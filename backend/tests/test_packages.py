@@ -534,3 +534,140 @@ def test_equal_digest_different_content_still_conflicts(client, project, manifes
     assert publish(client, project, manifest).status_code == 409
     content = client.get(f"/api/v1/packages/{first.json()['id']}/content")
     assert b"forced digest collision" not in content.content
+
+
+@pytest.mark.parametrize("view", ["list", "metadata"])
+def test_metadata_reads_do_not_fetch_canonical_content(client, project, manifest, engine, view):
+    published = publish(client, project, manifest)
+    assert published.status_code == 201
+    item = published.json()
+    statements = []
+
+    def capture(connection, cursor, statement, parameters, context, many):
+        if statement.startswith("SELECT ") and "FROM workflow_package_versions" in statement:
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        response = (
+            client.get("/api/v1/packages", params={"project_id": project})
+            if view == "list"
+            else client.get(f"/api/v1/packages/{item['id']}")
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert response.status_code == 200
+    assert response.json() == ({"items": [item], "next": None} if view == "list" else item)
+    assert len(statements) == 1, "Metadata must not lazy-load content in a second query"
+    assert "canonical_content" not in statements[0].partition("FROM")[0]
+    # Content retrieval must still return the original exact bytes and integrity headers.
+    content = client.get(f"/api/v1/packages/{item['id']}/content")
+    assert content.content == canonical_package_json(validate_package(manifest))
+    assert content.headers["x-package-sha256"] == item["sha256"]
+
+
+async def raw_package_request(app, client, project, manifest, extra_headers):
+    body = json.dumps(manifest).encode()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": f"/api/v1/projects/{project}/packages",
+        "root_path": "",
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("127.0.0.1", 12345),
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"origin", b"http://testserver"),
+            (b"x-lotuspond-workspace", client.headers["x-lotuspond-workspace"].encode()),
+            (b"cookie", f"lotuspond_session={client.cookies.get('lotuspond_session')}".encode()),
+            *extra_headers,
+        ],
+    }
+    sent = []
+    delivered = False
+
+    async def receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    try:
+        await app(scope, receive, send)
+    except UnicodeDecodeError:
+        # The prior middleware sent 500 and re-raised while decoding a raw byte.
+        pass
+    status = next(message["status"] for message in sent if message["type"] == "http.response.start")
+    content = b"".join(
+        message.get("body", b"") for message in sent if message["type"] == "http.response.body"
+    )
+    return status, content
+
+
+@pytest.mark.asyncio
+async def test_raw_latin1_request_key_is_rejected_safely(app, client, project, manifest):
+    status, body = await raw_package_request(
+        app, client, project, manifest, [(b"idempotency-key", b"nonascii-\xa3")]
+    )
+    assert status == 422
+    assert json.loads(body)["error"] == "invalid_idempotency_key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "values", [(b"gzip", b"identity"), (b"identity", b"gzip"), (b"identity", b"identity")]
+)
+async def test_duplicate_wire_content_encoding_rejected(app, client, project, manifest, values):
+    status, body = await raw_package_request(
+        app, client, project, manifest, [(b"content-encoding", value) for value in values]
+    )
+    assert status == 415
+    assert json.loads(body)["error"] == "unsupported_encoding"
+    assert client.get("/api/v1/packages", params={"project_id": project}).json()["items"] == []
+
+
+def test_registry_normalized_limit_preserves_digest_and_replay(client, project, db_factory):
+    from test_package_contract import boundary_package
+
+    from lotuspond.package_contract import MAX_PACKAGE_BYTES
+
+    raw = boundary_package()
+    wire = json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode()
+    assert len(wire) == MAX_PACKAGE_BYTES
+    response = client.post(
+        f"/api/v1/projects/{project}/packages",
+        content=wire,
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert response.json()["errors"][0]["code"] == "input_too_large"
+    raw["nodes"][1]["instructions"] = raw["nodes"][1]["instructions"][:-576]
+    first = publish(client, project, raw, "normalized-boundary")
+    assert first.status_code == 201
+    content = client.get(f"/api/v1/packages/{first.json()['id']}/content")
+    assert len(content.content) == MAX_PACKAGE_BYTES
+    assert hashlib.sha256(content.content).hexdigest() == first.json()["sha256"]
+    for connector in raw["connectors"]:
+        connector["secret_ref"] = None
+    assert (
+        len(json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode())
+        == MAX_PACKAGE_BYTES
+    )
+    # Compact bytes keep the wire bound distinct from default client JSON spacing.
+    replay = client.post(
+        f"/api/v1/projects/{project}/packages",
+        content=json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode(),
+        headers={"content-type": "application/json", "idempotency-key": "normalized-boundary"},
+    )
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    with db_factory() as db:
+        assert db.scalar(select(func.count()).select_from(models.WorkflowPackageVersion)) == 1

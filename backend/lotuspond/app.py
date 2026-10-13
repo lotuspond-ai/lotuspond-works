@@ -38,7 +38,11 @@ class RequestBoundary:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        headers = {key.decode().lower(): value.decode() for key, value in scope["headers"]}
+        # HTTP header octets use Latin-1; field-specific validation remains strict.
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope["headers"]
+        }
 
         async def error(status, code, message):
             await JSONResponse({"error": code, "message": message}, status_code=status)(
@@ -58,7 +62,12 @@ class RequestBoundary:
             if headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
                 await error(415, "unsupported_media_type", "Use an application/json request body.")
                 return
-            if headers.get("content-encoding", "identity").lower() != "identity":
+            encodings = [
+                value.decode("latin-1").lower()
+                for key, value in scope["headers"]
+                if key.lower() == b"content-encoding"
+            ]
+            if len(encodings) > 1 or (encodings and encodings[0] != "identity"):
                 await error(415, "unsupported_encoding", "Use an uncompressed package body.")
                 return
         method = scope["method"]

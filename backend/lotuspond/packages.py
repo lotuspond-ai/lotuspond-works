@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from starlette.concurrency import run_in_threadpool
 
 from .deps import DB, audit, record, require
@@ -256,9 +256,13 @@ def list_packages(
     db: Session = DB,
 ):
     record(db, Project, p.workspace_id, project_id)
-    query = select(WorkflowPackageVersion).where(
-        WorkflowPackageVersion.workspace_id == p.workspace_id,
-        WorkflowPackageVersion.project_id == project_id,
+    query = (
+        select(WorkflowPackageVersion)
+        .options(defer(WorkflowPackageVersion.canonical_content, raiseload=True))
+        .where(
+            WorkflowPackageVersion.workspace_id == p.workspace_id,
+            WorkflowPackageVersion.project_id == project_id,
+        )
     )
     if cursor is not None:
         time, identifier = _decode_cursor(cursor, p.workspace_id, project_id)
@@ -286,7 +290,17 @@ def list_packages(
 
 @router.get("/packages/{id}")
 def get_package(id: Identifier, p: Principal = Depends(require("read")), db: Session = DB):
-    return metadata(record(db, WorkflowPackageVersion, p.workspace_id, id))
+    row = db.scalar(
+        select(WorkflowPackageVersion)
+        .options(defer(WorkflowPackageVersion.canonical_content, raiseload=True))
+        .where(
+            WorkflowPackageVersion.workspace_id == p.workspace_id,
+            WorkflowPackageVersion.id == id,
+        )
+    )
+    if row is None:
+        fail(404, "not_found", "The requested record was not found in this workspace.")
+    return metadata(row)
 
 
 @router.get("/packages/{id}/content")
