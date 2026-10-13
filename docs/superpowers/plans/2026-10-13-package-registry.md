@@ -69,7 +69,7 @@ Migration retains advisory transaction lock 736183 and existing localhost/name g
 - [x] Document endpoints, replay/conflict semantics, admission revisions, raw-byte integrity and migration sequencing; distinguish admission from runtime compatibility.
 - [x] Independent reviewer checks final diff for authorization, transactions, migrations, immutability and acceptance coverage; fix findings and rerun affected checks.
 - [x] Run npm run check through saved cloud serial Node wrapper/reaper; npm run check:contracts; npm run test:database against verified localhost PostgreSQL; schema parity, docs checks and git diff --check. Record exact counts/skips/failures and cloud profile separately from default CI behavior.
-- [ ] Commit intended files only, publish codex/package-registry and create draft PR targeting codex/platform-foundation if GitHub publication is available. Never merge, force-push or deploy.
+- [x] Commit intended files only, publish codex/package-registry and create draft PR targeting codex/platform-foundation if GitHub publication is available. Never merge, force-push or deploy.
 
 ## Independent plan review incorporated
 
