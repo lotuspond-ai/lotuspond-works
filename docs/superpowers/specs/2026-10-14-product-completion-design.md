@@ -12,7 +12,7 @@ This design uses the existing roadmap's default first topology: a connected, iso
 
 ## Current evidence and preserved boundaries
 
-The source audit was pinned to registry commit `9c50d098f6d0ca7f9866861b8114c1caccbec743`. Foundation PR #1 was subsequently merged at `18eb85420d1e90e47fb5fb23a060a125180f08ed`. PR #2 was retargeted to main and has a bounded discovery-limit repair under verification. Those changes do not supply a production runtime.
+The source audit was pinned to registry commit `9c50d098f6d0ca7f9866861b8114c1caccbec743`. Foundation PR #1 was subsequently merged at `18eb85420d1e90e47fb5fb23a060a125180f08ed`. PR #2 was retargeted to main, repaired at `64d263f`, and merged at `a6025f8c2d7c1372c28876d5700d03df3d9faffd` after all ten final CI jobs passed. Those changes do not supply a production runtime.
 
 The implemented foundation includes human tenancy/identity/MFA, scenarios, supervised evaluation runners, release policies and independent approvals, traces/monitoring/incidents, model-gateway budgets, protocol adapters, voice transcript flows, software evaluation tools, a Go collector, Rust evidence verification/signatures, and the assurance console. The v1 package contract and immutable registry add declaration validation and content identity. Neither grants trust or permission to execute.
 
