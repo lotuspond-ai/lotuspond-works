@@ -1,4 +1,5 @@
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,6 +18,8 @@ from .models import SchemaVersion
 from .monitoring import router as monitoring_router
 from .offline_identity import router as offline_identity_router
 from .operations import router as operations_router
+from .package_contract import MAX_PACKAGE_BYTES
+from .packages import router as packages_router
 from .schema_version import SCHEMA_VERSION
 from .security import RateLimiter
 from .workflows import router as workflow_router
@@ -35,13 +38,38 @@ class RequestBoundary:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        headers = {key.decode().lower(): value.decode() for key, value in scope["headers"]}
+        # HTTP header octets use Latin-1; field-specific validation remains strict.
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope["headers"]
+        }
 
         async def error(status, code, message):
             await JSONResponse({"error": code, "message": message}, status_code=status)(
                 scope, receive, send
             )
 
+        package_publication = (
+            scope["method"] == "POST"
+            and re.fullmatch(r"/api/v1/projects/[^/]+/packages/?", scope["path"]) is not None
+        )
+        budget = (
+            min(self.settings.max_request_bytes, MAX_PACKAGE_BYTES)
+            if package_publication
+            else self.settings.max_request_bytes
+        )
+        if package_publication:
+            if headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+                await error(415, "unsupported_media_type", "Use an application/json request body.")
+                return
+            encodings = [
+                value.decode("latin-1").lower()
+                for key, value in scope["headers"]
+                if key.lower() == b"content-encoding"
+            ]
+            if len(encodings) > 1 or (encodings and encodings[0] != "identity"):
+                await error(415, "unsupported_encoding", "Use an uncompressed package body.")
+                return
         method = scope["method"]
         if method not in {"GET", "HEAD", "OPTIONS"}:
             # Authorization-bearing API calls still must not smuggle a browser session.
@@ -69,7 +97,7 @@ class RequestBoundary:
         except ValueError:
             await error(400, "invalid_length", "The content length is invalid.")
             return
-        if length < 0 or length > self.settings.max_request_bytes:
+        if length < 0 or length > budget:
             await error(413, "body_too_large", "The request body exceeds the size limit.")
             return
         chunks = []
@@ -80,7 +108,7 @@ class RequestBoundary:
                 return
             body = message.get("body", b"")
             total += len(body)
-            if total > self.settings.max_request_bytes:
+            if total > budget:
                 await error(413, "body_too_large", "The request body exceeds the size limit.")
                 return
             chunks.append(body)
@@ -212,10 +240,17 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "workflow-package-registry",
+                    "date": "2026-10-13",
+                    "title": "Immutable workflow package registry",
+                    "description": "Developers can publish validated workflow packages into workspace projects and retrieve exact canonical content, integrity digests and the validator revision used at admission. Contract discovery reports the installation's effective publication byte limit. Versions are immutable, retries are idempotent, and workspace roles and key scopes apply. Publication does not grant trust, release approval or permission to execute.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "workflow-package-foundation",
                     "date": "2026-10-13",
                     "title": "Workflow package validation",
-                    "description": "Developers can validate a versioned workflow package locally against a strict contract and calculate its content digest. The validator checks graph structure, declared references and agent limits without running the workflow. Package storage, signatures, deployment and production execution are still planned.",
+                    "description": "Developers can validate a versioned workflow package locally against a strict contract and calculate its content digest. The validator checks graph structure, declared references and agent limits without running the workflow. This foundation checks declarations; signatures, deployment and production execution remain planned.",
                 },
                 {
                     "version": "0.2.0",
@@ -358,6 +393,7 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
     app.include_router(offline_identity_router)
     app.include_router(mfa_router)
     app.include_router(operations_router)
+    app.include_router(packages_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)
     app.include_router(gateway_router)

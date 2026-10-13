@@ -152,3 +152,29 @@ The chat gateway uses `LOTUSPOND_PROVIDER_URL`, `LOTUSPOND_PROVIDER_KEY`, and `L
 Optional `npm run worker:alerts` delivers signed, bounded metadata to operator-configured HTTPS destinations. Configuration is shared with the API and evaluation worker; the default destination list is empty. See [incidents and alerts](../docs-site/docs/incidents.md). A delivered record proves HTTP 2xx acceptance only.
 
 New run creation rejects larger frozen snapshots with HTTP 413 and `run_snapshot_too_large` before creating a run or audit record. Capability matching occurs before claim row locking; all frozen scenario modalities must be supported, missing modality defaults to text, and an empty runner capability list remains unrestricted. Leases last 15 minutes and renewal resets expiry to 15 minutes from server time. Customer-side clients accept `LOTUSPOND_API_URL` as an origin or as the `/api/v1` base. See [runner execution](../docs-site/docs/runners.md) for subprocess deadlines, cancellation, packaged commands and credential handling.
+
+## Immutable workflow package registry
+
+Publication stores a fully validated declaration; it does not install, approve, trust or execute it. The complete semantic validator checks graphs and references as well as the strict v1 schema. Private manifest text remains workspace data. Secret references remain identifiers and are never resolved here.
+
+| Method/path | Contract |
+| --- | --- |
+| POST `/projects/:project_id/packages` | Raw v1 manifest JSON, `write` authority, optional `Idempotency-Key`. Returns publication metadata: 201 new version, 200 identical canonical replay, 409 conflicting immutable version or request key. |
+| GET `/packages?project_id=...` | `read` authority, metadata only, `limit` 1–100 (default 50), optional opaque `cursor` up to 1024 characters. Returns `{items,next}`; pass `next` as the next request's cursor. |
+| GET `/packages/:id` | Scoped publication metadata. |
+| GET `/packages/:id/content` | Exact stored canonical JSON bytes with `X-Package-SHA256`, `X-Package-Canonicalization` and quoted digest `ETag`; no revalidation or rewriting on read. |
+| GET `/package-contracts` | `read` authority; supported admission schema, validator revision, canonicalization identifier and effective publication byte bound (the smaller of `LOTUSPOND_MAX_REQUEST_BYTES` and 1 MiB). No runtime compatibility claim. |
+
+Workspace membership controls projects; there is no additional project ACL in this slice. Owner/admin/editor can publish, viewer can read. API-key scopes are exact: a `write` key has no implicit `read`. Key ownership overrides the workspace header. Foreign-tenant projects and versions return the normal 404; platform operators have no bypass. Current suspension, expiry/revocation, active creator, verified identity and MFA gates remain applicable on every request.
+
+Send exactly `application/json` (optional charset parameter) with identity encoding and the existing permitted Origin for browser requests. A package is bounded to 1 MiB while reading regardless of Content-Length; its complete normalized document must also fit 1 MiB, so optional default expansion can cause early admission rejection. Duplicate Content-Encoding headers are rejected on this identity-only route. Header values use HTTP Latin-1 decoding; request keys still require visible ASCII and invalid raw octets return a controlled 422. The shared CLI/API decoder rejects duplicate keys, malformed UTF-8/JSON, nonfinite or oversized numbers, excessive nesting and invalid Unicode; the full validator rejects extra fields, unsupported schemas and invalid graphs/references. Errors carry safe codes and fixed paths/messages without submitted values.
+
+A publication's identity is `(workspace_id, project_id, package_id, version)`. Identical canonical bytes reuse the original version and admission metadata, including when no request key is supplied. Different canonical bytes cannot overwrite it. Array order remains meaningful; JSON key order and formatting do not. Request keys are optional, preserved exactly, 1–128 visible ASCII characters without spaces, and unique within a workspace. The normalized request hash uses SHA-256 over the fixed `lotuspond.package-publication.v1` context, NUL, normalized project UUID, NUL and canonical content. Reuse with another payload or project returns 409. Keys have no expiry in this increment; choose a fresh key for a new request.
+
+Database uniqueness and one outer transaction cover version, key and audit. Concurrent identical publication emits one publication audit event; conflicting key races roll back any candidate version. Successful replays emit no second publication audit. No update/delete endpoint exists. No global cross-workspace content deduplication exists.
+
+Metadata includes server `id`, UTC `created_at`, authenticated `workspace_id`, `project_id`, logical `package_id`, `version`, `schema_version`, `validator_revision`, `canonicalization`, `sha256`, `content_bytes`, `publisher_id` and `publisher_kind` (`user` or `api_key`). Names, instructions, manifest objects and request keys are excluded from metadata/list/audit responses. Audit details contain project/package/version/digest identifiers only.
+
+Current admission identifiers are `lotuspond.workflow-package.validator.v1.1` and `lotuspond.workflow-package.canonical-json.v1`. The canonicalizer uses fully validated values with defaults, sorted object keys, UTF-8, compact JSON separators, finite numbers and preserved array order. These names permanently describe the stored content's admission, not execution compatibility. Future validator revisions must use a new server identifier and preserve existing stored bytes/identifiers.
+
+Pagination orders by descending `(created_at,id)`, so equal timestamps retain stable identity ordering. Cursors bind workspace and project; they confer no authority. New publications do not change the older rows reached by an existing cursor.

@@ -41,3 +41,11 @@ Failed assessments and unavailable evaluations open distinct incidents. `GET /in
 ## Operational state
 
 `GET /api/v1/admin/operations` requires a platform-operator session, including MFA in production. It returns timestamped installation aggregates for evaluation, mail and alert queues; worker poll observations; database/Redis dependency state; and separate failed/unknown assessment counts for the preceding 24 hours. It contains no tenant identifiers or customer evidence. See [Operations](operations.md) for field meanings, overlapping counts and failure handling.
+
+## Workflow package registry
+
+Publish raw workflow-package v1 JSON to `POST /projects/:project_id/packages` with `write` authority and an optional 1–128 visible-ASCII `Idempotency-Key`. Package bodies are bounded to 1 MiB while reading and checked by the complete validator. New publication returns 201, identical canonical replay returns 200, and conflicting version/key content returns 409. The request key is workspace-scoped and binds project plus canonical content.
+
+Use `GET /packages?project_id=...&limit=...&cursor=...` for metadata only (`limit` 1–100), `GET /packages/:id` for one publication and `/packages/:id/content` for exact stored canonical bytes with SHA-256 and canonicalizer headers. Pass list `next` as the next cursor. Every read requires explicit `read` scope; write keys cannot read implicitly. Foreign tenants receive 404. No update/delete API exists.
+
+`GET /package-contracts` advertises admission schema/validator/canonicalizer revisions and the effective publication byte bound (the smaller of `LOTUSPOND_MAX_REQUEST_BYTES` and 1 MiB). Publication stores a validated package; it does not grant trust, release approval, runtime compatibility or execution authority. Content reads preserve old bytes and revisions without revalidation. Names/instructions/manifests never appear in lists or audits. See the repository's `docs/API.md` and reviewed v11-to-v12 plan in `docs/DATABASE.md` for full semantics.

@@ -81,7 +81,7 @@ def main():
 
 
 def migrate(settings: Settings):
-    """Apply the reviewed additive v2 through v11 chain; never drop/import records."""
+    """Apply the reviewed additive v2 through v12 chain; never drop/import records."""
     url = make_url(settings.database_url.get_secret_value())
     if (
         settings.env == "production"
@@ -98,7 +98,7 @@ def migrate(settings: Settings):
             versions = list(connection.execute(SchemaVersion.__table__.select()).scalars())
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")
-            if len(versions) != 1 or versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10}:
+            if len(versions) != 1 or versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
                 raise ValueError("Unexpected schema state; no changes made")
             current = versions[0]
             inspector = inspect(connection)
@@ -405,7 +405,15 @@ def migrate(settings: Settings):
                             "CHECK (plan IN ('developer','team','enterprise'))"
                         )
                     )
-            connection.execute(SchemaVersion.__table__.update().values(version=SCHEMA_VERSION))
+                current = 11
+            if current == 11:
+                registry_tables = {"workflow_package_versions", "package_publication_requests"}
+                if registry_tables.intersection(inspect(connection).get_table_names()):
+                    raise ValueError("Unexpected schema state; no changes made")
+                Base.metadata.tables["workflow_package_versions"].create(connection)
+                Base.metadata.tables["package_publication_requests"].create(connection)
+                current = 12
+            connection.execute(SchemaVersion.__table__.update().values(version=current))
     finally:
         engine.dispose()
 

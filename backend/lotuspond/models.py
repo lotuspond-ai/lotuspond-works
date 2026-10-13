@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -48,6 +49,57 @@ def scoped(*constraints):
 
 def within(table: str, field: str):
     return ForeignKeyConstraint(["workspace_id", field], [f"{table}.workspace_id", f"{table}.id"])
+
+
+class WorkflowPackageVersion(Scoped, Base):
+    """Validated immutable content; publication grants no execution permission."""
+
+    __tablename__ = "workflow_package_versions"
+    project_id: Mapped[str] = mapped_column(String(36))
+    package_id: Mapped[str] = mapped_column(String(100))
+    version: Mapped[str] = mapped_column(String(100))
+    schema_version: Mapped[str] = mapped_column(String(100))
+    validator_revision: Mapped[str] = mapped_column(String(100))
+    canonicalization: Mapped[str] = mapped_column(String(100))
+    sha256: Mapped[str] = mapped_column(String(64))
+    canonical_content: Mapped[bytes] = mapped_column(LargeBinary)
+    content_bytes: Mapped[int] = mapped_column(Integer)
+    publisher_id: Mapped[str] = mapped_column(String(36))
+    publisher_kind: Mapped[str] = mapped_column(String(20))
+    __table_args__ = scoped(
+        within("projects", "project_id"),
+        UniqueConstraint(
+            "workspace_id",
+            "project_id",
+            "package_id",
+            "version",
+            name="package_version_identity_unique",
+        ),
+        CheckConstraint("length(sha256) = 64", name="package_digest_length_check"),
+        CheckConstraint(
+            "content_bytes > 0 AND content_bytes = length(canonical_content)",
+            name="package_content_length_check",
+        ),
+        CheckConstraint(
+            "publisher_kind IN ('user','api_key')", name="package_publisher_kind_check"
+        ),
+        Index("package_project_page_idx", "workspace_id", "project_id", "created_at", "id"),
+    )
+
+
+class PackagePublicationRequest(Scoped, Base):
+    __tablename__ = "package_publication_requests"
+    request_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    package_version_id: Mapped[str] = mapped_column(String(36))
+    __table_args__ = scoped(
+        within("workflow_package_versions", "package_version_id"),
+        UniqueConstraint("workspace_id", "request_key", name="package_request_key_unique"),
+        CheckConstraint(
+            "length(request_key) BETWEEN 1 AND 128", name="package_request_key_length_check"
+        ),
+        CheckConstraint("length(request_hash) = 64", name="package_request_hash_length_check"),
+    )
 
 
 class User(Row, Base):

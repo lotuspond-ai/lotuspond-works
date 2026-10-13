@@ -444,6 +444,31 @@ CREATE TABLE voice_sessions (
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
+CREATE TABLE workflow_package_versions (
+	project_id VARCHAR(36) NOT NULL,
+	package_id VARCHAR(100) NOT NULL,
+	version VARCHAR(100) NOT NULL,
+	schema_version VARCHAR(100) NOT NULL,
+	validator_revision VARCHAR(100) NOT NULL,
+	canonicalization VARCHAR(100) NOT NULL,
+	sha256 VARCHAR(64) NOT NULL,
+	canonical_content BYTEA NOT NULL,
+	content_bytes INTEGER NOT NULL,
+	publisher_id VARCHAR(36) NOT NULL,
+	publisher_kind VARCHAR(20) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	CONSTRAINT package_version_identity_unique UNIQUE (workspace_id, project_id, package_id, version),
+	CONSTRAINT package_digest_length_check CHECK (length(sha256) = 64),
+	CONSTRAINT package_content_length_check CHECK (content_bytes > 0 AND content_bytes = length(canonical_content)),
+	CONSTRAINT package_publisher_kind_check CHECK (publisher_kind IN ('user','api_key')),
+	UNIQUE (workspace_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
 CREATE TABLE assessments (
 	project_id VARCHAR(36) NOT NULL,
 	voice_session_id VARCHAR(36),
@@ -487,6 +512,22 @@ CREATE TABLE evaluation_jobs (
 	FOREIGN KEY(workspace_id, trace_id) REFERENCES traces (workspace_id, id),
 	FOREIGN KEY(workspace_id, voice_session_id) REFERENCES voice_sessions (workspace_id, id),
 	UNIQUE (monitor_id, trace_id),
+	UNIQUE (workspace_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE package_publication_requests (
+	request_key VARCHAR(128) NOT NULL,
+	request_hash VARCHAR(64) NOT NULL,
+	package_version_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, package_version_id) REFERENCES workflow_package_versions (workspace_id, id),
+	CONSTRAINT package_request_key_unique UNIQUE (workspace_id, request_key),
+	CONSTRAINT package_request_key_length_check CHECK (length(request_key) BETWEEN 1 AND 128),
+	CONSTRAINT package_request_hash_length_check CHECK (length(request_hash) = 64),
 	UNIQUE (workspace_id, id),
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
@@ -759,6 +800,8 @@ CREATE INDEX ix_offline_enrollments_user_id ON offline_enrollments (user_id);
 
 CREATE INDEX ix_offline_identity_attestations_user_id ON offline_identity_attestations (user_id);
 
+CREATE INDEX ix_package_publication_requests_workspace_id ON package_publication_requests (workspace_id);
+
 CREATE INDEX ix_policies_workspace_id ON policies (workspace_id);
 
 CREATE INDEX ix_projects_workspace_id ON projects (workspace_id);
@@ -787,14 +830,18 @@ CREATE INDEX ix_voice_segments_workspace_id ON voice_segments (workspace_id);
 
 CREATE INDEX ix_voice_sessions_workspace_id ON voice_sessions (workspace_id);
 
+CREATE INDEX ix_workflow_package_versions_workspace_id ON workflow_package_versions (workspace_id);
+
 CREATE INDEX mfa_login_challenges_factor_idx ON mfa_login_challenges (user_id, factor_id, factor_version);
 
 CREATE INDEX mfa_recovery_codes_factor_idx ON mfa_recovery_codes (user_id, factor_id, factor_version);
+
+CREATE INDEX package_project_page_idx ON workflow_package_versions (workspace_id, project_id, created_at, id);
 
 CREATE INDEX runs_workspace_status ON runs (workspace_id, status);
 
 CREATE INDEX sessions_mfa_factor_idx ON sessions (user_id, mfa_factor_id, mfa_factor_version);
 
-INSERT INTO schema_version (version, installed_at) VALUES (11, CURRENT_TIMESTAMP);
+INSERT INTO schema_version (version, installed_at) VALUES (12, CURRENT_TIMESTAMP);
 
 COMMIT;
