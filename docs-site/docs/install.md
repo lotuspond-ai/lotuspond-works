@@ -30,7 +30,7 @@ For separate development servers, use `LOTUSPOND_REGISTRATION_ENABLED=true LOTUS
 
 ## Existing local schema
 
-Read `docs/DATABASE.md` before `npm run db:migrate`. Reviewed additive upgrades from local versions 2, 3, or 4 add the usage ledger, widen its numeric fields where needed, and add identity challenges, invitations, encrypted mail outbox records, and API-key creator attribution. No user record is dropped, renamed, or imported. Hosted upgrades require a separately reviewed operator plan.
+Read `docs/DATABASE.md` before `npm run db:migrate`. Reviewed additive upgrades from local versions 2–11 reach schema 12. They retain the prior usage, identity, monitoring and authenticator upgrades and add immutable workflow-package versions plus tenant-scoped publication request keys. At v11 both registry tables must be absent; partial state refuses and the transaction rolls back. No user record is dropped, renamed, or imported. Hosted upgrades require a separately reviewed operator plan.
 
 ## Additional runtimes
 

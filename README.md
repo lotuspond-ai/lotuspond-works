@@ -4,7 +4,7 @@ Lotuspond is being developed as a licensable enterprise agent automation platfor
 
 The implemented core tests AI agents, records production evidence, and governs releases through Scenarios, Releases, Production Evidence, and Governance. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. A Go collector accepts OTLP/HTTP protobuf and JSON, a Rust CLI verifies artifact manifests, and Node tooling runs customer-controlled evaluation adapters and release gates.
 
-The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The production runtime, Studio authoring, package registry/signatures, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
+The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The next increment adds an immutable, tenant-scoped package registry with admission-validator metadata. Production runtime, Studio authoring, signatures, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
 
 ## Run locally
 
@@ -21,7 +21,7 @@ LOTUSPOND_REGISTRATION_ENABLED=true npm start
 
 Open http://127.0.0.1:8000. Choose an individual account or deliberately create an organization. Every account has a personal workspace; organizations contain projects and role-based memberships. Public registration never grants platform operator access.
 
-`db:start` creates only the independent `lotuspond_platform_dev` database in the localhost cluster on port 55439. `db:init` refuses nonempty databases. Existing data is not imported or reset. Reviewed additive upgrades from local schema versions 2–7 to version 8 use `npm run db:migrate`; read [the migration plan](docs/DATABASE.md) first.
+`db:start` creates only the independent `lotuspond_platform_dev` database in the localhost cluster on port 55439. `db:init` refuses nonempty databases. Existing data is not imported or reset. Reviewed additive upgrades from local schema versions 2–11 to version 12 use `npm run db:migrate`; read [the migration plan](docs/DATABASE.md) first.
 
 For development, run `LOTUSPOND_REGISTRATION_ENABLED=true LOTUSPOND_ORIGIN=http://127.0.0.1:3001 npm run dev` and `npm run dev:web` in separate terminals. The UI runs on port 3001 and proxies the API on port 8000. Optional settings belong in the untracked project `.env`; use `.env.example` as the template.
 

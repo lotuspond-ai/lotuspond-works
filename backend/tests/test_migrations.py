@@ -41,7 +41,15 @@ def rewind_identity_v5(connection):
     connection.execute(text("ALTER TABLE api_keys DROP COLUMN created_by_user_id"))
 
 
+def rewind_registry_v12(connection):
+    from lotuspond.models import PackagePublicationRequest, WorkflowPackageVersion
+
+    PackagePublicationRequest.__table__.drop(connection)
+    WorkflowPackageVersion.__table__.drop(connection)
+
+
 def rewind_plan_v11(connection):
+    rewind_registry_v12(connection)
     connection.execute(text("ALTER TABLE workspaces DROP CONSTRAINT workspaces_plan_check"))
 
 
@@ -652,6 +660,7 @@ def test_an_unwidened_table_at_version_9_is_still_migrated(engine, client, accou
         pytest.skip("The migration is intentionally restricted to local PostgreSQL")
     settings = Settings(env="test", database_url=os.environ["LOTUSPOND_PLATFORM_TEST_DATABASE_URL"])
     with engine.begin() as connection:
+        rewind_registry_v12(connection)
         connection.execute(SchemaVersion.__table__.update().values(version=9))
     monkeypatch.setattr(migration, "engine_for", lambda _: engine)
     # A table already created from the authoritative model carries the target shape already.
@@ -709,3 +718,94 @@ def test_plan_v11_migration_refuses_a_workspace_outside_the_ladder(
         assert connection.scalar(
             select(Workspace.plan).where(Workspace.id == account)
         ) == "platinum"
+
+
+def test_registry_v12_additive_preserves_rows_and_refuses_repeat(
+    engine, client, account, monkeypatch
+):
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Registry migration requires isolated PostgreSQL")
+    from lotuspond import models
+
+    assert hasattr(models, "WorkflowPackageVersion"), "Registry model missing"
+    settings = Settings(env="test", database_url=os.environ["LOTUSPOND_PLATFORM_TEST_DATABASE_URL"])
+    with engine.begin() as connection:
+        before = list(connection.execute(select(User.id, User.email)).all())
+        models.PackagePublicationRequest.__table__.drop(connection)
+        models.WorkflowPackageVersion.__table__.drop(connection)
+        connection.execute(SchemaVersion.__table__.update().values(version=11))
+    monkeypatch.setattr(migration, "engine_for", lambda _: engine)
+    migration.migrate(settings)
+    with engine.connect() as connection:
+        assert connection.scalar(select(SchemaVersion.version)) == 12
+        assert list(connection.execute(select(User.id, User.email)).all()) == before
+        assert (
+            connection.scalar(select(func.count()).select_from(models.WorkflowPackageVersion)) == 0
+        )
+        assert (
+            connection.scalar(select(func.count()).select_from(models.PackagePublicationRequest))
+            == 0
+        )
+    with pytest.raises(ValueError, match="already"):
+        migration.migrate(settings)
+
+
+@pytest.mark.parametrize("partial", ["version", "request", "both", "older"])
+def test_registry_partial_state_rolls_back_entire_chain(
+    engine, client, account, monkeypatch, partial
+):
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Registry migration requires isolated PostgreSQL")
+    from lotuspond import models
+
+    assert hasattr(models, "WorkflowPackageVersion"), "Registry model missing"
+    settings = Settings(env="test", database_url=os.environ["LOTUSPOND_PLATFORM_TEST_DATABASE_URL"])
+    with engine.begin() as connection:
+        if partial in {"version", "older"}:
+            models.PackagePublicationRequest.__table__.drop(connection)
+        if partial == "request":
+            # Remove only the FK, retaining a deliberate inconsistent fixture table.
+            fk = next(
+                item
+                for item in migration.inspect(connection).get_foreign_keys(
+                    "package_publication_requests"
+                )
+                if item["referred_table"] == "workflow_package_versions"
+            )
+            connection.execute(
+                text(f'ALTER TABLE package_publication_requests DROP CONSTRAINT "{fk["name"]}"')
+            )
+            models.WorkflowPackageVersion.__table__.drop(connection)
+        if partial == "older":
+            connection.execute(text("ALTER TABLE workspaces DROP CONSTRAINT workspaces_plan_check"))
+        version = 10 if partial == "older" else 11
+        connection.execute(SchemaVersion.__table__.update().values(version=version))
+        before_tables = set(migration.inspect(connection).get_table_names())
+    monkeypatch.setattr(migration, "engine_for", lambda _: engine)
+    with pytest.raises(ValueError, match="Unexpected schema state"):
+        migration.migrate(settings)
+    with engine.connect() as connection:
+        assert connection.scalar(select(SchemaVersion.version)) == version
+        assert set(migration.inspect(connection).get_table_names()) == before_tables
+        if partial == "older":
+            assert "workspaces_plan_check" not in {
+                item["name"]
+                for item in migration.inspect(connection).get_check_constraints("workspaces")
+            }
+
+
+def test_registry_fresh_empty_initialization(engine, monkeypatch):
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Fresh initializer requires isolated PostgreSQL")
+    # This fixture owns a random schema; no other database objects are removed.
+    migration.Base.metadata.drop_all(engine)
+    settings = Settings(env="test", database_url=os.environ["LOTUSPOND_PLATFORM_TEST_DATABASE_URL"])
+    monkeypatch.setattr(migration, "engine_for", lambda _: engine)
+    migration.initialize(settings)
+    with engine.connect() as connection:
+        assert connection.scalar(select(SchemaVersion.version)) == 12
+        assert {"workflow_package_versions", "package_publication_requests"}.issubset(
+            migration.inspect(connection).get_table_names()
+        )
+    with pytest.raises(ValueError, match="not empty"):
+        migration.initialize(settings)
