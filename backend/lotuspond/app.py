@@ -240,6 +240,13 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "compose-identity-settings",
+                    "date": "2026-10-14",
+                    "title": "Deployment identity settings",
+                    "description": "Compose installations now apply the configured installation-wide authenticator requirement and whole-conversation mail timeout. An enabled authenticator requirement still refuses startup without its encryption key; production operator MFA remains mandatory.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "workflow-package-registry",
                     "date": "2026-10-13",
                     "title": "Immutable workflow package registry",
