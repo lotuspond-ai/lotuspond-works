@@ -210,8 +210,9 @@ class PackageContractTests(unittest.TestCase):
         contract = self.contract()
         package = contract.validate_package(reviewed_package())
         package.nodes[2].limits.max_steps = 0
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ValidationError) as caught:
             contract.validate_package(package)
+        self.assertIn("greater_than_equal", {item["type"] for item in caught.exception.errors()})
 
     def test_content_digest_ignores_object_key_order_but_detects_content_changes(self):
         contract = self.contract()
@@ -274,3 +275,143 @@ class PackageContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def boundary_package():
+    from lotuspond.package_contract import MAX_PACKAGE_BYTES
+
+    raw = {
+        "schema_version": "lotuspond.workflow-package.v1",
+        "package_id": "boundary",
+        "version": "1.0.0",
+        "name": "Boundary fixture",
+        "entry_node": "start",
+        "models": [{"id": "reasoner", "profile": "primary-model", "revision": "v1"}],
+        "connectors": [
+            {
+                "id": f"connector-{i}",
+                "connector": "synthetic",
+                "version": "1.0.0",
+                "operations": ["read"],
+            }
+            for i in range(32)
+        ],
+        "secret_refs": [],
+        "nodes": [{"id": "start", "kind": "start"}]
+        + [
+            {
+                "id": f"agent-{i}",
+                "kind": "agent",
+                "model_ref": "reasoner",
+                "instructions": "x",
+                "limits": {
+                    "max_steps": 1,
+                    "timeout_seconds": 1,
+                    "max_input_tokens": 1,
+                    "max_output_tokens": 1,
+                    "max_cost_microusd": 1,
+                },
+            }
+            for i in range(64)
+        ]
+        + [{"id": "end", "kind": "end"}],
+    }
+    raw["edges"] = [
+        {"source": left["id"], "target": right["id"]}
+        for left, right in zip(raw["nodes"], raw["nodes"][1:])
+    ]
+    remaining = MAX_PACKAGE_BYTES - len(
+        json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode()
+    )
+    for node in raw["nodes"][1:-1]:
+        added = min(remaining, 16383)
+        node["instructions"] += "x" * added
+        remaining -= added
+    assert remaining == 0
+    return raw
+
+
+def test_valid_instances_revalidate_without_mutating_or_trusting_them():
+    from lotuspond.package_contract import WorkflowPackage, package_digest, validate_package
+
+    package = validate_package(reviewed_package())
+    for validate in (validate_package, WorkflowPackage.model_validate):
+        again = validate(package)
+        assert again is not package
+        assert again.model_dump() == package.model_dump()
+        assert package_digest(again) == package_digest(package)
+
+
+def test_normalized_size_rejected_at_admission_not_later_digest():
+    from lotuspond.package_contract import MAX_PACKAGE_BYTES, validate_package
+
+    raw = boundary_package()
+    assert (
+        len(json.dumps(raw, ensure_ascii=False, separators=(",", ":")).encode())
+        == MAX_PACKAGE_BYTES
+    )
+    try:
+        validate_package(raw)
+    except ValidationError as error:
+        assert error.errors(include_input=False)[0]["type"] == "input_too_large"
+    else:
+        raise AssertionError("Admission must reject normalized content beyond the byte bound")
+
+
+def test_instance_revalidation_rejects_extras_and_arbitrary_values_without_running_them():
+    from lotuspond.package_contract import validate_package
+
+    class Unsafe:
+        def __str__(self):
+            raise AssertionError("Untrusted string conversion executed")
+
+        def __iter__(self):
+            raise AssertionError("Untrusted iteration executed")
+
+    for defect in ("unknown-field", "extra-state", "arbitrary-node", "nested-extra"):
+        package = validate_package(reviewed_package())
+        if defect == "unknown-field":
+            package.__dict__["unknown"] = "private"
+        elif defect == "extra-state":
+            package.__pydantic_extra__ = {"unknown": "private"}
+        elif defect == "nested-extra":
+            package.nodes[2].__dict__["unknown"] = "private"
+        else:
+            package.nodes[0] = Unsafe()
+        try:
+            validate_package(package)
+        except ValidationError:
+            pass
+        else:
+            raise AssertionError(f"Mutated model accepted: {defect}")
+
+
+def test_omitted_and_null_defaults_at_normalized_byte_boundary_digest_identically():
+    from lotuspond.package_contract import (
+        MAX_PACKAGE_BYTES,
+        canonical_package_json,
+        package_digest,
+        validate_package,
+    )
+
+    raw = boundary_package()
+    raw["nodes"][1]["instructions"] = raw["nodes"][1]["instructions"][:-576]
+    explicit = copy.deepcopy(raw)
+    for connector in explicit["connectors"]:
+        connector["secret_ref"] = None
+    assert (
+        len(json.dumps(explicit, ensure_ascii=False, separators=(",", ":")).encode())
+        == MAX_PACKAGE_BYTES
+    )
+    omitted_package = validate_package(raw)
+    explicit_package = validate_package(explicit)
+    assert len(canonical_package_json(omitted_package)) == MAX_PACKAGE_BYTES
+    assert package_digest(omitted_package) == package_digest(explicit_package)
+    assert package_digest(validate_package(omitted_package)) == package_digest(explicit_package)
+    raw["nodes"][1]["instructions"] += "x"
+    try:
+        validate_package(raw)
+    except ValidationError as error:
+        assert error.errors(include_input=False)[0]["type"] == "input_too_large"
+    else:
+        raise AssertionError("Normalized limit plus one accepted")

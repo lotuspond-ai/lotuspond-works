@@ -216,13 +216,15 @@ class WorkflowPackage(ContractModel):
     nodes: list[Node] = Field(min_length=2, max_length=128)
     edges: list[Edge] = Field(min_length=1, max_length=256)
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    def bounded_input(cls, raw: object) -> object:
+    def bounded_input(cls, raw: object, handler) -> WorkflowPackage:
+        # A wrap validator sees the instance before Pydantic turns it into a
+        # dictionary still containing nested models. Never trust model instances.
         if isinstance(raw, cls):
-            raw = raw.model_dump(mode="python", warnings=False)
+            raw = _model_input(raw)
         check_json_bounds(raw)
-        return raw
+        return handler(raw)
 
     @model_validator(mode="after")
     def validate_graph(self) -> WorkflowPackage:
@@ -289,7 +291,71 @@ class WorkflowPackage(ContractModel):
                     ready.append(target)
         if visited != len(nodes):
             _reject("graph_cycle")
+        # Defaults are part of canonical content. Admit only packages whose
+        # complete normalized document fits, so a successful validation always
+        # supports canonicalization/digest without increasing untrusted bounds.
+        check_json_bounds(self.model_dump(mode="python", warnings=False))
         return self
+
+
+def _model_input(package: WorkflowPackage) -> dict:
+    """Project known model fields without invoking serializers on mutated values."""
+    known = (
+        WorkflowPackage,
+        ModelReference,
+        ConnectorReference,
+        SecretReference,
+        AgentLimits,
+        StartNode,
+        EndNode,
+        AgentNode,
+        ConnectorNode,
+        HumanReviewNode,
+        Edge,
+    )
+    active: set[int] = set()
+    visits = 0
+
+    def project(value: object, depth: int) -> object:
+        nonlocal visits
+        visits += 1
+        if visits > MAX_JSON_ITEMS:
+            _reject("input_too_complex")
+        if depth > MAX_JSON_DEPTH:
+            _reject("input_too_deep")
+        kind = type(value)
+        if value is None or kind in (str, bool, int, float):
+            return value
+        if kind in known:
+            data = object.__getattribute__(value, "__dict__")
+            extras = object.__getattribute__(value, "__pydantic_extra__")
+            if type(data) is not dict or any(type(key) is not str for key in data):
+                _reject("invalid_json_value")
+            if extras is not None and (type(extras) is not dict or len(extras)):
+                raise PydanticCustomError("extra_forbidden", "Extra fields are not permitted.")
+            if set(data) - set(kind.model_fields):
+                raise PydanticCustomError("extra_forbidden", "Extra fields are not permitted.")
+        elif kind is dict:
+            data = value
+            if any(type(key) is not str for key in data):
+                _reject("invalid_json_value")
+        elif kind is list:
+            data = value
+        else:
+            _reject("invalid_json_value")
+        if len(data) > MAX_JSON_ITEMS:
+            _reject("input_too_complex")
+        if id(value) in active:
+            _reject("cyclic_input")
+        active.add(id(value))
+        try:
+            if kind is list:
+                return [project(child, depth + 1) for child in data]
+            return {key: project(child, depth + 1) for key, child in data.items()}
+        finally:
+            active.remove(id(value))
+
+    return project(package, 0)
 
 
 def validate_package(raw: object) -> WorkflowPackage:
@@ -298,9 +364,9 @@ def validate_package(raw: object) -> WorkflowPackage:
 
 def canonical_package_json(package: WorkflowPackage) -> bytes:
     """Validated sorted-key UTF-8 JSON with defaults; array order remains significant."""
-    # Validate Python types before JSON serialization can coerce a mutated instance.
-    # Suppress serializer diagnostics: rejected values can contain confidential text.
-    validated = validate_package(package.model_dump(mode="python", warnings=False))
+    # Revalidate known model fields before a serializer can coerce mutated values
+    # or silently discard unknown fields.
+    validated = validate_package(package)
     return json.dumps(
         validated.model_dump(mode="json"),
         sort_keys=True,
