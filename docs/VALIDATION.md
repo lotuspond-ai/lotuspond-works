@@ -1,5 +1,7 @@
 # Local validation — 2026-09-21
 
+Latest increment: [repository and platform foundation, 2026-10-13](plans/2026-10-13-foundation-progress.md). The dated records below preserve earlier evidence; their repository/publication statements describe those earlier runs.
+
 This record applies to the current Python-first Lotuspond implementation. It does not establish hosted production readiness or complete the full delivery goal.
 
 | Check                         | Observed evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |

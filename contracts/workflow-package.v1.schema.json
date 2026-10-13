@@ -1,0 +1,453 @@
+{
+  "$defs": {
+    "AgentLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_steps": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "maximum": 100000,
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_cost_microusd": {
+          "maximum": 1000000000,
+          "minimum": 1,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_steps",
+        "timeout_seconds",
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_cost_microusd"
+      ],
+      "title": "AgentLimits",
+      "type": "object"
+    },
+    "AgentNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "agent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "model_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Model Ref",
+          "type": "string"
+        },
+        "instructions": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "limits": {
+          "$ref": "#/$defs/AgentLimits"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "model_ref",
+        "instructions",
+        "limits"
+      ],
+      "title": "AgentNode",
+      "type": "object"
+    },
+    "ConnectorNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "connector",
+          "title": "Kind",
+          "type": "string"
+        },
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "connector_ref",
+        "operation"
+      ],
+      "title": "ConnectorNode",
+      "type": "object"
+    },
+    "ConnectorReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "connector": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+          "title": "Version",
+          "type": "string"
+        },
+        "secret_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secret Ref"
+        },
+        "operations": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Operations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "connector",
+        "version",
+        "operations"
+      ],
+      "title": "ConnectorReference",
+      "type": "object"
+    },
+    "Edge": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+    },
+    "EndNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "end",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "EndNode",
+      "type": "object"
+    },
+    "HumanReviewNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "human_review",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "HumanReviewNode",
+      "type": "object"
+    },
+    "ModelReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "profile": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Profile",
+          "type": "string"
+        },
+        "revision": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "profile",
+        "revision"
+      ],
+      "title": "ModelReference",
+      "type": "object"
+    },
+    "SecretReference": {
+      "additionalProperties": false,
+      "description": "A configuration name, never a credential value or a secret-store path.",
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "SecretReference",
+      "type": "object"
+    },
+    "StartNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "start",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "StartNode",
+      "type": "object"
+    }
+  },
+  "$id": "urn:lotuspond:workflow-package:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Version-one topology/reference contract, not an executable or trusted package.",
+  "properties": {
+    "schema_version": {
+      "const": "lotuspond.workflow-package.v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "package_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+      "title": "Package Id",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 20,
+      "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+      "title": "Version",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "entry_node": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+      "title": "Entry Node",
+      "type": "string"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/ModelReference"
+      },
+      "maxItems": 32,
+      "title": "Models",
+      "type": "array"
+    },
+    "connectors": {
+      "items": {
+        "$ref": "#/$defs/ConnectorReference"
+      },
+      "maxItems": 32,
+      "title": "Connectors",
+      "type": "array"
+    },
+    "secret_refs": {
+      "items": {
+        "$ref": "#/$defs/SecretReference"
+      },
+      "maxItems": 32,
+      "title": "Secret Refs",
+      "type": "array"
+    },
+    "nodes": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "agent": "#/$defs/AgentNode",
+            "connector": "#/$defs/ConnectorNode",
+            "end": "#/$defs/EndNode",
+            "human_review": "#/$defs/HumanReviewNode",
+            "start": "#/$defs/StartNode"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/StartNode"
+          },
+          {
+            "$ref": "#/$defs/EndNode"
+          },
+          {
+            "$ref": "#/$defs/AgentNode"
+          },
+          {
+            "$ref": "#/$defs/ConnectorNode"
+          },
+          {
+            "$ref": "#/$defs/HumanReviewNode"
+          }
+        ]
+      },
+      "maxItems": 128,
+      "minItems": 2,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/Edge"
+      },
+      "maxItems": 256,
+      "minItems": 1,
+      "title": "Edges",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "package_id",
+    "version",
+    "name",
+    "entry_node",
+    "models",
+    "connectors",
+    "secret_refs",
+    "nodes",
+    "edges"
+  ],
+  "title": "WorkflowPackage",
+  "type": "object"
+}

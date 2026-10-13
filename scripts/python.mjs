@@ -28,17 +28,20 @@ const commands = {
   migrate: ['-m', 'lotuspond.initialize', 'migrate'],
   'offline-identity': ['-m', 'lotuspond.offline_provision'],
   retention: ['-m', 'lotuspond.retention'],
+  package: ['-m', 'lotuspond.package_cli'],
+  'package-schema': ['export_package_schema.py'],
   test: ['-m', 'pytest', '-q'],
   'test-database': ['-m', 'pytest', '-q'],
-  lint: ['-m', 'ruff', 'check', 'lotuspond', 'tests'],
+  lint: ['-m', 'ruff', 'check', 'lotuspond', 'tests', 'export_package_schema.py'],
 };
 const command = commands[process.argv[2]];
 if (!command)
   throw new Error(
-    'Select dev, start, worker, mail-worker, alert-worker, init, migrate, offline-identity, retention, test, test-database, or lint.',
+    'Select dev, start, worker, mail-worker, alert-worker, init, migrate, offline-identity, retention, package, package-schema, test, test-database, or lint.',
   );
 const child = spawn(python, [...command, ...process.argv.slice(3)], {
-  cwd: resolve('backend'),
+  // Package paths are relative to the caller, like other file-oriented CLIs.
+  cwd: process.argv[2] === 'package' ? process.cwd() : resolve('backend'),
   stdio: 'inherit',
   env: process.env,
 });

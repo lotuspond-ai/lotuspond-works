@@ -18,3 +18,5 @@ coverage/
 *.pyc
 .playwright-cli/
 output/
+# Local handoff notes may include machine-specific operational context.
+/HANDOFF.md

@@ -212,6 +212,13 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "workflow-package-foundation",
+                    "date": "2026-10-13",
+                    "title": "Workflow package validation",
+                    "description": "Developers can validate a versioned workflow package locally against a strict contract and calculate its content digest. The validator checks graph structure, declared references and agent limits without running the workflow. Package storage, signatures, deployment and production execution are still planned.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "collector-spool",
                     "date": "2026-09-23",
                     "title": "A durable collector spool",
