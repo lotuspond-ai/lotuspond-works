@@ -1,0 +1,3 @@
+# These upstream fixtures are byte-pinned; retain their terminal blank lines.
+sandbox/real-app/upstream/task.json whitespace=-blank-at-eof
+sandbox/real-app/upstream/verifier.py whitespace=-blank-at-eof

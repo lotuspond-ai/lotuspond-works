@@ -1,0 +1,46 @@
+# Deployment artifacts
+
+These files provide a portable single-host baseline for the Python API, its static React UI, the evaluation worker, optional identity-mail and incident-alert workers, PostgreSQL, Redis, and the Go telemetry collector.
+
+- `compose.yaml` builds application images from this checkout.
+- `compose.onprem.yaml` consumes prebuilt, preferably digest-pinned images.
+- `airgap/` creates and verifies an offline image bundle for the API, UI, evaluation worker, collector, PostgreSQL and Redis.
+- `execution/` creates a separate offline archive for the Node runner/voice image, the reviewed Gym real-application image, and a host-side Gym kit.
+
+The API and collector ports bind to loopback by default. Put a reviewed HTTPS reverse proxy in front of the API, keep PostgreSQL and Redis unexposed, store configuration outside the repository, and restrict its permissions. Run `docker compose ... config --quiet` before startup; it detects missing required variables but does not prove credentials, TLS, migrations, backups, capacity, or external integration compatibility.
+
+The API image does not initialize or migrate a database. Before first startup, a database administrator must review and execute the version-matched `backend/schema.sql` only against a newly created, independently verified empty database. Applying schema or migration SQL to an existing database requires a separate data-preserving migration review and authorization. Readiness remains unavailable until the expected schema version exists. The worker uses the API image with `python -m lotuspond.worker`; its inherited HTTP healthcheck is disabled because it does not listen on a port.
+
+These artifacts have no cloud side effects. They do not provision DNS, certificates, hosts, databases, registries, backups, or monitoring.
+
+## Operational visibility
+
+Administration → Operations shows queue state and Redis-backed worker poll observations. Collector metrics are optional and require a distinct `COLLECTOR_METRICS_TOKEN`; an empty setting leaves `/metrics` disabled. Both Compose variants pass this setting only to the collector. `monitoring/` contains Prometheus scrape configuration, alert rules and timing tests; it does not start a monitoring service. Read the [operations runbook](../docs-site/docs/operations.md) before configuring credentials, HTTPS scraping and notification delivery.
+
+## Identity mail
+
+The API and optional `mail-worker` share the mail settings in `example.env`. Keep mail disabled until an authorized SMTP service and an encryption key are configured. Start with `--profile mail` to run the delivery worker. The API can enqueue messages without a worker, so monitor queue age and worker liveness separately. See [the identity-mail runbook](../docs-site/docs/identity-mail.md) for configuration, delivery checks, and key handling. Mail is unavailable in airgap mode.
+
+Production platform operators also require authenticator MFA. Supply a distinct stable `LOTUSPOND_MFA_ENCRYPTION_KEY` to the API through the secret mechanism; workers do not receive it. Back it up separately, coordinate it across API instances, and test restoring the database and key together. Changing the key without re-encrypting stored factors will lock out authenticator sign-in. See the [MFA runbook](../docs-site/docs/mfa.md) for enrollment, recovery codes and limitations.
+
+## Synthetic restore drill
+
+`deploy/checks/restore-smoke.py` exercises `pg_dump` and `pg_restore` only against two newly created, randomly named, network-disabled PostgreSQL containers. It refuses image pulls, resolves the already-local image to an immutable id, loads `backend/schema.sql`, and inserts fixed synthetic records containing no customer data or usable credential, including verification/recovery metadata, invitations, an opaque outbox fixture, creator-attributed API keys, incident history, and an alert outbox record. It compares every public-table row, complete sequence metadata and state, and a normalized schema-only dump that covers types, varchar lengths, defaults, indexes, constraints, ownership relationships, and sequence definitions. PostgreSQL's random dump safety token is the only normalized field.
+
+Run it on a workstation with the reviewed image already present:
+
+```bash
+python3 deploy/checks/restore-smoke.py --image postgres:18.6-alpine3.24
+```
+
+The script verifies its labels before removal and then lists containers again to confirm cleanup. If cleanup cannot be confirmed, the command fails; when the drill already failed, the cleanup failure is attached to the original exception rather than replacing it. A local run on 2026-09-21 passed with 38 tables, a 129,613-byte custom backup, network `none`, and confirmed cleanup using image id `sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873`. This is local restore evidence for the synthetic schema and fixture only, not a production backup or disaster-recovery test.
+
+## Incident alerts
+
+The API and evaluation worker enqueue metadata-only alerts for the operator's explicitly enabled `LOTUSPOND_ALERT_WEBHOOKS` destinations. The optional `alerts` Compose profile runs `python -m lotuspond.alert_worker` from the API image. Resolve signing secrets outside this repository. Destinations are operator-wide and can receive events from every workspace, so they must be trusted operational receivers. Organization users cannot supply an arbitrary webhook URL through the API. Keep the destination list empty in airgap mode.
+
+## Offline installation drill
+
+`airgap/build-bundle.sh` records exact image IDs in `images.json` and the generated environment example. Its `--local-images` mode performs no build or pull. The separately trusted `checks/airgap-smoke.py` verifies a supplied bundle and exercises its API, evaluation worker, PostgreSQL, Redis, and collector on an internal-only disposable Docker network. Read [the installation procedure](airgap/INSTALL.md) for requirements, cleanup behavior, and the limits of this local proof.
+
+`execution/build-bundle.sh` records exact execution and Gym image IDs. `checks/execution-smoke.py` verifies that archive, runs HTTP and MCP cases from the extracted Node image, checks voice airgap refusal, and runs the genuine xterm task from the extracted Gym kit. Read [the execution installation procedure](execution/INSTALL.md). These drills do not prove clean-host transfer or live provider behavior.

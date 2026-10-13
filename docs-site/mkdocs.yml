@@ -1,0 +1,37 @@
+site_name: Lotuspond Documentation
+site_description: Install, operate, and evaluate agents with Lotuspond
+docs_dir: docs
+site_dir: site
+use_directory_urls: false
+theme:
+  name: mkdocs
+  color_mode: auto
+  user_color_mode_toggle: true
+nav:
+  - Start: index.md
+  - Install: install.md
+  - Authentication: authentication.md
+  - Authenticator and recovery: mfa.md
+  - Identity mail: identity-mail.md
+  - Offline identity: offline-identity.md
+  - API contracts: api.md
+  - Projects: projects.md
+  - Evaluations: evaluations.md
+  - Evaluation runners: runners.md
+  - Application sandboxes: sandboxes.md
+  - Voice evidence: voice.md
+  - Production monitoring: monitoring.md
+  - Incidents and alerts: incidents.md
+  - Administration: administration.md
+  - Operations: operations.md
+  - Deployment: deployment.md
+  - Pilot program: pilot.md
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - attr_list
+  - toc:
+      permalink: true
+extra_css:
+  - stylesheets/lotuspond.css

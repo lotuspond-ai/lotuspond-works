@@ -1,0 +1,17 @@
+:root {
+  --lotuspond-green: #2f6b57;
+  --lotuspond-warm: #b96f45;
+}
+
+a,
+a:visited {
+  color: var(--lotuspond-green);
+}
+
+.navbar.bg-primary {
+  background-color: #244d41 !important;
+}
+
+code {
+  color: #7a3f23;
+}

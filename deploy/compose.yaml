@@ -1,0 +1,211 @@
+name: lotuspond
+
+x-mail-environment: &mail-environment
+  LOTUSPOND_MAIL_ENABLED: ${LOTUSPOND_MAIL_ENABLED:-false}
+  LOTUSPOND_MAIL_ENCRYPTION_KEY: ${LOTUSPOND_MAIL_ENCRYPTION_KEY:-}
+  LOTUSPOND_SMTP_HOST: ${LOTUSPOND_SMTP_HOST:-}
+  LOTUSPOND_SMTP_PORT: ${LOTUSPOND_SMTP_PORT:-587}
+  LOTUSPOND_SMTP_USERNAME: ${LOTUSPOND_SMTP_USERNAME:-}
+  LOTUSPOND_SMTP_PASSWORD: ${LOTUSPOND_SMTP_PASSWORD:-}
+  LOTUSPOND_SMTP_FROM: ${LOTUSPOND_SMTP_FROM:-}
+  LOTUSPOND_SMTP_STARTTLS: ${LOTUSPOND_SMTP_STARTTLS:-true}
+  LOTUSPOND_SMTP_TIMEOUT_SECONDS: ${LOTUSPOND_SMTP_TIMEOUT_SECONDS:-15}
+
+x-alert-environment: &alert-environment
+  LOTUSPOND_ALERT_WEBHOOKS: ${LOTUSPOND_ALERT_WEBHOOKS:-[]}
+  LOTUSPOND_ALERT_TIMEOUT_SECONDS: ${LOTUSPOND_ALERT_TIMEOUT_SECONDS:-10}
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ${LOTUSPOND_API_IMAGE:-lotuspond-api:local}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      <<: [*mail-environment, *alert-environment]
+      LOTUSPOND_ENV: production
+      LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
+      LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
+      LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
+      LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
+      LOTUSPOND_REGISTRATION_ENABLED: ${LOTUSPOND_REGISTRATION_ENABLED:-false}
+      LOTUSPOND_MFA_ENCRYPTION_KEY: ${LOTUSPOND_MFA_ENCRYPTION_KEY:-}
+      LOTUSPOND_TYPESAFE_BASE_URL: ${LOTUSPOND_TYPESAFE_BASE_URL:-}
+      LOTUSPOND_TYPESAFE_API_KEY: ${LOTUSPOND_TYPESAFE_API_KEY:-}
+      LOTUSPOND_TYPESAFE_MODEL: ${LOTUSPOND_TYPESAFE_MODEL:-jev-latest}
+      LOTUSPOND_TYPESAFE_TIMEOUT_SECONDS: ${LOTUSPOND_TYPESAFE_TIMEOUT_SECONDS:-20}
+      LOTUSPOND_PROVIDER_URL: ${LOTUSPOND_PROVIDER_URL:-}
+      LOTUSPOND_PROVIDER_KEY: ${LOTUSPOND_PROVIDER_KEY:-}
+      LOTUSPOND_PROVIDER_MODELS: ${LOTUSPOND_PROVIDER_MODELS:-[]}
+      LOTUSPOND_PROVIDER_TIMEOUT_SECONDS: ${LOTUSPOND_PROVIDER_TIMEOUT_SECONDS:-20}
+      LOTUSPOND_PROVIDER_RESPONSE_BYTES: ${LOTUSPOND_PROVIDER_RESPONSE_BYTES:-2097152}
+    ports:
+      - ${LOTUSPOND_BIND_ADDRESS:-127.0.0.1}:${LOTUSPOND_PORT:-8000}:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  worker:
+    image: ${LOTUSPOND_API_IMAGE:-lotuspond-api:local}
+    restart: unless-stopped
+    command: ['python', '-m', 'lotuspond.worker']
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      <<: *alert-environment
+      LOTUSPOND_ENV: production
+      LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
+      LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
+      LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
+      LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
+      LOTUSPOND_REGISTRATION_ENABLED: ${LOTUSPOND_REGISTRATION_ENABLED:-false}
+      LOTUSPOND_TYPESAFE_BASE_URL: ${LOTUSPOND_TYPESAFE_BASE_URL:-}
+      LOTUSPOND_TYPESAFE_API_KEY: ${LOTUSPOND_TYPESAFE_API_KEY:-}
+      LOTUSPOND_TYPESAFE_MODEL: ${LOTUSPOND_TYPESAFE_MODEL:-jev-latest}
+      LOTUSPOND_TYPESAFE_TIMEOUT_SECONDS: ${LOTUSPOND_TYPESAFE_TIMEOUT_SECONDS:-20}
+      LOTUSPOND_PROVIDER_URL: ${LOTUSPOND_PROVIDER_URL:-}
+      LOTUSPOND_PROVIDER_KEY: ${LOTUSPOND_PROVIDER_KEY:-}
+      LOTUSPOND_PROVIDER_MODELS: ${LOTUSPOND_PROVIDER_MODELS:-[]}
+      LOTUSPOND_PROVIDER_TIMEOUT_SECONDS: ${LOTUSPOND_PROVIDER_TIMEOUT_SECONDS:-20}
+      LOTUSPOND_PROVIDER_RESPONSE_BYTES: ${LOTUSPOND_PROVIDER_RESPONSE_BYTES:-2097152}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  mail-worker:
+    image: ${LOTUSPOND_API_IMAGE:-lotuspond-api:local}
+    profiles: ['mail']
+    restart: unless-stopped
+    command: ['python', '-m', 'lotuspond.mail_worker']
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    environment:
+      <<: *mail-environment
+      LOTUSPOND_ENV: production
+      LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
+      LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
+      LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
+      LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
+      LOTUSPOND_REGISTRATION_ENABLED: ${LOTUSPOND_REGISTRATION_ENABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt: ['no-new-privileges:true']
+    cap_drop: ['ALL']
+
+  alert-worker:
+    image: ${LOTUSPOND_API_IMAGE:-lotuspond-api:local}
+    profiles: ['alerts']
+    restart: unless-stopped
+    command: ['python', '-m', 'lotuspond.alert_worker']
+    healthcheck:
+      disable: true
+    read_only: true
+    tmpfs: ['/tmp:size=64m,mode=1777']
+    environment:
+      <<: *alert-environment
+      LOTUSPOND_ENV: production
+      LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
+      LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
+      LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
+      LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt: ['no-new-privileges:true']
+    cap_drop: ['ALL']
+
+  collector:
+    build:
+      context: ../collector
+      dockerfile: Dockerfile
+    image: ${LOTUSPOND_COLLECTOR_IMAGE:-lotuspond-collector:local}
+    restart: unless-stopped
+    read_only: true
+    environment:
+      COLLECTOR_INGEST_TOKEN: ${COLLECTOR_INGEST_TOKEN:?Set a unique collector ingest token}
+      COLLECTOR_METRICS_TOKEN: ${COLLECTOR_METRICS_TOKEN:-}
+      LOTUSPOND_API_URL: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
+      LOTUSPOND_API_KEY: ${LOTUSPOND_API_KEY:?Set a telemetry-ingest scoped key}
+      LOTUSPOND_PROJECT_ID: ${LOTUSPOND_PROJECT_ID:?Set the monitored project UUID}
+      COLLECTOR_MAX_BODY_BYTES: ${COLLECTOR_MAX_BODY_BYTES:-2097152}
+      COLLECTOR_QUEUE_CAPACITY: ${COLLECTOR_QUEUE_CAPACITY:-128}
+      COLLECTOR_WORKERS: ${COLLECTOR_WORKERS:-4}
+      COLLECTOR_REQUEST_TIMEOUT_MS: ${COLLECTOR_REQUEST_TIMEOUT_MS:-5000}
+      # Set to /spool to keep batches on disk while the API is unreachable.
+      COLLECTOR_SPOOL_DIR: ${COLLECTOR_SPOOL_DIR:-}
+      COLLECTOR_SPOOL_MAX_BYTES: ${COLLECTOR_SPOOL_MAX_BYTES:-268435456}
+    ports:
+      - ${COLLECTOR_BIND_ADDRESS:-127.0.0.1}:${COLLECTOR_PORT:-4318}:4318
+    volumes:
+      - collector-spool:/spool
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  postgres:
+    image: postgres:18.6-alpine3.24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lotuspond}
+      POSTGRES_USER: ${POSTGRES_USER:-lotuspond}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a unique PostgreSQL password}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7.2.16-alpine3.21
+    restart: unless-stopped
+    command: ['sh', '-c', 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a unique Redis password}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  collector-spool:
+  postgres-data:
+  redis-data:

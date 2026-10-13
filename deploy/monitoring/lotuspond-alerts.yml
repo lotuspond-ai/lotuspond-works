@@ -1,0 +1,28 @@
+# Starting thresholds for a pilot; review against measured load and response targets.
+groups:
+  - name: lotuspond-collector
+    rules:
+      - alert: LotuspondCollectorScrapeUnavailable
+        expr: up{job="lotuspond-collector"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Collector metrics cannot be scraped
+          description: Check the process, network, certificate and dedicated metrics credential. A failed scrape does not identify which dependency failed.
+      - alert: LotuspondCollectorQueuePressure
+        expr: lotuspond_collector_queue_depth / lotuspond_collector_queue_capacity > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Collector queue remains near capacity
+          description: Inspect upstream latency and producer volume. The collector queue is in memory and cannot retain data across a restart.
+      - alert: LotuspondCollectorRequestsRejectedByCapacity
+        expr: rate(lotuspond_collector_requests_total{result="queue_full"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Collector rejected requests because the queue was full
+          description: Producers must handle retryable failures within their own bounded retry policy. Check upstream failures before increasing capacity.

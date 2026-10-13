@@ -1,0 +1,28 @@
+{
+  "schema_version": "lotuspond.sandbox.manifest.v1",
+  "manifest_id": "gym-reviewed",
+  "provider": "gym-anything",
+  "upstream_repository": "https://github.com/cmu-l3/gym-anything",
+  "upstream_revision": "f3dc04649641dba69d5032f7bb6adaa9785c150d",
+  "constraints_sha256": "0818490024cacfbaa221f21c428bd06a14b1045e2f70f647a3a01f0cbdf54f79",
+  "runtime_image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "runner": "local",
+  "network": "none",
+  "read_only": true,
+  "environments": [
+    {
+      "environment_id": "moodle",
+      "cli_name": "moodle",
+      "path": "benchmarks/cua_world/environments/moodle_env",
+      "tasks": ["enroll_student"]
+    }
+  ],
+  "limits": {
+    "cpus": 2,
+    "memory_mb": 4096,
+    "pids": 256,
+    "timeout_seconds": 900,
+    "tmpfs_mb": 512,
+    "max_artifact_bytes": 268435456
+  }
+}

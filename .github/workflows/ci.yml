@@ -1,0 +1,156 @@
+name: Lotuspond validation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lotuspond
+          POSTGRES_DB: lotuspond_platform_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+          PGDATA: /var/lib/postgresql/18/docker
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.11.16'
+      - run: uv sync --frozen --project backend
+      - run: npm ci
+      - run: npm run check
+      - run: backend/.venv/bin/python backend/export_schema.py --check
+      - run: PYTHONPATH=sandbox/src backend/.venv/bin/python -m pytest sandbox/tests -q
+      - run: backend/.venv/bin/python -m pytest deploy/checks -q
+      - run: npm run test:python
+        env:
+          LOTUSPOND_PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
+      - name: Exercise the supervised runner through the real API
+        run: backend/.venv/bin/python scripts/checks/runner-smoke.py --expected-data-directory /var/lib/postgresql/18/docker --report "$RUNNER_TEMP/lotuspond-runner-smoke.json"
+        env:
+          LOTUSPOND_PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
+  collector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: collector/go.mod
+          cache: false
+      - run: go test -race ./...
+        working-directory: collector
+  monitoring-rules:
+    runs-on: ubuntu-latest
+    env:
+      PROMETHEUS_IMAGE: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate scrape configuration and alert timing
+        run: |
+          docker pull "$PROMETHEUS_IMAGE"
+          docker run --rm --network none --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/work:ro" -w /work "$PROMETHEUS_IMAGE" check config --syntax-only prometheus.example.yml
+          docker run --rm --network none --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/work:ro" -w /work "$PROMETHEUS_IMAGE" check rules lotuspond-alerts.yml
+          docker run --rm --network none --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/work:ro" -w /work "$PROMETHEUS_IMAGE" test rules alerts.test.yml
+  voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.node-version'
+      - run: npm ci --ignore-scripts
+        working-directory: voice-bridge
+      - run: npm run check
+        working-directory: voice-bridge
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: cargo test --locked
+        working-directory: evidence-core
+  protocols:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.node-version'
+      - run: npm ci --ignore-scripts
+        working-directory: protocol-adapters
+      - run: npm run check
+        working-directory: protocol-adapters
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - run: docker pull postgres:18.6-alpine3.24
+      - run: python deploy/checks/restore-smoke.py
+  execution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Build the customer execution image
+        run: docker build -f deploy/execution/Dockerfile -t lotuspond-execution:ci .
+      - name: Probe HTTP, MCP, and airgap voice without a repository bind
+        run: python deploy/checks/execution-smoke.py --image lotuspond-execution:ci
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - run: pip install -r docs-site/requirements.txt
+      - run: mkdocs build --strict --config-file docs-site/mkdocs.yml
+  offline-install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Build the reviewed bundle
+        run: deploy/airgap/build-bundle.sh ci "$RUNNER_TEMP/lotuspond-airgap-ci.tar.gz"
+      - name: Install and exercise the bundle in an internal-only test network
+        run: python deploy/checks/airgap-smoke.py "$RUNNER_TEMP/lotuspond-airgap-ci.tar.gz" "$RUNNER_TEMP/lotuspond-airgap-ci.tar.gz.sha256" --failure-recovery

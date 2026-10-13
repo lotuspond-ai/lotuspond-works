@@ -1,0 +1,23 @@
+{
+  "name": "@lotuspond/protocol-adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./mcp-runner": "./src/mcp-runner.mjs",
+    "./mcp-tools": "./src/mcp-tools.mjs",
+    "./http-runner": "./src/http-runner.mjs",
+    "./a2a-runner": "./src/a2a-runner.mjs",
+    "./http-transport": "./src/http-transport.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/mcp-client.mjs && node --check src/mcp-runner.mjs && node --check src/mcp-tools.mjs && node --check src/http-transport.mjs && node --check src/http-runner.mjs && node --check src/a2a-runner.mjs && node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0"
+  }
+}

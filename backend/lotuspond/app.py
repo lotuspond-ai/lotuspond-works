@@ -1,0 +1,383 @@
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from .config import Settings
+from .database import engine_for, sessions_for
+from .gateway import router as gateway_router
+from .identity import router as identity_router
+from .identity_lifecycle import router as identity_lifecycle_router
+from .mfa import router as mfa_router
+from .models import SchemaVersion
+from .monitoring import router as monitoring_router
+from .offline_identity import router as offline_identity_router
+from .operations import router as operations_router
+from .schema_version import SCHEMA_VERSION
+from .security import RateLimiter
+from .workflows import router as workflow_router
+
+logger = logging.getLogger("lotuspond")
+
+
+class RequestBoundary:
+    """Reject oversized bodies before parsing and verify browser mutation origins."""
+
+    def __init__(self, app, settings):
+        self.app = app
+        self.settings = settings
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = {key.decode().lower(): value.decode() for key, value in scope["headers"]}
+
+        async def error(status, code, message):
+            await JSONResponse({"error": code, "message": message}, status_code=status)(
+                scope, receive, send
+            )
+
+        method = scope["method"]
+        if method not in {"GET", "HEAD", "OPTIONS"}:
+            # Authorization-bearing API calls still must not smuggle a browser session.
+            browser = "cookie" in headers or "origin" in headers
+            if browser and headers.get("origin") != self.settings.origin:
+                await error(403, "invalid_origin", "The request origin is not permitted.")
+                return
+            content_type = headers.get("content-type", "").lower()
+            # OTLP exporters send binary protobuf by default. Like JSON it is not a
+            # CORS-safelisted type, so a cross-site form still cannot submit it, and it is
+            # accepted only where trace exports arrive.
+            otlp_protobuf = (
+                scope["path"] == "/api/v1/telemetry/otlp"
+                and content_type.split(";")[0].strip() == "application/x-protobuf"
+            )
+            if (
+                scope["path"].startswith("/api/")
+                and "application/json" not in content_type
+                and not otlp_protobuf
+            ):
+                await error(415, "unsupported_media_type", "Use an application/json request body.")
+                return
+        try:
+            length = int(headers.get("content-length", "0"))
+        except ValueError:
+            await error(400, "invalid_length", "The content length is invalid.")
+            return
+        if length < 0 or length > self.settings.max_request_bytes:
+            await error(413, "body_too_large", "The request body exceeds the size limit.")
+            return
+        chunks = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body = message.get("body", b"")
+            total += len(body)
+            if total > self.settings.max_request_bytes:
+                await error(413, "body_too_large", "The request body exceeds the size limit.")
+                return
+            chunks.append(body)
+            if not message.get("more_body", False):
+                break
+        delivered = False
+
+        async def replay():
+            nonlocal delivered
+            if delivered:
+                return await receive()
+            delivered = True
+            return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
+
+        async def secure_send(message):
+            if message["type"] == "http.response.start":
+                message["headers"] = list(message.get("headers", [])) + [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (
+                        b"content-security-policy",
+                        b"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+                    ),
+                ]
+                if scope["path"].startswith("/api/"):
+                    message["headers"].append((b"cache-control", b"no-store"))
+                if self.settings.env == "production":
+                    message["headers"].append(
+                        (b"strict-transport-security", b"max-age=31536000; includeSubDomains")
+                    )
+            await send(message)
+
+        await self.app(scope, replay, secure_send)
+
+
+def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
+    settings = settings or Settings()
+    owned_engine = engine is None
+    engine = engine if engine is not None else engine_for(settings)
+    limiter = RateLimiter(settings)
+
+    @asynccontextmanager
+    async def lifespan(_):
+        yield
+        if limiter.client:
+            limiter.client.close()
+        if owned_engine:
+            engine.dispose()
+
+    app = FastAPI(
+        title="Lotuspond API", version="0.2.0", lifespan=lifespan, docs_url=None, redoc_url=None
+    )
+    app.state.settings = settings
+    app.state.engine = engine
+    app.state.sessions = sessions_for(engine)
+    app.state.limiter = limiter
+    app.add_middleware(RequestBoundary, settings=settings)
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_, exc):
+        body = (
+            exc.detail
+            if isinstance(exc.detail, dict)
+            else {"error": "request_failed", "message": str(exc.detail)}
+        )
+        return JSONResponse(body, status_code=exc.status_code)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_, exc):
+        # Pydantic errors include the submitted value; never echo it (passwords, tokens, prompts).
+        fields = [".".join(str(part) for part in error["loc"]) for error in exc.errors()]
+        return JSONResponse(
+            {
+                "error": "invalid_input",
+                "message": "Some request fields are invalid.",
+                "fields": fields,
+            },
+            status_code=422,
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def conflict(_, exc):
+        return JSONResponse(
+            {
+                "error": "conflict",
+                "message": "A record already exists or a related record is invalid.",
+            },
+            status_code=409,
+        )
+
+    @app.exception_handler(SQLAlchemyError)
+    async def database_error(_, exc):
+        logger.error("Database request failed: %s", type(exc).__name__)
+        return JSONResponse(
+            {"error": "database_unavailable", "message": "The data service is unavailable."},
+            status_code=503,
+        )
+
+    @app.exception_handler(Exception)
+    async def internal_error(_, exc):
+        logger.error("Request failed: %s", type(exc).__name__)
+        return JSONResponse(
+            {"error": "internal_error", "message": "The request failed. Please try again."},
+            status_code=500,
+        )
+
+    @app.get("/api/v1/health")
+    def health():
+        return {"status": "ok", "product": "Lotuspond", "version": "0.2.0"}
+
+    @app.get("/api/v1/ready")
+    def ready():
+        try:
+            with engine.connect() as connection:
+                version = connection.scalar(select(SchemaVersion.version))
+            if version != SCHEMA_VERSION:
+                raise RuntimeError("schema")
+            if limiter.client:
+                limiter.client.ping()
+        except Exception:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        return {"status": "ready", "schema_version": version}
+
+    @app.get("/api/v1/changelog")
+    def changelog():
+        return {
+            "product": "Lotuspond",
+            "items": [
+                {
+                    "version": "0.2.0",
+                    "id": "collector-spool",
+                    "date": "2026-09-23",
+                    "title": "A durable collector spool",
+                    "description": "The telemetry collector can keep batches on disk while the API is unreachable. With COLLECTOR_SPOOL_DIR set, every accepted batch is written durably before it is forwarded; a batch the API cannot answer is acknowledged with 202 and delivered later, across restarts and crashes, and a batch the API refuses is kept for the operator. A full spool refuses new batches with 503, so exporters keep them and nothing is dropped silently. The spool is off unless configured.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "signed-evidence-manifests",
+                    "date": "2026-09-23",
+                    "title": "Signed evidence manifests",
+                    "description": "The lotuspond-evidence CLI can now sign an artifact manifest with an Ed25519 publisher key and verify it against a public key you trust, so a manifest shows who published it as well as which files it covers. Keys are standard PEM files and the signed message is documented, so OpenSSL can check a signature without Lotuspond. Private keys are written readable only by their owner and are never overwritten.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "otlp-protobuf",
+                    "date": "2026-09-23",
+                    "title": "OTLP protobuf ingestion",
+                    "description": "OpenTelemetry exporters can now send traces with their default binary protobuf encoding, to the collector or straight to the API, with or without gzip; no switch to JSON is needed. A protobuf span is stored exactly as the same span sent as JSON, and the exporter receives the standard response, including how many spans were not kept and why. Usage counts such as gen_ai.usage.input_tokens are now kept as evidence instead of being redacted as if they were credentials.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "accessibility-review",
+                    "date": "2026-09-23",
+                    "title": "Accessibility review",
+                    "description": "The console and public pages were reviewed against WCAG 2.2 AA and corrected. The focus ring and text-field edges now hold 3:1 contrast on every surface, including the pond scene, and filter placeholders are full-contrast text. Search keeps focus inside and announces how many results match, closing a record drawer returns you to the button that opened it, and every row action names its record. Each page titles the browser tab and is announced when you move to it, the narrow-screen menu closes on Escape, Home no longer scrolls sideways on a 320px screen, and the wordmark is legible over the scene again.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "console-redesign",
+                    "date": "2026-09-23",
+                    "title": "A redesigned console",
+                    "description": "The console now opens on Home, where a six-step checklist built from your workspace's own records leads to a first release decision, each step opening the right form. Navigation is grouped in the order work happens with an icon beside every label, a workspace switcher sits at the top, and Search or ⌘K jumps to any page or create action. Lists have readable columns and relative times, details open in a drawer, and release decisions carry a verdict stamp. The public platform preview renders the same components.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "public-introduction",
+                    "date": "2026-09-22",
+                    "title": "A clearer public introduction",
+                    "description": "The signed-out page opens on a drawn pond scene, and then shifts to a field-record style: outcomes drawn as traces on graph paper, a workflow thread that inks each step as you scroll, ink glyphs for deployment and a stamped decision record. A labelled sample workspace lets visitors change scenario outcomes and policy limits and watch the release rules decide, and the page lists the latest changelog entries. It explains how a release decision is reached, quoting the exact reasons a policy records, why a missing or unknown outcome blocks a release, what each workflow retains, and where Lotuspond can be installed. Choosing an individual or organization account from the page opens registration with that choice selected.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "subscription-entitlements",
+                    "date": "2026-09-22",
+                    "title": "Subscription levels, assisted reset and A2A",
+                    "description": "A workspace's plan now decides its monthly trace allowance and retention window, with plan changes reserved to operators and a dry-run-first retention job. Traces export as canonical JSON on every plan. An organization administrator can clear a member's lost authenticator without being able to enter their account, and an A2A adapter evaluates agents over JSON-RPC where only a completed task is judged.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "compressed-telemetry",
+                    "date": "2026-09-21",
+                    "title": "Compressed OTLP ingestion",
+                    "description": "The collector and the telemetry endpoint accept the gzip that OTLP/HTTP exporters send by default. A gzip body must be a single member, and its decompressed size is bounded by the same budget as the wire body, so a small highly compressible payload is refused rather than expanded.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "account-change-notifications",
+                    "date": "2026-09-21",
+                    "title": "Account change notices and installation-wide authenticators",
+                    "description": "When a password or authenticator changes, Lotuspond queues a notification to the account mailbox. It states what changed and when, and deliberately carries no link and no code. A disabled mailbox never blocks the security change itself. Operators can also require an authenticator for every workspace on the installation.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "organization-authenticator-policy",
+                    "date": "2026-09-21",
+                    "title": "Organization authenticator policy",
+                    "description": "An organization administrator who already holds an authenticator can require one for every member and key owner in that organization. Personal workspaces are unaffected, and the SMTP outbox now bounds the whole conversation rather than each socket operation.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "customer-execution-distribution",
+                    "date": "2026-09-21",
+                    "title": "Customer-side execution distribution",
+                    "description": "HTTP, MCP, voice, and release-gate commands ship in a separate nonroot Node image. Gym tasks stay on a host-side kit with their own Docker image. API URLs accept an origin or the /api/v1 base.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "supervised-http-runners",
+                    "date": "2026-09-21",
+                    "title": "Supervised runners and HTTP agent evaluation",
+                    "description": "Run an operator-configured HTTP agent with bounded complete evidence. Scenario subprocesses enforce deadlines, keep control-plane credentials separate, and stop when their lease or authorization is lost. Infrastructure failures remain inconclusive.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "0.2.0",
+                    "date": "2026-09-21",
+                    "title": "Agent assurance platform",
+                    "description": "Individual and organization accounts, session controls, password changes, project-scoped evaluations, live monitors, voice transcripts, semantic assessments, and operator controls on the Python API.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "identity-lifecycle",
+                    "date": "2026-09-21",
+                    "title": "Verified identity lifecycle",
+                    "description": "Mailbox verification, password recovery, organization invitations, and an encrypted operator-managed mail outbox.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "actionable-monitoring",
+                    "date": "2026-09-21",
+                    "title": "Actionable production monitoring",
+                    "description": "Failed and unavailable assessments now create distinct incidents with audited resolution history and optional operator-managed signed webhook alerts.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "offline-enrollment-and-trace-costs",
+                    "date": "2026-09-21",
+                    "title": "Offline enrollment and trace cost provenance",
+                    "description": "Air-gapped installations can provision new operator-attested accounts with single-use enrollment links. Trace costs distinguish reported amounts, unavailable measurements, and preserved values of uncertain provenance.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "authenticator-app-mfa",
+                    "date": "2026-09-21",
+                    "title": "Authenticator app multi-factor authentication",
+                    "description": "Accounts can protect sign-in with time-based authenticator codes and single-use recovery codes. Production platform operators require a verified identity and a multi-factor session.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "worker-operations",
+                    "date": "2026-09-21",
+                    "title": "Worker and queue operations",
+                    "description": "Multi-factor-protected operators can inspect aggregate evaluation, mail, and alert queue health plus bounded last-poll observations without exposing customer evidence.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "bounded-run-snapshots",
+                    "date": "2026-09-21",
+                    "title": "Bounded runner claims",
+                    "description": "Run creation now limits frozen scenario snapshots to 4 MiB, and capability-aware claiming skips incompatible work before taking database locks.",
+                },
+            ],
+        }
+
+    app.include_router(identity_router)
+    app.include_router(identity_lifecycle_router)
+    app.include_router(offline_identity_router)
+    app.include_router(mfa_router)
+    app.include_router(operations_router)
+    app.include_router(workflow_router)
+    app.include_router(monitoring_router)
+    app.include_router(gateway_router)
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def frontend(path: str, request: Request):
+        if path.startswith("api/") or path == "api":
+            return JSONResponse(
+                {"error": "not_found", "message": "API route not found."}, status_code=404
+            )
+        root = settings.web_dist.resolve()
+        asset = (root / path).resolve()
+        if asset.is_relative_to(root) and asset.is_file():
+            return FileResponse(asset)
+        if path.startswith("assets/") or "." in path.rsplit("/", 1)[-1]:
+            return JSONResponse(
+                {"error": "not_found", "message": "Asset not found."}, status_code=404
+            )
+        index = root / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        return JSONResponse(
+            {"error": "frontend_unavailable", "message": "Build the Lotuspond web application."},
+            status_code=503,
+        )
+
+    return app
+
+
+app = create_app()

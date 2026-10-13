@@ -1,0 +1,60 @@
+# Lotuspond
+
+Lotuspond is a single product for testing AI agents, recording production evidence, and governing releases. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. A Go collector accepts OTLP/HTTP protobuf and JSON, a Rust CLI verifies artifact manifests, and Node tooling runs customer-controlled evaluation adapters and release gates.
+
+## Run locally
+
+Install Node.js 24 LTS (the reviewed version is in `.node-version`), Python 3.13+, uv, and PostgreSQL tools (`initdb`, `pg_ctl`, `psql`, `createdb`). Node 22.12+ remains compatible with the execution clients.
+
+```sh
+npm ci
+uv sync --frozen --project backend
+npm run db:start
+npm run db:init
+npm run build
+LOTUSPOND_REGISTRATION_ENABLED=true npm start
+```
+
+Open http://127.0.0.1:8000. Choose an individual account or deliberately create an organization. Every account has a personal workspace; organizations contain projects and role-based memberships. Public registration never grants platform operator access.
+
+`db:start` creates only the independent `lotuspond_platform_dev` database in the localhost cluster on port 55439. `db:init` refuses nonempty databases. Existing data is not imported or reset. Reviewed additive upgrades from local schema versions 2–7 to version 8 use `npm run db:migrate`; read [the migration plan](docs/DATABASE.md) first.
+
+For development, run `LOTUSPOND_REGISTRATION_ENABLED=true LOTUSPOND_ORIGIN=http://127.0.0.1:3001 npm run dev` and `npm run dev:web` in separate terminals. The UI runs on port 3001 and proxies the API on port 8000. Optional settings belong in the untracked project `.env`; use `.env.example` as the template.
+
+Start `npm run worker` separately for background assessments. Unconfigured semantic evaluation produces **unknown**, never a passing assessment. Cloud semantic calls are disabled in airgap mode. Configure [identity mail](docs-site/docs/identity-mail.md) and run `npm run worker:mail` separately for verification, recovery, and invitations; mail is disabled by default.
+
+Air-gapped installations use [offline identity enrollment](docs-site/docs/offline-identity.md) to provision new individuals, deliberate organizations and explicit operators. A one-use link lets each person set their own password. Operator attestation stays separate from mailbox verification; pending-link reissue and account revocation are audited CLI operations.
+
+## Work through a release
+
+1. Create a project, scenarios, and an immutable release policy.
+2. Register a runner and issue an API key with `read` and `run` scopes.
+3. Queue a run. Execute real evaluations through `npm run runner -- /absolute/path/to/adapter.mjs`.
+4. Create a release with the candidate revision, policy, and optional comparable baseline.
+5. Evaluate it. Missing or unknown evidence, critical failures, regressions, and latency/cost breaches block release.
+6. If required, request the `release` approval action and have a different administrator approve it. Re-evaluate and export the evidence.
+7. Enforce the result in your delivery process with `npm run cli -- gate RELEASE_ID`.
+
+Voice sessions accept transcript revisions from your transcription application. Final segments are immutable. Closing a finalized session enables a durable assessment job; recording a session does not activate a microphone or install a speech provider.
+
+The [voice bridge](voice-bridge/README.md) streams explicitly supplied PCM audio to a configured transcription provider. The [protocol adapters](protocol-adapters/README.md) evaluate an operator-selected HTTP agent or execute an explicit MCP tool, with read-only tool discovery kept separate. Both packages have independent lockfiles; run `npm ci --ignore-scripts` in each package before using it. Their local tests use synthetic endpoints or mock providers.
+
+## Validate
+
+```sh
+npm run check
+createdb -h 127.0.0.1 -p 55439 -U lotuspond lotuspond_platform_test
+LOTUSPOND_PLATFORM_TEST_DATABASE_URL=postgresql+psycopg://lotuspond@127.0.0.1:55439/lotuspond_platform_test npm run test:python
+```
+
+Create the test database only if it does not exist. Integration tests create and remove only their own random schemas. Go, Rust, voice, MCP, restore, and documentation checks have separate CI jobs. [Current validation](docs/VALIDATION.md) distinguishes observed results from remaining work.
+
+## Product and delivery
+
+Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and the [complete delivery goal](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
+
+This repository has no configured remote or hosted deployment. Production readiness requires the remaining identity, provider, streaming voice, sandbox, deployment, and operational evidence listed in the capability register. The separate local recovery archive is outside this project.
+
+Use [Operations](docs-site/docs/operations.md) to inspect queue eligibility, expired leases and worker poll observations. The collector offers separately authenticated Prometheus metrics; optional scrape/alert examples are under `deploy/monitoring/`.
+
+[Evaluation runners](docs-site/docs/runners.md) execute reviewed adapters in supervised processes. Use the HTTP adapter for an operator-configured text agent or the MCP adapter for a specific tool; frozen scenarios, complete evidence and a current lease remain required.

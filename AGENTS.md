@@ -1,0 +1,39 @@
+# Lotuspond workspace instructions
+
+## Product and ownership
+
+- Lotuspond is the single product. Its workflows are Releases, Scenarios, Production Evidence, and Governance.
+- This root is the owning repository. Resolve its branch and dirty state before editing or publishing.
+- Use `CLAUDE.md`, `docs/architecture/0002-agent-assurance-platform.md`, and `docs/CAPABILITIES.md` for the current implementation boundaries.
+- The current product goal authorizes selective recovery of archived agent-testing implementation. Restore useful behavior under Lotuspond naming, retain provenance, and preserve the archive. Do not restore unrelated products, obsolete affiliations, environment files, or previous Git history.
+- Preserve unrelated user changes. Never commit environment files, credentials, dependencies, local database files, or generated build output.
+
+## Personal workflow
+
+- Teams, Outlook, SharePoint, OneDrive, and other Microsoft work-context sources are excluded. Do not connect them or retrieve their context indirectly.
+- Use Asia/Kolkata for scheduled briefs. Keep updates concise and distinguish local tests, Git publication, deployment, and observed hosted behavior.
+- Honor the task's configured reasoning. Do not claim to change it without verifying the setting.
+
+## Implementation and validation
+
+- TypeScript uses strict checking. Keep imports first and use async/await.
+- UI: `web/`. Primary API and relational model: `backend/`. Go telemetry collector: `collector/`. Rust artifact verification: `evidence-core/`. Node execution clients: `scripts/`. Live transcription: `voice-bridge/`. Isolated software tasks: `sandbox/`.
+- Read `SECURITY.md` before authentication, authorization, data access, or outbound HTTP changes.
+- Before shipping, run `npm run check`. Run the isolated database integration test for API, policy, authorization, or schema changes.
+- Update the API changelog for user-visible changes. The client reads it from `/api/v1/changelog`.
+- Do not describe registered integrations as verified or locally tested functionality as production ready.
+- Interface work follows `DESIGN.md` and `docs/design-system.md`. Public copy must trace to `docs/CAPABILITIES.md`; verify visible changes in a browser at desktop, tablet, and 375px widths, including keyboard focus.
+
+## Database safety
+
+- Never read, modify, reset, migrate, or introspect a production database.
+- Use only an independently verified localhost development or test database. Do not reuse environment configuration from outside this project.
+- `npm run db:init` is a one-time, empty-database initializer. It must refuse existing tables.
+- Do not drop, rename, reset, or replace existing user data. Schema evolution needs a reviewed, data-preserving plan.
+- Changes to cloud resources, hosted domains, databases, deployment consumers, or remote repository history require a separate explicit scope and authorization.
+
+## AWS work
+
+- Prefer the AWS MCP server and a relevant AWS skill. Use profile `lotuspond-aws`, workload region `ap-south-2`, and toolkit endpoint region `us-east-1` unless instructed otherwise.
+- Prefer infrastructure-as-code. Inventory live resources before changing them.
+- Load the AWS secrets-manager skill before AWS secret tasks; resolve secrets at runtime with `asm-exec`. Never return secret values into conversation context.

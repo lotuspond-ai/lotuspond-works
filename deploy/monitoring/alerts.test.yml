@@ -1,0 +1,71 @@
+rule_files:
+  - lotuspond-alerts.yml
+evaluation_interval: 1m
+tests:
+  - name: quiet collector does not alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="lotuspond-collector",instance="test"}'
+        values: '1+0x10'
+      - series: 'lotuspond_collector_queue_depth{job="lotuspond-collector",instance="test"}'
+        values: '1+0x10'
+      - series: 'lotuspond_collector_queue_capacity{job="lotuspond-collector",instance="test"}'
+        values: '10+0x10'
+      - series: 'lotuspond_collector_requests_total{job="lotuspond-collector",instance="test",result="queue_full"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: LotuspondCollectorScrapeUnavailable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: LotuspondCollectorQueuePressure
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: LotuspondCollectorRequestsRejectedByCapacity
+        exp_alerts: []
+  - name: sustained scrape failure and queue pressure alert
+    interval: 1m
+    input_series:
+      - series: 'up{job="lotuspond-collector",instance="test"}'
+        values: '0+0x10'
+      - series: 'lotuspond_collector_queue_depth{job="lotuspond-collector",instance="test"}'
+        values: '9+0x10'
+      - series: 'lotuspond_collector_queue_capacity{job="lotuspond-collector",instance="test"}'
+        values: '10+0x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: LotuspondCollectorScrapeUnavailable
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: LotuspondCollectorScrapeUnavailable
+        exp_alerts:
+          - exp_labels: {job: lotuspond-collector, instance: test, severity: warning}
+            exp_annotations:
+              summary: Collector metrics cannot be scraped
+              description: Check the process, network, certificate and dedicated metrics credential. A failed scrape does not identify which dependency failed.
+      - eval_time: 4m
+        alertname: LotuspondCollectorQueuePressure
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: LotuspondCollectorQueuePressure
+        exp_alerts:
+          - exp_labels: {job: lotuspond-collector, instance: test, severity: warning}
+            exp_annotations:
+              summary: Collector queue remains near capacity
+              description: Inspect upstream latency and producer volume. The collector queue is in memory and cannot retain data across a restart.
+  - name: capacity rejections alert after sustained rate
+    interval: 1m
+    input_series:
+      - series: 'lotuspond_collector_requests_total{job="lotuspond-collector",instance="test",result="queue_full"}'
+        values: '0+10x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: LotuspondCollectorRequestsRejectedByCapacity
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: LotuspondCollectorRequestsRejectedByCapacity
+        exp_alerts:
+          - exp_labels: {job: lotuspond-collector, instance: test, result: queue_full, severity: warning}
+            exp_annotations:
+              summary: Collector rejected requests because the queue was full
+              description: Producers must handle retryable failures within their own bounded retry policy. Check upstream failures before increasing capacity.

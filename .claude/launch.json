@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lotuspond",
+      "cwd": ".",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "port": 8000
+    },
+    {
+      "name": "lotuspond-api-dev",
+      "cwd": ".",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "LOTUSPOND_ORIGIN=http://127.0.0.1:3001",
+        "LOTUSPOND_REGISTRATION_ENABLED=true",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "lotuspond-web",
+      "cwd": ".",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:web"],
+      "port": 3001,
+      "url": "http://127.0.0.1:3001"
+    }
+  ]
+}
