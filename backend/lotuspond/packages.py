@@ -318,14 +318,16 @@ def get_content(id: Identifier, p: Principal = Depends(require("read")), db: Ses
 
 
 @router.get("/package-contracts")
-def package_contracts(p: Principal = Depends(require("read"))):
+def package_contracts(request: Request, p: Principal = Depends(require("read"))):
     return {
         "contracts": [
             {
                 "schema_version": SCHEMA_VERSION,
                 "validator_revision": VALIDATOR_REVISION,
                 "canonicalization": CANONICALIZATION,
-                "max_package_bytes": MAX_PACKAGE_BYTES,
+                "max_package_bytes": min(
+                    request.app.state.settings.max_request_bytes, MAX_PACKAGE_BYTES
+                ),
             }
         ]
     }

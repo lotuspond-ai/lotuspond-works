@@ -299,6 +299,38 @@ def test_media_origin_encoding_and_no_mutations(client, project, manifest):
         )
 
 
+@pytest.mark.parametrize(
+    ("configured_limit", "expected_limit"),
+    [(1024, 1024), (1048576, 1048576), (2097152, 1048576)],
+)
+def test_discovered_publication_limit_matches_admission(
+    client, project, app, configured_limit, expected_limit
+):
+    app.state.settings.max_request_bytes = configured_limit
+    response = client.get("/api/v1/package-contracts")
+    assert response.status_code == 200
+    assert response.json()["contracts"][0]["max_package_bytes"] == expected_limit
+    manifest = {
+        "schema_version": "lotuspond.workflow-package.v1",
+        "package_id": "limit-test",
+        "version": "1.0.0",
+        "name": "Publication limit",
+        "entry_node": "start",
+        "models": [],
+        "connectors": [],
+        "secret_refs": [],
+        "nodes": [{"id": "start", "kind": "start"}, {"id": "end", "kind": "end"}],
+        "edges": [{"source": "start", "target": "end"}],
+    }
+    wire = json.dumps(manifest).encode().ljust(expected_limit, b" ")
+    url = f"/api/v1/projects/{project}/packages"
+    headers = {"content-type": "application/json"}
+    accepted = client.post(url, content=wire, headers=headers)
+    assert accepted.status_code == 201, accepted.text
+    rejected = client.post(url, content=wire + b" ", headers=headers)
+    assert rejected.status_code == 413
+
+
 def test_contracts_and_stable_pagination(client, project, manifest, db_factory, account):
     contracts = client.get("/api/v1/package-contracts")
     assert contracts.status_code == 200

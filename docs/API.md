@@ -163,7 +163,7 @@ Publication stores a fully validated declaration; it does not install, approve, 
 | GET `/packages?project_id=...` | `read` authority, metadata only, `limit` 1–100 (default 50), optional opaque `cursor` up to 1024 characters. Returns `{items,next}`; pass `next` as the next request's cursor. |
 | GET `/packages/:id` | Scoped publication metadata. |
 | GET `/packages/:id/content` | Exact stored canonical JSON bytes with `X-Package-SHA256`, `X-Package-Canonicalization` and quoted digest `ETag`; no revalidation or rewriting on read. |
-| GET `/package-contracts` | `read` authority; supported admission schema, validator revision, canonicalization identifier and package byte bound. No runtime compatibility claim. |
+| GET `/package-contracts` | `read` authority; supported admission schema, validator revision, canonicalization identifier and effective publication byte bound (the smaller of `LOTUSPOND_MAX_REQUEST_BYTES` and 1 MiB). No runtime compatibility claim. |
 
 Workspace membership controls projects; there is no additional project ACL in this slice. Owner/admin/editor can publish, viewer can read. API-key scopes are exact: a `write` key has no implicit `read`. Key ownership overrides the workspace header. Foreign-tenant projects and versions return the normal 404; platform operators have no bypass. Current suspension, expiry/revocation, active creator, verified identity and MFA gates remain applicable on every request.
 

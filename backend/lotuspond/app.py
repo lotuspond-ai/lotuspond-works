@@ -243,7 +243,7 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
                     "id": "workflow-package-registry",
                     "date": "2026-10-13",
                     "title": "Immutable workflow package registry",
-                    "description": "Developers can publish validated workflow packages into workspace projects and retrieve exact canonical content, integrity digests and the validator revision used at admission. Versions are immutable, retries are idempotent, and workspace roles and key scopes apply. Publication does not grant trust, release approval or permission to execute.",
+                    "description": "Developers can publish validated workflow packages into workspace projects and retrieve exact canonical content, integrity digests and the validator revision used at admission. Contract discovery reports the installation's effective publication byte limit. Versions are immutable, retries are idempotent, and workspace roles and key scopes apply. Publication does not grant trust, release approval or permission to execute.",
                 },
                 {
                     "version": "0.2.0",
