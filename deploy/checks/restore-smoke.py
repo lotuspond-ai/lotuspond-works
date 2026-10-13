@@ -19,9 +19,9 @@ FIXTURE = """
 INSERT INTO users (id,email,name,password_hash,is_platform_admin,email_verified,created_at)
 VALUES ('00000000-0000-0000-0000-000000000001','restore@example.invalid','Synthetic restore account',
         'not-a-login-credential',false,false,'2026-09-21T00:00:00Z');
-INSERT INTO workspaces (id,name,slug,kind,owner_id,status,plan,monthly_budget_usd,created_at)
+INSERT INTO workspaces (id,name,slug,kind,owner_id,status,plan,monthly_budget_usd,require_mfa,created_at)
 VALUES ('00000000-0000-0000-0000-000000000002','Synthetic restore workspace','restore-fixture','personal',
-        '00000000-0000-0000-0000-000000000001','active','developer',123.000001,'2026-09-21T00:00:00Z');
+        '00000000-0000-0000-0000-000000000001','active','developer',123.000001,false,'2026-09-21T00:00:00Z');
 INSERT INTO memberships (workspace_id,user_id,role)
 VALUES ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','owner');
 INSERT INTO projects (id,workspace_id,name,description,created_at)
@@ -41,9 +41,9 @@ VALUES ('00000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-00000000
         '00000000-0000-0000-0000-000000000001','synthetic.restore_check',
         '00000000-0000-0000-0000-000000000003','{"synthetic":true,"unicode":"lotus ∴"}',
         '2026-09-21T00:00:00Z');
-INSERT INTO workspaces (id,name,slug,kind,owner_id,status,plan,created_at)
+INSERT INTO workspaces (id,name,slug,kind,owner_id,status,plan,require_mfa,created_at)
 VALUES ('00000000-0000-0000-0000-000000000007','Synthetic organization','restore-organization',
-        'organization','00000000-0000-0000-0000-000000000001','active','developer','2026-09-21T00:00:00Z');
+        'organization','00000000-0000-0000-0000-000000000001','active','developer',true,'2026-09-21T00:00:00Z');
 INSERT INTO identity_challenges (id,user_id,kind,token_hash,expires_at,revoked_at,created_at)
 VALUES ('00000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000001',
         'password_reset',repeat('1',64),'2026-09-21T00:30:00Z','2026-09-21T00:10:00Z','2026-09-21T00:00:00Z');

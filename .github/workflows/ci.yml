@@ -41,9 +41,60 @@ jobs:
         env:
           LOTUSPOND_PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
       - name: Exercise the supervised runner through the real API
-        run: backend/.venv/bin/python scripts/checks/runner-smoke.py --expected-data-directory /var/lib/postgresql/18/docker --report "$RUNNER_TEMP/lotuspond-runner-smoke.json"
-        env:
-          LOTUSPOND_PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A bridged service reports its bridge address to inet_server_addr().
+          # Keep the smoke check's loopback guard and use a separate local-only DB.
+          smoke_state=$(mktemp -d "$RUNNER_TEMP/lotuspond-runner-smoke.XXXXXX")
+          cleanup() {
+            local result=$?
+            trap - EXIT
+            if [[ -s "$smoke_state/container.id" ]]; then
+              local container_id remaining
+              container_id=$(<"$smoke_state/container.id")
+              if ! docker rm --force --volumes "$container_id" >/dev/null; then
+                result=1
+              fi
+              if ! remaining=$(docker ps --all --quiet --no-trunc --filter "id=$container_id"); then
+                result=1
+              elif [[ -n "$remaining" ]]; then
+                echo "Runner smoke database cleanup could not be confirmed." >&2
+                result=1
+              fi
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          smoke_port=$(python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+          docker run --detach --pull=always --network host \
+            --cidfile "$smoke_state/container.id" \
+            --env POSTGRES_USER=lotuspond \
+            --env POSTGRES_DB=lotuspond_platform_test \
+            --env POSTGRES_HOST_AUTH_METHOD=trust \
+            --env PGDATA=/var/lib/postgresql/18/runner-smoke \
+            postgres:18.6-alpine3.24 \
+            -c listen_addresses=127.0.0.1 -c "port=$smoke_port" > "$smoke_state/start.log"
+          smoke_ready=false
+          for attempt in {1..60}; do
+            if docker exec "$(<"$smoke_state/container.id")" pg_isready \
+              -h 127.0.0.1 -p "$smoke_port" -U lotuspond -d lotuspond_platform_test >/dev/null 2>&1; then
+              smoke_ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$smoke_ready" != true ]]; then
+            echo "The isolated runner smoke database did not become ready." >&2
+            exit 1
+          fi
+          LOTUSPOND_PLATFORM_TEST_DATABASE_URL="postgresql+psycopg://lotuspond@127.0.0.1:$smoke_port/lotuspond_platform_test" \
+            backend/.venv/bin/python scripts/checks/runner-smoke.py \
+              --expected-data-directory /var/lib/postgresql/18/runner-smoke \
+              --report "$RUNNER_TEMP/lotuspond-runner-smoke.json"
   collector:
     runs-on: ubuntu-latest
     steps:

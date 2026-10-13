@@ -1,6 +1,10 @@
 # Lotuspond
 
-Lotuspond is a single product for testing AI agents, recording production evidence, and governing releases. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. A Go collector accepts OTLP/HTTP protobuf and JSON, a Rust CLI verifies artifact manifests, and Node tooling runs customer-controlled evaluation adapters and release gates.
+Lotuspond is being developed as a licensable enterprise agent automation platform, with transformation, implementation, training, and managed services across industries. Customers will be able to build, deploy, operate, and govern workflows combining agents, deterministic actions, and human tasks, using their own team, Lotuspond, or an implementation partner.
+
+The implemented core tests AI agents, records production evidence, and governs releases through Scenarios, Releases, Production Evidence, and Governance. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. A Go collector accepts OTLP/HTTP protobuf and JSON, a Rust CLI verifies artifact manifests, and Node tooling runs customer-controlled evaluation adapters and release gates.
+
+The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The production runtime, Studio authoring, package registry/signatures, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
 
 ## Run locally
 
@@ -49,11 +53,22 @@ LOTUSPOND_PLATFORM_TEST_DATABASE_URL=postgresql+psycopg://lotuspond@127.0.0.1:55
 
 Create the test database only if it does not exist. Integration tests create and remove only their own random schemas. Go, Rust, voice, MCP, restore, and documentation checks have separate CI jobs. [Current validation](docs/VALIDATION.md) distinguishes observed results from remaining work.
 
+## Validate a workflow package locally
+
+The current platform expansion starts with the [workflow-package v1 schema](contracts/workflow-package.v1.schema.json) and a synthetic reviewed-action example:
+
+```sh
+npm run package:validate -- contracts/examples/reviewed-action.v1.json
+npm run check:contracts
+```
+
+The validator checks the local declaration and emits a canonical content digest. It does not execute the workflow, contact a connector, grant approval, or verify a publisher signature. `npm run schema:contracts` regenerates the checked-in schema from the contract model; review the generated diff when changing the contract. A valid synthetic example is not a customer integration test.
+
 ## Product and delivery
 
 Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and the [complete delivery goal](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
 
-This repository has no configured remote or hosted deployment. Production readiness requires the remaining identity, provider, streaming voice, sandbox, deployment, and operational evidence listed in the capability register. The separate local recovery archive is outside this project.
+The canonical private repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Repository publication and hosted deployment are separate milestones. Production readiness requires the remaining identity, provider, streaming voice, sandbox, deployment, and operational evidence listed in the capability register, as well as the new runtime and commercial capabilities required for the expanded platform. The separate local recovery archive is outside this project.
 
 Use [Operations](docs-site/docs/operations.md) to inspect queue eligibility, expired leases and worker poll observations. The collector offers separately authenticated Prometheus metrics; optional scrape/alert examples are under `deploy/monitoring/`.
 

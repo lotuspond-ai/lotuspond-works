@@ -1,0 +1,26 @@
+name: Bug report
+description: Report reproducible behavior using synthetic or redacted evidence.
+title: '[Bug] '
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, customer records, private traces, or production database contents. Report security concerns privately to a repository maintainer.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction with synthetic inputs
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: Version and environment
+      description: Include the source/artifact version and relevant component. Do not paste environment files.
+    validations:
+      required: true

@@ -2,9 +2,10 @@
 
 ## Product and ownership
 
-- Lotuspond is the single product. Its workflows are Releases, Scenarios, Production Evidence, and Governance.
+- Lotuspond is the single product: a licensable enterprise agent automation platform with separately offered transformation, implementation, training, and managed services across industries. Studio, Control Room, and execution are capabilities of this product, not separate brands. Releases, Scenarios, Production Evidence, and Governance remain its implemented assurance workflows.
 - This root is the owning repository. Resolve its branch and dirty state before editing or publishing.
-- Use `CLAUDE.md`, `docs/architecture/0002-agent-assurance-platform.md`, and `docs/CAPABILITIES.md` for the current implementation boundaries.
+- Use `CLAUDE.md`, `docs/architecture/0009-agent-automation-platform.md`, and `docs/CAPABILITIES.md` for the current scope and implementation boundaries. ADR-0002 and later assurance decisions retain their applicable technical contracts; the October platform plans describe the expansion, not completed functionality.
+- Keep the current workflow-package v1 contract work separate from execution: local validation and a content digest do not install, sign, authorize, or run a package. Production runtime, Studio, package registry, commercial licensing, and qualified industry packs remain planned until their own evidence is recorded.
 - The current product goal authorizes selective recovery of archived agent-testing implementation. Restore useful behavior under Lotuspond naming, retain provenance, and preserve the archive. Do not restore unrelated products, obsolete affiliations, environment files, or previous Git history.
 - Preserve unrelated user changes. Never commit environment files, credentials, dependencies, local database files, or generated build output.
 

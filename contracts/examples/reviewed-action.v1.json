@@ -1,0 +1,50 @@
+{
+  "schema_version": "lotuspond.workflow-package.v1",
+  "package_id": "reviewed-action",
+  "version": "1.0.0",
+  "name": "Synthetic reviewed action example",
+  "entry_node": "start",
+  "models": [{ "id": "reasoner", "profile": "primary-model", "revision": "2026-10-13" }],
+  "connectors": [
+    {
+      "id": "case-system",
+      "connector": "synthetic-case-system",
+      "version": "1.0.0",
+      "secret_ref": "case-credential",
+      "operations": ["read-case", "write-case"]
+    }
+  ],
+  "secret_refs": [{ "id": "case-credential" }],
+  "nodes": [
+    { "id": "start", "kind": "start" },
+    { "id": "read", "kind": "connector", "connector_ref": "case-system", "operation": "read-case" },
+    {
+      "id": "propose",
+      "kind": "agent",
+      "model_ref": "reasoner",
+      "instructions": "Propose a synthetic case update for a person to review.",
+      "limits": {
+        "max_steps": 5,
+        "timeout_seconds": 60,
+        "max_input_tokens": 4000,
+        "max_output_tokens": 1000,
+        "max_cost_microusd": 100000
+      }
+    },
+    { "id": "review", "kind": "human_review" },
+    {
+      "id": "write",
+      "kind": "connector",
+      "connector_ref": "case-system",
+      "operation": "write-case"
+    },
+    { "id": "end", "kind": "end" }
+  ],
+  "edges": [
+    { "source": "start", "target": "read" },
+    { "source": "read", "target": "propose" },
+    { "source": "propose", "target": "review" },
+    { "source": "review", "target": "write" },
+    { "source": "write", "target": "end" }
+  ]
+}

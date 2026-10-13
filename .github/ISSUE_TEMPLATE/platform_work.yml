@@ -1,0 +1,23 @@
+name: Platform work
+description: Define a bounded platform increment and its acceptance evidence.
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User problem and desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and dependencies
+      description: Link the plan epic or architecture decision and identify affected contracts.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: Include meaningful failure cases and the evidence needed to consider this complete.
+    validations:
+      required: true

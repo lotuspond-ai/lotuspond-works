@@ -2,6 +2,8 @@
 
 Date: 2026-09-21. Status: implementing. Supersedes ADR-0001's source-reuse restriction and TypeScript-primary decision under the current product goal.
 
+Scope update, 2026-10-13: [ADR-0009](0009-agent-automation-platform.md) expands Lotuspond into a licensable enterprise agent automation platform with cross-industry services. It supersedes the assurance-only product scope here. This decision's Python ownership, assurance workflows, authorization, recovery, and data-safety boundaries remain applicable. The existing evaluation runner and assessment worker are not a production business runtime; that runtime remains planned.
+
 ## Product flow
 
 A developer signs up and receives a personal workspace. Creating an organization is a deliberate action that grants its creator owner membership. Both workspace types contain projects; agents, scenarios, production streams, policies, and releases belong to a project or its owning workspace. Platform administration is a separate operator privilege, never granted by public signup or an organization role.
