@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from lotuspond_sdk.metadata import CANONICALIZATION, VALIDATOR_REVISION
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -34,8 +35,6 @@ from .schemas import Identifier
 from .security import Principal, fail
 
 router = APIRouter(prefix="/api/v1")
-VALIDATOR_REVISION = "lotuspond.workflow-package.validator.v1.1"
-CANONICALIZATION = "lotuspond.workflow-package.canonical-json.v1"
 _METADATA = {
     "id",
     "created_at",

@@ -15,6 +15,7 @@ nav:
   - Identity mail: identity-mail.md
   - Offline identity: offline-identity.md
   - API contracts: api.md
+  - Workflow-package SDK: package-sdk.md
   - Projects: projects.md
   - Evaluations: evaluations.md
   - Evaluation runners: runners.md

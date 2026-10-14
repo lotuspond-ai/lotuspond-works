@@ -99,6 +99,26 @@ jobs:
             backend/.venv/bin/python scripts/checks/runner-smoke.py \
               --expected-data-directory /var/lib/postgresql/18/runner-smoke \
               --report "$RUNNER_TEMP/lotuspond-runner-smoke.json"
+  sdk:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.11.16'
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --frozen --project sdk/python
+      - run: uv run --frozen --project sdk/python ruff check sdk/python
+      - run: uv build --project sdk/python
+      - run: uv run --frozen --project sdk/python pytest sdk/python/tests -q
   collector:
     runs-on: ubuntu-latest
     steps:

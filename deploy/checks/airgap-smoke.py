@@ -683,6 +683,24 @@ def drill(archive: Path, checksum: Path, *, failure_recovery: bool = False) -> d
                     == 0
                 )
             )
+            sdk_probe = r"""
+import json, sys
+from pathlib import Path
+import lotuspond_sdk
+from lotuspond import package_contract, package_input
+from lotuspond_sdk import input as sdk_input
+assert package_contract.WorkflowPackage is lotuspond_sdk.WorkflowPackage
+assert package_input.PackageReadError is sdk_input.PackageReadError
+assert Path(lotuspond_sdk.__file__).is_relative_to(Path(sys.prefix))
+assert not Path('/app/sdk/python').exists()
+package = lotuspond_sdk.validate_package(json.loads(sys.stdin.read()))
+assert lotuspond_sdk.package_digest(package) == '305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3'
+"""
+            command(
+                "docker", "exec", "-i", api, "python", "-c", sdk_probe,
+                data=(Path(__file__).resolve().parents[2]
+                      / "contracts/examples/reviewed-action.v1.json").read_bytes(),
+            )
             drill_password = secrets.token_urlsafe(24)
             EPHEMERAL_SECRETS.add(drill_password)
             context = json.loads(
@@ -719,6 +737,7 @@ def drill(archive: Path, checksum: Path, *, failure_recovery: bool = False) -> d
                 app=True,
             )
             report = json.loads(execute(api, VERIFY, context).stdout)
+            report["standalone_sdk_identity_and_digest"] = True
             if failure_recovery:
                 owned_container_action(worker, run, "stop")
                 recovery = json.loads(execute(api, FAILURE_ENQUEUE, context).stdout)

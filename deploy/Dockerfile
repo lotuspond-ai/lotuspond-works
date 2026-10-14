@@ -8,10 +8,11 @@ FROM python:3.14.7-slim-trixie AS python-build
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app/backend
 RUN pip install --no-cache-dir uv==0.11.16
+COPY sdk/python /app/sdk/python
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-editable --no-install-project
 COPY backend/lotuspond ./lotuspond
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.14.7-slim-trixie
 ENV PATH=/app/backend/.venv/bin:$PATH \

@@ -4,7 +4,7 @@ Lotuspond is being developed as a licensable enterprise agent automation platfor
 
 The implemented core tests AI agents, records production evidence, and governs releases through Scenarios, Releases, Production Evidence, and Governance. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. A Go collector accepts OTLP/HTTP protobuf and JSON, a Rust CLI verifies artifact manifests, and Node tooling runs customer-controlled evaluation adapters and release gates.
 
-The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The next increment adds an immutable, tenant-scoped package registry with admission-validator metadata. Production runtime, Studio authoring, signatures, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
+The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The registry adds immutable, tenant-scoped package storage with admission-validator metadata. A standalone Python SDK now shares the v1 validator and canonical content behavior. Production runtime, Studio authoring, signatures, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
 
 ## Run locally
 
@@ -54,6 +54,13 @@ LOTUSPOND_PLATFORM_TEST_DATABASE_URL=postgresql+psycopg://lotuspond@127.0.0.1:55
 Create the test database only if it does not exist. Integration tests create and remove only their own random schemas. Go, Rust, voice, MCP, restore, and documentation checks have separate CI jobs. [Current validation](docs/VALIDATION.md) distinguishes observed results from remaining work.
 
 ## Validate a workflow package locally
+
+The independently installable [Python SDK](sdk/python/README.md) provides
+`lotuspond-package validate workflow.json` and Python validation/digest functions
+without the API or database. Build its wheel and sdist with
+`uv build --project sdk/python`. The [SDK guide](docs-site/docs/package-sdk.md)
+describes installation, bounds and the v1-only declaration boundary.
+
 
 The current platform expansion starts with the [workflow-package v1 schema](contracts/workflow-package.v1.schema.json) and a synthetic reviewed-action example:
 

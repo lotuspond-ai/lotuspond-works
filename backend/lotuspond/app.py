@@ -240,6 +240,13 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "standalone-package-sdk",
+                    "date": "2026-10-14",
+                    "title": "Standalone workflow package SDK",
+                    "description": "Developers can install a Python SDK to validate workflow-package v1 locally and calculate its content digest without the API or database. The SDK and registry share the existing validator and canonical bytes. These declaration checks grant no trust, approval or execution authority.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "compose-identity-settings",
                     "date": "2026-10-14",
                     "title": "Deployment identity settings",

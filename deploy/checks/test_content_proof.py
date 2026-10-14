@@ -2,6 +2,8 @@ import hashlib
 import importlib.util
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location(
@@ -63,6 +65,41 @@ class TreeHashTests(unittest.TestCase):
         (self.root / "a").write_bytes(b"x")
         (self.root / "b").write_bytes(b"yz")
         self.assertNotEqual(proof.tree_hash(self.root)["sha256"], first)
+
+
+class SdkProofTests(unittest.TestCase):
+    def test_changing_only_sdk_source_breaks_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            for path, data in {
+                "backend/lotuspond/__init__.py": b"backend",
+                "web/index.ts": b"web",
+                "scripts/run.mjs": b"scripts",
+                "dist/index.html": b"ui",
+                "sdk/python/src/lotuspond_sdk/__init__.py": b"sdk",
+                "sdk/python/src/lotuspond_sdk/py.typed": b"",
+                "bundle": b"bundle", "smoke": b"smoke",
+            }.items():
+                full = repo / path
+                full.parent.mkdir(parents=True, exist_ok=True)
+                full.write_bytes(data)
+            sdk = repo / "sdk/python/src/lotuspond_sdk"
+            embedded = {
+                "/app/backend/lotuspond": proof.tree_hash(repo / "backend/lotuspond"),
+                "/app/dist": proof.tree_hash(repo / "dist"),
+                "lotuspond_sdk": proof.tree_hash(sdk),
+            }
+            args = SimpleNamespace(bundle=repo / "bundle", smoke_report=repo / "smoke",
+                                   api_image="api", collector_image="collector")
+            with patch.object(proof, "image_id", return_value="sha256:synthetic"), patch.object(
+                proof, "embedded_tree", side_effect=lambda image, root: embedded[root]
+            ):
+                self.assertTrue(all(proof.build(repo, args)["embedded_matches_source"].values()))
+                (sdk / "__init__.py").write_bytes(b"changed sdk only")
+                matches = proof.build(repo, args)["embedded_matches_source"]
+                self.assertFalse(matches["sdk_runtime_module"])
+                self.assertTrue(matches["backend_runtime_module"])
+                self.assertTrue(matches["static_ui"])
 
 
 if __name__ == "__main__":
