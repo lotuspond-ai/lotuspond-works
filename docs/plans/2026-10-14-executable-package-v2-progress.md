@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1 and 2 are complete after independent review and correction; Tasks 3–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–3 are complete after independent review and correction; Tasks 4–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -224,3 +224,15 @@ checks pass. Red/green outputs are retained in Task 3 evidence. No full SDK or
 other broad suite was repeated for this narrow controller-approved correction;
 the earlier 678-test standalone result describes the initial source commit.
 Independent review will cover the complete Task 3 range including this fix.
+
+## Task 3 review closure
+
+Task 3 is complete through `1b4d871a82f949051a260a256ac1b7a60ddda91d`. Independent review of the full package/catalog range passed specification and quality with no findings. All 13 step families, seven catalog families, synthetic fixtures, complete normalized limits, local references and v1 boundaries were inspected.
+
+The final corrected source passes 119 focused package/catalog tests, Ruff and whitespace checks. The initial task source `98e1bbe` passed 263 preceding regression tests plus 68 subtests and the full standalone SDK suite of 678 tests plus 68 subtests. These remain evidence for that source; the narrow catalog correction has fresh covering tests. No Python 3.13/application/database/offline/hosted result is claimed for this task. Full integration and final artifact gates remain Task 10.
+
+Ruling: run coded domain/reference checks at the Task 3 public boundary outside Pydantic validators, then perform final complete normalized/default JCS enforcement — this preserves fixed domain codes without recovering them from exception internals — cost if wrong: an extra bounded shape-validation pass or boundary refactor, without changing v1, shared helpers or authority.
+
+Ruling: retain every validated identical normalized catalog document occurrence and count each toward family/raw/normalized bundle limits; reject differing content under one identity/version — the compiler must be able to deduplicate identical supplied definitions after admission — cost if wrong: refine the not-yet-stable bundle/caller contract; no limit is relaxed and no runtime authority changes.
+
+Task 4 receives the actual package/catalog APIs, normalized definition hashing, duplicate-retention contract, fresh fixture helpers and the complete reviewed Task 2 provenance contract. Compiler closure, lexical/type analysis, work expansion and per-effect verification coverage are still unimplemented requirements. Actual artifact custody, provider support and runtime authority remain later qualification boundaries.
