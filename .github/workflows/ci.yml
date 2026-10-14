@@ -118,7 +118,8 @@ jobs:
       - run: uv sync --frozen --project sdk/python
       - run: uv run --frozen --project sdk/python ruff check sdk/python
       - run: uv build --project sdk/python
-      - run: uv run --frozen --project sdk/python pytest sdk/python/tests -q
+      - name: SDK suite and installed wheel/sdist-wheel CLI journeys
+        run: uv run --frozen --project sdk/python pytest sdk/python/tests -q
   collector:
     runs-on: ubuntu-latest
     steps:

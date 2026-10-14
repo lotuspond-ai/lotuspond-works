@@ -56,8 +56,10 @@ Create the test database only if it does not exist. Integration tests create and
 ## Validate a workflow package locally
 
 The independently installable [Python SDK](sdk/python/README.md) provides
-`lotuspond-package validate workflow.json` and Python validation, digest, diff,
-detached-signature and synthetic capability functions without the API or database.
+`lotuspond-package` commands for validation, digest, canonical file output, diff,
+key generation, detached signing/verification and synthetic compatibility, plus
+their Python interfaces, without the API or database. File outputs are exclusive;
+trust and capability inputs are explicit, and local reports grant no authority.
 Build its wheel and sdist with
 `uv build --project sdk/python`. The [SDK guide](docs-site/docs/package-sdk.md)
 describes installation, bounds, independent trust and the v1-only declaration

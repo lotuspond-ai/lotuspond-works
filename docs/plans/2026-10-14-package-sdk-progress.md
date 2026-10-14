@@ -232,3 +232,58 @@ entries. This clarification preserves exact matching; restricting future profile
 to one version per name would require a separate policy change. The SDK remains
 synthetic and non-authoritative. Final CLI, capability/changelog integration,
 application/database/artifact checks and hosted CI are still pending.
+
+### Task 5 — complete bounded CLI and installed journeys
+
+The SDK and legacy CLI now share validate, digest, canonicalize, diff, keygen,
+sign, verify and compatibility commands. Historical validation JSON and v1 bytes
+are unchanged. Auxiliary reads use explicit role byte limits, the shared JSON
+checks and strict models; stdout is ASCII-safe, capped at 8 MiB including its
+newline, and errors retain at most 20 value-free entries. Argument/input/format
+failures exit 2; well-formed trust refusals and synthetic incompatibility exit 3.
+All canonical/signature/key files use explicit exclusive outputs, private files
+stay owner-only, and incomplete publication remains for operator inspection.
+
+Initial installed tests against the Task 1–4 base failed for unsupported commands:
+8 failures and 14 fixture setup errors. A clean focused red run recorded 4 failures
+for missing digest/canonicalize dispatch, help returning from main, and CLI report
+bounds. Existing legacy validation passed 12 tests and 12 subtests before dispatch
+changes. Initial green passed 24 CLI tests across both artifact origins. Expanded
+coverage includes every package input bound, auxiliary malformed/oversized/FIFO
+inputs, wrong-algorithm/unsafe/symlinked keys, duplicate/ambiguous trust, revoked
+and cryptographically invalid signatures, output preservation, partial keypair
+publication and sanitized errors. A unit fsync failure checks retained standalone
+output; the installed normal/refusal journeys use real subprocesses and files.
+
+Frozen Python 3.14.5 and isolated Python 3.13.13 each passed the full standalone
+suite: **339 tests plus 68 subtests**, zero skips, including RFC 8032 and independent
+OpenSSL cross-verification. Each run independently built and installed a direct
+wheel and an sdist-derived wheel into separate environments outside the checkout.
+The installed import probe checks package location, py.typed and absence of API,
+DB and HTTP-client dependencies. Each origin runs local validation/digest/
+canonicalization/diff, synthetic key generation/signing, external trust provision,
+verification/mutation/revocation and full/partial capability declarations.
+
+Focused backend legacy CLI/import/contract parity passed **35 tests plus 88
+subtests**, including identical canonical bytes and signature envelopes, allowed
+verification and revoked-key refusal through both module entry points. The only
+warning is the inherited Starlette BlockingPortal deprecation. Frozen Ruff,
+package-schema parity, strict MkDocs and git whitespace checks passed. Final
+installed CLI/distribution subset reruns after the README metadata wrap passed
+**41 tests on each Python version**, zero skips. uv used its
+ordinary cross-filesystem full-copy fallback for the Python 3.13 environment.
+
+The SDK README/guide, root README, capability register, changelog, current
+AGENTS/CLAUDE ownership guidance and a dated ADR-0009 addendum now describe the
+local tooling and preserve E02/runtime/production gates. The Task 2 reviewed-action
+README fixture nit was already resolved at the task base and remains correct.
+The existing CI matrix runs the complete installed journeys; no hosted result is
+claimed here. Exact commands/logs and the local task commit are recorded in
+`.superpowers/sdd/2026-10-14-package-sdk/task-5-report.md`.
+
+Per the final execution split, final full npm/application checks, independently
+verified loopback DB, deployment checks, actual API image, offline installation/
+failure-recovery and content proof, all independent reviews, publication and
+exact-head hosted CI remain controller-owned gates. No DB, production/customer
+access, push, merge, deployment or public package publication was performed by
+the Task 5 implementer.

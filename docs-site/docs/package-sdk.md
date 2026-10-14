@@ -23,6 +23,83 @@ available. Paths are relative to the caller. CLI output is ASCII-safe JSON; a
 valid package exits 0 and invalid input exits 2. Errors omit sensitive values,
 unknown field names and file paths, and contain at most 20 entries.
 
+## CLI commands and local limits
+
+`lotuspond-package`, `python -m lotuspond_sdk` and the legacy
+`python -m lotuspond.package_cli` dispatch the same commands. The legacy module
+requires the backend installation; the standalone entry points need only the SDK.
+Use `--help` or `COMMAND --help` for usage. All paths are explicit and relative to
+the caller; options cannot be abbreviated.
+
+| Command | Result |
+| --- | --- |
+| `validate PATH` | Historical validation JSON with `ok`, `schema_version` and `sha256`. |
+| `digest PATH` | Validated canonical `sha256`. |
+| `canonicalize PATH --output PATH` | Exclusive canonical UTF-8 output file; digest on stdout. |
+| `diff BEFORE AFTER [--include-values]` | Deterministic content changes; values omitted unless requested. Changes still exit 0. |
+| `keygen --private PATH --public PATH` | Exclusive PKCS8 private/SPKI public PEM files; public-key fingerprint on stdout. |
+| `sign PATH --key PATH --output PATH` | Exclusive detached signature JSON file; digest and key ID on stdout. |
+| `verify PATH --signature PATH --trust PATH` | Verification report using an independent explicit trust set. |
+| `compatibility PATH --profile PATH --requirements PATH` | Exact comparison with explicit synthetic declarations. |
+
+Except `validate`, successful commands and well-formed refusals print one
+ASCII-safe JSON object with `ok` and `result`. Validation output keeps its original
+shape. Argument, input, file and format failures print `ok: false` with at most 20
+sanitized `errors` (`path`, fixed `code`, fixed `message`), never raw values,
+unknown field names, supplied paths, private keys or tracebacks. Exit **0** means
+success (including a diff containing changes); **2** means argument/input/file/
+format failure; **3** means a well-formed signature/trust refusal or incompatible
+declaration. `--help` prints usage and exits 0. No network, ambient credential,
+key discovery or overwrite behavior is added.
+
+| CLI input/report | Byte limit |
+| --- | ---: |
+| Package, including normalized canonical content | 1,048,576 |
+| Private PEM or signature envelope | 4,096 |
+| Trust set or capability profile | 65,536 |
+| Compatibility requirements | 16,384 |
+| Complete JSON stdout report, including its newline | 8,388,608 |
+
+All inputs must be bounded regular files; named pipes are refused without waiting
+for a writer. Structured auxiliary JSON reuses UTF-8, duplicate-key, nonfinite
+number and depth-32 checks, enforces 10,000 JSON items, then uses its own strict
+model limits. Oversized reports fail with `report_too_large` instead of dropping
+changes. Canonical bytes and signature envelopes go only to explicit exclusive
+files. Every second write refuses and preserves existing bytes. A write failure
+after creation retains the destination (`output_incomplete` or
+`keypair_incomplete`); inspect it before retrying. Private keys never go to stdout.
+
+The tested private-key file boundary is Linux: owner-only mode 0600, ownership by
+the current user and refusal of final-component symlinks. Platforms missing the
+required POSIX file primitives fail closed; other platforms are not qualified.
+Python 3.13 and 3.14 are tested; the distribution requires Python >=3.13,
+Pydantic >=2.12,<3 and cryptography >=50,<51. OpenSSL is a test oracle, not a
+runtime dependency.
+
+For a local synthetic journey, supply a validated `workflow.json` and use fresh
+output paths:
+
+```sh
+lotuspond-package validate workflow.json
+lotuspond-package digest workflow.json
+lotuspond-package canonicalize workflow.json --output workflow.canonical.json
+lotuspond-package diff workflow.json workflow.canonical.json
+lotuspond-package keygen --private publisher.private.pem --public publisher.public.pem
+lotuspond-package sign workflow.json --key publisher.private.pem --output workflow.signature.json
+# Independently authenticate the public key and provision trust.json first.
+lotuspond-package verify workflow.json --signature workflow.signature.json --trust trust.json
+lotuspond-package compatibility workflow.json --profile synthetic-capabilities.v1.json --requirements synthetic-requirements.v1.json
+```
+
+Generate keys only for a publisher you control. Verification uses a public key
+obtained and authenticated out of band, not one inferred from the envelope. The
+explicit trust-set format, rotation/revocation procedure and Python interfaces
+are described below. An empty trust set refuses with `untrusted_key`; revoked
+entries refuse with `revoked_key`. A valid signature grants no tenant authority,
+deployment admission, release approval or execution permission. Compatibility is
+always a synthetic declaration with unchecked signatures and false authority;
+real provider and runtime qualification remains open.
+
 ## Python interface
 
 ```python
@@ -189,7 +266,8 @@ models, is ASCII-safe and is bounded at 8 MiB.
 A valid detached signature establishes integrity under the supplied allowed key.
 It grants no tenant authority, registry admission, release approval, deployment
 admission, runtime compatibility or permission to execute. No hosted issuer or
-trust registry is introduced. CLI signature/key commands are a separate increment.
+trust registry is introduced. The CLI exposes the same local signing and
+verification boundaries.
 
 ## Synthetic declared compatibility
 
@@ -201,16 +279,16 @@ requirements. They are demonstration declarations, not a production qualificatio
 ```python
 from pathlib import Path
 from lotuspond_sdk import (
-    MAX_PACKAGE_BYTES, check_declared_compatibility, decode_package_bytes,
+    check_declared_compatibility, decode_package_bytes,
     load_package, read_regular,
 )
 
 package = load_package(Path("contracts/examples/reviewed-action.v1.json"))
 profile = decode_package_bytes(read_regular(
-    Path("contracts/examples/synthetic-capabilities.v1.json"), max_bytes=MAX_PACKAGE_BYTES,
+    Path("contracts/examples/synthetic-capabilities.v1.json"), max_bytes=65_536,
 ))
 requirements = decode_package_bytes(read_regular(
-    Path("contracts/examples/synthetic-requirements.v1.json"), max_bytes=MAX_PACKAGE_BYTES,
+    Path("contracts/examples/synthetic-requirements.v1.json"), max_bytes=16_384,
 ))
 report = check_declared_compatibility(package, profile, requirements)
 print(report.model_dump_json())
@@ -264,14 +342,14 @@ A compatible result establishes only agreement with the supplied synthetic
 declarations. It does not check signatures, credential availability, tenant policy,
 real providers or runtime support, and grants no tenant authority, approval,
 deployment admission or execution permission. Detached verification remains a
-separate assessment. Compatibility CLI commands are a separate increment.
+separate assessment. The CLI exposes this same declaration-only comparison.
 
 ## Local verification
 
 `npm run check:sdk` performs frozen dependency sync, Ruff and the standalone test
 suite. Distribution tests install both a direct wheel and a wheel rebuilt from
-the sdist into fresh environments outside the checkout and assert API dependencies
-are absent. CI configures Python 3.13 and 3.14; hosted results are distinct from
+the sdist into fresh environments outside the checkout, assert API dependencies
+are absent, and run complete CLI journeys and refusal cases against both origins. CI configures Python 3.13 and 3.14; hosted results are distinct from
 local verification. The API image installs the SDK noneditably, with no SDK source
 directory in the final image. Deployment content proof includes installed SDK
 source bytes and the airgap smoke checks shared types and the historical digest.

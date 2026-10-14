@@ -54,3 +54,28 @@ The additive v11-to-v12 migration creates two registry tables under the existing
 ## Foundation review corrections (14 October 2026)
 
 Valid typed package instances are revalidated through a bounded projection of known model fields before Pydantic can turn them into dictionaries containing nested models. Mutated or validation-bypassed models, extras and arbitrary values cannot acquire trust through instance reuse. Admission checks both submitted JSON and the complete normalized document against the unchanged 1 MiB bound; optional defaults can cause early rejection near that bound. A successfully validated, unchanged package can always canonicalize and digest. Omitted and explicit null secret references produce identical canonical content when that content fits the bound. The schema, canonicalization format and execution boundary are unchanged.
+
+## Standalone SDK and local trust boundary (14 October 2026)
+
+The independently installable Python SDK now owns the shared workflow-package v1
+contract, decoder and canonical content implementation at
+`sdk/python/src/lotuspond_sdk/`; backend contract/input/CLI modules retain import
+and command compatibility. Sorted-key UTF-8 canonical bytes, normalized defaults,
+array order and historical validator/canonicalizer identifiers remain unchanged.
+The local CLI validates, digests, writes canonical content exclusively, compares
+content, generates owner-only Ed25519 keys, signs detached envelopes, verifies
+against an explicit independent trust set, and compares exact synthetic capability
+declarations and explicit platform requirements. It needs no API, database, HTTP
+client, provider, ambient credentials or production runtime.
+
+Independent publisher key authentication and explicit allow/revoke state are
+operator inputs; an envelope key ID never makes a key trusted. Private output is
+owner-only and exclusive, and incomplete publication is retained for operator
+inspection. Verification establishes integrity under the supplied allowed key,
+not tenant authority, deployment admission, release approval or permission to
+execute. Compatibility establishes only agreement with synthetic declarations;
+signatures, real providers and runtime support are not checked by that assessment.
+E02 remains partial: executable-v2/authoring, trusted admission, runtime
+qualification, Studio and production execution retain their own open gates.
+Installed wheel and independently rebuilt sdist-wheel checks are local artifact
+evidence; they do not establish hosted or customer readiness.
