@@ -1047,7 +1047,10 @@ booleans and concat strings), iteration-index integers and control-generated
 values are requirements even without an authored output schema. Arithmetic
 preserves its declared operand domain and coalesce preserves its input types;
 the checker does not evaluate expressions. Originating intent/review/dispatch/verification operations need
-their opaque handle support even if the result is discarded. A compiled dispatch
+their opaque handle support even if the result is discarded. Compensation also
+requires its own intent, receipt and verification handle support, plus
+`human_decision` when its separate approval is human. This applies even when the
+original action is automatic and no explicit human-task step exists. A compiled dispatch
 with `operation=null` may represent multiple exact origins; every originating
 connector/operation remains required.
 

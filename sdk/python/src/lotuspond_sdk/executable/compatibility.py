@@ -16,7 +16,7 @@ from .errors import _safe_pointer
 from .expressions import ArrayMapping, CallMapping, IndexSource, ObjectMapping
 from .input import REPORT_LIMITS, project_json
 from .metadata import CANONICALIZATION, COMPILER_REVISION, SCHEMA_VERSION
-from .package import ArtifactRef, Digest, PackageLimits, Step
+from .package import ArtifactRef, CompensationSpec, Digest, PackageLimits, Step
 from .plan import PlanArray, PlanHandle, PlanObject
 from .types import ArrayExport, DataSchema, HandleExport, ObjectExport
 from .validation import executable_digest
@@ -386,6 +386,14 @@ def check_declared_compatibility(
                     produced_kind = "human_decision"
                 if produced_kind is not None and produced_kind not in target.value_kinds:
                     emit("unsupported_value", path + "/kind")
+            if isinstance(node, CompensationSpec):
+                # Compensation originates its own effect/review/verification
+                # handles, even though it has no explicit compiled step output.
+                produced_kinds = ("action_intent", "action_receipt", "verification_evidence")
+                if node.approval == "human":
+                    produced_kinds += ("human_decision",)
+                if any(kind not in target.value_kinds for kind in produced_kinds):
+                    emit("unsupported_value", path)
             if isinstance(node, CallMapping):
                 if node.fn not in target.expression_functions:
                     emit("unsupported_expression", path + "/fn")

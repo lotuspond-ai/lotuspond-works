@@ -1013,3 +1013,94 @@ def test_implicit_guard_and_iteration_index_value_requirements(
     report = assess(root, profile, requirements)
     assert not report.compatible
     assert any(r.code == "unsupported_value" for r in report.reasons)
+
+
+def compensation_case(case, catalog_case, profile, *, approval, nested):
+    """Automatic main action: only compensation may require a review handle."""
+    child = case("reviewed_action")
+    catalog = {
+        "documents": [
+            d for d in catalog_case()["documents"] if d["kind"] in ("connector", "policy")
+        ]
+    }
+    intent, review, dispatch, verify = child["body"]["steps"]
+    dispatch["compensation"] = {
+        **{k: deepcopy(v) for k, v in intent.items() if k not in ("id", "kind")},
+        "retry": deepcopy(dispatch["retry"]),
+        "verification": {
+            k: deepcopy(v) for k, v in verify.items() if k not in ("id", "kind", "receipt")
+        },
+    }
+    automatic = deepcopy(catalog["documents"][1])
+    automatic["name"] = "automatic-policy"
+    automatic["definition"].update(approval="none", independent_review=False)
+    catalog["documents"].append(automatic)
+    support_catalog(profile, catalog["documents"])
+    child["policies"].append({"id": "automatic", "ref": deepcopy(profile["artifacts"][-1])})
+    intent.update(policy_ref="automatic", approval="none", independent_review=False)
+    dispatch["decision"] = None
+    child["body"]["steps"].remove(review)
+    if approval == "none":
+        dispatch["compensation"].update(
+            policy_ref="automatic", approval="none", independent_review=False
+        )
+    if not nested:
+        return child, [], catalog, "/body/steps/1/*"
+    root = case("subworkflow")
+    pin = {
+        "kind": "workflow",
+        "name": child["package_id"],
+        "version": child["version"],
+        "sha256": api.executable_digest(child),
+    }
+    root["subworkflows"][0]["ref"] = pin
+    profile["artifacts"].append(deepcopy(pin))
+    return root, [child], catalog, "/dependencies/0/body/steps/1/*"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    "approval,review_support,compatible",
+    [("human", True, True), ("human", False, False), ("none", True, True), ("none", False, True)],
+)
+def test_compensation_only_human_review_support(
+    case, catalog_case, profile, requirements, nested, approval, review_support, compatible
+):
+    root, dependencies, catalog, compensation_path = compensation_case(
+        case, catalog_case, profile, approval=approval, nested=nested
+    )
+    plan = api.compile_package(root, dependencies=dependencies, catalog=catalog)
+    # No explicit main-path review or exported decision can mask this requirement.
+    assert all(step.kind != "human_task" for step in plan.steps)
+    assert len(plan.outcome_obligations) == 2
+    if not review_support:
+        profile["value_kinds"].remove("human_decision")
+    report = assess(root, profile, requirements, dependencies=dependencies, catalog=catalog)
+    assert report.closure_complete and report.compilation_status == "valid"
+    assert report.compatible is compatible
+    assert report.authority_granted is False
+    if compatible:
+        assert report.reasons == []
+    else:
+        assert [(reason.code, reason.path) for reason in report.reasons] == [
+            ("unsupported_value", compensation_path)
+        ]
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize(
+    "handle_kind", ["action_intent", "action_receipt", "verification_evidence"]
+)
+def test_compensation_originating_handles_have_their_own_requirements(
+    case, catalog_case, profile, requirements, nested, handle_kind
+):
+    root, dependencies, catalog, compensation_path = compensation_case(
+        case, catalog_case, profile, approval="none", nested=nested
+    )
+    profile["value_kinds"].remove(handle_kind)
+    report = assess(root, profile, requirements, dependencies=dependencies, catalog=catalog)
+    assert not report.compatible
+    # Main-path origins also need these handles; independently pin compensation's requirement.
+    assert ("unsupported_value", compensation_path) in [
+        (reason.code, reason.path) for reason in report.reasons
+    ]
