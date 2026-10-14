@@ -566,3 +566,42 @@ wrong-recipient or expired command still fails binding. These APIs are pure loca
 checks; file/key output uses the existing safe helpers, with exclusive writes
 and retained partial failures. The [executable guide](../../docs-site/docs/executable-packages.md#detached-package-and-command-signatures)
 contains exact fields, framing, refusal precedence, bounds and caller obligations.
+
+### Assess explicit synthetic v2 support
+
+```python
+from lotuspond_sdk.executable import (
+    check_declared_compatibility, executable_compatibility_report_json,
+)
+
+report = check_declared_compatibility(
+    package, profile, requirements, dependencies=definitions, catalog=catalog,
+)
+output = executable_compatibility_report_json(report)
+```
+
+`ExecutableCapabilityProfile` requires every feature list, exact artifact pins,
+connector operations, model configuration pins, platforms and package capacity
+limits. `ExecutableRequirements` explicitly selects runtime-contract v1,
+OS/architecture and capabilities; no host defaults apply. The checker accounts
+for unused declarations and the entire dependency closure, including catalog
+references and implicit compiled output types. Empty lists or zero capacity mean
+no support. Distinct versions are allowed; duplicate/conflicting immutable pins
+are refused.
+
+Missing well-formed definitions yield `closure_complete=false`,
+`compilation_status="unresolved"` and `compatible=false` after complete supplied
+input and known-edge checks. Structural validity does not assert lexical/type
+compilation. Complete sources compile before support assessment; malformed or
+type-invalid complete inputs raise fixed errors. Reports expose separate package,
+profile and requirements digests, at most 20 sorted private reasons and explicit
+truncation. All signatures, provider/binary availability, policy, credentials and
+live support remain `not_checked`; authority remains false.
+
+Public validators are `validate_executable_capability_profile`,
+`validate_executable_requirements` and `validate_executable_compatibility_report`.
+Canonical declaration serializers are `canonical_capability_profile_json` and
+`canonical_requirements_json`; report output is revalidated ASCII JSON plus
+newline under the complete 8 MiB cap. See the [full synthetic assessment contract](../../docs-site/docs/executable-packages.md#explicit-synthetic-capability-assessment)
+for record fields, exact bounds, refusal vocabulary and caller obligations.
+Root v1 compatibility APIs and profiles remain unchanged.

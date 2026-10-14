@@ -30,10 +30,23 @@ class DependencyClosure:
     catalog_digests: Mapping[tuple[str, str, str], str]
 
 
-def resolve_dependencies(
-    raw: object, dependencies: list[object], catalog: object
-) -> DependencyClosure:
-    """Admit all occurrences, then resolve every declared exact definition pin."""
+@dataclass(frozen=True)
+class _DependencyInventory:
+    root: ExecutablePackage
+    packages: Mapping[tuple[str, str], ExecutablePackage]
+    package_digests: Mapping[tuple[str, str], str]
+    catalog: Mapping[tuple[str, str, str], CatalogDocument]
+    catalog_digests: Mapping[tuple[str, str, str], str]
+    missing: frozenset[tuple[str, str, str]]
+
+
+def _dependency_inventory(raw, dependencies, catalog) -> _DependencyInventory:
+    """Admit every occurrence and audit all known edges, including incomplete inputs.
+
+    Missing definitions cannot hide later supplied graph/pin errors. Supplied
+    definitions require reachability through known edges; absent sources never
+    justify otherwise unreachable extras. This is not a compiled/complete closure.
+    """
     if type(dependencies) is not list:
         raise ExecutableError("invalid_package")
     if len(dependencies) > 63:
@@ -54,6 +67,7 @@ def resolve_dependencies(
     root_key = (sources[0].package_id, sources[0].version)
     reached_packages, reached_catalog = set(), set()
     declared = {}
+    missing = set()
     visited_depth = {}
 
     def check_pin(ref):
@@ -63,8 +77,8 @@ def resolve_dependencies(
         declared[key] = ref.sha256
         actual = digests.get(key[1:]) if ref.kind == "workflow" else catalog_digests.get(key)
         if actual is None:
-            raise ExecutableError("dependency_missing")
-        if actual != ref.sha256:
+            missing.add(key)
+        elif actual != ref.sha256:
             raise ExecutableError("dependency_digest_mismatch")
         return key
 
@@ -73,6 +87,8 @@ def resolve_dependencies(
         if key in reached_catalog:
             return
         reached_catalog.add(key)
+        if key not in documents:
+            return
         definition = documents[key].definition
         if key[0] == "agent":
             visit_catalog(definition.model_ref)
@@ -85,6 +101,10 @@ def resolve_dependencies(
         if len(active) >= 8:
             raise ExecutableError("expansion_exceeded")
         reached_packages.add(key)
+        if len(reached_packages) > 64:
+            raise ExecutableError("expansion_exceeded")
+        if key not in packages:
+            return
         if visited_depth.get(key, -1) >= len(active):
             return
         visited_depth[key] = len(active)
@@ -101,12 +121,29 @@ def resolve_dependencies(
                     visit_catalog(declaration.ref)
 
     visit_package(root_key, ())
-    if reached_packages != packages.keys() or reached_catalog != documents.keys():
+    if packages.keys() - reached_packages or documents.keys() - reached_catalog:
         raise ExecutableError("dependency_conflict")
-    return DependencyClosure(
+    return _DependencyInventory(
         sources[0],
         MappingProxyType(dict(sorted(packages.items()))),
         MappingProxyType(dict(sorted(digests.items()))),
         MappingProxyType(dict(sorted(documents.items()))),
         MappingProxyType(dict(sorted(catalog_digests.items()))),
+        frozenset(missing),
+    )
+
+
+def resolve_dependencies(
+    raw: object, dependencies: list[object], catalog: object
+) -> DependencyClosure:
+    """Resolve complete exact closure; incomplete inventories never escape as plans."""
+    inventory = _dependency_inventory(raw, dependencies, catalog)
+    if inventory.missing:
+        raise ExecutableError("dependency_missing")
+    return DependencyClosure(
+        inventory.root,
+        inventory.packages,
+        inventory.package_digests,
+        inventory.catalog,
+        inventory.catalog_digests,
     )

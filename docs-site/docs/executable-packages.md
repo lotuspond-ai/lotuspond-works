@@ -988,3 +988,113 @@ failed partial output is retained. Native CLI composition belongs to the later
 CLI task. Independent RFC 8032 key attribution, literal frames and Node/OpenSSL
 oracles are preserved in the SDK test fixtures; neither oracle is a runtime
 dependency.
+
+## Explicit synthetic capability assessment
+
+`lotuspond_sdk.executable.check_declared_compatibility(package, profile,
+requirements, *, dependencies, catalog)` compares complete synthetic declarations.
+Both keyword inputs are required, including explicit empty lists/bundles. Root
+`lotuspond_sdk.check_declared_compatibility` remains the unchanged v1 API.
+
+`ExecutableCapabilityProfile` requires `format_version` equal to
+`lotuspond.workflow-capabilities.v2`, `assurance="synthetic-declaration"`,
+`schema_versions`, `compiler_revisions`, `canonicalizations`, `step_kinds`,
+`expression_functions`, `value_kinds`, `artifacts`, `operations`,
+`model_configurations`, `platforms` and `supported_limits`. Feature vocabularies
+are closed: current v2 schema/compiler/canonicalizer, all 13 step kinds, all 16
+mapping functions, nine DataSchema kinds and four opaque handle kinds. Generic
+`data`/`handle` export wrapper tags are not value kinds. Every list is bounded to
+64 records; each connector operation list is bounded to 32. Empty means no
+support. All lists reject duplicate entries or natural keys; no records merge.
+
+- `artifacts` contains exact `ArtifactRef` records: kind, name, version and
+  lowercase SHA-256 of the normalized workflow/catalog definition.
+- `operations` contains `{connector_ref: ArtifactRef, operations: [Identifier]}`;
+  the reference must have kind `connector`.
+- `model_configurations` contains `{model_ref: ArtifactRef,
+  configuration_revision: ReferenceRevision, configuration_sha256: Digest}`;
+  the reference must have kind `model`.
+- `platforms` contains `{os, architecture, capabilities}` with unique bounded
+  capability identifiers and unique OS/architecture pairs.
+- `supported_limits` requires every `PackageLimits` field as an exact integer
+  from zero through that field's existing upper bound. Zero means no capacity;
+  there are no inferred budget defaults.
+
+Artifact natural keys are kind/name/version; distinct explicit versions are
+allowed, but conflicting digests for one immutable key are malformed even across
+support lists. Each immutable model pin has one configuration revision/digest.
+An operation or model-configuration record does not imply artifact support:
+omitting its separate artifact record is a valid partial declaration that
+produces `unsupported_artifact`. Artifact digests identify definitions, not
+independently verified binaries.
+
+`ExecutableRequirements` requires exact integer `format_version=1`, literal
+`runtime_contract="lotuspond.runtime-contract.v1"`, `os`, `architecture` and
+`required_capabilities` (at most 64 unique identifiers). No target values come
+from the host or environment. The selected platform must appear in the profile
+and every package's platform whitelist; an empty whitelist supports none. Both
+explicit requirements and package environment capabilities must be declared on
+that selected profile platform. Destination/operation classes remain policy
+restrictions enforced by compilation, not permission granted by a profile.
+
+Assessment covers every source in the dependency closure, including unused
+artifact declarations, catalog-internal references, all declared connector
+operations, exact model configurations, schemas, mappings, step kinds and every
+package budget. Source inspection preserves requirements omitted from public
+compiled metadata. Compiled output types account for implicit values such as
+parallel objects. Fixed expression result domains (comparison/logical/exists
+booleans and concat strings), iteration-index integers and control-generated
+values are requirements even without an authored output schema. Arithmetic
+preserves its declared operand domain and coalesce preserves its input types;
+the checker does not evaluate expressions. Originating intent/review/dispatch/verification operations need
+their opaque handle support even if the result is discarded. A compiled dispatch
+with `operation=null` may represent multiple exact origins; every originating
+connector/operation remains required.
+
+Structural validity, successful compilation and declared support are separate:
+
+- All supplied package/catalog occurrences are bounded and revalidated before
+  deduplication. Conflicts, known cycles, incorrect digests, excessive known
+  depth/closure and unreachable supplied definitions raise fixed input errors.
+- Missing well-formed definitions produce `contract_valid=true`,
+  `closure_complete=false`, `compilation_status="unresolved"` and
+  `compatible=false`. Only structural admission and known-edge graph auditing
+  have completed; lexical/typed-flow compilation is deferred. No partial plan is
+  returned. Supplied definitions require a known path from the root: an absent
+  source cannot justify an otherwise unreachable extra definition.
+- Complete closure invokes the normal compiler. Lexical, type, expansion and
+  verification failures remain input errors. A returned complete report has
+  `compilation_status="valid"`; `compatible` separately records support refusals.
+
+`ExecutableCompatibilityReport` includes package/profile/requirements SHA-256
+identities, `contract_valid`, `closure_complete`, `compilation_status`,
+`compatible`, `reasons`, `reasons_truncated`, fixed synthetic assurance and
+`authority_granted=false`. Profile and requirements use independent normalized
+JCS identities; they never change package content identity. Object key order is
+irrelevant; authored list order remains significant. The fixed `not_checked`
+fields are `signature_status`, `artifact_availability`, `provider_availability`,
+`policy_status`, `credentials_status` and `live_support_status`.
+
+The full refusal set determines incompatibility before display truncation. At
+most 20 unique reasons are shown, sorted by code and sanitized path, with no
+private identifiers or values. Codes are `dependency_missing`,
+`unsupported_schema`, `unsupported_compiler`, `unsupported_canonicalization`,
+`unsupported_step`, `unsupported_expression`, `unsupported_value`,
+`unsupported_artifact`, `unsupported_operation`, `unsupported_model_configuration`,
+`unsupported_platform`, `missing_capability` and `insufficient_limit`.
+
+Use `validate_executable_capability_profile`, `validate_executable_requirements`
+and `validate_executable_compatibility_report` as public admission boundaries for
+raw, constructed or mutated records. Constructors and model serializers do not
+replace these boundaries. `canonical_capability_profile_json` and
+`canonical_requirements_json` return normalized JCS bytes.
+`executable_compatibility_report_json` revalidates the report and emits ASCII JSON
+plus newline within 8,388,608 bytes. CLI callers must include their entire wrapper
+in that same `report_bytes` budget. Malformed profiles use `invalid_profile`;
+malformed requirements/reports use `invalid_requirements`, with existing fixed
+JSON/bounds errors retained. Exact bool/int guards apply to constructed/mutated
+reports as well as parsed records.
+
+Synthetic examples live in `contracts/examples/executable-v2/capability-profile.json`
+and `requirements.json`. These declarations perform no I/O or provider call and
+establish neither current policy/credentials nor actual runtime availability.

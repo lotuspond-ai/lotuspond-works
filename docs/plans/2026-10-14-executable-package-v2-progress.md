@@ -568,3 +568,57 @@ Independent literal frames/signatures use public RFC 8032 TEST 1 material and RF
 Later installed v2 CLI journeys, full application/database/offline-image qualification, whole-branch review and exact-head hosted CI remain Task 10. Actual authenticated runtime authority and provider qualification remain later product work.
 
 Ruling: Signing uses one public canonical-entry call per operation and frames its returned immutable bytes, while retaining the reviewed validators' internal JCS bound measurements; expose explicit context-specific envelope and verification-report admission/ASCII helpers — the byte-consistency requirement forbids independently rereading or reframing different content, not the existing bounded semantic validation passes — cost if wrong: refine pre-stable helper naming or optimize repeated internal validation, without changing signed bytes, v1 framing or trust semantics.
+
+## Task 9 implementation evidence
+
+Added executable-only strict capability profiles, explicit requirements and
+bounded synthetic compatibility reports, with public admission and normalized
+JCS/ASCII serialization APIs. Profiles compare exact artifact versions/digests,
+connector operations, model configurations, selected platform capabilities and
+every package budget through the entire supplied closure. Unused declarations,
+catalog-internal pins, source schemas/functions/steps, originating handles,
+implicit expression results, iteration indices and control output values all
+remain requirements. A multi-origin compiled dispatch with operation=null cannot
+imply unconstrained support. Root v1 APIs and canonical fixtures are unchanged.
+
+A shared private dependency inventory admits all occurrences and checks known
+pins/graph errors before allowing an unresolved report. Public resolution remains
+complete-only. Missing well-formed definitions yield structurally valid but
+unresolved/incompatible reports; type compilation waits for complete closure.
+Neither a missing source nor truncation creates success. Every returned report
+retains synthetic assurance, false authority and explicit unchecked signature,
+artifact/provider availability, policy, credential and live-support statuses.
+
+Initial missing-API red: **32 failures**, expanded to **60 failures**. The first
+implementation run had **72 passes, 2 fixture failures**; the fixtures were
+corrected to respect parent budget containment and actually author a transform.
+Self-review independently exposed a discarded parallel-object requirement
+(**1 red → 1 green**) and implicit comparison/logical/exists booleans and
+iteration-index integers (**20 red → 20 green**). The fixed expression/control
+vocabulary was reviewed together without introducing an interpreter.
+
+Final Python **3.14.5** and separate-environment **3.13.13** checks each pass:
+**164 focused compatibility tests**, **364 grouped v2 compatibility/dependency/
+compiler/canonical/input tests**, **113 separate root v1 tests plus 68 subtests**,
+and **1,394 full normal-discovery SDK tests plus 68 subtests**. No skips. Ruff and
+whitespace checks pass. Full discovery includes the current installed wheel and
+independently rebuilt-sdist journeys; new v2 CLI installed journeys remain later.
+
+Initial full runs had **1,336 passes +68 subtests and 38 artifact setup errors**
+on each interpreter: sandbox networking prevented uv from fetching hatchling
+(`Operation not permitted` opening the proxy connection). The already-authorized
+network-enabled reruns passed with TLS, proxy and CA settings intact. No test or
+harness was weakened. Their **1,374-pass** source snapshots precede the final
+implicit guard/index correction and are not relabelled as final-head results.
+Final corrected matrix passes are **1,394** each. Failed/intermediate/final logs,
+exact commands and both source manifests are retained in the Task 9 SDD evidence
+directory. Final source hashes were checked after all runs with no changes.
+
+The guide and synthetic profile/requirements examples document exact records,
+zero-capacity semantics, explicit platform requirements, known-edge incomplete
+inventory rules, separate identities and complete output bounds. Controller
+rulings are preserved in `task-9-controller-decisions.md`. Self-review is complete;
+independent Task 9 review is pending. No task defect is knowingly deferred or
+waived. Full application/database/offline-image, installed v2 CLI, whole-branch
+and exact-head hosted gates remain Task 10; real runtime/provider qualification
+is not asserted.

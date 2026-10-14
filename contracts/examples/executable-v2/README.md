@@ -25,3 +25,12 @@ catalog bundle, and `v1_example` as the existing independent historical v1
 fixture. Later compiler tests will add literal expected plans and compile these
 same pinned sources. Structural success alone does not establish full closure,
 lexical/type validity, conservative work bounds, verified outcomes, or admission.
+
+`capability-profile.json` and `requirements.json` are explicit synthetic v2
+support and assessment declarations, not workflow packages. The profile pins the
+catalog definitions, all their declared connector operations, the exact model
+configuration and the minimal subworkflow. Supply only the exact catalog closure
+needed by the selected package (connector and policy for `reviewed_action.json`).
+The requirements explicitly select runtime-contract v1 and Linux/amd64; nothing
+is inferred from the host. These examples assert no provider/binary availability,
+credentials, policy approval, live support or execution authority.

@@ -27,6 +27,23 @@ from .catalog import (
     catalog_document_digest,
     validate_catalog,
 )
+from .compatibility import (
+    ExecutableCapabilityProfile,
+    ExecutableCompatibilityReason,
+    ExecutableCompatibilityReport,
+    ExecutableModelConfiguration,
+    ExecutableOperationCapability,
+    ExecutablePlatformCapability,
+    ExecutableRequirements,
+    SupportedLimits,
+    canonical_capability_profile_json,
+    canonical_requirements_json,
+    check_declared_compatibility,
+    executable_compatibility_report_json,
+    validate_executable_capability_profile,
+    validate_executable_compatibility_report,
+    validate_executable_requirements,
+)
 from .compiler import compile_package
 from .dependencies import DependencyClosure, resolve_dependencies
 from .diff import (
@@ -116,6 +133,21 @@ from .wire import (
 )
 
 __all__ = [
+    "ExecutableCapabilityProfile",
+    "ExecutableRequirements",
+    "ExecutableCompatibilityReport",
+    "ExecutableCompatibilityReason",
+    "ExecutableOperationCapability",
+    "ExecutableModelConfiguration",
+    "ExecutablePlatformCapability",
+    "SupportedLimits",
+    "validate_executable_capability_profile",
+    "validate_executable_requirements",
+    "validate_executable_compatibility_report",
+    "canonical_capability_profile_json",
+    "canonical_requirements_json",
+    "executable_compatibility_report_json",
+    "check_declared_compatibility",
     "CommandSignatureEnvelope",
     "ExecutableSignatureEnvelope",
     "ExecutableVerificationReport",
@@ -129,7 +161,6 @@ __all__ = [
     "validate_executable_verification_report",
     "verify_executable_package",
     "verify_runtime_command",
-
     "ExecutableChange",
     "ExecutableDiff",
     "diff_executable_packages",
@@ -148,7 +179,6 @@ __all__ = [
     "validate_completion_summary",
     "validate_transition_report",
     "transition_report_json",
-
     "ActionBinding",
     "ActionIntent",
     "HumanDecision",
