@@ -36,6 +36,8 @@ jobs:
         with:
           version: '0.11.16'
       - run: uv sync --frozen --project backend
+      - name: Check backend dependency metadata
+        run: uv pip check --python backend/.venv/bin/python
       - run: npm ci
       - run: npm run check
       - run: backend/.venv/bin/python backend/export_schema.py --check
