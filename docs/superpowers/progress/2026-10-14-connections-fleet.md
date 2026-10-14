@@ -56,3 +56,16 @@ Independent review found two Important defects: session acquisition could decide
 - A restricted local execution run exhibited worker-wakeup timeouts; the same source passed with the documented execution permission. The environment cause is not proven. Failed receipts remain preserved, and no product workaround was added.
 
 Credential rotation, the runtime client and signed command admission remain subsequent tasks. Production recovery/Redis integrations, resource and outage qualification, rebuilt installed artifacts, the full root check, API-image verification and hosted CI remain later gates. This local identity evidence is not a production-readiness claim.
+
+
+## Task 5 — two-phase credential rotation
+
+Implementation `a0adc8f534b30914bfb4ffc84a1f9960bedfa494` passed independent specification and code-quality reviews on the first review, with no findings. A worker prepares a pending successor while its current credential retains its original expiry, persists both locally in the next task, and activates the successor using the same live process session. Activation checks the exact preparation policy revision and current authority after lock/quota waits, then atomically revokes the predecessor and sets a fixed fifteen-minute expiry.
+
+A separate active-successor retry returns safe state after a lost response without requiring the old credential or session memory, extending expiry, granting a session, changing audit history, or disturbing a newer pending successor. Cancellation affects only a still-pending reciprocal successor; takeover and instance revocation invalidate pending authority. Credential versions never repeat. Three fixed audit events contain only IDs and versions, and one shared rotation quota permits ten requests per minute per instance.
+
+- **192 affected PostgreSQL tests passed, zero skips**, covering rotation, enrollment, sessions, runtime authentication and recovery authority; backend/runtime Ruff and diff checks passed. Both reviewers verified all six source hashes and retained evidence hashes.
+- Independent-connection races and held-row tests cover overlapping transitions, expiry or epoch changes during waits, and rollback after intermediate writes. Self-review reproduced a missing explicit scope predicate and corrected it before the final run. Earlier 55- and 112-test receipts are successive, overlapping runs and are not additional totals.
+- Tests use synthetic credentials and deterministic clocks with real PostgreSQL transactions. They do not exhaust all scheduler interleavings or qualify a production recovery/Redis deployment. No reviewer repeated already-passing suites solely for reassurance.
+
+Worker file durability, restart recovery and late responses remain Task 6; command admission remains Task 8. The consolidated API changelog and final installed/root/image/hosted checks remain Task 9. This establishes locally reviewed server rotation behavior, not production business execution.
