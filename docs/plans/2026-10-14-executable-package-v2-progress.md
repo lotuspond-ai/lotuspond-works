@@ -835,3 +835,36 @@ cache/scratch/stdin probe failures were diagnosed and retained separately.
 The prior offline installation drill remains evidence for its earlier source
 and image; it was not rerun or relabeled as proof of this new image. Current
 hosted CI results are recorded on PR #6 for its exact published head.
+
+## Bounded-work regression guard correction
+
+The documentation-only E03 child exposed a five-second subprocess timeout in
+the Python 3.14.8 public shared-choice compiler probe: 1,471 tests and 68
+subtests passed; the parent with identical SDK source passed all 1,472 tests.
+The exact hosted slowdown stage remains unknown. A controlled six-second
+interpreter-start delay reproduces the old failure without changing compiler
+work, demonstrating that the old guard conflated initialization with complexity.
+
+Commit `93452fef269c55f7ad03981f0e3a6075e97ef9aa` changes only two test files.
+The same 32-node shared graph and semantic assertions remain. The probe now
+counts compiler line execution independently of internal budget accounting,
+rejects above 500,000 events, and requires a nonzero observation. Normal public
+compilation uses about 149,000 events. A separate 30-second process timeout
+contains hangs and permits startup/scheduling overhead. This guard covers the
+current Python compiler module; future refactors require renewed evidence.
+
+All 69 compiler tests pass on each of Python 3.13.13 and 3.14.5. The delayed-start
+case now passes. Twelve in-memory lost-memoization cases (distribution or
+fingerprinting, three modes, two versions) fail on the explicit work cap before
+the safety timeout. Production source was never mutated. An earlier incomplete
+fingerprint mutation is retained and excluded from that proof.
+
+The full application gate passes again under the recorded cloud harness:
+105 Node, 300 backend plus 97 subtests with 39 DB skips, 1,472 SDK plus 68
+subtests, lint/schema/TypeScript/build. Independent review freshly checks the
+real compiler invocation and both regression mutations, with zero Critical,
+Important or Minor findings. Evidence is retained at
+`/tmp/lotuspond-bounded-work.SXb8su`; the original failed hosted run remains
+recorded. This test-only change does not rebuild or relabel earlier runtime
+artifacts. Hosted results for the new published heads remain separately
+attributed in PRs #6 and #8; the E03 specification is unchanged.

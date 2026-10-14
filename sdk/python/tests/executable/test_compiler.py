@@ -1067,7 +1067,9 @@ def test_shared_choice_distribution_has_bounded_work(operation):
         [sys.executable, str(probe), operation, str(Path(__file__).parents[4])],
         capture_output=True,
         text=True,
-        timeout=5,
+        # The probe enforces a deterministic work bound; this only contains hangs
+        # and includes interpreter startup, imports and shared-runner scheduling.
+        timeout=30,
         check=True,
     )
     assert result.stdout.strip() == "PASS"
