@@ -150,6 +150,7 @@ def authenticate_runtime(
     dependencies: FleetDependencies,
 ) -> RuntimePrincipal:
     digest = token_digest(token, "lpr_")
+    session_digest = token_digest(session_secret, "lps_") if session_secret is not None else None
     hint = db.scalar(select(RuntimeCredential).where(RuntimeCredential.token_digest == digest))
     if hint is None:
         raise FleetError("unauthenticated")
@@ -163,18 +164,23 @@ def authenticate_runtime(
     check_observation(
         RuntimeObservation.model_validate_json(instance.observation_ceiling), policy, dependencies
     )
-    session = None
-    if session_secret is not None:
-        session_digest = token_digest(session_secret, "lps_")
-        session = lock(
-            machine_query(RuntimeSession, instance).where(
-                RuntimeSession.instance_id == instance.id,
-                RuntimeSession.token_digest == session_digest,
-            ),
-            db,
+    # Lock the active session even without process proof, before C. Later
+    # self/acquisition services inspect that same row under the shared order.
+    selected = RuntimeSession.status == "active"
+    if session_digest is not None:
+        selected = selected | (RuntimeSession.token_digest == session_digest)
+    sessions = list(
+        db.scalars(
+            machine_query(RuntimeSession, instance)
+            .where(RuntimeSession.instance_id == instance.id, selected)
+            .order_by(RuntimeSession.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        if session is None:
-            raise FleetError("unauthenticated")
+    )
+    session = next((row for row in sessions if row.token_digest == session_digest), None)
+    if session_digest is not None and session is None:
+        raise FleetError("unauthenticated")
     credential = lock(
         machine_query(RuntimeCredential, instance).where(
             RuntimeCredential.id == hint.id,

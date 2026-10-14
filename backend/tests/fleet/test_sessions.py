@@ -304,3 +304,38 @@ def test_expiry_is_rechecked_after_quota_wait(identity_env, operation):
         headers=auth(credential, session["secret"] if session else None),
     )
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("operation", ["self", "session", "heartbeat"])
+def test_runtime_boundary_locks_sessions_before_credentials(identity_env, engine, operation):
+    from sqlalchemy import event
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PostgreSQL shared lock-order qualification required")
+    env = identity_env
+    credential = enrolled(env)
+    session = acquire(env, credential).json() if operation == "heartbeat" else None
+    ordered = []
+
+    def before_cursor(connection, cursor, statement, parameters, context, many):
+        if "FOR UPDATE" in statement:
+            for name in ("runtime_instances", "runtime_sessions", "runtime_credentials"):
+                if f"FROM {name} " in statement or f"FROM {name}\n" in statement:
+                    ordered.append(name)
+
+    event.listen(engine, "before_cursor_execute", before_cursor)
+    try:
+        headers = auth(credential, session["secret"] if session else None)
+        response = (
+            env.client.get("/api/v1/runtime/self", headers=headers)
+            if operation == "self"
+            else env.client.post(f"/api/v1/runtime/{operation}", json={}, headers=headers)
+        )
+        assert response.status_code in {200, 201}
+    finally:
+        event.remove(engine, "before_cursor_execute", before_cursor)
+    assert (
+        ordered.index("runtime_instances")
+        < ordered.index("runtime_sessions")
+        < ordered.index("runtime_credentials")
+    )
