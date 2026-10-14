@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–9 are complete after independent review and correction; Task 10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–9 are complete after independent review and correction. Task 10 implementation and task review plus local application/database/actual-artifact gates pass; whole-branch review and draft publication/exact-head CI remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -643,3 +643,72 @@ Ruling: Requirements name only the current literal lotuspond.runtime-contract.v1
 Ruling: V2 value_kinds includes the nine existing DataSchema kinds and four existing opaque HandleKind literals, with originating steps requiring their handle support even when that output is discarded — complete typed-feature accounting must not disappear merely because an authored result is unused — cost if wrong: refine the pre-stable feature vocabulary and profile fixtures; handles remain compiler-originated and untrusted on the wire.
 
 Ruling: Missing-dependency compatibility results require full admission and a bounded audit of all available supplied pins/graph errors before returning unresolved; share dependency inventory/traversal rather than copy a second resolver, and defer lexical/type compilation until closure is complete — a missing first pin must not hide detectable bad digests, conflicts, cycles or extra supplied definitions, while an unresolved report promises only structural validity — cost if wrong: refine private dependency factoring and partial-closure diagnostics, with complete-input resolver/compiler behavior and public authority boundaries preserved.
+
+
+## Task 10 implementation, independent review and local integrated evidence
+
+The complete CLI/schema/artifact integration was committed at
+`29052f5e9187d5ce9f78c0e97391116c51c9bb70`. A fresh independent review of the entire
+Task 10 range from `e7c3899a46de5fa734a9c5a5262a3abb116565da` passed specification
+and quality with zero Critical, Important or Minor findings. All 31 changed-file
+hashes match the final manifest; both final artifact manifests match all 36 SDK
+source files. No task finding was waived.
+
+Only an exact leading `v2` selects the nine new local CLI forms. The root v1
+commands, canonical bytes/digest and registry admission remain unchanged. Three
+committed structural schemas cover packages, compiled plans and the seven tagged
+runtime records, including all seventeen event/payload/reference combinations.
+Independent JSON Schema behavioral cases supplement snapshot parity. Schemas do
+not establish semantic validity, hashes, trusted compilation or authority.
+
+Initial evidence retains missing-validator/schema collection failures, CLI
+2-failed/13-passed red and installed 2-failed/2-passed red; legacy baseline was
+39 passes. Final focused CLI/schema checks pass 23 tests. After inspection found
+and fixed a missing required root runtime discriminator, full SDK suites passed
+1,433 tests plus 68 subtests on Python 3.14.5 and 3.13.13. This was an inspection
+finding, not an invented observed-red claim.
+
+A later fixture-only correction made the artifact origins independent: explicit
+checkout `uv build --wheel`, separate `uv build --sdist`, then wheel build from
+that extracted archive. All consumers of the corrected fixture passed 43 tests
+on each interpreter. Earlier default-uv-build wheels originated from an sdist;
+those earlier full matrices are not relabelled as corrected-fixture runs. Final
+checkout/rebuilt wheels on both interpreters have SHA-256
+`f194589f26b9293b005634936b4099bb48f7eb73ceaa72f74e109b2e01c68be8`; the source
+archive is `b8de3e7b8e6953cd30642a1f4bb23078b5322e299ea95e56a36ab545d1e312e4`.
+
+Controller integration then passed on the same clean product commit:
+
+- `npm run check`: 105 Node tests, 300 backend tests plus 97 subtests with 39
+  PostgreSQL-only skips, and 1,433 SDK tests plus 68 subtests; TypeScript, Ruff,
+  legacy/new schema parity and Vite build passed. This final Python 3.14 SDK run
+  includes the corrected installed fixture. The cloud host used serial Node and
+  a child-process reaper, without changing hosted CI.
+- The identity-verified owned localhost PostgreSQL run passed 339 tests plus 97
+  subtests with no skips. An inherited Starlette deprecation warning remains.
+- Deployment checks passed 37 tests plus 13 subtests; database schema parity and
+  whitespace passed. Strict MkDocs evidence remains tied to the unchanged site
+  sources tested in Task 10; no unrelated broad repeat was substituted.
+- The actual noneditable API image is
+  `sha256:7624d3080f9a56044d1fcc766f43056fd33c179ffd227debb53dcc7e9ae30abf`.
+  The unchanged collector source and immutable image ID were rechecked before
+  reuse. A build-only CA secret preserved TLS on this cloud host; ordinary hosted
+  builds remain an independent gate.
+- The retained offline archive is 214,667,187 bytes, SHA-256
+  `afa840593a810b44d9759c335a42a3c50c880fc2f5f233fc08369e71fe623112`.
+  Its 218.4-second drill passed installed v1 identity/digest and literal v2
+  compilation, schema 12, operator MFA/replay/revocation, worker backlog/staleness
+  and restart drain, and Redis failure/recovery. It used an internal-only network,
+  zero published ports and synthetic data; cleanup of five containers and three
+  anonymous volumes was confirmed. The image matches all 42 backend runtime,
+  36 nested SDK and four static UI files. Content equality is not signed Git
+  provenance. The inherited proof tool's literal “Repository has no HEAD” note
+  is inaccurate for this checkout and is flagged for whole-branch review; the
+  source commit is independently recorded above.
+
+Local evidence is retained at `/tmp/lotuspond-v2-final.5WdOFT` and in this plan's
+SDD workspace. Whole-branch review, its corrections and exact-head hosted checks
+remain pending. Real runtime/provider support, Studio, commercial licensing and
+customer/operational production qualification remain open product requirements.
+The customer-need rationale in `docs/AGENT_PRODUCT_RATIONALE.md` preserves every
+approved goal and treats Automation Anywhere as a reference only.
