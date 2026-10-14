@@ -49,7 +49,10 @@ class _StrictRecord(BaseModel):
         if len(BaseModel.model_dump_json(validated, ensure_ascii=True)) > MAX_REPORT_BYTES:
             raise SdkError("report_too_large")
         kwargs["ensure_ascii"] = True
-        return BaseModel.model_dump_json(validated, **kwargs)
+        rendered = BaseModel.model_dump_json(validated, **kwargs)
+        if len(rendered) > MAX_REPORT_BYTES:
+            raise SdkError("report_too_large")
+        return rendered
 
 
 class TrustedKey(_StrictRecord):

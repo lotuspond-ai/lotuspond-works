@@ -270,3 +270,41 @@ def test_wrong_private_key_type_is_fixed_error(example):
     with pytest.raises(SdkError) as error:
         sign_package(example, object())
     assert error.value.code == "invalid_signing_key"
+
+
+def test_indented_envelope_cannot_exceed_eight_mib():
+    envelope = SignatureEnvelope.model_validate(json.loads(FIXTURE.read_text()))
+    with pytest.raises(SdkError) as error:
+        envelope.model_dump_json(indent=1024 * 1024)
+    assert error.value.code == "report_too_large"
+
+
+@pytest.mark.parametrize("kind", ["envelope", "report", "trusted_key", "trust_set"])
+def test_rendered_record_limit_includes_formatting(example, monkeypatch, kind):
+    from pydantic import BaseModel
+
+    from lotuspond_sdk import TrustedKey, TrustSet, trust
+
+    envelope = sign_package(example, synthetic_key())
+    record = {
+        "envelope": envelope,
+        "report": verify_package(example, envelope, synthetic_trust()),
+        "trusted_key": TrustedKey.model_validate(synthetic_trust()["keys"][0]),
+        "trust_set": TrustSet.model_validate(synthetic_trust()),
+    }[kind]
+    compact = BaseModel.model_dump_json(record, ensure_ascii=True)
+    pretty = BaseModel.model_dump_json(record, indent=4, ensure_ascii=True)
+    assert len(compact) < len(pretty)
+    # The exact rendered boundary succeeds; one byte over must fail even though
+    # the complete compact record fits. No large allocation is needed here.
+    monkeypatch.setattr(trust, "MAX_REPORT_BYTES", len(pretty))
+    assert record.model_dump_json(indent=4, ensure_ascii=False) == pretty
+    monkeypatch.setattr(trust, "MAX_REPORT_BYTES", len(pretty) - 1)
+    with pytest.raises(SdkError) as error:
+        record.model_dump_json(indent=4)
+    assert error.value.code == "report_too_large"
+    # Selecting only some fields cannot bypass the full-record precheck.
+    monkeypatch.setattr(trust, "MAX_REPORT_BYTES", len(compact) - 1)
+    with pytest.raises(SdkError) as error:
+        record.model_dump_json(include={"key_id"})
+    assert error.value.code == "report_too_large"

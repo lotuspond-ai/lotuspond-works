@@ -148,3 +148,20 @@ explicitly before indexing its agent node. Independent Task 3 specification/cryp
 and quality review, application/database/image integration and hosted CI remain
 controller-owned. No push, merge, package-index publication, production/customer
 access or broader integration check was performed by this implementer.
+
+### Task 3 review fix — formatted serialization cap
+
+Independent review found one Minor spec gap: caller indentation could expand a
+compact-valid record beyond 8 MiB because `_StrictRecord.model_dump_json` checked
+only the complete compact record. The fix retains complete-record revalidation,
+ASCII safety and the full-record precheck, then also checks the actual rendered
+JSON before returning it. Oversized formatted output raises `report_too_large`.
+
+Five regressions failed before the fix: the reviewer's actual 8,389,129-byte
+indented envelope, plus formatted output limits for envelope, verification report,
+trusted key and trust set. The four smaller boundary cases also verify exact-limit
+acceptance and that field selection cannot bypass the full-record precheck.
+All five then passed. Scoped signing/trust verification passed **103 tests**,
+zero skips, on Python 3.14.5 and isolated Python 3.13.13; SDK Ruff and whitespace
+checks passed. No unrelated application, database or artifact checks were repeated.
+Independent re-review remains controller-owned.
