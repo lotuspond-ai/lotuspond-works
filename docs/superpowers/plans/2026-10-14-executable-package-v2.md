@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.13; existing Pydantic >=2.12,<3, cryptography >=50,<51, Hatchling and uv; reviewed and exactly pinned rfc8785==0.1.4; Python 3.13/3.14 CI, independent Node JSON/JCS and OpenSSL test oracles. No engine, HTTP client or database dependency in the SDK.
 
-**Spec:** [Owner-approved executable-v2 design](../specs/2026-10-14-executable-package-v2-design.md), approved 14 October 2026. The owner has already selected subagents with independent review after each task. This written implementation plan awaits owner review; the execution method need not be selected again.
+**Spec:** [Owner-approved executable-v2 design](../specs/2026-10-14-executable-package-v2-design.md), approved 14 October 2026. The owner has already selected subagents with independent review after each task. The owner approved this written implementation plan on 14 October 2026; execute using the selected subagent method with independent task reviews.
 
 ## Global Constraints
 
@@ -434,4 +434,4 @@ This is one coherent static-contract SDK subsystem: each task produces an indepe
 
 Inline plan self-review completed: the coverage table accounts for every specification section; produced/consumed names and task-owned fixtures agree; all ten Python examples parse; local links and whitespace checks pass; no placeholders or copied implementation bodies remain. Corrections made during review explicitly cover full finite-number JCS round trips, JavaScript numeric-string key ordering, agent-internal attempt accounting, identical dependency deduplication, opaque array/region provenance, current-epoch replay precedence and code-property error assertions. Each Review Focus case has concrete owning tests. The plan is longer than the design because it fixes interfaces, wire variants and exact commands; implementation bodies remain the implementers' work.
 
-The writing-plans review gate applies to this artifact; writing the plan itself does not authorize implementation. The owner's selected subagent/task-review method remains in force after written-plan review.
+The owner approved this written plan on 14 October 2026. The selected subagent/task-review method now governs implementation; each task still requires its tests and independent review before completion.

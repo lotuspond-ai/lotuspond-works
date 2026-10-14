@@ -1,6 +1,6 @@
 # Executable package v2 and runtime contract design
 
-Date: 14 October 2026. Status: written specification approved by the owner on 14 October 2026 for detailed implementation planning; not implemented. The owner retains subagent-driven execution with independent task reviews. The written implementation plan must be reviewed before implementation.
+Date: 14 October 2026. Status: written specification approved by the owner on 14 October 2026 for detailed implementation planning; not implemented. The owner retains subagent-driven execution with independent task reviews. The owner also approved the written implementation plan on 14 October 2026; implementation is starting in an isolated branch.
 
 ## Intent and place in the approved sequence
 
@@ -140,4 +140,4 @@ No production database, customer integration, cloud resource, public package ind
 
 ## Review handoff
 
-The owner approved this written specification on 14 October 2026. The [detailed implementation plan](../plans/2026-10-14-executable-package-v2.md) now defines exact model/API/CLI names, file ownership, compatibility tests, dependency review, meaningful red/green cases and independent review gates. That plan awaits owner review before implementation. Preserve the owner's selected subagent-driven execution method; do not ask them to select it again.
+The owner approved this written specification on 14 October 2026. The [detailed implementation plan](../plans/2026-10-14-executable-package-v2.md) now defines exact model/API/CLI names, file ownership, compatibility tests, dependency review, meaningful red/green cases and independent review gates. The owner approved that plan on 14 October 2026 for implementation. Preserve the owner's selected subagent-driven execution method; do not ask them to select it again.
