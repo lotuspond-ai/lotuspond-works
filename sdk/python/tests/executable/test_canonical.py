@@ -131,3 +131,33 @@ def test_identifiers_and_digest_do_not_replace_v1():
     assert len(canonical) == 1166
     assert package_digest(raw) == "305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3"
     assert sha256_hex(b"abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_full_cap_numeric_jcs_remains_readable_after_declared_number_normalization():
+    cap = 1048576
+    prefix = b'[100000000000000000000,1e-7,"'
+    suffix = b'"]'
+    padding = "x" * (cap - len(prefix) - len(suffix))
+    expected = prefix + padding.encode() + suffix
+    canonical = jcs_bytes([1e20, 1e-7, padding])
+    assert canonical == expected
+    assert len(canonical) == cap
+    reread = decode_executable_bytes(canonical)
+    assert type(reread[0]) is int and reread[0] == 10**20
+    # Declared number fields normalize bounded JSON int/float spellings to float.
+    normalized = [float(reread[0]), float(reread[1]), reread[2]]
+    assert jcs_bytes(normalized) == expected
+
+
+@pytest.mark.parametrize("number,spelling", [(1.0, b"1"), (-0.0, b"0"), (1e-7, b"1e-7")])
+def test_full_cap_jcs_counts_actual_numeric_spelling_and_one_byte_overflow(number, spelling):
+    cap = 1048576
+    prefix = b"[" + spelling + b',"'
+    suffix = b'"]'
+    padding = "x" * (cap - len(prefix) - len(suffix))
+    expected = prefix + padding.encode() + suffix
+    assert jcs_bytes([number, padding]) == expected
+    assert jcs_bytes([number, padding[:-1]]) == prefix + padding[:-1].encode() + suffix
+    with pytest.raises(ExecutableError) as raised:
+        jcs_bytes([number, padding + "x"])
+    assert raised.value.code == "input_too_large"

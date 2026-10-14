@@ -89,6 +89,10 @@ def project_json(
     the returned JSON and project the normalized model again to count defaults.
     Dictionary keys count as items; depth counts nested containers, root scalar zero.
     Raw integers are at most 1024 bits until the declared field selects its domain.
+    Bytes here are a structural lower bound: syntax/strings are counted exactly,
+    numbers occupy at least one byte without choosing a domain or spelling. The
+    decoder bounds actual raw bytes; validated output needs a bounded JCS/report
+    serializer to measure its complete normalized representation.
     """
     if type(limits) is not JsonLimits or type(model_types) is not tuple:
         raise ExecutableError("invalid_json_value")
@@ -101,9 +105,16 @@ def project_json(
     active: set[int] = set()
     count = 0
     string_bytes = 0
+    byte_lower_bound = 0
     size_code = (
         "report_too_large" if limits.max_bytes > PACKAGE_LIMITS.max_bytes else "input_too_large"
     )
+
+    def charge(amount: int) -> None:
+        nonlocal byte_lower_bound
+        byte_lower_bound += amount
+        if byte_lower_bound > limits.max_bytes:
+            raise ExecutableError(size_code)
 
     def visit(value: object, depth: int) -> JsonValue:
         nonlocal count, string_bytes
@@ -122,16 +133,22 @@ def project_json(
                 raise ExecutableError("invalid_unicode") from None
             if string_bytes > limits.max_bytes:
                 raise ExecutableError(size_code)
+            # String escaping is independent of numeric domain selection and
+            # identical for this lower-bound UTF-8 JSON and normalized JCS.
+            charge(len(json.dumps(value, ensure_ascii=False).encode("utf-8")))
             return value
         if kind is float:
             if not math.isfinite(value):
                 raise ExecutableError("nonfinite_number")
+            charge(1)
             return value
         if value is None or kind is bool:
+            charge(4 if value is None or value is True else 5)
             return value
         if kind is int:
             if value.bit_length() > 1024:
                 raise ExecutableError("invalid_json_value")
+            charge(1)
             return value
         if kind in model_types:
             try:
@@ -157,6 +174,7 @@ def project_json(
         needed = len(data) * (1 if kind is list else 2)
         if count + needed > limits.max_items:
             raise ExecutableError("input_too_complex")
+        charge(2 + max(len(data) - 1, 0) + (0 if kind is list else len(data)))
         active.add(id(value))
         try:
             if kind is list:
@@ -167,12 +185,4 @@ def project_json(
         finally:
             active.remove(id(value))
 
-    projected = visit(raw, 0)
-    # Only exact JSON remains, so this cannot invoke an arbitrary serializer.
-    encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-    total = 0
-    for chunk in encoder.iterencode(projected):
-        total += len(chunk.encode("utf-8"))
-        if total > limits.max_bytes:
-            raise ExecutableError(size_code)
-    return projected
+    return visit(raw, 0)

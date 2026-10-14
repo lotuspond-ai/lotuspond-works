@@ -353,8 +353,10 @@ runtime-facing records and CLI commands are subsequent implementation tasks.
 Raw package and normalized canonical JSON stay within 1,048,576 bytes, depth 32
 and 10,000 items (including object keys). Internal wire/report boundaries use
 65,536/8,388,608 bytes respectively; report limits never raise package limits.
-The decoder preserves bounded raw integers until a declared field chooses its
-domain. Integer fields require exact safe integers; numbers may normalize to
+The decoder checks supplied raw bytes and preserves bounded raw integers until
+a declared field chooses its domain. Internal projection bounds structure and
+a byte lower bound without choosing numeric spellings; complete normalized JCS
+bytes are checked after field validation and default insertion. Integer fields require exact safe integers; numbers may normalize to
 finite IEEE-754 floats. JCS may spell a float such as `1.0` as `1`, or `1e20` as
 `100000000000000000000`; those spellings remain readable before field selection.
 

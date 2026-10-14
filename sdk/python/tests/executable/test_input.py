@@ -432,3 +432,135 @@ def test_optional_integer_fields_keep_exact_safe_domain(invalid):
             code="invalid_package",
         )
     assert raised.value.code == "invalid_package"
+
+
+def test_decoder_counts_actual_raw_bytes_without_python_float_reserialization():
+    cap = 1048576
+    prefix = b'[100000000000000000000,1e-7,"'
+    suffix = b'"]'
+    padding = b"x" * (cap - len(prefix) - len(suffix))
+    canonical = prefix + padding + suffix
+    expected = [10**20, 1e-7, padding.decode()]
+    assert decode_executable_bytes(canonical) == expected
+    assert project_json(expected) == expected
+    with pytest.raises(PackageReadError) as raised:
+        decode_executable_bytes(prefix + padding + b"x" + suffix)
+    assert raised.value.code == "input_too_large"
+    # Raw input has its own cap even when number normalization would shrink it.
+    with pytest.raises(PackageReadError) as raised:
+        decode_executable_bytes(canonical.replace(b"1e-7", b"1e-07"))
+    assert raised.value.code == "input_too_large"
+
+
+def test_projection_bounds_structure_without_selecting_numeric_domains():
+    limits = JsonLimits(7, 32, 100)
+    assert project_json([1.0, "x"], limits=limits) == [1.0, "x"]
+    with pytest.raises(ExecutableError) as raised:
+        project_json([1.0, "xx"], limits=limits)
+    assert raised.value.code == "input_too_large"
+    # Unsafe integers remain raw integers before a declared field selects number.
+    assert project_json(10**20, limits=JsonLimits(1, 32, 100)) == 10**20
+    assert project_json(1e100, limits=JsonLimits(1, 32, 100)) == 1e100
+    with pytest.raises(ExecutableError) as raised:
+        jcs_bytes(1e100, max_bytes=1)
+    assert raised.value.code == "input_too_large"
+
+
+def test_full_cap_mixed_raw_numeric_domains_normalize_before_jcs_measurement():
+    cap = 1048576
+    integer_spelling = b"1" + b"0" * 100
+    prefix = b"[1e20," + integer_spelling + b',"'
+    suffix = b'"]'
+    padding = b"x" * (cap - len(prefix) - len(suffix))
+    content = prefix + padding + suffix
+    assert len(content) == cap
+    decoded = decode_executable_bytes(content)
+    assert type(decoded[0]) is float and decoded[0] == 1e20
+    assert type(decoded[1]) is int and decoded[1] == 10**100
+    normalized = [float(decoded[0]), float(decoded[1]), decoded[2]]
+    expected = b'[100000000000000000000,1e+100,"' + padding + suffix
+    assert len(expected) == cap - 78
+    assert jcs_bytes(normalized) == expected
+    reread = decode_executable_bytes(expected)
+    assert jcs_bytes([float(reread[0]), float(reread[1]), reread[2]]) == expected
+
+
+def test_validated_numeric_defaults_count_complete_normalized_jcs_bytes():
+    class NumericDefaults(StrictModel):
+        value: float = 1e20
+        padding: str
+
+    cap = 1048576
+    prefix = b'{"padding":"'
+    suffix = b'","value":100000000000000000000}'
+    padding = "x" * (cap - len(prefix) - len(suffix))
+    validated = validate_model(
+        {"padding": padding},
+        model_type=NumericDefaults,
+        model_types=(NumericDefaults,),
+        code="invalid_package",
+    )
+    assert jcs_bytes(project_json(validated, model_types=(NumericDefaults,))) == (
+        prefix + padding.encode() + suffix
+    )
+    with pytest.raises(ExecutableError) as raised:
+        validate_model(
+            {"padding": padding + "x"},
+            model_type=NumericDefaults,
+            model_types=(NumericDefaults,),
+            code="invalid_package",
+        )
+    assert raised.value.code == "input_too_large"
+
+
+def test_validated_number_domain_precedes_complete_normalized_byte_measurement():
+    class NumberRecord(StrictModel):
+        value: float
+        padding: str
+
+    cap = 1048576
+    prefix = b'{"padding":"'
+    suffix = b'","value":1e+100}'
+    padding = "x" * (cap - len(prefix) - len(suffix))
+    raw = {"value": 10**100, "padding": padding}
+    validated = validate_model(
+        raw, model_type=NumberRecord, model_types=(NumberRecord,), code="invalid_package"
+    )
+    assert type(validated.value) is float
+    assert jcs_bytes(project_json(validated, model_types=(NumberRecord,))) == (
+        prefix + padding.encode() + suffix
+    )
+    with pytest.raises(ExecutableError) as raised:
+        validate_model(
+            {**raw, "padding": padding + "x"},
+            model_type=NumberRecord,
+            model_types=(NumberRecord,),
+            code="invalid_package",
+        )
+    assert raised.value.code == "input_too_large"
+
+
+def test_report_byte_cap_counts_complete_ascii_without_a_different_numeric_representation():
+    class NumericReport(StrictModel):
+        value: float
+        padding: str
+
+    cap = 8388608
+    prefix = b'{"value":1e+20,"padding":"'
+    suffix = b'"}\n'
+    padding = "x" * (cap - len(prefix) - len(suffix))
+    report = NumericReport(value=1e20, padding=padding)
+    expected = prefix + padding.encode() + suffix
+    assert len(expected) == cap
+    assert (
+        report_bytes(
+            report, model_type=NumericReport, model_types=(NumericReport,), code="invalid_package"
+        )
+        == expected
+    )
+    report.padding += "x"
+    with pytest.raises(ExecutableError) as raised:
+        report_bytes(
+            report, model_type=NumericReport, model_types=(NumericReport,), code="invalid_package"
+        )
+    assert raised.value.code == "report_too_large"

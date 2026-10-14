@@ -38,3 +38,24 @@ This is local Task 1 evidence; no full application/database/offline matrix,
 provider execution, authority or production qualification is claimed. Later
 v2 authoring/compiler/wire/CLI APIs remain separate tasks. The controller owns
 review acceptance and task/plan completion state.
+
+### Task 1 review correction I1 (re-review pending)
+
+Independent review reproduced a full-cap canonical round trip refused by the
+projection's intermediate Python numeric spelling. The correction separates
+actual raw-byte admission, structural projection and actual normalized/output
+measurement. Projection retains all type/Unicode/cycle/depth/item/raw-integer
+checks and a structural byte lower bound; it does not choose numeric domains.
+`validate_model` measures complete JCS after field validation/default insertion.
+`report_bytes` shares model revalidation but measures its own complete ASCII
+output, including newline, without imposing a different numeric representation.
+No approved cap, dependency, v1 boundary or root SDK API changed.
+
+The initial focused correction tests observed 6 failures and 105 passes. Separate
+red checks reproduced the mixed raw-number interaction, normalized/default byte
+expansion and full-cap ASCII report interaction before their corrections.
+Final focused tests pass on Python 3.14.5 and separate 3.13.13: 115 tests on each,
+no skips. Fresh wheel and independently rebuilt sdist-wheel direct v2 probes
+pass on both interpreters. Frozen SDK Ruff and diff whitespace checks pass.
+The correction and exact commands/logs are recorded in the implementation
+report; independent review and completion state remain controller-owned.

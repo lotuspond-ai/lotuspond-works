@@ -7,8 +7,9 @@ from typing import Literal, TypeVar, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from ._canonical import jcs_bytes
 from .errors import ErrorCode, ExecutableError, safe_validation_issues
-from .input import PACKAGE_LIMITS, REPORT_LIMITS, JsonLimits, project_json
+from .input import PACKAGE_LIMITS, REPORT_LIMITS, JsonLimits, JsonValue, project_json
 
 Model = TypeVar("Model", bound=BaseModel)
 
@@ -57,7 +58,28 @@ def validate_model(
     code: ErrorCode,
     limits: JsonLimits = PACKAGE_LIMITS,
 ) -> Model:
-    """Revalidate projected fields, then count the complete normalized defaults."""
+    """Revalidate fields, then bound complete normalized JCS including defaults.
+
+    Model validators must select every declared numeric domain before returning;
+    unsafe raw integers must become finite floats only in declared number fields.
+    The projection's structural byte lower bound is not final admission evidence.
+    """
+    validated, normalized = _validated_json(
+        raw, model_type=model_type, model_types=model_types, code=code, limits=limits
+    )
+    jcs_bytes(normalized, max_bytes=limits.max_bytes)
+    return validated
+
+
+def _validated_json(
+    raw: object,
+    *,
+    model_type: type[Model],
+    model_types: tuple[type[BaseModel], ...],
+    code: ErrorCode,
+    limits: JsonLimits,
+) -> tuple[Model, JsonValue]:
+    """Share known-model revalidation; the caller measures its actual output format."""
     if model_type not in model_types:
         raise ExecutableError("invalid_json_value")
     projected = project_json(raw, model_types=model_types, limits=limits)
@@ -66,8 +88,8 @@ def validate_model(
     except ValidationError as error:
         issues, truncated = safe_validation_issues(error, code=code)
         raise ExecutableError(code, issues=issues, truncated=truncated) from None
-    project_json(validated, model_types=model_types, limits=limits)
-    return validated
+    normalized = project_json(validated, model_types=model_types, limits=limits)
+    return validated, normalized
 
 
 def report_bytes(
@@ -85,10 +107,9 @@ def report_bytes(
     """
     if type(max_bytes) is not int or not 1 <= max_bytes <= REPORT_LIMITS.max_bytes:
         raise ExecutableError("invalid_json_value")
-    model = validate_model(
+    _, projected = _validated_json(
         raw, model_type=model_type, model_types=model_types, code=code, limits=REPORT_LIMITS
     )
-    projected = project_json(model, model_types=model_types, limits=REPORT_LIMITS)
     encoder = json.JSONEncoder(ensure_ascii=True, allow_nan=False, separators=(",", ":"))
     output = bytearray()
     for chunk in encoder.iterencode(projected):

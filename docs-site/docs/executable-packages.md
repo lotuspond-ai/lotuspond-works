@@ -15,7 +15,11 @@ Package raw input and normalized content are each at most 1,048,576 bytes, with
 32 container levels and 10,000 items, including object keys. The wire boundary
 is 65,536 bytes. Reports use 8,388,608 bytes, depth 32 and 262,144 items, counting
 complete ASCII output and its final newline. Package admission always uses its
-own smaller limits.
+own smaller limits. Supplied raw bytes, structural projection and complete
+normalized output are separate checks. Projection counts a structural byte
+lower bound without selecting numeric domains or spellings; model validation
+then checks actual JCS bytes after domain selection and default insertion.
+Reports measure their actual complete ASCII representation.
 
 JCS includes normalized defaults, preserves array order and sorts object names
 by UTF-16 units, including names such as `10` before `2`. Strings retain their
