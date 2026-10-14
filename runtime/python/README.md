@@ -230,3 +230,19 @@ when cleanup cannot be confirmed. DNS helpers remain in that owned worker group;
 standalone egress owns its separate DNS group. Process isolation bounds lifetime
 and credential exposure; it provides neither hostile-host containment nor Python
 memory zeroization.
+
+
+Signed command polling and admission claims are internal foundations. The supervisor
+checks independently supplied action records and current command trust before a
+claim; production record, trust and business dispatch dependencies deny by default.
+A claim closes admission only and never invokes a connector. Command keys have
+separate trust from package publishers. Current trust snapshots last at most sixty
+seconds; a newer revision can retain a previously allowed issuance key during an
+explicit operator transition of at most five minutes, and revocation denies it.
+
+Polling and record verification/claim are separate bounded stages. Each reserves
+its full attempt budget before heartbeat and credential rotation targets. The
+supervisor exposes only waiting, denied or claimed admission status and retains no
+business effect loop. Authoritative deployment records must link the signed intent
+to exact connection versions and secret references: SDK command bytes do not encode
+those direct pins, and E03 supplies no production deployment record source.

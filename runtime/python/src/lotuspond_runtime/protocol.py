@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Annotated, Literal, TypeVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Annotated, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -31,8 +32,17 @@ from .canonical import (
 )
 from .errors import FleetError
 
+if TYPE_CHECKING:
+    from lotuspond_sdk.executable.actions import ActionIntent, BindingContext, HumanDecision
+    from lotuspond_sdk.trust import TrustSet
+
 # Re-export the pure public helpers from this shared module.
 __all__ = [
+    "ResolvedSecretBinding",
+    "PinnedCommandRecords",
+    "CommandTrustSnapshot",
+    "CommandDelivery",
+    "AdmissionView",
     "Scope",
     "ConnectorPin",
     "SecretPin",
@@ -633,3 +643,57 @@ class RuntimeConfig(FleetModel):
 
 
 __all__ += ["RuntimeConfig", "validate_token"]
+
+
+# Internal pure values deliberately have no JSON/HTTP constructor for pinned records
+# or trust. Their authorities are independently injected, never worker request bodies.
+
+
+@dataclass(frozen=True)
+class ResolvedSecretBinding:
+    reference_id: str
+    version: int
+    binding_id: str
+
+
+@dataclass(frozen=True)
+class PinnedCommandRecords:
+    intent: ActionIntent
+    decision: HumanDecision | None
+    context: BindingContext
+    connection_id: str
+    connection_version: int
+    configuration: ConnectionConfig
+    secret_bindings: tuple[ResolvedSecretBinding, ...]
+    actual_input: bytes
+    actual_target: bytes
+
+
+@dataclass(frozen=True)
+class CommandTrustSnapshot:
+    revision: int
+    trust: TrustSet
+    valid_until_ms: int
+
+
+@dataclass(frozen=True)
+class CommandDelivery:
+    command_bytes: bytes
+    signature_bytes: bytes
+    trust_revision: int
+
+
+class AdmissionView(FleetModel):
+    command_id: OpaqueId
+    command_sha256: Digest
+    status: Literal["admitted", "claimed", "terminal", "uncertain"]
+
+
+class CommandClaimRequest(FleetModel):
+    command_sha256: Digest
+
+
+class CommandDeliveryWire(FleetModel):
+    command: str
+    signature: dict
+    trust_revision: Annotated[SafeInt, Field(ge=1)]

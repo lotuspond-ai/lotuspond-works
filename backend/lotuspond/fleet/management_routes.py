@@ -58,6 +58,7 @@ MANAGEMENT_PATH = re.compile(
 )
 ERROR_STATUS = {
     "invalid_request": 400,
+    "command_rejected": 400,
     "input_limit": 413,
     "unauthenticated": 401,
     "forbidden": 403,

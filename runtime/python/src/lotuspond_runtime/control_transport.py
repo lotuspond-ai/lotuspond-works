@@ -32,6 +32,7 @@ _ROUTES = {
     "/credentials/prepare",
     "/credentials/activate",
     "/credentials/cancel",
+    "/commands/poll",
 }
 _DNS_PROGRAM = """import json, socket, sys
 rows = socket.getaddrinfo(sys.argv[1], int(sys.argv[2]), type=socket.SOCK_STREAM)
@@ -203,8 +204,13 @@ class ControlTransport:
         token: SecretStr,
         session: SecretStr | None = None,
     ) -> bytes:
+        command_claim = (
+            type(route) is str
+            and re.fullmatch(r"/commands/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/claim", route)
+            is not None
+        )
         if (
-            route not in _ROUTES
+            (route not in _ROUTES and not command_claim)
             or method != ("GET" if route == "/self" else "POST")
             or (route == "/self" and body is not None)
             or (route != "/self" and type(body) is not bytes)
@@ -217,7 +223,11 @@ class ControlTransport:
             validate_token(session, "lps_")
         if (session is not None and route in ("/enroll", "/self", "/session")) or (
             session is None
-            and route in ("/heartbeat", "/credentials/prepare", "/credentials/cancel")
+            and (
+                route
+                in ("/heartbeat", "/credentials/prepare", "/credentials/cancel", "/commands/poll")
+                or command_claim
+            )
         ):
             raise FleetError("invalid_request")
         if self._closed or not self._serial.acquire(blocking=False):

@@ -62,5 +62,34 @@ class RuntimeClient:
         validate_token(session, "lps_")
         return self._call("/credentials/cancel", token, SelfState, session)
 
+    def poll(self, token: SecretStr, session: SecretStr):
+        from .commands import decode_delivery
+
+        validate_token(token, "lpr_")
+        validate_token(session, "lps_")
+        return decode_delivery(
+            self.transport.request("POST", "/commands/poll", b"{}", token, session)
+        )
+
+    def claim(self, token: SecretStr, session: SecretStr, command_id: str, command_sha256: str):
+        from pydantic import TypeAdapter
+
+        from .errors import FleetError
+        from .protocol import AdmissionView, CommandClaimRequest, OpaqueId
+
+        try:
+            TypeAdapter(OpaqueId).validate_python(command_id, strict=True)
+            body = CommandClaimRequest(command_sha256=command_sha256)
+        except Exception:
+            raise FleetError("invalid_request") from None
+        validate_token(session, "lps_")
+        return self._call(
+            "/commands/" + command_id + "/claim",
+            token,
+            AdmissionView,
+            session,
+            body=json.dumps(body.model_dump(), separators=(",", ":")).encode(),
+        )
+
     def close(self) -> None:
         self.transport.close()

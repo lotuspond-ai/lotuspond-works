@@ -22,15 +22,14 @@ from typing import Literal, Protocol
 
 from .destination import DestinationTransport, remaining
 from .errors import FleetError
-from .protocol import ConnectionConfig, ConnectorPin, RuntimeIdentity, SecretPin
+from .protocol import (
+    ConnectionConfig,
+    ConnectorPin,
+    ResolvedSecretBinding,
+    RuntimeIdentity,
+    SecretPin,
+)
 from .resolver import MountedSecretResolver
-
-
-@dataclass(frozen=True)
-class ResolvedSecretBinding:
-    reference_id: str
-    version: int
-    binding_id: str
 
 
 @dataclass(frozen=True)

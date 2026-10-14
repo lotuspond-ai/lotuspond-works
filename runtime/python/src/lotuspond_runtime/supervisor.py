@@ -30,12 +30,23 @@ class RuntimeSupervisor:
         observation: RuntimeObservation,
         *,
         installation_id: str,
+        command_records=None,
+        command_trust=None,
         wall_ms=lambda: time.time_ns() // 1000000,
         monotonic=time.monotonic,
         jitter_ms=lambda: secrets.randbelow(30001),
         wait=lambda stop, seconds: stop.wait(seconds),
         checkpoint=lambda point: None,
     ):
+        from .commands import DenyRuntimeRecordSource, _RecordLookup
+        from .trust import UnavailableCommandTrustAuthority
+
+        self._command_records = command_records or DenyRuntimeRecordSource()
+        self._command_trust = command_trust or UnavailableCommandTrustAuthority()
+        self._command_lookup = _RecordLookup()
+        self._pending_delivery = None
+        self._poll_at = 0
+        self.command_status = "waiting"
         self.client, self.store = client, store
         self.observation = RuntimeObservation.model_validate(observation)
         self.installation_id = installation_id
@@ -154,6 +165,73 @@ class RuntimeSupervisor:
         self._checkpoint("after_final_save")
         return state, result
 
+    def _commands(self, state, stop, valid_until_ms):
+        from lotuspond_sdk.executable.wire import validate_runtime_command, wire_digest
+
+        from .canonical import decode_fleet_json
+        from .commands import validate_delivery
+        from .protocol import AdmissionView
+
+        try:
+            started = self._monotonic()
+            if stop.is_set() or self._now() >= valid_until_ms:
+                raise FleetError("unauthenticated")
+            if self._pending_delivery is None:
+                value = self.client.poll(state.active_token, self._session)
+                if (
+                    not 0 <= self._monotonic() - started <= 10
+                    or stop.is_set()
+                    or self._now() >= valid_until_ms
+                ):
+                    raise FleetError("authority_unavailable")
+                self._pending_delivery = value
+                self._poll_at = self._monotonic() + 1
+                self.command_status = "waiting"
+                return
+            delivery = self._pending_delivery
+            command = validate_runtime_command(decode_fleet_json(delivery.command_bytes))
+            pins, trust = self._command_lookup.load(
+                self._command_records, self._command_trust, command, self.installation_id
+            )
+            if (
+                not 0 <= self._monotonic() - started <= 5
+                or stop.is_set()
+                or self._now() >= valid_until_ms
+            ):
+                raise FleetError("authority_unavailable")
+            command = validate_delivery(
+                delivery, identity=self._identity, records=pins, trust=trust, now_ms=self._now()
+            )
+            if stop.is_set() or self._now() >= valid_until_ms:
+                raise FleetError("authority_unavailable")
+            claimed = AdmissionView.model_validate(
+                self.client.claim(
+                    state.active_token, self._session, command.command_id, wire_digest(command)
+                )
+            )
+            if (
+                not 0 <= self._monotonic() - started <= 15
+                or stop.is_set()
+                or self._now() >= valid_until_ms
+            ):
+                raise FleetError("authority_unavailable")
+            # Admission is closed only. There is deliberately no invocation path.
+            validate_delivery(
+                delivery, identity=self._identity, records=pins, trust=trust, now_ms=self._now()
+            )
+            if (
+                claimed.command_id != command.command_id
+                or claimed.command_sha256 != wire_digest(command)
+                or claimed.status != "claimed"
+            ):
+                raise FleetError("command_rejected")
+            self._pending_delivery = None
+            self.command_status = "claimed"
+        except Exception:
+            self._pending_delivery = None
+            self._poll_at = self._monotonic() + 1
+            self.command_status = "denied"
+
     def _next_heartbeat(self, rotation_at, lease_expires):
         now = self._monotonic()
         rotation_deadline = now + (rotation_at - self._now()) / 1000
@@ -224,6 +302,22 @@ class RuntimeSupervisor:
                 # A completed heartbeat may land exactly on the rotation target.
                 # Re-evaluate immediately instead of adding a forced wait.
                 continue
+            # Poll (10s) and fresh record/trust+claim (5s+10s) are separate
+            # stages. Reserve each full budget before heartbeat/rotation targets;
+            # timestamps from command responses never advance the clock anchor.
+            budget = 16 if self._pending_delivery is not None else 11
+            if (
+                self._monotonic() >= self._poll_at
+                and heartbeat_at - self._monotonic() > budget
+                and next_rotation - self._now() > budget * 1000
+                and min(lease_expires, active.credential_expires_at_ms) - self._now()
+                > budget * 1000
+            ):
+                self._identity = active.identity
+                self._commands(
+                    state, stop, min(lease_expires, active.credential_expires_at_ms, next_rotation)
+                )
+                continue
             delay = min(
                 1.0,
                 max(0.001, heartbeat_at - self._monotonic()),
@@ -240,6 +334,7 @@ class RuntimeSupervisor:
         finally:
             self._session = None
             self._identity = None
+            self._pending_delivery = None
             self._attempt += 1
             try:
                 self.client.close()

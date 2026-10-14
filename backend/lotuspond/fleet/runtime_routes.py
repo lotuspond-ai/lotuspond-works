@@ -227,3 +227,28 @@ def revoke_instance(
     return service(request, db, human, IdentityManagement).revoke_instance(
         scope, instance_id, request_key(request)
     )
+
+
+@router.post("/commands/poll")
+def poll_route(request: Request, raw=BODY, db=DB):
+    from fastapi.responses import Response
+    from lotuspond_runtime.commands import delivery_wire
+
+    EmptyManagementRequest.model_validate(raw)
+    current = principal(request, db, require_session=True)
+    delivery = request.app.state.command_service.poll(db, current)
+    return Response(
+        delivery_wire(delivery) if delivery is not None else b"null",
+        media_type="application/json",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/commands/{command_id}/claim")
+def claim_route(command_id: str, request: Request, raw=BODY, db=DB):
+    from lotuspond_runtime.protocol import CommandClaimRequest
+
+    body = CommandClaimRequest.model_validate(raw)
+    return request.app.state.command_service.claim(
+        db, principal(request, db, require_session=True), command_id, body.command_sha256
+    )

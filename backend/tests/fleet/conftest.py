@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from tests.fleet.command_fixtures import command_env as command_env
 from tests.fleet.identity_fixtures import authority_store as authority_store
 from tests.fleet.identity_fixtures import identity_env as identity_env
 from tests.fleet.test_management import catalog as catalog

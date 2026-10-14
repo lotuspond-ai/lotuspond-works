@@ -100,6 +100,9 @@ class Authority:
         self.expiry = self.clock.now + 900000
         return self.state()
 
+    def poll(self, token, session):
+        return None
+
     def close(self):
         pass
 
@@ -734,3 +737,104 @@ def test_timestamp_phase_change_renews_before_unsafe_heartbeat_deferral(tmp_path
     assert len(starts) == 1 and starts[0][1] >= 300000
     assert any(start >= starts[0][0] + 20000 for start in heartbeat_starts)
     assert len(heartbeat_starts) < 36
+
+
+@pytest.mark.parametrize("jitter", [0, 1, 30000])
+@pytest.mark.parametrize("stamp", ["start", "completion"])
+def test_slow_command_poll_preserves_heartbeat_and_rotation_lead(tmp_path, jitter, stamp):
+    clock, stop = Clock(), threading.Event()
+
+    class Slow(Authority):
+        prepared_at = None
+        heartbeat_starts = []
+
+        def poll(self, token, session):
+            clock.now += 10000
+            return None
+
+        def heartbeat(self, token, session):
+            self.heartbeat_starts.append(clock.now)
+            start = clock.now
+            clock.now += 10000
+            result = super().heartbeat(token, session)
+            return (
+                result.model_copy(update={"server_time_ms": start}) if stamp == "start" else result
+            )
+
+        def prepare(self, token, session):
+            self.prepared_at = clock.now
+            assert self.expiry - clock.now >= 300000
+            return super().prepare(token, session)
+
+    authority = Slow(clock, stop)
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        runner = supervisor(authority, store, clock)
+        runner._jitter = lambda: jitter
+        assert runner.run(stop) == 0
+    assert authority.prepared_at is not None
+    assert (
+        max(b - a for a, b in zip(authority.heartbeat_starts, authority.heartbeat_starts[1:]))
+        <= 40000
+    )
+
+
+@pytest.mark.parametrize("stamp", ["start", "completion"])
+def test_slow_poll_records_and_claim_preserve_control_priority(tmp_path, stamp):
+    from command_fixtures import command_case, delivery, records, snapshot
+
+    from lotuspond_runtime.protocol import AdmissionView, RuntimeIdentity
+
+    clock, stop = Clock(), threading.Event()
+    clock.now = 2000
+
+    class SlowCommands(Authority):
+        case = None
+        claimed = 0
+        prepared_at = None
+
+        def poll(self, token, session):
+            clock.now += 10000
+            self.case = command_case(
+                identity=RuntimeIdentity.model_validate(IDENTITY), now=clock.now
+            )
+            return delivery(self.case)
+
+        def claim(self, token, session, command_id, digest):
+            clock.now += 10000
+            self.claimed += 1
+            return AdmissionView(command_id=command_id, command_sha256=digest, status="claimed")
+
+        def heartbeat(self, token, session):
+            start = clock.now
+            clock.now += 10000
+            result = super().heartbeat(token, session)
+            return (
+                result.model_copy(update={"server_time_ms": start}) if stamp == "start" else result
+            )
+
+        def prepare(self, token, session):
+            self.prepared_at = clock.now
+            assert self.expiry - clock.now >= 300000
+            return super().prepare(token, session)
+
+    authority = SlowCommands(clock, stop)
+
+    class Records:
+        def load(self, command):
+            clock.now += 2000
+            return records(authority.case)
+
+    class Trust:
+        def current(self, installation_id):
+            clock.now += 2000
+            return snapshot(authority.case)
+
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        runner = supervisor(
+            authority, store, clock, command_records=Records(), command_trust=Trust()
+        )
+        assert runner.run(stop) == 0
+    assert authority.prepared_at is not None
+    assert authority.claimed > 0

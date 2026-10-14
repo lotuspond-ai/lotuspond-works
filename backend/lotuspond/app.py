@@ -156,9 +156,12 @@ def create_app(
     *,
     engine=None,
     fleet_dependencies: FleetDependencies | None = None,
+    command_dependencies=None,
 ) -> FastAPI:
     settings = settings or Settings()
-    if fleet_dependencies is not None and settings.env != "test":
+    if (
+        fleet_dependencies is not None or command_dependencies is not None
+    ) and settings.env != "test":
         raise ValueError("Fleet fixture injection requires test mode")
     owned_engine = engine is None
     engine = engine if engine is not None else engine_for(settings)
@@ -184,6 +187,28 @@ def create_app(
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
+    from .fleet.commands import (
+        CommandDependencies,
+        CommandService,
+        DenyBusinessDispatchAuthority,
+        DenyPinnedRecordSource,
+        UnavailableCommandTrustAuthority,
+    )
+
+    if command_dependencies is not None and type(command_dependencies) is not CommandDependencies:
+        raise ValueError("Invalid command hooks")
+    command_hooks = command_dependencies or CommandDependencies(
+        DenyBusinessDispatchAuthority(),
+        DenyPinnedRecordSource(),
+        UnavailableCommandTrustAuthority(),
+    )
+    app.state.command_service = CommandService(
+        dependencies.recovery,
+        command_hooks.dispatch,
+        command_hooks.records,
+        command_hooks.trust,
+        dependencies=dependencies,
+    )
     app.state.engine = engine
     app.state.sessions = sessions_for(engine)
     app.state.limiter = limiter
@@ -260,6 +285,13 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.2.0",
+                    "id": "fleet-command-admission",
+                    "date": "2026-10-14",
+                    "title": "Signed runtime command admission and replay fences",
+                    "description": "The opt-in fleet API adds session-authenticated command polling and one-use admission claims. Signed commands are checked against current recovery, independent command trust, scoped connections and authoritative action records. Production record and dispatch authorities deny by default. Claims grant no business execution permission.",
+                },
                 {
                     "version": "0.2.0",
                     "id": "fleet-runtime-identity",
