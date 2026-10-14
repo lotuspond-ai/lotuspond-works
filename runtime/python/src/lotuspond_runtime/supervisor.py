@@ -120,7 +120,11 @@ class RuntimeSupervisor:
             active = self._remote("self_state", state, SelfState, state.active_token)
         return state, active
 
-    def _rotate(self, state, active, stop):
+    def _rotate(self, state, active, stop, *, startup_recovery=False):
+        # Normal scheduling must retain the five-minute lead. One already-late
+        # startup recovery may rotate a still-valid C after fresh session proof.
+        if not startup_recovery and self._now() > active.credential_expires_at_ms - 300000:
+            raise FleetError("authority_unavailable")
         self._attempt += 1
         attempt = self._attempt
         pending = self._remote(
@@ -150,6 +154,18 @@ class RuntimeSupervisor:
         self._checkpoint("after_final_save")
         return state, result
 
+    def _next_heartbeat(self, rotation_at):
+        now = self._monotonic()
+        deadline = now + 20
+        # Reserve one full ten-second attempt plus one second of loop/clock
+        # granularity before rotation. Once this earlier heartbeat completes,
+        # the boundary is no longer in the future, so
+        # normal cadence resumes without repeatedly renewing in that window.
+        until_headroom = (rotation_at - self._now()) / 1000 - 11
+        if until_headroom > 0:
+            deadline = min(deadline, now + until_headroom)
+        return deadline
+
     def _run(self, stop):
         if stop.is_set():
             return
@@ -173,12 +189,19 @@ class RuntimeSupervisor:
         if type(jitter) is not int or not 0 <= jitter <= 30000:
             raise FleetError("invalid_request")
         next_rotation = active.credential_expires_at_ms - 300000 - jitter
-        heartbeat_at = self._monotonic() + 20
+        startup_overdue = self._now() > next_rotation
+        heartbeat_at = self._next_heartbeat(next_rotation)
         lease_expires = session.expires_at_ms
         while not stop.is_set():
             now = self._now()
             if now >= active.credential_expires_at_ms or now >= lease_expires:
                 raise FleetError("unauthenticated")
+            if self._now() >= next_rotation and not stop.is_set():
+                state, active = self._rotate(state, active, stop, startup_recovery=startup_overdue)
+                startup_overdue = False
+                next_rotation = active.credential_expires_at_ms - 300000 - jitter
+                if next_rotation <= self._now():
+                    raise FleetError("authority_unavailable")
             if self._monotonic() >= heartbeat_at:
                 previous_version = active.identity.credential_version
                 active = self._remote(
@@ -190,12 +213,10 @@ class RuntimeSupervisor:
                 ):
                     raise FleetError("unauthenticated")
                 lease_expires = active.session_expires_at_ms
-                heartbeat_at = self._monotonic() + 20
-            if self._now() >= next_rotation and not stop.is_set():
-                state, active = self._rotate(state, active, stop)
-                next_rotation = active.credential_expires_at_ms - 300000 - jitter
-                if next_rotation <= self._now():
-                    raise FleetError("authority_unavailable")
+                heartbeat_at = self._next_heartbeat(next_rotation)
+                # A completed heartbeat may land exactly on the rotation target.
+                # Re-evaluate immediately instead of adding a forced wait.
+                continue
             delay = min(
                 1.0,
                 max(0.001, heartbeat_at - self._monotonic()),

@@ -398,3 +398,187 @@ def test_independently_provisioned_identity_and_changed_responses_deny(
         assert "prepare" not in authority.calls
         if phase == "self_state":
             assert "acquire" not in authority.calls
+
+
+@pytest.mark.parametrize(
+    "initial_ms,jitter_ms,heartbeat_latency_ms",
+    [
+        (0, 0, 1000),
+        (0, 0, 9000),
+        (0, 0, 10000),
+        (15000, 0, 9000),
+        (15000, 0, 10000),
+        (10000, 5000, 10000),
+        (10000, 30000, 10000),
+        (0, 30000, 10000),
+    ],
+)
+def test_actual_prepare_keeps_rotation_lead_across_heartbeat_latency(
+    tmp_path, initial_ms, jitter_ms, heartbeat_latency_ms
+):
+    clock, stop = Clock(), threading.Event()
+    clock.now = initial_ms
+    authority = Authority(clock, stop)
+    target = authority.expiry - 300000 - jitter_ms
+    heartbeat, prepare, activate = authority.heartbeat, authority.prepare, authority.activate
+    events, starts, heartbeat_starts = [], [], []
+
+    def heartbeat_with_latency(*args):
+        started = clock.now
+        # Exercise real authority/lease behavior, not a mocked return. Delaying
+        # only the critical window retains the previously reviewed phase alignment.
+        assert started < authority.lease
+        heartbeat_starts.append(started)
+        response = heartbeat(*args)
+        if not starts and started >= target - 11000:
+            clock.now += heartbeat_latency_ms
+        assert clock.now < authority.lease
+        events.append(("heartbeat", started, clock.now))
+        return response
+
+    def prepare_with_latency(*args):
+        started = clock.now
+        starts.append((started, authority.expiry - started))
+        assert started < authority.lease
+        response = prepare(*args)
+        clock.now += 10000  # The full allowed prepare attempt is still lease-safe.
+        assert clock.now < authority.lease
+        events.append(("prepare", started, clock.now))
+        return response
+
+    def activate_with_latency(*args):
+        started = clock.now
+        assert started < authority.lease
+        response = activate(*args)
+        clock.now += 10000
+        assert clock.now < authority.lease
+        events.append(("activate", started, clock.now))
+        return response
+
+    authority.heartbeat, authority.prepare, authority.activate = (
+        heartbeat_with_latency,
+        prepare_with_latency,
+        activate_with_latency,
+    )
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        instance = supervisor_module().RuntimeSupervisor(
+            authority,
+            store,
+            RuntimeObservation(platform="linux", connectors=()),
+            installation_id="test-install",
+            wall_ms=clock.wall,
+            monotonic=clock.monotonic,
+            jitter_ms=lambda: jitter_ms,
+            wait=clock.wait,
+        )
+        assert instance.run(stop) == 0
+        assert store.load().active_token == SecretStr(P)
+    assert starts == [(target, 300000 + jitter_ms)]
+    assert any(event[0] == "heartbeat" and event[1] >= starts[0][0] + 20000 for event in events)
+    assert len(starts) == 1
+    # One early heartbeat may reserve the rotation window; there is no retry storm.
+    assert len(heartbeat_starts) < 36
+
+
+def test_missed_five_minute_minimum_fences_before_actual_prepare(tmp_path):
+    clock, stop = Clock(), threading.Event()
+    authority = Authority(clock, stop)
+
+    def overshooting_wait(stop, seconds):
+        clock.wait(stop, seconds)
+        if clock.now == 600000:
+            clock.now += 1
+        return stop.is_set()
+
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        instance = supervisor_module().RuntimeSupervisor(
+            authority,
+            store,
+            RuntimeObservation(platform="linux", connectors=()),
+            installation_id="test-install",
+            wall_ms=clock.wall,
+            monotonic=clock.monotonic,
+            jitter_ms=lambda: 0,
+            wait=overshooting_wait,
+        )
+        assert instance.run(stop) == 3
+        assert store.load() == credential()
+    assert "prepare" not in authority.calls
+
+
+def test_jitter_cushion_allows_slightly_late_target_without_extending_minimum(tmp_path):
+    clock, stop = Clock(), threading.Event()
+    authority = Authority(clock, stop)
+    starts = []
+    prepare = authority.prepare
+
+    def measured_prepare(*args):
+        starts.append((clock.now, authority.expiry - clock.now))
+        return prepare(*args)
+
+    authority.prepare = measured_prepare
+
+    def overshooting_wait(stop, seconds):
+        clock.wait(stop, seconds)
+        if clock.now == 595000:
+            clock.now += 1
+        return stop.is_set()
+
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        instance = supervisor_module().RuntimeSupervisor(
+            authority,
+            store,
+            RuntimeObservation(platform="linux", connectors=()),
+            installation_id="test-install",
+            wall_ms=clock.wall,
+            monotonic=clock.monotonic,
+            jitter_ms=lambda: 5000,
+            wait=overshooting_wait,
+        )
+        assert instance.run(stop) == 0
+        assert store.load().active_token == SecretStr(P)
+    assert starts == [(595001, 304999)]
+
+
+def test_valid_c_late_startup_recovers_once_then_resumes_normal_rotation(tmp_path):
+    clock, stop = Clock(), threading.Event()
+    clock.now = 661000
+    authority = Authority(clock, stop)
+    starts = []
+    q = SecretStr("lpr_" + "C" * 42 + "A")
+    heartbeat = authority.heartbeat
+
+    def keep_running_heartbeat(*args):
+        result = heartbeat(*args)
+        if authority.version < 3:
+            stop.clear()
+        return result
+
+    def prepare_successor(*args):
+        starts.append((clock.now, authority.expiry - clock.now))
+        assert clock.now < authority.lease and clock.now < authority.expiry
+        authority.prepared = True
+        return PreparedCredential(
+            token=P if authority.version == 1 else q,
+            credential_version=authority.version + 1,
+            activation_deadline_ms=clock.now + 60000,
+            server_time_ms=clock.now,
+        )
+
+    def activate_successor(token, session):
+        assert session == SESSION and authority.prepared
+        assert clock.now < authority.lease and clock.now < authority.expiry
+        authority.active, authority.version = token, authority.version + 1
+        authority.expiry = clock.now + 900000
+        return authority.state()
+
+    authority.heartbeat = keep_running_heartbeat
+    authority.prepare, authority.activate = prepare_successor, activate_successor
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        assert supervisor(authority, store, clock).run(stop) == 0
+        assert store.load().active_token == q
+    assert starts == [(661000, 239000), (1261000, 300000)]

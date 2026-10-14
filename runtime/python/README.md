@@ -121,8 +121,17 @@ config value, never an installation inferred from a response.
 Enrollment persists C durably before session acquisition. Session proof stays in
 supervisor memory. Rotation starts with at least five minutes remaining plus
 0–30 seconds of jitter, using confirmed server time and monotonic elapsed time;
-clock disagreement over 30 seconds fences the process. Heartbeats run every
-20 seconds. Shutdown uses SIGINT/SIGTERM and closes owned transport resources.
+clock disagreement over 30 seconds fences the process. Heartbeats normally run
+at 20-second intervals; one early heartbeat reserves the full ten-second attempt
+plus one second of loop/clock headroom before the unchanged rotation target.
+Due rotation runs before a coincident heartbeat, and heartbeat completion causes
+an immediate deadline check. A steady-state prepare with less than five minutes
+remaining is fenced; nonzero jitter may absorb small scheduling delays while
+that minimum still holds. An already-overdue credential recovered at startup
+may make one immediate fresh rotation attempt after current credential/session
+validation. That recovery never extends C's expiry or accepts expired proof;
+success returns to normal scheduling. Shutdown uses SIGINT/SIGTERM and closes
+owned transport resources.
 
 The supervisor persists C/P before activation and retains uncertainty after a
 lost response or storage failure. On restart it first tries P's metadata-only
