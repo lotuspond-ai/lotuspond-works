@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["lotuspond-sdk==0.2.0", "pydantic>=2.12,<3", "rfc8785==0.1.4"]
 
+[project.scripts]
+lotuspond-runtime = "lotuspond_runtime.cli:main"
+
 [dependency-groups]
 dev = ["pytest>=9,<10", "ruff>=0.14,<1"]
 

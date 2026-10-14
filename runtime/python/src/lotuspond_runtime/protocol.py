@@ -595,3 +595,41 @@ __all__ += [
     "InstanceList",
     "encode_enrollment_issued",
 ]
+
+
+def validate_token(value: SecretStr, prefix: Literal["lpe_", "lpr_", "lps_"]) -> SecretStr:
+    """Validate exactly one canonical 256-bit token at private runtime boundaries."""
+    if (
+        type(value) is not SecretStr
+        or type(value.get_secret_value()) is not str
+        or prefix not in ("lpe_", "lpr_", "lps_")
+        or re.fullmatch(
+            re.escape(prefix) + r"[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]", value.get_secret_value()
+        )
+        is None
+    ):
+        raise FleetError("invalid_request")
+    return value
+
+
+class RuntimeConfig(FleetModel):
+    origin: Annotated[str, Field(min_length=1, max_length=2048)]
+    ca_file: Annotated[str, Field(min_length=1, max_length=4096)]
+    state_directory: Annotated[str, Field(min_length=1, max_length=4096)]
+    installation_id: OpaqueId
+    observation: RuntimeObservation
+    mode: Literal["production", "development", "test"] = "production"
+
+    @field_validator("ca_file", "state_directory")
+    @classmethod
+    def _operator_path(cls, value):
+        if (
+            not value.startswith("/")
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)
+            or ".." in value.split("/")
+        ):
+            raise FleetError("invalid_request")
+        return value
+
+
+__all__ += ["RuntimeConfig", "validate_token"]
