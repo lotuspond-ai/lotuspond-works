@@ -102,9 +102,11 @@ def migrate(settings: Settings):
             } != {"version", "installed_at"}:
                 raise ValueError("Unexpected schema state; no changes made")
             versions = list(connection.execute(SchemaVersion.__table__.select()).scalars())
+            if len(versions) != 1 or type(versions[0]) is not int:
+                raise ValueError("Unexpected schema state; no changes made")
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")
-            if len(versions) != 1 or versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
+            if versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
                 raise ValueError("Unexpected schema state; no changes made")
             current = versions[0]
             inspector = inspect(connection)

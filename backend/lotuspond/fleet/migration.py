@@ -33,10 +33,44 @@ ERROR = "Unexpected schema state; no changes made"
 
 
 def _normalize_check(expression: str) -> str:
-    # PostgreSQL may render the same string literal as text or varchar after an
-    # earlier supported upgrade. Remove only those implicit scalar/array casts;
-    # retain grouping, operators and literals so a weakened predicate differs.
-    return re.sub(r"::(?:character varying|text|numeric)(?:\[\])?", "", expression)
+    # Normalize accepted PostgreSQL cast rendering only between quoted regions.
+    # Literal bytes, doubled quotes, quoted identifiers and E-string escapes
+    # retain their exact meaning; this is not a general SQL equivalence parser.
+    cast = re.compile(r"::(?:character varying|text|numeric)(?:\[\])?(?![\w$])")
+    parts = []
+    outside_start = cursor = 0
+    while cursor < len(expression):
+        quote = expression[cursor]
+        if quote not in {"'", '"'}:
+            cursor += 1
+            continue
+        parts.append(cast.sub("", expression[outside_start:cursor]))
+        quoted_start = cursor
+        escapes = (
+            quote == "'"
+            and cursor > 0
+            and expression[cursor - 1] in "eE"
+            and (
+                cursor < 2
+                or not (expression[cursor - 2].isalnum() or expression[cursor - 2] in "_$")
+            )
+        )
+        cursor += 1
+        while cursor < len(expression):
+            if escapes and expression[cursor] == "\\":
+                cursor += 2
+            elif expression[cursor] == quote:
+                cursor += 1
+                if cursor < len(expression) and expression[cursor] == quote:
+                    cursor += 1
+                else:
+                    break
+            else:
+                cursor += 1
+        parts.append(expression[quoted_start:cursor])
+        outside_start = cursor
+    parts.append(cast.sub("", expression[outside_start:]))
+    return "".join(parts)
 
 
 def _preflight(connection: Connection) -> None:
@@ -62,6 +96,21 @@ def _preflight(connection: Connection) -> None:
         )
     )
     if invalid:
+        raise ValueError(ERROR)
+    # A validated FK is insufficient when its internal insert/update or
+    # referenced-table delete/update triggers do not enforce normal writes.
+    # Refuse the operator's state unchanged; never silently enable triggers.
+    unenforced = connection.scalar(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM pg_constraint c "
+            "JOIN pg_class child ON child.oid=c.conrelid "
+            "JOIN pg_namespace n ON n.oid=child.relnamespace "
+            "JOIN pg_trigger t ON t.tgconstraint=c.oid "
+            "WHERE n.nspname=current_schema() AND c.contype='f' "
+            "AND t.tgenabled NOT IN ('O','A'))"
+        )
+    )
+    if unenforced:
         raise ValueError(ERROR)
     for name, table in old_tables.items():
         columns = inspector.get_columns(name)
@@ -138,11 +187,22 @@ def _preflight(connection: Connection) -> None:
         expected_indexes = {
             (i.name, tuple(c.name for c in i.columns), bool(i.unique)) for i in table.indexes
         }
-        actual_indexes = {
-            (i["name"], tuple(i["column_names"]), bool(i["unique"]))
-            for i in inspector.get_indexes(name)
-            if not i.get("duplicates_constraint")
-        }
+        indexes = [i for i in inspector.get_indexes(name) if not i.get("duplicates_constraint")]
+        # Every frozen v12 index is an unconditional plain-column default btree.
+        # Reflection omits default options (except an empty INCLUDE list). Refuse
+        # predicates, methods, opclasses, INCLUDE, storage or sort changes rather
+        # than accepting or rebuilding a customer's altered index.
+        if any(
+            i.get("expressions")
+            or i.get("column_sorting")
+            or any(
+                value not in (None, False, {}, [])
+                for value in i.get("dialect_options", {}).values()
+            )
+            for i in indexes
+        ):
+            raise ValueError(ERROR)
+        actual_indexes = {(i["name"], tuple(i["column_names"]), bool(i["unique"])) for i in indexes}
         if actual_indexes != expected_indexes:
             raise ValueError(ERROR)
         # A disabled trigger could have allowed existing orphan rows even while

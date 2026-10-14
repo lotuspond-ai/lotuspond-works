@@ -336,3 +336,211 @@ def test_missing_ledger_shape_refused_atomically(schema_database, monkeypatch, c
     with engine.connect() as connection:
         assert rows(connection) == before_rows
         assert signature(connection) == before_signature
+
+
+def fk_trigger_catalog(connection):
+    return list(
+        connection.execute(
+            text(
+                "SELECT c.conname, child.relname, referenced.relname, t.tgname, target.relname, "
+                "t.tgenabled, t.tgisinternal, t.tgtype, t.tgdeferrable, t.tginitdeferred, "
+                "pg_get_triggerdef(t.oid) FROM pg_constraint c "
+                "JOIN pg_class child ON child.oid=c.conrelid "
+                "JOIN pg_class referenced ON referenced.oid=c.confrelid "
+                "JOIN pg_namespace n ON n.oid=child.relnamespace "
+                "JOIN pg_trigger t ON t.tgconstraint=c.oid "
+                "JOIN pg_class target ON target.oid=t.tgrelid "
+                "WHERE n.nspname=current_schema() AND c.contype='f' "
+                "ORDER BY c.conname, child.relname, target.relname, t.tgname"
+            )
+        )
+    )
+
+
+def corrupt_snapshot(connection):
+    return (
+        rows(connection),
+        signature(connection),
+        fk_trigger_catalog(connection),
+        list(
+            connection.execute(text("SELECT row_to_json(s)::text FROM schema_version s")).scalars()
+        ),
+        list(
+            connection.execute(
+                text(
+                    "SELECT indexname, indexdef FROM pg_indexes "
+                    "WHERE schemaname=current_schema() ORDER BY indexname"
+                )
+            )
+        ),
+    )
+
+
+def assert_corrupt_refusal(engine, monkeypatch, before):
+    with pytest.raises(ValueError) as error:
+        upgrade(engine, monkeypatch)
+    assert str(error.value) == "Unexpected schema state; no changes made"
+    with engine.connect() as connection:
+        assert corrupt_snapshot(connection) == before
+        from lotuspond.fleet.migration import FLEET_TABLES
+
+        assert not FLEET_TABLES.intersection(inspect(connection).get_table_names())
+
+
+@pytest.mark.parametrize("literal", ["personal::text", "personal::text''::numeric"])
+def test_cast_looking_check_literal_refused_atomically(schema_database, monkeypatch, literal):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)  # Organization rows remain valid under the corrupt kind CHECK.
+        check = next(
+            c
+            for c in inspect(connection).get_check_constraints("workspaces")
+            if "'personal'" in c["sqltext"]
+        )
+        connection.execute(
+            text(
+                f"ALTER TABLE workspaces DROP CONSTRAINT \"{check['name']}\", ADD CONSTRAINT \"{check['name']}\" CHECK (kind IN ('{literal}','organization'))"
+            )
+        )
+        before = corrupt_snapshot(connection)
+    assert_corrupt_refusal(engine, monkeypatch, before)
+
+
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("kind::text = 'personal::text'::text", "kind = 'personal::text'"),
+        ("kind::text = 'personal''::text'::text", "kind = 'personal''::text'"),
+        ("\"kind::text\"::text = 'value'::character varying", "\"kind::text\" = 'value'"),
+        ("kind::text = E'personal\\'::text'::text", "kind = E'personal\\'::text'"),
+        ("value::numeric >= 0::numeric", "value >= 0"),
+        (
+            "kind::text = ANY (ARRAY['personal'::character varying]::text[])",
+            "kind = ANY (ARRAY['personal'])",
+        ),
+        ("value::textual = value::numeric_precision", "value::textual = value::numeric_precision"),
+    ],
+)
+def test_check_normalization_preserves_quotes_and_only_accepted_casts(expression, expected):
+    from lotuspond.fleet.migration import _normalize_check
+
+    assert _normalize_check(expression) == expected
+
+
+def environment_project_fk_triggers(connection, table):
+    return list(
+        connection.execute(
+            text(
+                "SELECT t.tgname FROM pg_trigger t JOIN pg_constraint c ON c.oid=t.tgconstraint "
+                "JOIN pg_class child ON child.oid=c.conrelid "
+                "JOIN pg_class parent ON parent.oid=c.confrelid "
+                "JOIN pg_namespace n ON n.oid=child.relnamespace "
+                "JOIN pg_class target ON target.oid=t.tgrelid "
+                "WHERE n.nspname=current_schema() AND c.contype='f' "
+                "AND child.relname='environments' AND parent.relname='projects' "
+                "AND target.relname=:table ORDER BY t.tgname"
+            ),
+            {"table": table},
+        ).scalars()
+    )
+
+
+@pytest.mark.parametrize("table", ["environments", "projects"])
+@pytest.mark.parametrize("mode", ["DISABLE", "ENABLE REPLICA"])
+def test_disabled_fk_enforcement_refused_atomically(schema_database, monkeypatch, table, mode):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)
+        triggers = environment_project_fk_triggers(connection, table)
+        assert len(triggers) == 2
+        # One disabled insert/update or delete/update trigger already leaves a gap.
+        connection.execute(text(f'ALTER TABLE "{table}" {mode} TRIGGER "{triggers[0]}"'))
+        before = corrupt_snapshot(connection)
+    assert_corrupt_refusal(engine, monkeypatch, before)
+
+
+@pytest.mark.parametrize("table", ["environments", "projects"])
+def test_always_enabled_fk_triggers_preserve_normal_write_enforcement(
+    schema_database, monkeypatch, table
+):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)
+        for trigger in environment_project_fk_triggers(connection, table):
+            connection.execute(text(f'ALTER TABLE "{table}" ENABLE ALWAYS TRIGGER "{trigger}"'))
+        before_rows, before_triggers = rows(connection), fk_trigger_catalog(connection)
+    upgrade(engine, monkeypatch)
+    with engine.connect() as connection:
+        assert {name: rows(connection)[name] for name in before_rows} == before_rows
+        assert set(before_triggers).issubset(set(fk_trigger_catalog(connection)))
+        assert connection.scalar(select(SchemaVersion.version)) == 13
+
+
+@pytest.mark.parametrize(
+    ("index", "definition"),
+    [
+        ("ix_sessions_expires_at", "(expires_at) WHERE false"),
+        ("ix_sessions_user_id", "(user_id) WHERE false"),
+        ("ix_sessions_user_id", "USING hash (user_id)"),
+        ("ix_sessions_user_id", "(user_id DESC)"),
+        ("ix_sessions_user_id", "(user_id) INCLUDE (expires_at)"),
+        ("ix_sessions_user_id", "(user_id varchar_pattern_ops)"),
+        ("ix_sessions_user_id", "(user_id) WITH (fillfactor=70)"),
+    ],
+)
+def test_changed_index_definition_refused_atomically(
+    schema_database, monkeypatch, index, definition
+):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)
+        connection.execute(text(f'DROP INDEX "{index}"'))
+        connection.execute(text(f'CREATE INDEX "{index}" ON sessions {definition}'))
+        before = corrupt_snapshot(connection)
+    assert_corrupt_refusal(engine, monkeypatch, before)
+
+
+def test_array_ledger_value_refused_atomically(schema_database, monkeypatch):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)
+        connection.execute(
+            text(
+                "ALTER TABLE schema_version ALTER COLUMN version DROP DEFAULT, ALTER COLUMN version TYPE integer[] USING ARRAY[version]"
+            )
+        )
+        before = corrupt_snapshot(connection)
+    assert_corrupt_refusal(engine, monkeypatch, before)
+
+
+@pytest.mark.parametrize(
+    ("column", "definition"),
+    [
+        ("kind", "kind::text IN ('personal'::text,'organization'::text)"),
+        (
+            "monthly_budget_usd",
+            "monthly_budget_usd IS NULL OR monthly_budget_usd >= CAST(0 AS NUMERIC)",
+        ),
+    ],
+)
+def test_accepted_check_cast_rendering_preserves_v12_rows(
+    schema_database, monkeypatch, column, definition
+):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)
+        check = next(
+            c
+            for c in inspect(connection).get_check_constraints("workspaces")
+            if c["sqltext"].startswith(column)
+        )
+        connection.execute(
+            text(
+                f'ALTER TABLE workspaces DROP CONSTRAINT "{check["name"]}", ADD CONSTRAINT "{check["name"]}" CHECK ({definition})'
+            )
+        )
+        before = rows(connection)
+    upgrade(engine, monkeypatch)
+    with engine.connect() as connection:
+        assert {name: rows(connection)[name] for name in before} == before
+        assert connection.scalar(select(SchemaVersion.version)) == 13
