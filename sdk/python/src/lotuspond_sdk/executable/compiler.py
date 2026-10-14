@@ -42,6 +42,31 @@ def _leaves(origin):
     return [leaf for option in origin.options if option is not None for leaf in _leaves(option)]
 
 
+def _ordinary_data(flow):
+    """Check complete data on an already inferred, bounded flow without casting handles."""
+    pending, seen = [flow], set()
+    while pending:
+        value = pending.pop()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        if value.may_be_missing:
+            return False
+        if type(value) is DataType:
+            continue
+        if type(value) is FlowObjectType:
+            pending.extend(value.fields.values())
+        elif type(value) is FlowArrayType:
+            # Summaries, elements and alternatives can share already validated nodes.
+            if value.items is not None:
+                pending.append(value.items)
+            pending.extend(value.elements or ())
+            pending.extend(item for item in value.alternatives or () if item is not None)
+        else:
+            return False
+    return True
+
+
 @dataclass
 class _Scope:
     input_schema: object
@@ -624,7 +649,10 @@ class _Compiler:
             left, a = nested(
                 step.then_body,
                 "/then_body",
-                replace(env, present_refs=env.present_refs | presence_guard(step.condition)),
+                replace(
+                    env,
+                    present_refs=env.present_refs | presence_guard(step.condition, package.schemas),
+                ),
                 conditions=(*guards, (selector, 0)),
                 edge="then",
             )
@@ -659,12 +687,13 @@ class _Compiler:
             array = self.infer(step.input, env)
             if array.may_be_missing:
                 raise ExecutableError("unavailable_value")
-            maximum = (
-                array.max_items
-                if type(array) is FlowArrayType
-                else getattr(array.schema, "max_items", None)
-            )
-            if maximum is None or maximum > step.max_items:
+            if type(array) is FlowArrayType:
+                maximum = array.max_items
+            elif type(array) is DataType and array.schema.kind == "array":
+                maximum = array.schema.max_items
+            else:
+                raise ExecutableError("type_mismatch")
+            if maximum > step.max_items:
                 raise ExecutableError("type_mismatch")
             owner = "l" + _digest([digest, path])[:63]
             slot = f"$item:{owner}"
@@ -736,7 +765,8 @@ class _Compiler:
                 for leaf in _leaves(intent.source):
                     authored = self.intents[(digest, leaf.step_id)]
                     if (
-                        self.declaration(package, "policies", authored.policy_ref).ref
+                        authored.approval != "human"
+                        or self.declaration(package, "policies", authored.policy_ref).ref
                         != self.declaration(package, "policies", step.assignment_policy_ref).ref
                     ):
                         raise ExecutableError("intent_mismatch")
@@ -747,17 +777,16 @@ class _Compiler:
                 output = DataType(resolve_schema(step.form_schema, package.schemas))
         elif kind == "action_dispatch":
             intent = self.handle(step.intent, "action_intent", env)
-            needs_review = any(
-                self.intents[(digest, x.step_id)].approval == "human"
-                for x in _leaves(intent.source)
-            )
+            intent_steps = [self.intents[(digest, x.step_id)] for x in _leaves(intent.source)]
+            needs_review = any(x.approval == "human" for x in intent_steps)
             if step.decision is not None:
+                if any(x.approval != "human" for x in intent_steps):
+                    raise ExecutableError("intent_mismatch")
                 decision = self.handle(step.decision, "human_decision", env)
                 if decision.intent_source != intent.source:
                     raise ExecutableError("intent_mismatch")
             elif needs_review:
                 raise ExecutableError("intent_mismatch")
-            intent_steps = [self.intents[(digest, x.step_id)] for x in _leaves(intent.source)]
             referenced = [
                 self.declaration(package, "connectors", x.connector_ref).ref for x in intent_steps
             ]
@@ -917,7 +946,7 @@ class _Compiler:
             output = null
         elif kind == "external_wait":
             correlation = self.infer(step.correlation, env)
-            if type(correlation) is not DataType or correlation.may_be_missing:
+            if not _ordinary_data(correlation):
                 raise ExecutableError("type_mismatch")
             output = DataType(resolve_schema(step.signal_schema, package.schemas))
             pins = [self.declaration(package, "policies", step.assignment_policy_ref).ref]

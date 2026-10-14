@@ -1,8 +1,8 @@
 """Prove that a built API image embeds exactly the source trees in this working copy.
 
-The repository has no commit, so provenance here is content-based: the same tree hash
-is computed over the source on disk and over the tree actually present inside the
-image. It answers "is this image built from this source", not "is this source
+This proof establishes content identity only; Git provenance is not established.
+The same tree hash is computed over the source on disk and over the tree actually
+present inside the image. It answers "is this image built from this source", not "is this source
 reviewed", "is this image published", or anything about a hosted deployment.
 """
 
@@ -142,7 +142,9 @@ def build(repo: Path, args) -> dict[str, object]:
         "schema": "lotuspond.local-content-proof.v1",
         "tree_hash_algorithm": TREE_ALGORITHM,
         "git_provenance": None,
-        "git_provenance_note": "Repository has no HEAD; hashes are content-based.",
+        "git_provenance_note": (
+            "This proof establishes content identity only; Git provenance has not been established."
+        ),
         "bundle": file_record(args.bundle),
         "smoke_report": file_record(args.smoke_report),
         "delivery_scope": ["api", "static_ui", "collector", "postgres", "redis"],

@@ -59,6 +59,33 @@ def test_optional_reference_requires_default_or_direct_guard():
     assert presence_guard(call("not", call("exists", optional))) == frozenset()
 
 
+def test_presence_guard_named_definitions_preserve_only_direct_exists_facts():
+    definitions = [{"name": "flag", "schema": BOOLEAN}]
+    named = literal(True, {"kind": "ref", "name": "flag"})
+    optional = ref("/a~1b~0c")
+    direct = call("exists", optional)
+    assert presence_guard(direct, definitions) == presence_guard(direct)
+    assert presence_guard(named, definitions) == frozenset()
+    assert presence_guard(call("and", direct, named), definitions) == frozenset()
+    assert presence_guard(call("not", direct), definitions) == frozenset()
+
+
+def test_presence_guard_revalidates_mutated_named_mapping_and_definitions():
+    from lotuspond_sdk.executable import parse_mapping
+
+    definitions = [{"name": "flag", "schema": BOOLEAN}]
+    mapping = parse_mapping(literal(True, {"kind": "ref", "name": "flag"}), definitions)
+    mapping.value = "not-a-boolean"
+    with pytest.raises(ExecutableError) as error:
+        presence_guard(mapping, definitions)
+    assert error.value.code == "type_mismatch"
+    mapping.value = True
+    definitions[0]["schema"] = {"kind": "ref", "name": "unknown"}
+    with pytest.raises(ExecutableError) as error:
+        presence_guard(mapping, definitions)
+    assert error.value.code == "unknown_reference"
+
+
 @pytest.mark.parametrize("pointer", ["/bad~2", "not-pointer", "/missing", "/a~1b~0c/x"])
 def test_invalid_pointer(pointer):
     with pytest.raises(ExecutableError):

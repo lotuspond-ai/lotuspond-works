@@ -348,9 +348,10 @@ SDK 0.2.0 adds `lotuspond_sdk.executable.decode_executable_bytes`, fixed
 `ExecutableError`/`ExecutableIssue` diagnostics and v2 metadata constants.
 The v2 schema/canonicalizer identifiers are `lotuspond.workflow-package.v2`
 and `lotuspond.workflow-package.jcs.v2`. The current increment supplies bounded
-JSON/JCS, closed data schemas, static typed mappings and immutable handle-origin
-metadata; package/control authoring, compilation,
-runtime-facing records and CLI commands are subsequent implementation tasks.
+JSON/JCS, closed data schemas, static typed mappings, immutable handle-origin
+metadata, package/control authoring, deterministic compilation, runtime-facing
+records and local CLI commands. These contracts do not execute workflows or
+grant runtime authority.
 
 Raw package and normalized canonical JSON stay within 1,048,576 bytes, depth 32
 and 10,000 items (including object keys). Internal wire/report boundaries use
@@ -405,7 +406,7 @@ Already-bound choices retain their selector identity through repeated aliases.
 Explicit ordered occurrence/selection binding records preserve owner identity
 after slots are bound and remain part of exact provenance equality. Empty handle
 arrays create no origin.
-The later compiler must enforce lexical scopes, guarded branches, originating
+The compiler enforces lexical scopes, guarded branches, originating
 operation kinds and correlated intent/decision provenance; wire records still
 require independent authenticated reload at runtime. See
 [the typed syntax and compiler handoff](../../docs-site/docs/executable-packages.md)

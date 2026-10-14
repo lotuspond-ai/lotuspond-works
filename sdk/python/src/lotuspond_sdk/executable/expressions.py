@@ -223,9 +223,11 @@ def parse_mapping(raw: object, definitions: list[NamedSchema] | None = None) -> 
     return parsed
 
 
-def presence_guard(raw: object) -> frozenset[ReferenceKey]:
+def presence_guard(
+    raw: object, definitions: list[NamedSchema] | None = None
+) -> frozenset[ReferenceKey]:
     """Only a direct exists(ref) true decision edge proves presence, not truthiness."""
-    mapping = parse_mapping(raw)
+    mapping = parse_mapping(raw, definitions)
     if (
         mapping.kind == "call"
         and mapping.fn == "exists"

@@ -102,8 +102,9 @@ inexact integer division and decimal nonrepresentability are runtime errors;
 this layer does not execute or constant-fold even literal arithmetic.
 
 `exists` accepts one direct reference and tests absence, not null/truthiness.
-`presence_guard(condition)` returns reference keys only for a direct
-`exists(ref)` condition. The later compiler applies those keys only on its true
+`presence_guard(condition, definitions=None)` revalidates the mapping using its
+owning named schema definitions and returns reference keys only for a direct
+`exists(ref)` condition. The compiler applies those keys only on its true
 edge, preserving lexical scope and removing them at inappropriate joins.
 `coalesce` takes two compatible data values: its present fallback handles absence
 and does not replace present null. Required consumers refuse a possibly missing
@@ -124,8 +125,8 @@ an operation occurrence. Allowed operation/handle pairs are `action_intent` /
 `action_intent`, `human_review` / `human_decision`, `action_dispatch` /
 `action_receipt`, and `verification` / `verification_evidence`. Non-intent handles
 also carry `intent_source`. Those symbols are static metadata, never authenticated
-runtime handles. The later compiler must create them only for the corresponding
-validated operation and compare the exact intent origins for review/dispatch;
+runtime handles. The compiler creates them only for the corresponding
+validated operation and compares the exact intent origins for review/dispatch;
 the later runtime must independently reload authenticated tenant-bound records
 and compare exact binding digests.
 
