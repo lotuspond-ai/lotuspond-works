@@ -4,9 +4,9 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-All ten v2 tasks are pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1 and 2 are complete after independent review and correction; Tasks 3–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
-## Task 1 implementation evidence (independent review pending)
+## Task 1 initial implementation evidence
 
 Bounded executable JSON/JCS, fixed diagnostics, exact known-model projection,
 strict fixed-field guards and ASCII report helpers are implemented in the new
@@ -39,7 +39,7 @@ provider execution, authority or production qualification is claimed. Later
 v2 authoring/compiler/wire/CLI APIs remain separate tasks. The controller owns
 review acceptance and task/plan completion state.
 
-### Task 1 review correction I1 (re-review pending)
+### Task 1 review correction I1 implementation evidence
 
 Independent review reproduced a full-cap canonical round trip refused by the
 projection's intermediate Python numeric spelling. The correction separates
@@ -70,7 +70,7 @@ Ruling: update the inherited installed-distribution version assertion with Task 
 
 Tasks 2–10 and final application/database/artifact/hosted gates remain pending. This does not qualify an execution runtime or the complete product for production.
 
-## Task 2 implementation evidence (independent review pending)
+## Task 2 initial implementation evidence
 
 Closed data/export schemas, bounded literal validation, lexical mapping inference,
 optional-presence checks and compiler-only handle provenance are implemented in
@@ -143,3 +143,15 @@ Ruff and whitespace checks pass with retained output. The correction includes
 nested intent/decision correlation, owned selectors, empty/nonempty object items,
 metadata mutation and cyclic-alternative refusals. No full SDK/application/DB
 matrix was repeated; the controller requested this scoped correction gate.
+
+## Task 2 review closure
+
+Task 2 is complete through `03c7b76248f87cbe37de969b4885cf3593ebd55c`. Independent review found three Important nested-flow defects: lost array ownership, rewritten bound-choice aliases, and empty-array cardinality treated as missing items. One correction round and a fresh scoped re-review passed: all three addressed, no open or new findings. The final 110 focused tests and 225 Task 1+2 tests on each Python 3.13/3.14 pass without skips or warnings; final logs, Ruff and whitespace evidence were inspected. Earlier full SDK/artifact results remain evidence for their recorded source, not a new full-matrix claim at this fix head.
+
+Nested arrays retain ordered alternatives, owner metadata and cardinality. Owned selections record explicit immutable binding pairs; aliases retain their original identity. Compiler integration must preserve the complete choice, bindings and alternatives in exact comparison and deterministic projection. Package validation must resolve and normalize every mapping before final complete JCS measurement. These obligations are carried into Tasks 3 and 4.
+
+Ruling: extend FlowArrayType with immutable per-element provenance and safe item-selection/iteration metadata because a representative item cannot retain heterogeneous handle origins — cost if wrong: refine these compiler metadata/helper interfaces before v2 stabilization, without changing wire authority.
+
+Ruling: retain selected ownership in ordered immutable source/selector binding records while preserving occurrence-path behavior because substituting different owner slots with the same numeric index otherwise collapses identity — cost if wrong: refine the not-yet-stable compiler metadata and deterministic projection before v2 stabilization; no runtime authority or wire compatibility is created.
+
+Tasks 3–10, full application/database/offline/artifact/hosted verification and the broader product requirement register remain open. This layer does not execute workflows or establish production qualification.
