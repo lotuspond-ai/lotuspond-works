@@ -155,3 +155,50 @@ Ruling: extend FlowArrayType with immutable per-element provenance and safe item
 Ruling: retain selected ownership in ordered immutable source/selector binding records while preserving occurrence-path behavior because substituting different owner slots with the same numeric index otherwise collapses identity — cost if wrong: refine the not-yet-stable compiler metadata and deterministic projection before v2 stabilization; no runtime authority or wire compatibility is created.
 
 Tasks 3–10, full application/database/offline/artifact/hosted verification and the broader product requirement register remain open. This layer does not execute workflows or establish production qualification.
+
+## Task 3 — structured packages and exact catalogs (independent review pending)
+
+Implemented `ExecutablePackage`, `Body`, the 13-family closed `Step` union,
+`ArtifactRef`, `CatalogDocument`, and `CatalogBundle`, plus public package
+validation/canonicalization/digest and catalog validation/document digest APIs.
+All required declaration families, exact pins, local references, nested step ID
+uniqueness, control/retry/resource bounds and deterministic readback rule shapes
+are checked. The seven synthetic source fixtures include actual normalized
+catalog pins and a separately supplied workflow pin; external binary/content
+availability is not checked. Guides document the exact structures and authority
+boundary. V1 code and historical content remain unchanged.
+
+The initial prescribed focused command failed with the two expected missing-API
+collection errors. The first implementation run had 49 passes and one test
+asserting error prose; that test was corrected to follow the required fixed-code
+contract. Additional development runs corrected test setup (exact Version values
+and the number of default-bearing fields needed to cross the item cap). A later
+red run specifically proved schema-count refusals occurred in recursive shape
+validation; preflight checks now refuse those counts before that phase.
+All failed output is retained with the Task 3 report, including initial Ruff
+formatting findings and the successful formatting correction.
+
+Controller ruling: keep shape checks in Pydantic, then perform literal/schema
+normalization and local domain checks outside its validators before the unchanged
+Task 1 helper performs final normalized/default projection and complete JCS
+measurement. This retains specific fixed domain codes without inspecting exception
+cause chains. Exact 1 MiB canonical reread, one-byte overflow after defaults,
+complete normalized item overflow, catalog aggregate budgets, named number
+literals and mutation/construction boundaries are covered.
+
+Python 3.14.5 final focused command:
+`uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_package.py sdk/python/tests/executable/test_catalog.py -q`
+— 114 passed. Preceding Task 1/2 plus v1 contract/input regression files —
+263 passed and 68 subtests. One authorized network-enabled standalone SDK run,
+`uv run --frozen --project sdk/python pytest sdk/python/tests -q`, passed
+678 tests and 68 subtests in 45.94 seconds, including wheel and rebuilt-sdist
+journeys. No skips or warnings. Frozen SDK Ruff and whitespace checks pass.
+The full standalone run includes the final preflight changes; no additional
+Python 3.13/application/database/offline matrix was run in this task.
+
+Task 4 must verify supplied dependency closure/pins, lexical/type availability,
+read/write operation effects, rule/readback schema compatibility, exact handle
+and intent/target provenance, expansion limits and every-path verification.
+Constructors and structural admission do not establish those compiler properties.
+The runtime must independently authenticate authority and enforce budgets.
+Independent Task 3 review and later whole-branch/product gates remain pending.

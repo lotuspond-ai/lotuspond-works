@@ -1,0 +1,186 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "synthetic-reviewed-action",
+  "version": "1.0.0",
+  "name": "Synthetic only",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "action_intent",
+        "id": "intent",
+        "connector_ref": "store",
+        "operation": "write",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "policy_ref": "reviewers",
+        "approval": "human",
+        "independent_review": true,
+        "expiry_seconds": 60
+      },
+      {
+        "kind": "human_task",
+        "id": "review",
+        "assignment_policy_ref": "reviewers",
+        "timeout_seconds": 60,
+        "mode": "review",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "intent"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "action_dispatch",
+        "id": "dispatch",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "intent"
+          },
+          "pointer": ""
+        },
+        "decision": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "review"
+          },
+          "pointer": ""
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "outcome_verification",
+        "id": "verify",
+        "receipt": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "dispatch"
+          },
+          "pointer": ""
+        },
+        "connector_ref": "store",
+        "read_operation": "read",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "rule_id": "observed",
+        "version": "1",
+        "rules": [
+          {
+            "op": "present",
+            "readback_pointer": ""
+          }
+        ]
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 100,
+    "active_seconds": 100,
+    "elapsed_seconds": 1000,
+    "retained_waits": 10,
+    "max_input_tokens": 1000,
+    "max_output_tokens": 1000,
+    "max_cost_microusd": 100000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [],
+  "connectors": [
+    {
+      "id": "store",
+      "ref": {
+        "kind": "connector",
+        "name": "connector-fixture",
+        "version": "1.0.0",
+        "sha256": "478fde8e7f65a29046477b92f4110126d77aff896e45e5686213e47f720ce76d"
+      }
+    }
+  ],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [
+    {
+      "id": "reviewers",
+      "ref": {
+        "kind": "policy",
+        "name": "policy-fixture",
+        "version": "1.0.0",
+        "sha256": "d2fd55f2a66e85f5c47cef915e44e0c0cb1b5853a61f7e7abc8cceeb34198b4d"
+      }
+    }
+  ],
+  "knowledge": [],
+  "artifacts": []
+}

@@ -1,5 +1,12 @@
 """V2 executable-definition foundations; local checks confer no authority."""
 
+from .catalog import (
+    CatalogBundle,
+    CatalogDocument,
+    canonical_catalog_document,
+    catalog_document_digest,
+    validate_catalog,
+)
 from .errors import ExecutableError, ExecutableIssue
 from .expressions import Mapping, TypeEnvironment, infer_mapping, parse_mapping, presence_guard
 from .input import decode_executable_bytes
@@ -10,6 +17,7 @@ from .metadata import (
     SCHEMA_VERSION,
     VALIDATOR_REVISION,
 )
+from .package import ArtifactRef, Body, ExecutablePackage, Step
 from .types import (
     DataSchema,
     DataType,
@@ -29,8 +37,21 @@ from .types import (
     select_array_item,
     validate_value,
 )
+from .validation import canonical_executable_json, executable_digest, validate_executable_package
 
 __all__ = [
+    "ArtifactRef",
+    "Body",
+    "ExecutablePackage",
+    "Step",
+    "CatalogDocument",
+    "CatalogBundle",
+    "canonical_catalog_document",
+    "catalog_document_digest",
+    "validate_catalog",
+    "canonical_executable_json",
+    "executable_digest",
+    "validate_executable_package",
     "CANONICALIZATION",
     "COMPILER_REVISION",
     "ExecutableError",

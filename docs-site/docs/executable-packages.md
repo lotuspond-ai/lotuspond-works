@@ -2,9 +2,10 @@
 
 The standalone Python SDK has a separate `lotuspond_sdk.executable` namespace
 for executable definitions. This increment provides bounded JSON decoding,
-reviewed RFC 8785 canonicalization, strict validation/report helpers, closed data schemas, static mapping inference
-and fixed value-free errors. Package/control authoring, compilation, runtime-facing
-records and explicit v2 CLI commands are subsequent implementation tasks. No workflow is
+reviewed RFC 8785 canonicalization, strict validation/report helpers, closed data schemas, static mapping inference,
+fixed value-free errors, structured package/control authoring and exact local
+catalog documents. Compilation, runtime-facing records and explicit v2 CLI
+commands are subsequent implementation tasks. No workflow is
 executed and no local artifact grants authority.
 
 The schema identifier is `lotuspond.workflow-package.v2`; the canonicalizer is
@@ -202,3 +203,171 @@ before measuring complete mapping bytes. Likewise, resolve an expected export
 with `parse_export(raw, definitions)` before passing it to `assert_assignable`.
 The later package validator must apply these steps with its own definition set
 and retain its complete package byte/item/depth limits.
+
+## Structured packages and exact catalogs
+
+```python
+from lotuspond_sdk.executable import (
+    canonical_executable_json,
+    decode_executable_bytes,
+    executable_digest,
+    validate_catalog,
+    validate_executable_package,
+)
+
+package = validate_executable_package(decode_executable_bytes(source_bytes))
+normalized_bytes = canonical_executable_json(package)
+content_digest = executable_digest(package)
+catalog = validate_catalog({"documents": []})
+```
+
+These are local structural checks. They do not compile typed control flow,
+resolve a dependency closure, verify provider support or external binaries,
+run a workflow, or grant authority. A model constructor or JSON schema alone
+is not the complete admission boundary. Use the public validation functions
+even for already constructed or previously validated models.
+
+`ExecutablePackage` requires `schema_version`, `package_id`, `version`, `name`,
+`input_schema`, `output_schema`, `schemas`, `body`, `models`, `connectors`,
+`agents`, `subworkflows`, `evaluations`, `policies`, `knowledge`, `artifacts`,
+`secret_refs`, `environment`, `limits`, and `assurance`. Every declaration family
+is required, including empty lists, unique by `id`, and bounded to 64 entries.
+The input/output boundaries use public `DataSchema`; internal body exports use
+`ExportSchema`. `name` is at most 160 characters. Each local schema definition
+set is independently bounded, acyclic, and checked even when unused.
+
+A declaration has `id` and `ref`. An `ArtifactRef` has exact `kind`, `name`,
+`version`, and lowercase 64-hex `sha256`. Kinds are `workflow`, `connector`,
+`model`, `agent`, `evaluation`, `policy`, `knowledge`, and `artifact` and must
+match the declaration family. Names use the existing Identifier contract;
+versions use the existing exact Version contract, never ranges or wildcards.
+Repeated identity/version pins with different digests are refused.
+Connector declarations additionally have `credential_ref` (default null), which
+must name `secret_refs`. Knowledge declarations additionally require
+`required_freshness_seconds` (1..31,536,000), unique `allowed_classifications`
+(at most 64), and `citation_schema`.
+
+Keep credentials and customer documents outside packages. Reference slots accept
+bounded identifiers or pinned references, never credential objects or URL
+substitutions. Free text is untrusted author content; these checks do not claim
+to discover secrets hidden in arbitrary text.
+
+`environment` requires literal `runtime_contract="lotuspond.runtime-contract.v1"`,
+`platforms` as unique `{os, architecture}` pairs, and unique
+`required_capabilities`, `destination_classes`, and `operation_classes` lists.
+Every list has at most 64 entries. These names use Identifier; this increment
+does not invent a supported OS/capability vocabulary. `assurance` requires
+unique `evaluation_refs`, `outcome_rule_refs`, and `required_classification`.
+The reference lists name package evaluations and locally authored verification
+rule IDs respectively. These are declarations, never observed qualification.
+
+`limits` requires `max_steps` (1..10,000), `active_seconds` (1..86,400),
+`elapsed_seconds` (1..31,536,000), `retained_waits` (0..10,000),
+`max_input_tokens` and `max_output_tokens` (0..10,000,000), and
+`max_cost_microusd` (0..1,000,000,000,000). `AgentLimits` has `max_steps`
+(1..1,000), `timeout_seconds` (1..3,600), and the same token/cost fields.
+`RetryPolicy` requires `max_attempts` (1..10), `timeout_seconds` (1..86,400),
+`backoff_seconds` (0..3,600), and unique `retry_codes` drawn only from
+`unavailable`, `rate_limited`, and `timeout_before_dispatch`. A possibly
+completed write does not qualify for blind retry. Waiting, compute, elapsed
+time, retention, spend and availability remain distinct later runtime duties.
+
+### Bodies and steps
+
+`Body` has ordered `steps`, `result: Mapping`, and `result_schema: ExportSchema`.
+There are at most 128 authored steps across all bodies, with package-wide unique
+step IDs and at most eight nested decision/parallel/iteration controls. No edges,
+back edges, implicit start/end nodes, custom code, or unsupported join modes
+are accepted. Array order affects the digest. Every step has `id` and `kind`:
+
+| Kind | Additional fields |
+| --- | --- |
+| `transform` | `mapping`, `output_schema` (data) |
+| `decision` | `condition`, `then_body`, `else_body`; branch export declarations must match after local schema resolution |
+| `parallel` | `branches` (1..64 `{id, body}` with unique IDs), `join="all"` |
+| `iteration` | `input`, `max_items` (1..1,000), `concurrency` (1..64 and no greater than `max_items`), `body` |
+| `connector_read` | `connector_ref`, `operation`, `target`, `input`, `retry` |
+| `agent` | Exactly one `model_ref`/`agent_ref`, `instructions` (1..16,384), data `output_schema`, `read_tools` (default empty, at most 32), `knowledge_refs` (default empty, at most 64), `limits`, `retry` |
+| `action_intent` | `connector_ref`, `operation`, `target`, `input`, `policy_ref`, `approval` (`none`/`human`), exact boolean `independent_review`, `expiry_seconds` (1..2,592,000) |
+| `human_task` | `assignment_policy_ref`, `timeout_seconds` (1..31,536,000), optional `escalation_policy_ref`; `mode="form"` requires only data `form_schema`, `mode="review"` requires only `intent: RefMapping` |
+| `action_dispatch` | `intent: RefMapping`, optional `decision: RefMapping`, `retry`, optional `compensation` |
+| `timer` | `delay_seconds` (1..31,536,000) |
+| `external_wait` | `signal_schema`, `correlation`, `expiry_seconds` (1..31,536,000), `assignment_policy_ref`, optional `escalation_policy_ref` |
+| `subworkflow` | `workflow_ref`, `input` |
+| `outcome_verification` | `receipt: RefMapping` and all `VerificationSpec` fields |
+
+`ReadTool` is `{connector_ref, operation, retry}`, with package aliases in a
+package and exact `ArtifactRef` connector pins inside model/agent catalogs.
+`VerificationSpec` requires `connector_ref`, `read_operation`, `target`, `input`,
+`rule_id`, `version` (ReferenceRevision), and nonempty `rules`.
+`CompensationSpec` requires the action-intent payload, `retry`, and its own
+`verification: VerificationSpec`; it is a separately bound write declaration,
+not an automatic inverse. Optional kind-specific fields normalize to null.
+
+A `Rule` uses `op` as its discriminator. `eq`/`ne`/`lt`/`le`/`gt`/`ge` require
+`readback_pointer` and typed `expected: Mapping`; `present` requires only a
+`readback_pointer`; `and`/`or` require `rules` with 2..63 children. Pointers use
+RFC 6901 escaping and are at most 512 characters. Each rule tree and each
+unnamed rule list has at most 64 total nodes and depth eight. Leaf rules always
+inspect readback data: literal-only and model-assertion acceptance forms are
+unsupported. Rules declare deterministic checks and are not evaluated here.
+
+### Catalog documents
+
+`CatalogBundle` is `{documents: [...]}`, bounded to 64 documents per non-workflow
+kind and to the complete 1 MiB/depth-32/10,000-item budget. Duplicate document
+identities are refused; differing content for one identity/version is
+`dependency_conflict`. Workflows are separately supplied complete v2 packages.
+`CatalogDocument` requires exact integer `format_version=1`, `kind`, `name`,
+`version`, local `schemas`, and one `definition` matching its outer `kind`.
+There is no redundant inner kind field.
+
+| Definition kind | Required fields |
+| --- | --- |
+| `connector` | `artifact_sha256`, `operations` (1..64 unique operation IDs) |
+| `model` | `profile`, `configuration_revision`, `configuration_sha256`, `input_schema`, `output_schema`, `limits`; optional `read_tools` defaults empty |
+| `agent` | Pinned `model_ref`, `instructions`, `input_schema`, `output_schema`, `limits`; optional `read_tools` defaults empty |
+| `evaluation` | `input_schema`, `rules` (1..64 unique `{rule_id, version, rule}` records) |
+| `policy` | `approval`, `independent_review`, `assignment`, `allowed_operation_classes`, `allowed_capability_classes`; optional `escalation` defaults null |
+| `knowledge` | `source_revision`, `content_sha256`, `freshness_seconds` (1..31,536,000), `classification`, `citation_schema` |
+| `artifact` | `media_type` (1..160), `content_sha256`, `size_bytes` (0..safe-integer maximum), `classification` |
+
+A connector operation has `id`, `target_schema`, `input_schema`, `output_schema`,
+`effect` (`read`/`write`), `idempotency` (`none`/`target_key`), and `reconciliation`.
+A global target uses `{"kind":"null"}`. Reconciliation has `mode="none"` with
+null `read_operation`, `absence_rules`, and `effect_rules`, or `mode="read_back"`
+with all three required. The read operation must name a local operation whose
+effect is `read`; absence/effect rule lists are nonempty. Write compilation
+will require read-back; structural catalog admission alone does not do so.
+
+`canonical_catalog_document(raw) -> bytes` validates and canonicalizes the
+complete normalized document including `format_version`, identity, definitions,
+schemas and defaults. `catalog_document_digest(raw) -> str` hashes those bytes.
+That digest supplies `ArtifactRef.sha256`. It excludes the separate reference
+wrapper and is distinct from the claimed connector binary/content checksums.
+No artifact is downloaded or checked for availability by these functions.
+
+### Admission sequence and compiler obligations
+
+The public boundaries first project only fixed known model classes into bounded
+JSON, then preflight step/control/schema/rule limits before recursive shape
+validation. They run strict shape validation, normalize every mapping using
+`parse_mapping(mapping, local_definitions)`, resolve every data/export schema,
+and check local IDs/references/conflicts outside Pydantic. This preserves fixed
+domain codes such as `duplicate_identifier`, `unknown_reference`, and
+`dependency_conflict`. Malformed field/union shapes use `invalid_package` or
+`invalid_catalog`. Finally the shared Task 1 validator revalidates the normalized
+models, projects every default, and measures complete JCS bytes. No serializer
+hooks or untrusted exception text are used. Catalog definitions use their own
+schema scope, never the caller package's definitions.
+
+The later compiler must verify the complete supplied dependency closure and
+all pins, enforce lexical ordering/branch availability and every mapping type,
+check operation effects and read-only tools, validate rules against readback
+schemas, maintain exact handle provenance, and bind human decisions, dispatch,
+compensation and verification to the same immutable intent/target. It must
+also enforce conservative retries/iteration/call expansion and verification
+coverage on every effect-producing normal completion path. A structural
+reference to an existing but unavailable step is not evidence of lexical
+availability. Declared agent/review/write capabilities confer no authority;
+artifact availability remains `not_checked` until later admission duties.

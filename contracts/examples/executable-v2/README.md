@@ -1,0 +1,27 @@
+# Synthetic executable-v2 authoring examples
+
+Every document here is synthetic. No example is provider-qualified, an approved
+business process, a signature, or execution authority. No customer documents or
+credentials belong in these packages.
+
+- `minimal.json`: empty body with explicit null data boundaries/result.
+- `decision.json`: two null-export branches under a boolean literal condition.
+- `parallel.json`: two uniquely named branches with the sole supported `all` join.
+- `iteration.json`: one bounded integer item and a null body result.
+- `reviewed_action.json`: intent, human review, dispatch and readback verification.
+- `subworkflow.json`: exact reference to `minimal.json` supplied separately.
+- `catalog.json`: one definition per non-workflow family.
+
+Catalog pins are SHA-256 over `canonical_catalog_document(document)`, including
+identity, format version, local schemas, definition and normalized defaults;
+these are not checksums of the claimed external binaries. The reusable agent's
+model pin is computed first, followed by package connector/policy pins.
+The subworkflow pin is `executable_digest(minimal_package)` and its reference
+name is the child's `package_id`. Each package has a distinct synthetic ID.
+No remote resolution or artifact availability check is performed.
+
+Tests expose `case(name)` for a fresh dictionary, `catalog_case()` for a fresh
+catalog bundle, and `v1_example` as the existing independent historical v1
+fixture. Later compiler tests will add literal expected plans and compile these
+same pinned sources. Structural success alone does not establish full closure,
+lexical/type validity, conservative work bounds, verified outcomes, or admission.

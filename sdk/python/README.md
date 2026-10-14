@@ -409,3 +409,37 @@ operation kinds and correlated intent/decision provenance; wire records still
 require independent authenticated reload at runtime. See
 [the typed syntax and compiler handoff](../../docs-site/docs/executable-packages.md)
 for exact schemas, operation signatures, selection helpers and limits.
+
+Structured package authoring is also available in `lotuspond_sdk.executable`:
+
+```python
+from lotuspond_sdk.executable import (
+    canonical_executable_json,
+    executable_digest,
+    validate_catalog,
+    validate_executable_package,
+)
+
+package = validate_executable_package(raw_package)
+canonical_bytes = canonical_executable_json(package)
+sha256 = executable_digest(package)
+catalog = validate_catalog({"documents": []})
+```
+
+`ExecutablePackage`, `Body`, `Step`, `ArtifactRef`, `CatalogDocument`, and
+`CatalogBundle` describe closed structures. Required declaration families may
+be empty. All 13 step families, exact reference pins, local schema scopes,
+control bounds, strict limits and deterministic readback rules are validated.
+Every literal is normalized in its declared domain before complete default,
+item/depth and 1 MiB canonical measurement. Known models are revalidated after
+mutation or construction; use these complete boundary functions rather than
+model constructors alone. V1 root APIs, registry format and bytes stay fixed.
+
+`canonical_catalog_document` and `catalog_document_digest` bind the complete
+normalized catalog definition document, excluding the separate `ArtifactRef`
+wrapper. External binary/content checksums remain unverified claims. All
+examples in `contracts/examples/executable-v2/` are synthetic and include actual
+local definition pins; they do not establish provider support or authority.
+Secrets and customer documents belong outside packages. The compiler, full
+closure/type checks, runtime-facing records, v2 CLI and execution remain later
+work. See [the complete structural contracts and compiler obligations](../../docs-site/docs/executable-packages.md#structured-packages-and-exact-catalogs).
