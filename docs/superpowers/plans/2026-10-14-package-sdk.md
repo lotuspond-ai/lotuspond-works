@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.13 (CI 3.13 and 3.14), Pydantic >=2.12,<3, cryptography >=50,<51, Hatchling, uv; existing pytest/Ruff, PostgreSQL integration and Docker artifact checks. OpenSSL is an independent test oracle, never a runtime dependency.
 
-**Spec:** [Approved product completion design](../specs/2026-10-14-product-completion-design.md), “Next subsystem: standalone package SDK, diff and detached trust tooling.” Owner approved the written design and sequence on 14 October 2026. This implementation plan is awaiting review and execution-method selection.
+**Spec:** [Approved product completion design](../specs/2026-10-14-product-completion-design.md), “Next subsystem: standalone package SDK, diff and detached trust tooling.” Owner approved the written design and sequence on 14 October 2026. The owner approved this implementation plan and selected subagent-driven execution with review after each task on 14 October 2026.
 
 ## Global Constraints
 
@@ -229,4 +229,4 @@ The plan covers every requirement in the approved next-subsystem section: extrac
 
 Self-review added the container's noneditable installation/content proof, independent sdist rebuild, mixed allowed/revoked duplicates, keypair partial-failure behavior, model revision matching, explicit platform input and full installed CLI journey. These are verification and implementation details for the approved scope. No existing registry records need rewriting; rollback is the previous application artifact with its own locked dependencies and unchanged data.
 
-Recommend subagent-driven execution because the five tasks establish reusable validation and trust boundaries, where review before subsequent tasks consume an interface reduces the cost of an error. Native execution remains available with one independent whole-branch review. Owner review of this plan and selection of the execution method are pending. Broader product subsystems remain in the approved design's requirement register and receive their own specifications/plans in dependency order.
+Recommend subagent-driven execution because the five tasks establish reusable validation and trust boundaries, where review before subsequent tasks consume an interface reduces the cost of an error. Native execution remains available with one independent whole-branch review. The owner approved this plan and selected subagent-driven execution with review after each task on 14 October 2026; execution is in progress. Broader product subsystems remain in the approved design's requirement register and receive their own specifications/plans in dependency order.

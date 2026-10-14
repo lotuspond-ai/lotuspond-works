@@ -114,4 +114,4 @@ Use the roadmap's workload targets as hypotheses: 5 admissions/second, 25 active
 
 ## Review handoff
 
-The owner approved this written design and dependency sequence on 14 October 2026: “Approve the written design and sequence.” The next review artifact is the [SDK implementation plan](../plans/2026-10-14-package-sdk.md); its review and execution-method selection remain pending. Existing authorized PR integration, verification and concrete defect repair remain independently actionable. No unimplemented row is considered complete by approval of this document.
+The owner approved this written design and dependency sequence on 14 October 2026: “Approve the written design and sequence.” The next review artifact is the [SDK implementation plan](../plans/2026-10-14-package-sdk.md); the owner subsequently approved it and selected subagent-driven execution with review after each task. Existing authorized PR integration, verification and concrete defect repair remain independently actionable. No unimplemented row is considered complete by approval of this document.
