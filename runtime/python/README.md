@@ -153,3 +153,75 @@ Exit codes: 0 success/stopped, 2 invalid input, 3 unavailable/fenced, 4 unsafe
 storage. C/P/session/enrollment secrets never appear in output or DNS/worker argv
 or environments. The C/P disk format is private, bounded to 8192 bytes, and must
 never be exposed as an API response.
+
+Mounted-secret and destination test integration is available through the internal
+`invoke_fixture` harness. The production supervisor has no fixture selector or
+business invocation path. Its only connector is fixed `lotuspond-fixture` version
+`1.0.0`, pinned to SHA256 of the exact packaged `fixture_connector.py` source
+artifact (bounded to 65,536 bytes). Parent and child independently recheck that
+identity. This is a synthetic source-artifact identity, not wheel attestation or
+publisher trust, and differs from the frozen literal protocol fixture digest.
+
+Provision mounted secrets as the worker's effective Linux user under an absolute
+0700 root, with 0700 subdirectories and 0600 regular singly-linked version files.
+The private 0600 mapping file also needs a 0700 parent and safe ancestors. Every
+ancestor must be root/runtime-owned and cannot be group/other writable, except a
+root-owned sticky temporary directory. Symlinks are refused at every component.
+The mapping is operator input, never registration data, a command path or model
+output. Example private mapping (synthetic names; no secret values):
+
+```json
+{"bindings":[{"binding_id":"payroll-test","version":1,"filename":"payroll/version-1"}]}
+```
+
+A scoped secret reference exposes only an opaque binding ID and integer version.
+Current authority must load the binding from same-scope records and verify the
+exact reference/version in the immutable connection configuration. The fixture
+requires exactly one secret, one destination, and its fixed `inspect` operation.
+It connects with verified TLS before opening mounted-secret paths, then requests
+fresh current authority from its parent immediately before sending. It reads only
+that selected version, at most 65,536 bytes, and never caches or hashes values.
+Reads check the opened file and directory descriptors, ownership, mode, link count,
+and file identity/size/mtime/ctime before and after reading, including replacement
+of the named version file. Rotate by provisioning a new immutable version file,
+new mapping metadata and new connection configuration; never overwrite a published
+version in place. Root/administrator tampering between checks is a host trust
+boundary. The synthetic fixture accepts only printable ASCII secret header values.
+
+`EgressPolicy` and CA trust come from the operator and are fixed during an
+invocation. Every DNS answer must pass policy before one address is selected and
+pinned to the actual socket. TLS verifies the original hostname/SNI and supplied
+CA. There are no proxies, redirects, connection reuse, DNS retry or reconnect.
+Only explicit operator CIDRs can allow RFC1918/ULA private destinations; denied
+hosts/IP ranges, metadata/link-local, mapped IPv6, reserved, unspecified, multicast
+and production loopback remain refused. The internal `_for_test` constructor
+permits only explicitly allowlisted loopback for local TLS tests, with all other
+checks intact; no environment/config/CLI switch enables it in production. Paths
+must be absolute ASCII resources with segment-prefix matching and no percent
+encoding, dot segments, repeated slashes, backslashes, query or fragment. Fixed
+connector code constructs method, origin and headers; inputs cannot override them.
+
+The child starts only the fixed installed module using isolated Python, an empty
+environment, closed inherited descriptors and private bounded IPC. Fleet/session
+credentials are never passed. The entire IPC envelope is limited to 65,536 bytes;
+metadata/base64 overhead and the bounded parser can conservatively reject an input
+below its configured request-body maximum. No truncation, splitting or retry
+occurs. Request/response bounds and the minimum of the configuration timeout and
+30 seconds cover authorization, DNS, TLS, secret resolution, IPC and response.
+Results contain only `observed`, `denied` or `uncertain` and byte counts. A failure
+after a request may have been sent is uncertain and is never automatically retried.
+Revocation cannot undo a sent external effect.
+
+Internal parent-owned `InvocationLimits` default to one operator child and one
+child per scoped pool. The process-wide gate uses the smaller operator/pool cap,
+rejects reconfiguration while active, and never grants authority. Current pool
+permission remains the authority dependency's responsibility. A single bounded
+in-flight authority helper prevents stalled providers from accumulating threads;
+a hung provider occupies that slot until it actually returns, fencing subsequent
+checks. Provider cancellation is not claimed. While waiting on a sent request,
+the parent checks authority at approximately 50ms intervals within the original
+deadline, kills/reaps its child group on loss, and fences all future invocations
+when cleanup cannot be confirmed. DNS helpers remain in that owned worker group;
+standalone egress owns its separate DNS group. Process isolation bounds lifetime
+and credential exposure; it provides neither hostile-host containment nor Python
+memory zeroization.

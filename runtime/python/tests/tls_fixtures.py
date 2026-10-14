@@ -66,7 +66,12 @@ def tls_server(directory, reply, *, trickle=False, body_trickle=False):
                     stream.settimeout(1)
                     request = b""
                     while b"\r\n\r\n" not in request:
-                        request += stream.recv(8192)
+                        chunk = stream.recv(8192)
+                        if not chunk:
+                            break
+                        request += chunk
+                    if b"\r\n\r\n" not in request:
+                        continue
                     requests.append(request)
                     response = reply(request) if callable(reply) else reply
                     if body_trickle:
