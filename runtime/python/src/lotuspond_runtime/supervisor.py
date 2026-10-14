@@ -154,16 +154,23 @@ class RuntimeSupervisor:
         self._checkpoint("after_final_save")
         return state, result
 
-    def _next_heartbeat(self, rotation_at):
+    def _next_heartbeat(self, rotation_at, lease_expires):
         now = self._monotonic()
+        rotation_deadline = now + (rotation_at - self._now()) / 1000
         deadline = now + 20
-        # Reserve one full ten-second attempt plus one second of loop/clock
-        # granularity before rotation. Once this earlier heartbeat completes,
-        # the boundary is no longer in the future, so
-        # normal cadence resumes without repeatedly renewing in that window.
-        until_headroom = (rotation_at - self._now()) / 1000 - 11
-        if until_headroom > 0:
-            deadline = min(deadline, now + until_headroom)
+        # A ten-second heartbeat can advance the conservative server estimate
+        # by twenty seconds when its timestamp is sampled at completion. Keep
+        # one further second for loop/clock granularity before the target.
+        headroom_deadline = rotation_deadline - 21
+        if headroom_deadline > now:
+            deadline = min(deadline, headroom_deadline)
+        elif deadline <= rotation_deadline:
+            # Do not launch another heartbeat inside the reserved window. A
+            # deferred heartbeat must still fit after prepare + activate (20s)
+            # and its own full attempt (10s), within the current half-open lease.
+            # If that lease would be too short, renew now while the normal
+            # interval leaves at least twenty seconds before rotation.
+            deadline = now if lease_expires <= rotation_at + 30000 else rotation_deadline
         return deadline
 
     def _run(self, stop):
@@ -190,8 +197,8 @@ class RuntimeSupervisor:
             raise FleetError("invalid_request")
         next_rotation = active.credential_expires_at_ms - 300000 - jitter
         startup_overdue = self._now() > next_rotation
-        heartbeat_at = self._next_heartbeat(next_rotation)
         lease_expires = session.expires_at_ms
+        heartbeat_at = self._next_heartbeat(next_rotation, lease_expires)
         while not stop.is_set():
             now = self._now()
             if now >= active.credential_expires_at_ms or now >= lease_expires:
@@ -213,7 +220,7 @@ class RuntimeSupervisor:
                 ):
                     raise FleetError("unauthenticated")
                 lease_expires = active.session_expires_at_ms
-                heartbeat_at = self._next_heartbeat(next_rotation)
+                heartbeat_at = self._next_heartbeat(next_rotation, lease_expires)
                 # A completed heartbeat may land exactly on the rotation target.
                 # Re-evaluate immediately instead of adding a forced wait.
                 continue

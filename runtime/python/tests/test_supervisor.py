@@ -582,3 +582,155 @@ def test_valid_c_late_startup_recovers_once_then_resumes_normal_rotation(tmp_pat
         assert supervisor(authority, store, clock).run(stop) == 0
         assert store.load().active_token == q
     assert starts == [(661000, 239000), (1261000, 300000)]
+
+
+@pytest.mark.parametrize("jitter_ms", [0, 5000, 30000])
+@pytest.mark.parametrize("timestamp_fraction", [0, 0.5, 1])
+def test_normal_rotation_survives_heartbeat_timestamp_placement(
+    tmp_path, jitter_ms, timestamp_fraction
+):
+    clock, stop = Clock(), threading.Event()
+    authority = Authority(clock, stop)
+    target = authority.expiry - 300000 - jitter_ms
+    heartbeat, prepare, activate = authority.heartbeat, authority.prepare, authority.activate
+    previous_finish, delayed, heartbeat_starts, starts = [0], [], [], []
+
+    def heartbeat_response(*args):
+        started = clock.now
+        assert started < authority.lease
+        heartbeat_starts.append(started)
+        # Identify the scheduler's early renewal by observable cadence, independent
+        # of its internal reservation constant. Exactly one such request is slow.
+        early = started - previous_finish[0] < 20000
+        latency = 10000 if early and not delayed and not starts else 0
+        before_sample = int(latency * timestamp_fraction)
+        clock.now += before_sample
+        assert clock.now < authority.lease
+        response = heartbeat(*args)
+        clock.now += latency - before_sample
+        assert clock.now < authority.lease
+        if latency:
+            delayed.append((started, clock.now, response.server_time_ms))
+        previous_finish[0] = clock.now
+        return response
+
+    def prepare_response(*args):
+        starts.append((clock.now, authority.expiry - clock.now))
+        assert clock.now < authority.lease
+        response = prepare(*args)
+        clock.now += 10000
+        assert clock.now < authority.lease
+        return response
+
+    def activate_response(*args):
+        assert clock.now < authority.lease
+        response = activate(*args)
+        clock.now += 10000
+        assert clock.now < authority.lease
+        return response
+
+    authority.heartbeat, authority.prepare, authority.activate = (
+        heartbeat_response,
+        prepare_response,
+        activate_response,
+    )
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        instance = supervisor_module().RuntimeSupervisor(
+            authority,
+            store,
+            RuntimeObservation(platform="linux", connectors=()),
+            installation_id="test-install",
+            wall_ms=clock.wall,
+            monotonic=clock.monotonic,
+            jitter_ms=lambda: jitter_ms,
+            wait=clock.wait,
+        )
+        assert instance.run(stop) == 0
+        assert store.load().active_token == SecretStr(P)
+    assert len(delayed) == 1
+    assert len(starts) == 1 and starts[0][0] <= target
+    assert starts[0][1] >= 300000
+    assert any(start >= starts[0][0] + 20000 for start in heartbeat_starts)
+    assert len(heartbeat_starts) < 36
+
+
+def test_fast_early_heartbeat_does_not_expose_another_slow_request_before_rotation(tmp_path):
+    clock, stop = Clock(), threading.Event()
+    authority = Authority(clock, stop)
+    heartbeat, prepare = authority.heartbeat, authority.prepare
+    early_seen, last_finish, starts = [False], [0], []
+
+    def mixed_heartbeat(*args):
+        started = clock.now
+        first_early = not early_seen[0] and started - last_finish[0] < 20000
+        if first_early:
+            early_seen[0] = True
+        if early_seen[0] and not first_early and not starts:
+            clock.now += 10000  # A subsequent heartbeat samples server time at completion.
+        assert clock.now < authority.lease
+        result = heartbeat(*args)
+        last_finish[0] = clock.now
+        return result
+
+    def measured_prepare(*args):
+        starts.append((clock.now, authority.expiry - clock.now))
+        return prepare(*args)
+
+    authority.heartbeat, authority.prepare = mixed_heartbeat, measured_prepare
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        assert supervisor(authority, store, clock).run(stop) == 0
+        assert store.load().active_token == SecretStr(P)
+    assert early_seen[0]
+    assert starts == [(600000, 300000)]
+
+
+def test_timestamp_phase_change_renews_before_unsafe_heartbeat_deferral(tmp_path):
+    clock, stop = Clock(), threading.Event()
+    clock.now = 15000
+    authority = Authority(clock, stop)
+    heartbeat, prepare, activate = authority.heartbeat, authority.prepare, authority.activate
+    first_early, previous_finish, starts, heartbeat_starts = [False], [15000], [], []
+
+    def mixed_heartbeat(*args):
+        started = clock.now
+        heartbeat_starts.append(started)
+        assert started < authority.lease
+        early = not first_early[0] and started - previous_finish[0] < 20000
+        if early:
+            first_early[0] = True
+            response = heartbeat(*args)  # Start timestamp removes the previous clock surplus.
+            clock.now += 10000
+        else:
+            clock.now += 10000
+            assert clock.now < authority.lease  # Mutation itself needs an unexpired lease.
+            response = heartbeat(*args)
+        assert clock.now < authority.lease
+        previous_finish[0] = clock.now
+        return response
+
+    def completion_prepare(*args):
+        starts.append((clock.now, authority.expiry - clock.now))
+        clock.now += 10000
+        assert clock.now < authority.lease
+        return prepare(*args)
+
+    def completion_activate(*args):
+        clock.now += 10000
+        assert clock.now < authority.lease
+        return activate(*args)
+
+    authority.heartbeat, authority.prepare, authority.activate = (
+        mixed_heartbeat,
+        completion_prepare,
+        completion_activate,
+    )
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        assert supervisor(authority, store, clock).run(stop) == 0
+        assert store.load().active_token == SecretStr(P)
+    assert first_early[0]
+    assert len(starts) == 1 and starts[0][1] >= 300000
+    assert any(start >= starts[0][0] + 20000 for start in heartbeat_starts)
+    assert len(heartbeat_starts) < 36

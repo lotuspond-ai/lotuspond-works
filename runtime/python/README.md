@@ -122,8 +122,11 @@ Enrollment persists C durably before session acquisition. Session proof stays in
 supervisor memory. Rotation starts with at least five minutes remaining plus
 0–30 seconds of jitter, using confirmed server time and monotonic elapsed time;
 clock disagreement over 30 seconds fences the process. Heartbeats normally run
-at 20-second intervals; one early heartbeat reserves the full ten-second attempt
-plus one second of loop/clock headroom before the unchanged rotation target.
+at 20-second intervals. Earlier renewal reserves the full twenty-second possible
+conservative clock advance of a ten-second attempt, plus one second of loop/clock
+headroom, before the unchanged rotation target. A further heartbeat inside that
+window waits for rotation when the live lease can cover prepare, activation and
+the next heartbeat; otherwise it renews current proof first.
 Due rotation runs before a coincident heartbeat, and heartbeat completion causes
 an immediate deadline check. A steady-state prepare with less than five minutes
 remaining is fenced; nonzero jitter may absorb small scheduling delays while
