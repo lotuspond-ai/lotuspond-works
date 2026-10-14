@@ -28,3 +28,16 @@ The additive migration validates the frozen v12 schema before creating fleet obj
 Earlier migration-chain tests reconstruct prior schemas from the current model. Immutable historical v2–v11 deployment snapshots are unavailable; the checked shapes are qualified locally, and unknown historical/customized shapes are conservatively refused. One rewind fixture was corrected to remove a later incident constraint before reconstructing v5. Real historical variants require explicit review. Recovery is forward repair, with no destructive downgrade; production migration roles, lock duration and operational qualification remain later work.
 
 Publication immutability, current authorization, terminal revocation, canonical-document/link consistency and safe service DTOs remain with the subsequent service tasks. This record qualifies the database foundation, not production execution.
+
+
+## Task 3 — scoped connection and pool administration
+
+Implementation `5127fe0cc888e30ab163b1a9e505ddb217cf4541` and correction `0ccc7f4e33b11a491dc01fde36c5ab773a9ff7e5` passed independent specification and code-quality reviews with no open findings. Sixteen management routes require eligible owner/admin customer sessions, preserve current verification/MFA rules, and provide immutable connection/pool revisions, opaque secret-reference metadata, bounded inventories and closed audit fields. Fleet defaults to disabled, and the production connector catalog grants nothing.
+
+Publication and request-key results share the caller transaction. Full-scope parent/reference checks, terminal revocation and canonical-document/link integrity apply before use. The independent quality review found that a caller Session could retain old active status after another transaction revoked a row; the correction refreshes current attributes in the three locking reads. PostgreSQL regressions cover workspace, connection, pool and secret revocation, terminal transitions, replay, and a stale current-policy pointer. Two narrowly scoped parent/ID indexes support bounded revision inventories.
+
+- At the reviewed correction, **68 management PostgreSQL tests passed, zero skips**, including eight new regressions that first failed; backend Ruff and diff checks passed. Both closure reviewers verified the final source and evidence manifests.
+- The prior broader PostgreSQL gate passed **246 tests, zero skips**, across management/schema, existing authentication/MFA, projects/evaluation and registry. It preceded the isolated UTC timestamp correction and later lock-refresh fix; the final affected gate covers those changes. The runtime protocol gate passed **328 tests, zero skips**, at unchanged current runtime bytes. Overlapping counts are not summed.
+- A non-UTC timestamp conversion issue was reproduced and corrected before independent review. The only remaining test warning is the existing upstream Starlette/AnyIO deprecation.
+
+Enrollment, machine sessions, rotation and signed command admission remain subsequent tasks. Final installed artifacts must be rebuilt because protocol additions supersede Task 1's artifact bytes. Full root checks, API-image build and hosted CI remain Task 9; local administration evidence does not establish production readiness.

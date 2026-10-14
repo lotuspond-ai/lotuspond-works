@@ -164,7 +164,7 @@ assert str(partial_upgrade_error) == "Unexpected schema state; no changes made"
 
 Audit uses `fleet_audit(db: Session, actor_id: str, scope: Scope, code: str, resource_id: str, revision: int | None) -> None`, with a closed operation-code set and IDs/revision only. Do not pass arbitrary details to the generic serializer/audit helper. Current status, references and policy revisions are rechecked under locks for every mutation. Lock order is workspace → pool → connection/reference rows sorted by ID; later identity tasks add instance → session → credential. Limit/idempotency allocation shares the same parent lock.
 
-- [ ] **Step 1: Add failing route and concurrency tests.** `test_management_principal_matrix` covers owner/admin, editor/viewer, API key, runtime/enrollment/pending prefixes, platform admin with/without customer membership, MFA/verification failure and suspended workspace. `test_nested_scope_not_found` varies all parent/reference scopes. `test_version_and_request_key_races` asserts immutable version publication and same-key/same-content converge under PostgreSQL; changed content returns 409, replays recheck current membership. `test_catalog_cannot_be_widened` refuses new operation/artifact, raw path/URL secret reference, revoked secret, wrong scope, caller-defined effects and policy capacity overflow. `test_inventory_and_audit_safe` checks pagination and sentinel absence.
+- [x] **Step 1: Add failing route and concurrency tests.** `test_management_principal_matrix` covers owner/admin, editor/viewer, API key, runtime/enrollment/pending prefixes, platform admin with/without customer membership, MFA/verification failure and suspended workspace. `test_nested_scope_not_found` varies all parent/reference scopes. `test_version_and_request_key_races` asserts immutable version publication and same-key/same-content converge under PostgreSQL; changed content returns 409, replays recheck current membership. `test_catalog_cannot_be_widened` refuses new operation/artifact, raw path/URL secret reference, revoked secret, wrong scope, caller-defined effects and policy capacity overflow. `test_inventory_and_audit_safe` checks pagination and sentinel absence.
 Core assertions for the cases above (test-local setup names):
 
 ```python
@@ -174,10 +174,10 @@ assert wrong_environment_reference.status_code == 404
 assert secret_sentinel not in audit_bytes
 ```
 
-- [ ] **Step 2: Run both management test files, including PostgreSQL race cases; record absent routes/behavior as red.**
-- [ ] **Step 3: Implement routes/services and explicit DTOs.** Publish canonical immutable config/policy bytes with domain-separated digests. Enforce reference versions and catalog requirements; mutable revocation overrides historical pins. Required request-key results never include one-time secrets. A later connection/secret/pool disable blocks use; publishing a new revision does not rewrite old versions. Feature off returns not found for fleet groups without touching existing APIs.
-- [ ] **Step 4: Run management tests, schema tests, existing auth/MFA/project/registry suites and Ruff.** Require all management decisions in both API predicates and database scope constraints; bound inventory query work with keyset indexes.
-- [ ] **Step 5: Commit `feat: add scoped connection and runtime pool administration`.** Review auth reuse, idempotency transactions and absence of secret/destination audit leakage.
+- [x] **Step 2: Run both management test files, including PostgreSQL race cases; record absent routes/behavior as red.**
+- [x] **Step 3: Implement routes/services and explicit DTOs.** Publish canonical immutable config/policy bytes with domain-separated digests. Enforce reference versions and catalog requirements; mutable revocation overrides historical pins. Required request-key results never include one-time secrets. A later connection/secret/pool disable blocks use; publishing a new revision does not rewrite old versions. Feature off returns not found for fleet groups without touching existing APIs.
+- [x] **Step 4: Run management tests, schema tests, existing auth/MFA/project/registry suites and Ruff.** Require all management decisions in both API predicates and database scope constraints; bound inventory query work with keyset indexes.
+- [x] **Step 5: Commit `feat: add scoped connection and runtime pool administration`.** Review auth reuse, idempotency transactions and absence of secret/destination audit leakage.
 
 ## Task 4: Current authority, one-use enrollment and process ownership
 
