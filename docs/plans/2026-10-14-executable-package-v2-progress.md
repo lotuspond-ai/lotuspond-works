@@ -509,3 +509,32 @@ rules and adds no private payload. Task 10 must revalidate the inner report and
 count its complete CLI wrapper/newline with the shared report boundary. Fresh
 independent Task 7 review is pending. Python 3.13/application/database/offline/
 whole-branch/hosted gates remain Task 10; no production qualification is claimed.
+
+## Task 7 correction round 1 evidence
+
+Independent review of `96617e65bbc65c98794e8283e3850bf30ea3af3d` found one
+Important defect: report admission rejected a legitimate moved step when its
+numeric before/after source pointers were equal. Replacing a parallel branch ID
+or control-owner ID changes the containing region identity while preserving the
+stable child ID and its position. Movement follows region identity; distinct
+numeric pointers are not required. Removed that admission prohibition while
+retaining category, step identity, non-null paths, permitted pointer tokens,
+privacy, order and complete output bounds. The guide now states the distinction.
+
+Literal branch/owner replacement expectations cover both private and opt-in
+serialization, removed/added regions and owners, the retained child's `moved`
+operation and exact equal source paths. Correction red: **4 failures, 5 passes,
+28 deselected**. Same targeted green: **9 passes, 28 deselected**. Grouped named
+v2 diff/package/canonical suites: **170 passed**; separate v1 diff/contract:
+**66 passed and 68 subtests passed**. Ruff and whitespace pass on Python 3.14.5.
+Exact commands, failed/passing output and corrected source hashes are retained
+in Task 7 evidence/report. No full SDK artifact repeat was requested or run;
+the earlier 1,075-test/68-subtest result belongs to the pre-correction source.
+
+The reviewer independently reproduced the mixed whole-file fixture-order errors
+on immutable pre-Task-7 BASE `3e9f2cae2c76ba5a0a6d2613f078cdad4d858f2f`.
+That concern is now established as a pre-existing harness limitation; the
+original failed evidence remains and no harness rewrite or weakened assertions
+entered this correction. Scoped independent re-review is pending; no finding
+was waived or deferred. Final dual-Python/application/database/offline/whole-
+branch/hosted gates remain Task 10.

@@ -574,3 +574,122 @@ def test_private_data_member_names_are_never_source_paths(case):
         ("data_mapping", "changed", "body", "/body/result", "/body/result"),
     ]
     assert "PRIVATE_SENTINEL" not in executable_diff_json(report).decode()
+
+
+@pytest.mark.parametrize("include_values", [False, True])
+@pytest.mark.parametrize("replacement", ["branch", "owner"])
+def test_region_replacement_moves_child_at_same_pointer(case, replacement, include_values):
+    before = case("parallel")
+    branch = before["body"]["steps"][0]["branches"][0]
+    branch["body"]["steps"] = [timer("child")]
+    branch["body"]["result"] = {
+        "kind": "literal",
+        "schema": {"kind": "string", "max_length": 64},
+        "value": "PRIVATE_SENTINEL",
+    }
+    branch["body"]["result_schema"] = {
+        "kind": "data",
+        "schema": {"kind": "string", "max_length": 64},
+    }
+    after = copy.deepcopy(before)
+    if replacement == "branch":
+        after["body"]["steps"][0]["branches"][0]["id"] = "renamed"
+        expected = [
+            (
+                "control_flow",
+                "removed",
+                "parallel:both:left",
+                "/body/steps/0/branches/0/body",
+                None,
+            ),
+            (
+                "control_flow",
+                "added",
+                "parallel:both:renamed",
+                None,
+                "/body/steps/0/branches/0/body",
+            ),
+            (
+                "control_flow",
+                "moved",
+                "step:child",
+                "/body/steps/0/branches/0/body/steps/0",
+                "/body/steps/0/branches/0/body/steps/0",
+            ),
+        ]
+        target_region = "parallel:both:renamed"
+    else:
+        after["body"]["steps"][0]["id"] = "other"
+        expected = [
+            (
+                "control_flow",
+                "removed",
+                "parallel:both:left",
+                "/body/steps/0/branches/0/body",
+                None,
+            ),
+            (
+                "control_flow",
+                "removed",
+                "parallel:both:right",
+                "/body/steps/0/branches/1/body",
+                None,
+            ),
+            ("control_flow", "added", "parallel:other:left", None, "/body/steps/0/branches/0/body"),
+            (
+                "control_flow",
+                "added",
+                "parallel:other:right",
+                None,
+                "/body/steps/0/branches/1/body",
+            ),
+            ("control_flow", "removed", "step:both", "/body/steps/0", None),
+            (
+                "control_flow",
+                "moved",
+                "step:child",
+                "/body/steps/0/branches/0/body/steps/0",
+                "/body/steps/0/branches/0/body/steps/0",
+            ),
+            ("control_flow", "added", "step:other", None, "/body/steps/0"),
+        ]
+        target_region = "parallel:other:left"
+    validate_executable_package(before)
+    validate_executable_package(after)
+    report = diff_executable_packages(before, after, include_values=include_values)
+    assert changes(report) == expected
+    assert changes(validate_executable_diff(report)) == expected
+    encoded = executable_diff_json(report)
+    assert changes(validate_executable_diff(json.loads(encoded))) == expected
+    assert report.model_dump_json() == encoded.decode("ascii").removesuffix("\n")
+    moved = next(change for change in report.changes if change.operation == "moved")
+    if include_values:
+        assert moved.values.before == "parallel:both:left"
+        assert moved.values.after == target_region
+        assert "PRIVATE_SENTINEL" in encoded.decode("ascii")
+    else:
+        assert moved.values is None
+        assert "PRIVATE_SENTINEL" not in encoded.decode("ascii")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("category", "limits"),
+        ("identity", "package"),
+        ("before_path", None),
+        ("after_path", None),
+        ("before_path", "/PRIVATE_SENTINEL"),
+    ],
+)
+def test_moved_report_retains_identity_category_and_path_guards(
+    before_move,
+    after_move_and_edit,
+    field,
+    value,
+):
+    report = diff_executable_packages(before_move, after_move_and_edit)
+    moved = next(change for change in report.changes if change.operation == "moved")
+    setattr(moved, field, value)
+    with pytest.raises(ExecutableError):
+        executable_diff_json(report)

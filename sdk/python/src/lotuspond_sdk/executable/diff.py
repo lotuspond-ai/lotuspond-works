@@ -172,7 +172,6 @@ def validate_executable_diff(raw: object) -> ExecutableDiff:
                 and (
                     change.category != "control_flow"
                     or not change.identity.startswith("step:")
-                    or before == after
                 )
             )
             or (change.values is not None and not report.include_values)
@@ -425,6 +424,7 @@ def diff_executable_packages(
             )
             continue
         if old[1] != new[1]:
+            # Region identity can change while numeric source pointers stay equal.
             emit("control_flow", "moved", identity, old[0], new[0], old[1], new[1])
         if old[2]["kind"] != new[2]["kind"]:
             emit(

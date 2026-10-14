@@ -704,8 +704,10 @@ Steps match globally unique authored IDs as `step:<id>`. Regions match `body`,
 `decision:<owner_id>:then`, `decision:<owner_id>:else`,
 `parallel:<owner_id>:<branch_id>` and `iteration:<owner_id>:body`. Branch IDs are
 scoped to their parallel owner. Moving a parent preserves its descendants'
-region identities. Moving and editing a step yields both changes. Kind
-replacement yields one `control_flow` step change, with child region/step
+region identities. Moving and editing a step yields both changes. Movement
+follows containing-region identity: replacing a branch or owning control
+ID can produce a child `moved` change with equal before/after numeric source paths.
+Kind replacement yields one `control_flow` step change, with child region/step
 additions and removals reported independently. Parent content excludes child
 bodies because their steps, results and export schemas are compared separately.
 Branch order and relative order among common steps remaining in the same region
