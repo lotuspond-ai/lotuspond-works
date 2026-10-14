@@ -14,6 +14,9 @@ current scoped authority, identity, pool/connection status and destination polic
 Public model/helper errors are bounded `FleetError` codes without caller input.
 Models are frozen and strict; JSON arrays become tuples without scalar coercion.
 Public validators and canonical helpers revalidate even constructed/mutated models.
+Field membership is enforced independently of Pydantic's per-call `extra` option;
+`ignore` and `allow` cannot discard or retain unknown fields. Existing SecretStr
+wrappers must contain an exact string, including when their contents were mutated.
 Ordinary secret model repr/JSON is redacted. Only `encode_issued_credential`,
 `encode_prepared_credential` and `encode_acquired_session` return the intended
 one-time secret as a plain string; callers must restrict these to private no-store
@@ -23,6 +26,14 @@ Fleet JSON is limited to 65,536 bytes, depth 16 (root at depth zero), 4,096 valu
 and member names combined, and 8,192 UTF-8 bytes per string/member name. Canonical
 config/policy documents have a separate 32,768-byte bound. Canonical set ordering
 is explicit and does not give operation or destination rules precedence.
+
+Supported JSON entry points are `FleetModelSubclass.model_validate_json(content)`
+or `decode_fleet_json(content)` followed by a model/public validator or
+`TypeAdapter(FleetModelSubclass).validate_python(decoded)`. They preserve the raw
+byte, duplicate-key and decoded-value checks. Native Pydantic JSON validation
+(such as `TypeAdapter(...).validate_json(content)`) is denied for fleet DTOs because
+its parser discards duplicate-key and raw-byte evidence before model validation.
+Use the bounded decoder even when integrating with a framework or adapter.
 
 The fixture literals in `tests/fixtures` were independently calculated with Node
 SHA256 during approved E03 planning; the suite checks exact bytes and identities

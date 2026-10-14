@@ -53,7 +53,13 @@ def _project_fleet_value(raw: object, *, models: bool = False) -> object:
                 raise FleetError("invalid_request")
             return value
         if models and kind is SecretStr:
-            walk(value.get_secret_value(), depth)
+            try:
+                inner = value.get_secret_value()
+            except AttributeError:
+                raise FleetError("invalid_request") from None
+            if type(inner) is not str:
+                raise FleetError("invalid_request")
+            walk(inner, depth)
             return value
         if models and isinstance(value, BaseModel):
             # No model_dump hook: constructed or mutated instances must not bypass

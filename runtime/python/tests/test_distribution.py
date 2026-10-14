@@ -32,3 +32,59 @@ assert connection_digest(decode_fleet_json(b'{"connector":{"name":"lotuspond-fix
         tmp_path,
         env,
     )
+
+
+def test_installed_strict_boundaries(installed_runtime, tmp_path):
+    venv, env = installed_runtime
+    artifact_run(
+        [
+            str(venv / "bin/python"),
+            "-I",
+            "-c",
+            """
+import json
+from pydantic import SecretStr, TypeAdapter
+from lotuspond_runtime.protocol import (
+    FleetError, Scope, PreparedCredential, CredentialState,
+    decode_fleet_json, encode_prepared_credential,
+)
+uuid = '01234567-89ab-cdef-0123-456789abcdef'
+scope = dict(workspace_id=uuid, project_id=uuid, environment_id=uuid)
+def rejected(call):
+    try:
+        call()
+    except FleetError as error:
+        assert error.code == 'invalid_request'
+        assert str(error) == 'invalid_request'
+    else:
+        raise AssertionError('installed fleet boundary accepted invalid input')
+raw = json.dumps(scope).encode()
+for content in (raw, b'{"workspace_id":"' + uuid.encode() + b'",' + raw[1:],
+                raw + b' ' * 65536):
+    rejected(lambda: TypeAdapter(Scope).validate_json(content))
+assert Scope.model_validate_json(raw).workspace_id == uuid
+assert TypeAdapter(Scope).validate_python(decode_fleet_json(raw)).workspace_id == uuid
+for extra in ('ignore', 'allow'):
+    for validate in (Scope.model_validate, TypeAdapter(Scope).validate_python):
+        rejected(lambda: validate(scope | {'secret_extra': 'synthetic'}, extra=extra))
+    dto = dict(token='synthetic', credential_version=1, activation_deadline_ms=60,
+               server_time_ms=0, secret_extra='synthetic')
+    for validate in (PreparedCredential.model_validate,
+                     TypeAdapter(PreparedCredential).validate_python):
+        rejected(lambda: validate(dto, extra=extra))
+for inner in (42, None, True, 1.5, ['unexpected'], {'unexpected': 'synthetic'}):
+    rejected(lambda: PreparedCredential(token=SecretStr(inner), credential_version=1,
+                                        activation_deadline_ms=60, server_time_ms=0))
+    model = PreparedCredential(token=SecretStr('synthetic'), credential_version=1,
+                               activation_deadline_ms=60, server_time_ms=0)
+    object.__setattr__(model.token, '_secret_value', inner)
+    rejected(lambda: encode_prepared_credential(model))
+    state = CredentialState(revision=0, instance_id=uuid, active_token='synthetic',
+                            pending_token=SecretStr('pending-synthetic'), pending_version=1)
+    object.__setattr__(state.pending_token, '_secret_value', inner)
+    rejected(lambda: CredentialState.model_validate(state))
+""",
+        ],
+        tmp_path,
+        env,
+    )

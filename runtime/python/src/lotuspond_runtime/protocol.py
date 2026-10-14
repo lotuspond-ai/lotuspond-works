@@ -15,6 +15,7 @@ from pydantic import (
     Field,
     SecretStr,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -141,9 +142,18 @@ class FleetModel(BaseModel):
 
     @model_validator(mode="wrap")
     @classmethod
-    def _bounded_validation(cls, value, handler):
+    def _bounded_validation(cls, value, handler, info: ValidationInfo):
+        # Native Pydantic JSON parsing loses raw byte counts and duplicate keys.
+        # Supported JSON entry points decode first, then validate in Python mode.
+        if info.mode == "json":
+            raise FleetError("invalid_request")
         try:
-            return handler(_project_fleet_value(value, models=True))
+            projected = _project_fleet_value(value, models=True)
+            # Per-call extra='ignore'/'allow' must not relax the wire contract.
+            # Each nested FleetModel enforces its own declared fields as well.
+            if type(projected) is not dict or any(key not in cls.model_fields for key in projected):
+                raise FleetError("invalid_request")
+            return handler(projected)
         except (ValidationError, ValueError, TypeError, RecursionError):
             raise FleetError("invalid_request") from None
 

@@ -540,3 +540,202 @@ def test_unknown_nested_fields_and_lossy_tuple_coercions_fail():
     reject(lambda: api().validate_connection_config(raw))
     for array in ("inspect", {"inspect"}, {"inspect": None}):
         reject(lambda: api().validate_connection_config(connection() | {"operations": array}))
+
+
+@pytest.mark.parametrize("payload_kind", ["valid", "duplicate", "over_bytes"])
+def test_native_adapter_json_is_denied_before_fleet_validation(payload_kind):
+    from pydantic import TypeAdapter
+
+    p = api()
+    raw = json.dumps(identity()["scope"]).encode()
+    if payload_kind == "duplicate":
+        raw = b'{"workspace_id":"' + UUID.encode() + b'",' + raw[1:]
+    elif payload_kind == "over_bytes":
+        raw += b" " * (65537 - len(raw))
+    reject(lambda: TypeAdapter(p.Scope).validate_json(raw))
+    if payload_kind == "valid":
+        assert p.Scope.model_validate_json(raw).workspace_id == UUID
+        assert TypeAdapter(p.Scope).validate_python(p.decode_fleet_json(raw)).workspace_id == UUID
+    else:
+        code = "input_limit" if payload_kind == "over_bytes" else "invalid_request"
+        reject(lambda: p.Scope.model_validate_json(raw), code)
+
+
+@pytest.mark.parametrize("extra", ["ignore", "allow"])
+@pytest.mark.parametrize("entry_point", ["class", "adapter"])
+@pytest.mark.parametrize("target", ["scope", "nested_scope", "prepared", "private_state"])
+def test_per_call_extra_override_cannot_relax_fleet_fields(extra, entry_point, target):
+    from pydantic import TypeAdapter
+
+    p = api()
+    if target == "scope":
+        model = p.Scope
+        raw = identity()["scope"] | {"secret_extra": "PRIVATE_SENTINEL"}
+    elif target == "nested_scope":
+        model = p.RuntimeIdentity
+        raw = identity()
+        raw["scope"]["secret_extra"] = "PRIVATE_SENTINEL"
+    elif target == "prepared":
+        model = p.PreparedCredential
+        raw = dict(
+            token="synthetic",
+            credential_version=1,
+            activation_deadline_ms=60,
+            server_time_ms=0,
+            secret_extra="PRIVATE_SENTINEL",
+        )
+    else:
+        model = p.CredentialState
+        raw = dict(
+            revision=0,
+            instance_id=UUID,
+            active_token="synthetic",
+            pending_token=None,
+            pending_version=None,
+            secret_extra="PRIVATE_SENTINEL",
+        )
+    validate = (
+        model.model_validate if entry_point == "class" else TypeAdapter(model).validate_python
+    )
+    reject(lambda: validate(raw, extra=extra))
+
+
+@pytest.mark.parametrize(
+    "model_name,raw",
+    [
+        ("ConnectionConfig", connection()),
+        ("PoolPolicy", pool()),
+        (
+            "IssuedCredential",
+            dict(
+                token="synthetic",
+                state=dict(
+                    identity=identity(),
+                    credential_expires_at_ms=0,
+                    session_expires_at_ms=None,
+                    server_time_ms=0,
+                ),
+            ),
+        ),
+        (
+            "AcquiredSession",
+            dict(secret="synthetic", identity=identity(), expires_at_ms=60, server_time_ms=0),
+        ),
+    ],
+)
+def test_nested_native_json_mode_is_denied(model_name, raw):
+    from pydantic import TypeAdapter
+
+    p = api()
+    reject(lambda: TypeAdapter(getattr(p, model_name)).validate_json(json.dumps(raw).encode()))
+
+
+class DerivedString(str):
+    pass
+
+
+BAD_SECRET_VALUES = [
+    42,
+    None,
+    True,
+    1.5,
+    ["unexpected"],
+    {"unexpected": "synthetic"},
+    b"synthetic",
+    DerivedString("synthetic"),
+]
+
+
+def secret_dto_case(p, dto_name, field):
+    if dto_name == "IssuedCredential":
+        raw = dict(
+            token=SecretStr("synthetic"),
+            state=dict(
+                identity=identity(),
+                credential_expires_at_ms=0,
+                session_expires_at_ms=None,
+                server_time_ms=0,
+            ),
+        )
+        encode = p.encode_issued_credential
+    elif dto_name == "PreparedCredential":
+        raw = dict(
+            token=SecretStr("synthetic"),
+            credential_version=1,
+            activation_deadline_ms=60,
+            server_time_ms=0,
+        )
+        encode = p.encode_prepared_credential
+    elif dto_name == "AcquiredSession":
+        raw = dict(
+            secret=SecretStr("synthetic"), identity=identity(), expires_at_ms=60, server_time_ms=0
+        )
+        encode = p.encode_acquired_session
+    else:
+        raw = dict(
+            revision=0,
+            instance_id=UUID,
+            active_token=SecretStr("synthetic"),
+            pending_token=None,
+            pending_version=None,
+        )
+        if field == "pending_token":
+            raw.update(pending_token=SecretStr("pending-synthetic"), pending_version=1)
+        encode = p.CredentialState.model_validate
+    return getattr(p, dto_name), raw, encode
+
+
+@pytest.mark.parametrize(
+    "dto_name,field",
+    [
+        ("IssuedCredential", "token"),
+        ("PreparedCredential", "token"),
+        ("AcquiredSession", "secret"),
+        ("CredentialState", "active_token"),
+        ("CredentialState", "pending_token"),
+    ],
+)
+@pytest.mark.parametrize(
+    "malformed",
+    BAD_SECRET_VALUES,
+    ids=["integer", "none", "bool", "float", "list", "dict", "bytes", "str-subclass"],
+)
+@pytest.mark.parametrize("origin", ["constructor", "constructed_model", "mutated_wrapper"])
+def test_malformed_secret_wrappers_fail_every_secret_boundary(dto_name, field, malformed, origin):
+    p = api()
+    model, raw, encode = secret_dto_case(p, dto_name, field)
+    if origin == "constructor":
+        raw[field] = SecretStr(malformed)
+        reject(lambda: model(**raw))
+    elif origin == "constructed_model":
+        raw[field] = SecretStr(malformed)
+        reject(lambda: encode(model.model_construct(**raw)))
+    else:
+        instance = model(**raw)
+        object.__setattr__(getattr(instance, field), "_secret_value", malformed)
+        reject(lambda: encode(instance))
+
+
+@pytest.mark.parametrize("inner,code", [("\ud800", "invalid_request"), ("a" * 8193, "input_limit")])
+def test_existing_secret_wrappers_retain_unicode_and_string_budgets(inner, code):
+    p = api()
+    model = p.PreparedCredential(
+        token=SecretStr("synthetic"),
+        credential_version=1,
+        activation_deadline_ms=60,
+        server_time_ms=0,
+    )
+    object.__setattr__(model.token, "_secret_value", inner)
+    reject(lambda: p.encode_prepared_credential(model), code)
+
+
+def test_missing_secret_wrapper_inner_value_has_safe_error():
+    p = api()
+    model = p.PreparedCredential(
+        token=SecretStr("synthetic"),
+        credential_version=1,
+        activation_deadline_ms=60,
+        server_time_ms=0,
+    )
+    object.__delattr__(model.token, "_secret_value")
+    reject(lambda: p.encode_prepared_credential(model))
