@@ -330,11 +330,13 @@ def test_move_and_edit_remain_private(case, expected_move_and_edit):
 
 **Interfaces:** ExecutableSignatureEnvelope, CommandSignatureEnvelope, ExecutableVerificationReport; sign_executable_package(raw: object, private_key: Ed25519PrivateKey) -> ExecutableSignatureEnvelope; verify_executable_package(raw: object, envelope: object, trust_set: object) -> ExecutableVerificationReport; sign_runtime_command(raw: object, private_key: Ed25519PrivateKey) -> CommandSignatureEnvelope; verify_runtime_command(raw: object, envelope: object, trust_set: object) -> ExecutableVerificationReport.
 
+Public admission helpers validate_executable_signature_envelope, validate_command_signature_envelope and validate_executable_verification_report have corresponding executable_signature_envelope_json, command_signature_envelope_json and executable_verification_report_json complete ASCII serializers. Each operation captures bytes from one public canonical entry; existing internal validation/JCS bound measurements remain intact.
+
 V2 envelope fields are exact format_version 2, algorithm ed25519, context lotuspond-workflow-package-signature-v2, schema_version lotuspond.workflow-package.v2, canonicalization lotuspond.workflow-package.jcs.v2, key_id, sha256 and signature. Command envelope uses format_version 1, context lotuspond-runtime-command-v1, schema_version lotuspond.runtime-command.v1 and canonicalization lotuspond.runtime-wire.jcs.v1. Public keys remain outside envelopes. Signature is 128 lowercase hex. H is sorted compact ASCII JSON of every envelope field except signature; C is exact JCS package/command bytes. Frame is context ASCII + NUL + uint64be(len(H)) + H + uint64be(len(C)) + C. The internal frame helper is called only with validated context-specific envelopes.
 
 Verification report fields: valid, code verified/untrusted_key/revoked_key/digest_mismatch/invalid_signature, content_kind package_v2/runtime_command_v1, sha256, key_id, contract_valid=true, compatibility_status=not_checked, binding_status=not_checked and authority_granted=false. Malformed context/version/header is an input error, never a fallback to another verifier. Allowed/revoked precedence and duplicate/degenerate trust refusal remain the reviewed v1 behavior.
 
-- [ ] **Step 1: Write independent framing/signature tests.** Create literal synthetic frames/signatures using RFC 8032 key material and independent OpenSSL signing, retaining provenance. Assert both directions, every signed header field, wrong key/content, v1/evidence/command/package cross-context refusal, malformed formats, duplicate/revoked trust and mutated models. An internally valid signature over a wrong-context command must still fail Task 5 binding.
+- [x] **Step 1: Write independent framing/signature tests.** Create literal synthetic frames/signatures using RFC 8032 key material and independent OpenSSL signing, retaining provenance. Assert both directions, every signed header field, wrong key/content, v1/evidence/command/package cross-context refusal, malformed formats, duplicate/revoked trust and mutated models. An internally valid signature over a wrong-context command must still fail Task 5 binding.
 
 ```python
 def test_signed_wrong_recipient_is_not_authority(command_input, key, trust, intent, decision, context):
@@ -346,10 +348,10 @@ def test_signed_wrong_recipient_is_not_authority(command_input, key, trust, inte
     assert result.authority_granted is False
 ```
 
-- [ ] **Step 2: Run uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_signing.py -q; expect missing signing APIs.** Existing v1 signature fixtures/tests must stay green unchanged. Missing OpenSSL on required Linux CI is a failed prerequisite, not a silent skip.
-- [ ] **Step 3: Implement context-specific signing/verification.** Canonicalize once after full validation, bind all header bytes, revalidate external trust and envelope, then verify with cryptography. Command cryptographic verification deliberately leaves actual identity/current authority/binding unchecked; compose the separate Task 5 check explicitly. No signer key discovery or credentials from environment.
-- [ ] **Step 4: Verify both signature suites, exact frame literals, OpenSSL/RFC/JCS oracles and Ruff on 3.13/3.14.** Exercise wrong-algorithm keys, report/output caps and known key-encoding guards through the new APIs; do not broaden subgroup claims.
-- [ ] **Step 5: Commit feat: sign v2 packages and runtime commands with domain separation.** A crypto-capable independent reviewer checks both framing contexts and trust/authority separation.
+- [x] **Step 2: Run uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_signing.py -q; expect missing signing APIs.** Existing v1 signature fixtures/tests must stay green unchanged. Missing OpenSSL on required Linux CI is a failed prerequisite, not a silent skip.
+- [x] **Step 3: Implement context-specific signing/verification.** Canonicalize once after full validation, bind all header bytes, revalidate external trust and envelope, then verify with cryptography. Command cryptographic verification deliberately leaves actual identity/current authority/binding unchecked; compose the separate Task 5 check explicitly. No signer key discovery or credentials from environment.
+- [x] **Step 4: Verify both signature suites, exact frame literals, OpenSSL/RFC/JCS oracles and Ruff on 3.13/3.14.** Exercise wrong-algorithm keys, report/output caps and known key-encoding guards through the new APIs; do not broaden subgroup claims.
+- [x] **Step 5: Commit feat: sign v2 packages and runtime commands with domain separation.** A crypto-capable independent reviewer checks both framing contexts and trust/authority separation.
 
 ## Task 9: Assess explicit synthetic v2 capability declarations
 
