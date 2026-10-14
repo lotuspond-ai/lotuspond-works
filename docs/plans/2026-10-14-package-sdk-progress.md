@@ -165,3 +165,22 @@ All five then passed. Scoped signing/trust verification passed **103 tests**,
 zero skips, on Python 3.14.5 and isolated Python 3.13.13; SDK Ruff and whitespace
 checks passed. No unrelated application, database or artifact checks were repeated.
 Independent re-review remains controller-owned.
+
+### Task 3 independent review closure
+
+Independent review of `653dab2..a6cfa7c` passed the signature framing, strict
+external trust, degenerate-key guard provenance, RFC/OpenSSL evidence and safe
+file requirements. It found one minor specification gap: caller-controlled JSON
+indentation could exceed the 8 MiB rendered-output cap. Fix `0c71e0b` checks actual
+rendered output as well as the complete-record precheck. Five regressions failed
+before the repair and passed after; 103 signing/trust tests passed on both
+Python 3.13 and 3.14. Fresh scoped review passed specification and quality with no
+remaining findings. The earlier README fixture nit is also confirmed resolved.
+
+Two execution safety decisions are incorporated into the plan and documentation:
+retain incomplete/replaced output on write failure instead of unsafe pathname
+cleanup (operator inspection may be needed), and reject known degenerate or
+noncanonical provisioned trust keys using established encoding guards (those
+keys must be replaced). Neither changes historical package bytes or grants
+execution authority. Final whole-branch artifact/application/CI checks remain
+the shipping gate.
