@@ -856,6 +856,7 @@ class ConnectionVersion(FleetScoped, Base):
     config_digest: Mapped[str] = mapped_column(String(64), index=True)
     __table_args__ = fleet_scoped(
         fleet_parent("connections", "connection_id"),
+        Index("connection_versions_inventory_idx", *FLEET_SCOPE, "connection_id", "id"),
         UniqueConstraint(*FLEET_SCOPE, "connection_id", "version"),
         fleet_positive("version"),
         CheckConstraint("length(canonical_config) BETWEEN 1 AND 32768"),
@@ -935,6 +936,7 @@ class RuntimePoolPolicy(FleetScoped, Base):
     policy_digest: Mapped[str] = mapped_column(String(64), index=True)
     __table_args__ = fleet_scoped(
         fleet_parent("runtime_pools", "pool_id"),
+        Index("runtime_pool_policies_inventory_idx", *FLEET_SCOPE, "pool_id", "id"),
         UniqueConstraint(*FLEET_SCOPE, "pool_id", "version"),
         fleet_positive("version"),
         CheckConstraint("length(canonical_policy) BETWEEN 1 AND 32768"),

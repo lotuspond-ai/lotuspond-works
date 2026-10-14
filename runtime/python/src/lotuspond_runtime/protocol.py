@@ -409,3 +409,130 @@ def encode_acquired_session(raw: AcquiredSession) -> dict[str, object]:
         "expires_at_ms": model.expires_at_ms,
         "server_time_ms": model.server_time_ms,
     }
+
+
+# Explicit management wire records. Private configuration appears only in detail.
+ResourceStatus = Literal["active", "disabled", "revoked"]
+Revision = Annotated[int, BeforeValidator(_exact_int), Field(ge=1, le=2147483647)]
+Name = Annotated[str, Field(min_length=1, max_length=160)]
+
+
+class ManagementNameRequest(FleetModel):
+    name: Name
+
+
+class ManagementStatusRequest(FleetModel):
+    status: ResourceStatus
+
+
+class SecretRegistrationRequest(FleetModel):
+    binding_id: OpaqueId
+    version: Revision
+
+
+class EmptyManagementRequest(FleetModel):
+    pass
+
+
+class ManagementPageRequest(FleetModel):
+    after_id: CanonicalUUID | None = None
+    limit: Annotated[int, BeforeValidator(_exact_int), Field(ge=1, le=100)] = 50
+
+
+class ConnectionView(FleetModel):
+    id: CanonicalUUID
+    scope: Scope
+    name: Name
+    status: ResourceStatus
+    current_version: Revision | None
+    created_at_ms: SafeInt
+
+
+class PoolView(ConnectionView):
+    pass
+
+
+class ConnectionVersionView(FleetModel):
+    id: CanonicalUUID
+    connection_id: CanonicalUUID
+    scope: Scope
+    version: Revision
+    sha256: Digest
+    created_at_ms: SafeInt
+
+
+class ConnectionVersionDetail(ConnectionVersionView):
+    config: ConnectionConfig
+
+
+class PoolPolicyView(FleetModel):
+    id: CanonicalUUID
+    pool_id: CanonicalUUID
+    scope: Scope
+    version: Revision
+    sha256: Digest
+    created_at_ms: SafeInt
+
+
+class PoolPolicyDetail(PoolPolicyView):
+    policy: PoolPolicy
+
+
+class SecretReferenceView(FleetModel):
+    id: CanonicalUUID
+    scope: Scope
+    binding_id: OpaqueId
+    version: Revision
+    status: Literal["active", "revoked"]
+    created_at_ms: SafeInt
+
+
+class ConnectionList(FleetModel):
+    items: Annotated[tuple[ConnectionView, ...], BeforeValidator(_array), Field(max_length=100)]
+    next_after_id: CanonicalUUID | None
+
+
+class PoolList(FleetModel):
+    items: Annotated[tuple[PoolView, ...], BeforeValidator(_array), Field(max_length=100)]
+    next_after_id: CanonicalUUID | None
+
+
+class ConnectionVersionList(FleetModel):
+    items: Annotated[
+        tuple[ConnectionVersionView, ...], BeforeValidator(_array), Field(max_length=100)
+    ]
+    next_after_id: CanonicalUUID | None
+
+
+class PoolPolicyList(FleetModel):
+    items: Annotated[tuple[PoolPolicyView, ...], BeforeValidator(_array), Field(max_length=100)]
+    next_after_id: CanonicalUUID | None
+
+
+class SecretReferenceList(FleetModel):
+    items: Annotated[
+        tuple[SecretReferenceView, ...], BeforeValidator(_array), Field(max_length=100)
+    ]
+    next_after_id: CanonicalUUID | None
+
+
+__all__ += [
+    "ResourceStatus",
+    "ManagementNameRequest",
+    "ManagementStatusRequest",
+    "SecretRegistrationRequest",
+    "EmptyManagementRequest",
+    "ManagementPageRequest",
+    "ConnectionView",
+    "PoolView",
+    "ConnectionVersionView",
+    "ConnectionVersionDetail",
+    "PoolPolicyView",
+    "PoolPolicyDetail",
+    "SecretReferenceView",
+    "ConnectionList",
+    "PoolList",
+    "ConnectionVersionList",
+    "PoolPolicyList",
+    "SecretReferenceList",
+]

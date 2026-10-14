@@ -1094,6 +1094,8 @@ CREATE TABLE runtime_credentials (
 
 ALTER TABLE runtime_pools ADD CONSTRAINT runtime_pools_current_policy_fk FOREIGN KEY(workspace_id, project_id, environment_id, id, current_policy_version) REFERENCES runtime_pool_policies (workspace_id, project_id, environment_id, pool_id, version);
 
+CREATE INDEX connection_versions_inventory_idx ON connection_versions (workspace_id, project_id, environment_id, connection_id, id);
+
 CREATE INDEX gateway_usage_workspace_created ON gateway_usage (workspace_id, created_at);
 
 CREATE INDEX ix_alert_deliveries_status ON alert_deliveries (status);
@@ -1235,6 +1237,8 @@ CREATE UNIQUE INDEX runtime_one_active_credential ON runtime_credentials (worksp
 CREATE UNIQUE INDEX runtime_one_active_session ON runtime_sessions (workspace_id, project_id, environment_id, pool_id, installation_id, recovery_epoch, instance_id) WHERE status = 'active';
 
 CREATE UNIQUE INDEX runtime_one_pending_credential ON runtime_credentials (workspace_id, project_id, environment_id, pool_id, installation_id, recovery_epoch, instance_id) WHERE status = 'pending';
+
+CREATE INDEX runtime_pool_policies_inventory_idx ON runtime_pool_policies (workspace_id, project_id, environment_id, pool_id, id);
 
 CREATE INDEX sessions_mfa_factor_idx ON sessions (user_id, mfa_factor_id, mfa_factor_version);
 

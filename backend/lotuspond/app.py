@@ -10,6 +10,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .config import Settings
 from .database import engine_for, sessions_for
+from .fleet.catalog import InstalledCatalog
+from .fleet.management_routes import FleetRequestBoundary
+from .fleet.management_routes import router as fleet_management_router
 from .gateway import router as gateway_router
 from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
@@ -163,10 +166,12 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
         title="Lotuspond API", version="0.2.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.state.settings = settings
+    app.state.fleet_catalog = InstalledCatalog()
     app.state.engine = engine
     app.state.sessions = sessions_for(engine)
     app.state.limiter = limiter
     app.add_middleware(RequestBoundary, settings=settings)
+    app.add_middleware(FleetRequestBoundary, settings=settings)
 
     @app.exception_handler(HTTPException)
     async def http_error(_, exc):
@@ -238,6 +243,13 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.2.0",
+                    "id": "fleet-management",
+                    "date": "2026-10-14",
+                    "title": "Scoped connection and runtime pool administration",
+                    "description": "An opt-in API lets customer owners and administrators manage immutable connection configurations, secret-reference metadata and runtime pool policies. Installed connector metadata and current scoped references bound publication. This foundation grants no business execution authority.",
+                },
                 {
                     "version": "0.2.0",
                     "id": "executable-v2-local-tooling",
@@ -415,6 +427,7 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
     app.include_router(mfa_router)
     app.include_router(operations_router)
     app.include_router(packages_router)
+    app.include_router(fleet_management_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)
     app.include_router(gateway_router)
