@@ -117,3 +117,29 @@ later work. Root v1 modules and runtime behavior are unchanged.
 
 The final network-enabled SDK 3.14 rerun passes 544 tests and 68 subtests, with
 no skips or warnings, closing the earlier shared artifact-fixture errors.
+
+### Task 2 review correction round 1 (scoped re-review pending)
+
+Independent review found three Important nested-flow defects: array merging lost
+producer ownership, repeated aliases rewrote already-bound choices, and empty
+nested arrays became missing handle items. Seven initial regression cases
+reproduced those failures. The correction retains complete ordered nested-array
+alternatives with each owner/cardinality, distributes selection before merging,
+and distinguishes impossible zero-cardinality branches from absent fields.
+Already-bound choice identities remain unchanged through unrelated aliases;
+only explicitly owned source/selector slots are specialized.
+
+A composed differing-owner regression additionally proved that replacing an
+owned slot with the same index could erase its owner. The controller approved
+explicit immutable occurrence/selection binding records as part of static origin
+equality. They retain ordered owner/path pairs, reject repeated/conflicting
+owners, and survive aliases, choices and revalidation. The guide and appended
+Task 2 report record the exact metadata and later serialization obligations.
+This refines compiler metadata only; no wire/runtime authority or v1 code changed.
+
+Final retained logs show 110 focused tests and 225 Task 1+2 tests on each Python
+3.14.5 and separate 3.13.13, all passing with no skips or warnings. Frozen SDK
+Ruff and whitespace checks pass with retained output. The correction includes
+nested intent/decision correlation, owned selectors, empty/nonempty object items,
+metadata mutation and cyclic-alternative refusals. No full SDK/application/DB
+matrix was repeated; the controller requested this scoped correction gate.

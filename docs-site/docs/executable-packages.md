@@ -117,7 +117,7 @@ schema and `max_items`). A declaration constrains an existing flow; it does not
 cast data into handles. Public package/model/tool/connector schemas and literals
 use `DataSchema`, which has no handle kind. Calls cannot produce handles.
 
-Compiler-only `SourceSymbol(operation, step_id, occurrence_path=())` identifies
+Compiler-only `SourceSymbol(operation, step_id, occurrence_path=(), occurrence_bindings=())` identifies
 an operation occurrence. Allowed operation/handle pairs are `action_intent` /
 `action_intent`, `human_review` / `human_decision`, `action_dispatch` /
 `action_receipt`, and `verification` / `verification_evidence`. Non-intent handles
@@ -129,7 +129,13 @@ and compare exact binding digests.
 
 `FlowObjectType` preserves fields and origins. `FlowArrayType` adds immutable
 `elements` for constructor arrays and an explicit `item_schema`; its `items`
-summary never stands in for one chosen concrete origin. An empty array has
+summary never stands in for one chosen concrete origin. A selection between
+nested arrays retains ordered `alternatives`, their `selection_path` and
+`selection_bindings`, rather than flattening their owners or lengths. Identical
+alternatives preserve the existing array and its owner. Different alternatives
+retain each complete array, including its `iteration_id`, nested alternatives,
+concrete elements and maximum length. `max_items` is their maximum, not the
+export declaration's potentially larger allowance. An empty array has
 `items=None`, `max_items=0` and its declared `item_schema`, creating no origin.
 The pure selection helpers are:
 
@@ -143,8 +149,13 @@ is present because it describes a current element, and requires a nonempty,
 stable path identifying that selection. Both refuse selection from an empty
 array. Concrete array/object aliases preserve the exact original handle symbol.
 Unknown selection among different handles produces `OriginChoice(options,
-selection_path)`, preserving order, multiplicity, nested choices and missing
-optional-field slots (`None`). The compiler must traverse those choices, use the
+selection_path, selection_bindings=())`, preserving order, multiplicity,
+nested choices and positional slots (`None`). An absent optional array occupies
+a `None` alternative; a present empty array remains an explicit array of length
+zero. Selection from an empty alternative is impossible, not a missing element
+inside a nonempty array. Its positional origin slot remains `None` for
+correlation, while a current inner iteration item is present. Required nested
+fields retain their own availability checks. The compiler must traverse those choices, use the
 same selector path for correlated fields, distinguish different selection paths
 or reordered slots, and never choose the first option or treat an unbound
 `items` summary as a concrete handle.
@@ -154,8 +165,30 @@ producing iteration. Only source occurrence slots spelled `$item:<iteration_id>`
 are bound when that array is selected. The compiler creates such slots only for
 operations actually authored inside that iteration. Aliases of outside handles
 retain their origin, including an outer iteration's still-symbolic slot when an
-inner result is selected. Nested choices remain conservative metadata; the
-compiler must carry their complete structure through region exports and joins.
+inner result is selected. Already-bound outside choices retain their selector
+identity; binding recurses into their options only to specialize slots belonging
+to the current producer. An explicitly owned selector slot can likewise be bound.
+
+`SourceSymbol.occurrence_bindings` and both `OriginChoice.selection_bindings` and
+`FlowArrayType.selection_bindings` are immutable ordered
+`tuple[tuple[str, tuple[str, ...]], ...]` records of owner and binding path. They
+retain ownership after `$item:<owner>` is replaced by an index/selection path,
+and participate in exact equality. At most 32 unique Identifier owners are
+allowed. Binding paths are nonempty with at most 32 strings of 1..512 characters.
+Duplicate owners, including identical or conflicting repeats, are refused; a
+bound owner cannot also have an unresolved slot in that same path. Aliases retain
+all bindings unchanged. Later plan serialization must preserve binding order,
+owner/path pairs, alternatives, empty arrays and all choice slots deterministically;
+none may be flattened, deduplicated or omitted from provenance comparison.
+
+`FlowArrayType.alternatives` is either null or an immutable tuple of 1..1,000
+arrays/absent slots, with at least one array. This representation requires an
+explicit item schema, excludes simultaneous concrete `elements` or a shared
+`iteration_id`, and is recursively revalidated under the flow bounds. Its
+selection metadata belongs to that alternative selection; each alternative
+retains its own producer owner. The selection helpers distribute through those
+alternatives before merging results. Nested choices remain conservative metadata;
+the compiler must carry their complete structure through region exports and joins.
 Data bounds are checked for every concrete array element and retained in its
 summary. All model inputs are reprojected/revalidated after mutation or bypassed
 construction. Refusals use fixed `ExecutableError` codes and reveal no supplied

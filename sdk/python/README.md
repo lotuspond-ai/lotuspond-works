@@ -398,7 +398,12 @@ metadata carries `SourceSymbol` and ordered `OriginChoice` provenance.
 `select_array_item` preserves alias origins and requires presence checking;
 `iteration_item_flow` produces a present but possibly symbolic current element.
 An array's `iteration_id` binds only its own `$item:<iteration_id>` occurrence
-slots, preserving outer-loop aliases. Empty handle arrays create no origin.
+slots, preserving outer-loop aliases. Nested array alternatives retain each
+producer owner and cardinality; empty alternatives contribute no current item.
+Already-bound choices retain their selector identity through repeated aliases.
+Explicit ordered occurrence/selection binding records preserve owner identity
+after slots are bound and remain part of exact provenance equality. Empty handle
+arrays create no origin.
 The later compiler must enforce lexical scopes, guarded branches, originating
 operation kinds and correlated intent/decision provenance; wire records still
 require independent authenticated reload at runtime. See

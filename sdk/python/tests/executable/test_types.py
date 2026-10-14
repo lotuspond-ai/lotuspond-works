@@ -182,3 +182,128 @@ def test_public_import_does_not_emit_schema_shadow_warnings():
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "handle_kind,operation",
+    [("action_intent", "action_intent"), ("human_decision", "human_review")],
+)
+def test_repeated_aliases_preserve_bound_choices_and_intent_correlation(handle_kind, operation):
+    from lotuspond_sdk.executable.types import FlowArrayType, iteration_item_flow, select_array_item
+
+    intents = [SourceSymbol("action_intent", name) for name in ("a", "b")]
+    handles = tuple(
+        HandleType(
+            handle_kind,
+            SourceSymbol(operation, name),
+            intent_source=None if handle_kind == "action_intent" else intent,
+        )
+        for name, intent in zip(("a", "b"), intents)
+    )
+    chosen = iteration_item_flow(
+        FlowArrayType(handles[0], 2, elements=handles), occurrence_path=("producer",)
+    )
+    aliases = FlowArrayType(chosen, 2, iteration_id="inner")
+    for actual in (
+        select_array_item(aliases, 0),
+        select_array_item(aliases, 1),
+        iteration_item_flow(aliases, occurrence_path=("consumer",)),
+    ):
+        assert actual.source == chosen.source
+        assert actual.intent_source == chosen.intent_source
+
+
+def test_owned_templates_inside_bound_choices_bind_without_changing_external_selector():
+    from lotuspond_sdk.executable.types import FlowArrayType, OriginChoice, select_array_item
+
+    fixed = SourceSymbol("action_intent", "outside", ("$item:outer",))
+    owned = SourceSymbol("action_intent", "inside", ("$item:inner",))
+    choice = OriginChoice((fixed, owned), ("producer",))
+    array = FlowArrayType(HandleType("action_intent", choice), 2, iteration_id="inner")
+    selected = select_array_item(array, 0).source
+    assert selected.selection_path == ("producer",)
+    assert selected.options == (
+        fixed,
+        SourceSymbol("action_intent", "inside", ("0",), (("inner", ("0",)),)),
+    )
+
+
+@pytest.mark.parametrize(
+    "bindings",
+    [
+        (("inner", ("0",)), ("inner", ("0",))),
+        (("inner", ("0",)), ("inner", ("1",))),
+        (("not valid", ("0",)),),
+        (("inner", ["0"]),),
+    ],
+)
+def test_occurrence_bindings_reject_duplicate_conflicting_or_malformed_entries(bindings):
+    with pytest.raises(ExecutableError):
+        SourceSymbol("action_intent", "propose", occurrence_bindings=bindings)
+
+
+def test_owned_choice_selector_binding_retains_owner_identity():
+    from lotuspond_sdk.executable.types import FlowArrayType, OriginChoice, select_array_item
+
+    options = (SourceSymbol("action_intent", "a"), SourceSymbol("action_intent", "b"))
+    selected = [
+        select_array_item(
+            FlowArrayType(
+                HandleType("action_intent", OriginChoice(options, (f"$item:{owner}",))),
+                2,
+                iteration_id=owner,
+            ),
+            0,
+        ).source
+        for owner in ("inner", "other")
+    ]
+    assert selected[0] != selected[1]
+    assert selected[0].selection_path == selected[1].selection_path == ("0",)
+
+
+@pytest.mark.parametrize("corruption", ["owner", "cardinality", "cycle", "selector_bindings"])
+def test_nested_array_alternatives_are_revalidated(corruption):
+    from lotuspond_sdk.executable.types import (
+        FlowArrayType,
+        iteration_item_flow,
+        parse_export,
+        validate_flow,
+    )
+
+    a = HandleType("action_intent", SourceSymbol("action_intent", "a"))
+    b = HandleType("action_intent", SourceSymbol("action_intent", "b"))
+    left, right = FlowArrayType(a, 1), FlowArrayType(b, 2)
+    exported = parse_export(
+        {
+            "kind": "array",
+            "max_items": 2,
+            "items": {"kind": "handle", "handle_kind": "action_intent"},
+        }
+    )
+    current = iteration_item_flow(
+        FlowArrayType(left, 2, elements=(left, right), item_schema=exported),
+        occurrence_path=("outer",),
+    )
+    if corruption == "owner":
+        object.__setattr__(current, "iteration_id", "invented")
+    elif corruption == "cardinality":
+        object.__setattr__(current, "max_items", 1)
+    elif corruption == "cycle":
+        object.__setattr__(current, "alternatives", (current,))
+    else:
+        object.__setattr__(current, "selection_bindings", (("owner", ("0",)), ("owner", ("1",))))
+    with pytest.raises(ExecutableError):
+        validate_flow(current)
+
+
+def test_bound_origin_metadata_survives_revalidation_and_rejects_mutation():
+    from lotuspond_sdk.executable.types import FlowArrayType, select_array_item, validate_flow
+
+    template = HandleType(
+        "action_intent", SourceSymbol("action_intent", "propose", ("$item:owner",))
+    )
+    result = select_array_item(FlowArrayType(template, 2, iteration_id="owner"), 1)
+    assert validate_flow(result).source.occurrence_bindings == (("owner", ("1",)),)
+    object.__setattr__(result.source, "occurrence_bindings", (("owner", ["1"]),))
+    with pytest.raises(ExecutableError):
+        validate_flow(result)

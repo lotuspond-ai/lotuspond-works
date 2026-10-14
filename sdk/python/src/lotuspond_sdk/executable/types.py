@@ -302,7 +302,9 @@ def resolve_schema(raw: object, definitions: object = ()) -> DataSchema:
 
 def parse_export(raw: object, definitions: object = ()) -> ExportSchema:
     parsed = _parse(raw, _EXPORT)
-    named = schema_definitions([] if type(definitions) is tuple and not definitions else definitions)
+    named = schema_definitions(
+        [] if type(definitions) is tuple and not definitions else definitions
+    )
 
     def resolve(item):
         if item.kind == "data":
@@ -378,6 +380,9 @@ def _value(value, schema):
     return value
 
 
+OccurrenceBindings: TypeAlias = tuple[tuple[str, tuple[str, ...]], ...]
+
+
 @dataclass(frozen=True, slots=True)
 class SourceSymbol:
     """Immutable static origin, including the occurrence within bounded arrays."""
@@ -385,6 +390,7 @@ class SourceSymbol:
     operation: str
     step_id: str
     occurrence_path: tuple[str, ...] = ()
+    occurrence_bindings: OccurrenceBindings = ()
 
     def __post_init__(self):
         if self.operation not in (
@@ -405,6 +411,7 @@ class SourceSymbol:
         ):
             raise ExecutableError("invalid_mapping")
         project_json(list(self.occurrence_path))
+        _check_bindings(self.occurrence_bindings, self.occurrence_path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,6 +424,7 @@ class OriginChoice:
 
     options: tuple[SourceSymbol | OriginChoice | None, ...]
     selection_path: tuple[str, ...] = ()
+    selection_bindings: OccurrenceBindings = ()
 
     def __post_init__(self):
         _check_origin(self)
@@ -432,13 +440,31 @@ def _check_occurrence(path):
     project_json(list(path))
 
 
+def _check_bindings(bindings, unresolved_path):
+    if type(bindings) is not tuple or len(bindings) > 32:
+        raise ExecutableError("invalid_mapping")
+    seen = set()
+    for entry in bindings:
+        if type(entry) is not tuple or len(entry) != 2:
+            raise ExecutableError("invalid_mapping")
+        owner, path = entry
+        try:
+            TypeAdapter(Identifier).validate_python(owner, strict=True)
+        except ValidationError:
+            raise ExecutableError("invalid_mapping") from None
+        _check_occurrence(path)
+        if not path or owner in seen or f"$item:{owner}" in unresolved_path:
+            raise ExecutableError("invalid_mapping")
+        seen.add(owner)
+
+
 def _check_origin(raw, *, _depth=0, _budget=None):
     budget = [10000] if _budget is None else _budget
     budget[0] -= 1
     if _depth > 8 or budget[0] < 0:
         raise ExecutableError("invalid_mapping")
     if type(raw) is SourceSymbol:
-        SourceSymbol(raw.operation, raw.step_id, raw.occurrence_path)
+        SourceSymbol(raw.operation, raw.step_id, raw.occurrence_path, raw.occurrence_bindings)
         return raw.operation
     if (
         type(raw) is not OriginChoice
@@ -447,6 +473,7 @@ def _check_origin(raw, *, _depth=0, _budget=None):
     ):
         raise ExecutableError("invalid_mapping")
     _check_occurrence(raw.selection_path)
+    _check_bindings(raw.selection_bindings, raw.selection_path)
     operations = {
         _check_origin(x, _depth=_depth + 1, _budget=budget) for x in raw.options if x is not None
     }
@@ -458,9 +485,13 @@ def _check_origin(raw, *, _depth=0, _budget=None):
 def _origin(raw):
     _check_origin(raw)
     if type(raw) is SourceSymbol:
-        return SourceSymbol(raw.operation, raw.step_id, raw.occurrence_path)
+        return SourceSymbol(
+            raw.operation, raw.step_id, raw.occurrence_path, raw.occurrence_bindings
+        )
     return OriginChoice(
-        tuple(None if x is None else _origin(x) for x in raw.options), raw.selection_path
+        tuple(None if x is None else _origin(x) for x in raw.options),
+        raw.selection_path,
+        raw.selection_bindings,
     )
 
 
@@ -522,6 +553,10 @@ class FlowArrayType:
     elements: tuple[FlowType, ...] | None = field(default=None, repr=False)
     item_schema: ExportSchema | None = field(default=None, repr=False)
     iteration_id: str | None = None
+    # A selected nested array retains each alternative's owner and cardinality.
+    alternatives: tuple[FlowArrayType | None, ...] | None = field(default=None, repr=False)
+    selection_path: tuple[str, ...] = ()
+    selection_bindings: OccurrenceBindings = ()
 
 
 FlowType: TypeAlias = DataType | HandleType | FlowObjectType | FlowArrayType
@@ -576,6 +611,43 @@ def validate_flow(raw: object, *, definitions=(), _active=None, _depth=0, _budge
             except ValidationError:
                 raise ExecutableError("invalid_mapping") from None
         declared = None if raw.item_schema is None else parse_export(raw.item_schema, definitions)
+        _check_occurrence(raw.selection_path)
+        _check_bindings(raw.selection_bindings, raw.selection_path)
+        if raw.alternatives is not None:
+            if (
+                type(raw.alternatives) is not tuple
+                or not 1 <= len(raw.alternatives) <= 1000
+                or raw.elements is not None
+                or raw.iteration_id is not None
+                or declared is None
+            ):
+                raise ExecutableError("invalid_mapping")
+            alternatives = tuple(
+                None if value is None else child(value) for value in raw.alternatives
+            )
+            if not any(value is not None for value in alternatives) or any(
+                value is not None and type(value) is not FlowArrayType for value in alternatives
+            ):
+                raise ExecutableError("invalid_mapping")
+            if raw.max_items != max(value.max_items for value in alternatives if value is not None):
+                raise ExecutableError("invalid_mapping")
+            expected_array = ArrayExport(kind="array", items=declared, max_items=raw.max_items)
+            for value in alternatives:
+                if value is not None:
+                    _assign(replace(value, may_be_missing=False), expected_array)
+            if raw.items is not None:
+                _assign(child(raw.items), declared)
+            elif raw.max_items:
+                raise ExecutableError("invalid_mapping")
+            return _merge_arrays(
+                alternatives,
+                declared,
+                raw.selection_path,
+                raw.may_be_missing,
+                raw.selection_bindings,
+            )
+        if raw.selection_path or raw.selection_bindings:
+            raise ExecutableError("invalid_mapping")
         if raw.items is None:
             if raw.max_items != 0 or declared is None or raw.elements not in (None, ()):
                 raise ExecutableError("invalid_mapping")
@@ -716,34 +788,77 @@ def assert_assignable(actual: FlowType, expected: ExportSchema) -> None:
     _assign(validate_flow(actual), parse_export(expected))
 
 
-def _choose_origin(origins, path):
+def _choose_origin(origins, path, bindings=()):
     if all(origin == origins[0] for origin in origins):
         return origins[0]
-    return OriginChoice(tuple(origins), path)
+    return OriginChoice(tuple(origins), path, bindings)
+
+
+class _NoElement:
+    """An impossible selection (zero cardinality), not an absent field value."""
+
+
+_NO_ELEMENT = _NoElement()
+
+
+def _merge_arrays(alternatives, item_schema, selection_path, missing, selection_bindings=()):
+    present = tuple(value for value in alternatives if value is not None)
+    if not present:
+        raise ExecutableError("unavailable_value")
+    if len(present) == len(alternatives) and all(value == present[0] for value in present):
+        return replace(present[0], may_be_missing=missing)
+    maximum = max(value.max_items for value in present)
+    # Impossible branches retain their positional slot in provenance but cannot
+    # make an element of a present array absent. In particular [] has no item.
+    children = tuple(
+        _NO_ELEMENT if value is None or value.max_items == 0 else value.items
+        for value in alternatives
+    )
+    items = (
+        None
+        if maximum == 0
+        else merge_flow_elements(children, item_schema, selection_path, selection_bindings)
+    )
+    return FlowArrayType(
+        items,
+        maximum,
+        missing,
+        item_schema=item_schema,
+        alternatives=alternatives,
+        selection_path=selection_path,
+        selection_bindings=selection_bindings,
+    )
 
 
 def merge_flow_elements(
-    elements: tuple[FlowType | None, ...],
+    elements: tuple[FlowType | None | _NoElement, ...],
     expected: ExportSchema,
     selection_path: tuple[str, ...] = (),
+    selection_bindings: OccurrenceBindings = (),
 ) -> FlowType:
     """Conservatively describe constructor elements without choosing an origin."""
-    missing = any(x is None or x.may_be_missing for x in elements)
+    missing = any(x is not _NO_ELEMENT and (x is None or x.may_be_missing) for x in elements)
     if expected.kind == "data":
         return DataType(expected.schema, missing)
     if expected.kind == "handle":
         if (
             not elements
-            or not any(x is not None for x in elements)
-            or not all(x is None or type(x) is HandleType for x in elements)
+            or not any(x is not None and x is not _NO_ELEMENT for x in elements)
+            or not all(x is None or x is _NO_ELEMENT or type(x) is HandleType for x in elements)
         ):
             raise ExecutableError("type_mismatch")
-        source = _choose_origin([None if x is None else x.source for x in elements], selection_path)
+        source = _choose_origin(
+            [None if x is None or x is _NO_ELEMENT else x.source for x in elements],
+            selection_path,
+            selection_bindings,
+        )
         intent = (
             None
             if expected.handle_kind == "action_intent"
             else _choose_origin(
-                [None if x is None else x.intent_source for x in elements], selection_path
+                [None if x is None or x is _NO_ELEMENT else x.intent_source for x in elements],
+                selection_path,
+                selection_bindings,
             )
         )
         return HandleType(
@@ -752,20 +867,31 @@ def merge_flow_elements(
     if expected.kind == "object":
         result = {}
         for f in expected.fields:
-            values = tuple(None if x is None else x.fields.get(f.name) for x in elements)
-            if not any(x is not None for x in values):
+            values = tuple(
+                x if x is None or x is _NO_ELEMENT else x.fields.get(f.name) for x in elements
+            )
+            if not any(x is not None and x is not _NO_ELEMENT for x in values):
                 continue
-            result[f.name] = merge_flow_elements(values, f.schema, selection_path)
+            result[f.name] = merge_flow_elements(
+                values, f.schema, selection_path, selection_bindings
+            )
         return FlowObjectType(result, missing)
-    children = tuple(None if x is None else x.items for x in elements)
-    if not any(x is not None for x in children):
-        return FlowArrayType(None, 0, missing, item_schema=expected.items)
-    return FlowArrayType(
-        merge_flow_elements(children, expected.items, selection_path),
-        expected.max_items,
-        missing,
-        item_schema=expected.items,
-    )
+    alternatives = tuple(None if value is _NO_ELEMENT else value for value in elements)
+    return _merge_arrays(alternatives, expected.items, selection_path, missing, selection_bindings)
+
+
+def _bind_occurrence_path(original, path, owner):
+    slot = f"$item:{owner}"
+    if owner is None or slot not in original:
+        return original
+    index = original.index(slot)
+    return (*original[:index], *path, *original[index + 1 :])
+
+
+def _bind_owner(original_path, bindings, path, owner):
+    if owner is not None and f"$item:{owner}" in original_path:
+        return (*bindings, (owner, path))
+    return bindings
 
 
 def _occurrence_flow(flow, path, owner):
@@ -773,17 +899,19 @@ def _occurrence_flow(flow, path, owner):
 
         def bind(origin):
             if type(origin) is OriginChoice:
-                return replace(origin, selection_path=(*origin.selection_path, *path))
-            slot = f"$item:{owner}"
-            if owner is None or slot not in origin.occurrence_path:
-                return origin
-            index = origin.occurrence_path.index(slot)
+                return replace(
+                    origin,
+                    options=tuple(None if item is None else bind(item) for item in origin.options),
+                    selection_path=_bind_occurrence_path(origin.selection_path, path, owner),
+                    selection_bindings=_bind_owner(
+                        origin.selection_path, origin.selection_bindings, path, owner
+                    ),
+                )
             return replace(
                 origin,
-                occurrence_path=(
-                    *origin.occurrence_path[:index],
-                    *path,
-                    *origin.occurrence_path[index + 1 :],
+                occurrence_path=_bind_occurrence_path(origin.occurrence_path, path, owner),
+                occurrence_bindings=_bind_owner(
+                    origin.occurrence_path, origin.occurrence_bindings, path, owner
                 ),
             )
 
@@ -803,6 +931,16 @@ def _occurrence_flow(flow, path, owner):
             elements=None
             if flow.elements is None
             else tuple(_occurrence_flow(v, path, owner) for v in flow.elements),
+            alternatives=None
+            if flow.alternatives is None
+            else tuple(
+                None if value is None else _occurrence_flow(value, path, owner)
+                for value in flow.alternatives
+            ),
+            selection_path=_bind_occurrence_path(flow.selection_path, path, owner),
+            selection_bindings=_bind_owner(
+                flow.selection_path, flow.selection_bindings, path, owner
+            ),
         )
     return flow
 
@@ -823,7 +961,22 @@ def select_array_item(raw: FlowArrayType | DataType, index: int) -> FlowType:
         return DataType(flow.schema.items, True)
     if type(flow) is not FlowArrayType or index >= flow.max_items:
         raise ExecutableError("unknown_reference")
-    if flow.elements is not None:
+    if flow.alternatives is not None:
+        selected = tuple(
+            _NO_ELEMENT
+            if value is None
+            or index >= value.max_items
+            or value.elements is not None
+            and index >= len(value.elements)
+            else replace(select_array_item(value, index), may_be_missing=False)
+            for value in flow.alternatives
+        )
+        if all(value is _NO_ELEMENT for value in selected):
+            raise ExecutableError("unknown_reference")
+        item = merge_flow_elements(
+            selected, flow.item_schema, flow.selection_path, flow.selection_bindings
+        )
+    elif flow.elements is not None:
         if index >= len(flow.elements):
             raise ExecutableError("unknown_reference")
         item = flow.elements[index]
@@ -851,6 +1004,18 @@ def iteration_item_flow(
         return DataType(flow.schema.items)
     if type(flow) is not FlowArrayType or not flow.max_items:
         raise ExecutableError("unavailable_value")
+    if flow.alternatives is not None:
+        selected = tuple(
+            _NO_ELEMENT
+            if value is None or not value.max_items
+            else iteration_item_flow(
+                replace(value, may_be_missing=False), occurrence_path=occurrence_path
+            )
+            for value in flow.alternatives
+        )
+        return merge_flow_elements(
+            selected, flow.item_schema, flow.selection_path, flow.selection_bindings
+        )
     if flow.elements is not None:
         return merge_flow_elements(
             flow.elements, flow.item_schema or flow_export(flow.items), occurrence_path

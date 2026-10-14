@@ -391,3 +391,184 @@ def test_inner_iteration_alias_cannot_bind_outer_iteration_slot():
     assert iteration_item_flow(inner_results, occurrence_path=("consumer",)).source == outer.source
     outer_results = FlowArrayType(outer, 5, iteration_id="outer")
     assert select_array_item(outer_results, 0).source.occurrence_path == ("0",)
+
+
+@pytest.mark.parametrize("different_owners", [False, True])
+def test_nested_array_selection_preserves_each_producing_iteration(different_owners):
+    from lotuspond_sdk.executable.types import OriginChoice, iteration_item_flow, select_array_item
+
+    owners = ("inner", "other") if different_owners else ("inner",)
+    arrays = {
+        owner: FlowArrayType(
+            HandleType(
+                "action_intent", SourceSymbol("action_intent", "propose", (f"$item:{owner}",))
+            ),
+            2,
+            iteration_id=owner,
+        )
+        for owner in owners
+    }
+    environment = TypeEnvironment(input_schema={"kind": "null"}, step_outputs=arrays)
+    outer = infer_mapping(
+        {
+            "kind": "array",
+            "items": [ref(source={"kind": "step", "id": owner}) for owner in owners],
+            "item_schema": {
+                "kind": "array",
+                "items": {"kind": "handle", "handle_kind": "action_intent"},
+                "max_items": 2,
+            },
+        },
+        environment,
+    )
+    current = iteration_item_flow(outer, occurrence_path=("outer",))
+    if not different_owners:
+        assert current.iteration_id == "inner"
+    zero = select_array_item(current, 0).source
+    one = select_array_item(current, 1).source
+    assert zero != one
+    if different_owners:
+        assert isinstance(zero, OriginChoice)
+        assert zero.selection_path == ("outer",)
+        assert zero.options == tuple(select_array_item(arrays[owner], 0).source for owner in owners)
+        assert one.options == tuple(select_array_item(arrays[owner], 1).source for owner in owners)
+
+
+@pytest.mark.parametrize("object_items", [False, True])
+def test_mixed_empty_nested_arrays_remain_present_and_consumable(object_items):
+    from lotuspond_sdk.executable.types import iteration_item_flow, select_array_item, validate_flow
+
+    handle = HandleType("action_intent", SourceSymbol("action_intent", "propose"))
+    environment = TypeEnvironment(input_schema={"kind": "null"}, step_outputs={"handle": handle})
+    item = ref(source={"kind": "step", "id": "handle"})
+    exported = {"kind": "handle", "handle_kind": "action_intent"}
+    if object_items:
+        item = {"kind": "object", "fields": [{"name": "intent", "value": item}]}
+        exported = {
+            "kind": "object",
+            "fields": [{"name": "intent", "required": True, "schema": exported}],
+        }
+    nested = infer_mapping(
+        {
+            "kind": "array",
+            "items": [
+                {"kind": "array", "items": items, "item_schema": exported} for items in ([], [item])
+            ],
+            "item_schema": {"kind": "array", "items": exported, "max_items": 2},
+        },
+        environment,
+    )
+    validate_flow(nested)
+    assert select_array_item(nested, 0).max_items == 0
+    assert select_array_item(nested, 1).max_items == 1
+    current = iteration_item_flow(nested, occurrence_path=("outer",))
+    assert current.max_items == 1
+    assert not current.may_be_missing
+    indexed = select_array_item(current, 0)
+    assert indexed.may_be_missing
+    actual = iteration_item_flow(current, occurrence_path=("inner",))
+    assert not actual.may_be_missing
+    assert_assignable(actual, exported)
+    selected_handle = actual.fields["intent"] if object_items else actual
+    assert selected_handle.source.options == (None, handle.source)
+    assert selected_handle.source.selection_path == ("outer",)
+    assert not selected_handle.may_be_missing
+
+
+@pytest.mark.parametrize("reverse_decisions", [False, True])
+def test_nested_alternatives_preserve_intent_decision_and_alias_correlation(reverse_decisions):
+    from lotuspond_sdk.executable.types import iteration_item_flow, select_array_item
+
+    owners = ("left", "right")
+    intents = [SourceSymbol("action_intent", "propose", (f"$item:{owner}",)) for owner in owners]
+    arrays = {}
+    for index, owner in enumerate(owners):
+        decision_intent = intents[1 - index] if reverse_decisions else intents[index]
+        arrays[owner] = FlowArrayType(
+            FlowObjectType(
+                {
+                    "intent": HandleType("action_intent", intents[index]),
+                    "decision": HandleType(
+                        "human_decision",
+                        SourceSymbol("human_review", "review", (f"$item:{owner}",)),
+                        intent_source=decision_intent,
+                    ),
+                }
+            ),
+            2,
+            iteration_id=owner,
+        )
+    exported = {
+        "kind": "object",
+        "fields": [
+            {
+                "name": "intent",
+                "required": True,
+                "schema": {"kind": "handle", "handle_kind": "action_intent"},
+            },
+            {
+                "name": "decision",
+                "required": True,
+                "schema": {"kind": "handle", "handle_kind": "human_decision"},
+            },
+        ],
+    }
+    outer = infer_mapping(
+        {
+            "kind": "array",
+            "items": [ref(source={"kind": "step", "id": owner}) for owner in owners],
+            "item_schema": {"kind": "array", "items": exported, "max_items": 2},
+        },
+        TypeEnvironment(input_schema={"kind": "null"}, step_outputs=arrays),
+    )
+    current_array = iteration_item_flow(outer, occurrence_path=("outer",))
+    zero, one = (select_array_item(current_array, index) for index in (0, 1))
+    assert zero.fields["intent"].source != one.fields["intent"].source
+    assert (
+        zero.fields["intent"].source == zero.fields["decision"].intent_source
+    ) is not reverse_decisions
+    aliases = FlowArrayType(zero.fields["decision"], 2, iteration_id="aliases")
+    for result in (
+        select_array_item(aliases, 1),
+        iteration_item_flow(aliases, occurrence_path=("consumer",)),
+    ):
+        assert result.source == zero.fields["decision"].source
+        assert result.intent_source == zero.fields["decision"].intent_source
+
+
+def test_nested_array_selector_owner_bindings_survive_composed_selection():
+    from lotuspond_sdk.executable.types import iteration_item_flow, select_array_item, validate_flow
+
+    a = HandleType("action_intent", SourceSymbol("action_intent", "a"))
+    b = HandleType("action_intent", SourceSymbol("action_intent", "b"))
+    environment = TypeEnvironment(
+        input_schema={"kind": "null"},
+        step_outputs={"a": FlowArrayType(a, 1), "b": FlowArrayType(b, 1)},
+    )
+    outer = infer_mapping(
+        {
+            "kind": "array",
+            "items": [ref(source={"kind": "step", "id": name}) for name in ("a", "b")],
+            "item_schema": {
+                "kind": "array",
+                "items": {"kind": "handle", "handle_kind": "action_intent"},
+                "max_items": 1,
+            },
+        },
+        environment,
+    )
+    current = iteration_item_flow(outer, occurrence_path=("$item:owner",))
+    wrapped = FlowArrayType(current, 2, iteration_id="owner")
+    zero = select_array_item(wrapped, 0)
+    one = select_array_item(wrapped, 1)
+    assert zero.selection_bindings == (("owner", ("0",)),)
+    # Selection of a known outer index is still optional until presence is proved.
+    from dataclasses import replace
+
+    actual = iteration_item_flow(
+        replace(validate_flow(zero), may_be_missing=False), occurrence_path=("inner",)
+    )
+    other = iteration_item_flow(replace(one, may_be_missing=False), occurrence_path=("inner",))
+    assert actual.source.selection_bindings == zero.selection_bindings
+    assert actual.source.selection_path == ("0",)
+    assert actual.source != other.source
