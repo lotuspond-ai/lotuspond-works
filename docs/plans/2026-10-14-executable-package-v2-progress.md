@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–5 are complete after independent review and correction; Tasks 6–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–6 are complete after independent review and correction; Tasks 7–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -449,3 +449,21 @@ exact-head full-suite claim for this correction. Failed and passing correction
 logs and exact tested source hashes are retained in the Task 6 evidence directory,
 and the implementer report documents the updated receipt/state obligations.
 Scoped independent re-review remains pending.
+
+## Task 6 review closure
+
+Task 6 is complete through `6877cc54514b2b79b375ec92b670f5de8e815539`. Initial independent review found two Important defects; scoped independent re-review confirms both addressed, specification PASS and quality APPROVE, with no open or new findings. The common fresh-progression guard now checks the exact relevant receipt binding before retry/dispatch/completion paths, and completed accepted/observed actions require verified outcomes through every public state/report admission path. Fence, historical replay, sequence, stop and legitimate acknowledgement/qualified-absence behavior remain preserved.
+
+The reviewer checked all corrected source hashes and retained 48-failure red, 56-case green and 348-test covering evidence. Ruff and whitespace are clean. No full SDK suite was repeated for the correction; the earlier 991-test/68-subtest result applies to its earlier commit. No defect was waived or deferred. Corrected-head dual-Python/artifact/application/database/offline/whole-branch/hosted gates remain Task 10, and actual authentication, persistence and provider qualification remain later product work.
+
+Controller rulings for the reviewed transition contract:
+
+Ruling: Extend EventContext with bounded optional singleton BindingContext/intent/decision/receipt/wait/retry/completion facts, expected step/action/attempt, exact active_step boolean, expected reconciliation/verification rule identities and explicit opaque target_operation_ref — transition legality and receipt/evidence correlation require these supplied facts; neither persistent history nor parsing an opaque reference can substitute — cost if wrong: refine the not-yet-stable context model and caller fixtures before v2 stabilization; no authentication or execution authority is introduced.
+
+Ruling: Require explicit expected package/configuration/plan hashes for admission in EventContext fields or a bounded expected-admission singleton, without fabricating action identity to reuse BindingContext — a new execution must compare its admission payload to independent supplied expectations rather than accept the incoming hashes as their own reference — cost if wrong: refine draft context shape and caller fixtures; this remains synthetic consistency and introduces no authority.
+
+Ruling: Interpret runtime attempt as a zero-based index, allowing dispatch only while attempt < max_attempts and a further retry only while attempt+1 < max_attempts — existing wire fixtures begin at zero and max_attempts counts total attempts — cost if wrong: refine draft transition/context documentation and callers before stabilization; no extra attempt or authority is granted.
+
+Ruling: Allow exact qualified-absence reconciliation to make an accepted acknowledgement retry-eligible, while preserving observed/verified effects and contradictory positive evidence — accepted records transport acknowledgement, not a known target effect, and the approved retry contract permits qualified absence under the same intent — cost if wrong: refine the pre-stable transition policy and callers; future authority must still authenticate absence and issue fresh permission before any retry.
+
+Ruling: Treat qualified absence as its own structural retry basis, without requiring the timeout_before_dispatch retry code; ordinary failures and no-dispatch timeouts still require their actual allowed retry code — a qualified-absence payload contains no failure code and the approved contract separately permits that recovery condition — cost if wrong: refine the pre-stable retry-policy interpretation and callers; bounded attempts, current binding/lifetime/epoch, positive-effect preservation and fresh authority remain mandatory.
