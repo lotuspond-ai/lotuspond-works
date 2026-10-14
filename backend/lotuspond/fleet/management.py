@@ -78,7 +78,11 @@ def record(db: Session, model, scope: Scope, identifier: str, *, lock=False):
 
     identifier = TypeAdapter(CanonicalUUID).validate_python(identifier, strict=True)
     query = scoped(model, scope).where(model.id == identifier)
-    row = db.scalar(query.with_for_update() if lock else query)
+    # Lock the current database row and replace any earlier identity-map state.
+    # Caller-owned sessions may already retain a pre-revocation object.
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    row = db.scalar(query)
     if row is None:
         raise FleetError("not_found")
     return row
@@ -218,7 +222,10 @@ class ManagementService:
     def lock_scope(self, scope):
         scope = Scope.model_validate(scope)
         workspace = self.db.scalar(
-            select(Workspace).where(Workspace.id == scope.workspace_id).with_for_update()
+            select(Workspace)
+            .where(Workspace.id == scope.workspace_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if workspace is None:
             raise FleetError("not_found")
@@ -299,6 +306,7 @@ class ManagementService:
                 SecretReference.version == request.version,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if previous is not None and previous.status != "active":
             raise FleetError("conflict")

@@ -124,3 +124,114 @@ def test_pool_policy_and_secret_registration_races(app, client, fleet, catalog, 
     results = race(app, client, f"{fleet}/secret-references", [payload, payload], ["same", "same"])
     assert [r.status_code for r in results] == [201, 201]
     assert results[0].json() == results[1].json()
+
+
+@pytest.mark.parametrize(
+    "target,operation,denial",
+    [
+        ("workspace", "publish", "forbidden"),
+        ("connection", "publish", "conflict"),
+        ("pool", "publish", "conflict"),
+        ("secret", "publish", "conflict"),
+        ("connection", "activate", "conflict"),
+        ("pool", "activate", "conflict"),
+        ("secret", "register", "conflict"),
+    ],
+)
+def test_preloaded_authority_refreshes_under_service_lock(
+    client, fleet, catalog, app, engine, db_factory, account, target, operation, denial
+):
+    from lotuspond_runtime.errors import FleetError
+    from lotuspond_runtime.protocol import ConnectionConfig, PoolPolicy, Scope
+
+    from lotuspond.fleet.management import ConnectionService, PoolService
+    from tests.fleet.test_management import POLICY, post
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PostgreSQL identity-map/row-lock qualification required")
+    connection = create(client, fleet)
+    pool = create(client, fleet, "runtime-pools", "pool")
+    reference = post(
+        client,
+        f"{fleet}/secret-references",
+        {"binding_id": "fixture-binding", "version": 1},
+        "reference",
+    ).json()
+    scope = Scope(
+        workspace_id=account, project_id=fleet.split("/")[4], environment_id=fleet.split("/")[6]
+    )
+    with db_factory() as caller:
+        actor = caller.scalar(select(models.User)).id
+        model, identifier = {
+            "workspace": (models.Workspace, account),
+            "connection": (models.Connection, connection["id"]),
+            "pool": (models.RuntimePool, pool["id"]),
+            "secret": (models.SecretReference, reference["id"]),
+        }[target]
+        # A strong reference keeps the earlier object in the Session identity map.
+        # No locks are acquired until the independent change has committed.
+        cached = caller.get(model, identifier)
+        assert cached.status == "active"
+        with db_factory.begin() as other:
+            other.get(model, identifier).status = (
+                "suspended" if target == "workspace" else "revoked"
+            )
+        assert cached.status == "active"
+        service_type = PoolService if target == "pool" else ConnectionService
+        service = service_type(caller, catalog=app.state.fleet_catalog, actor_id=actor)
+        with pytest.raises(FleetError, match=f"^{denial}$"):
+            if operation == "activate":
+                service.set_status(scope, identifier, "active", "reactivate")
+            elif operation == "register":
+                service.register_secret(scope, "fixture-binding", 1, "reference")
+            elif target == "pool":
+                service.publish(scope, pool["id"], PoolPolicy.model_validate(POLICY), "publish")
+            else:
+                config = dict(CONFIG)
+                if target == "secret":
+                    config["secrets"] = [{"reference_id": reference["id"], "version": 1}]
+                service.publish(
+                    scope, connection["id"], ConnectionConfig.model_validate(config), "publish"
+                )
+        assert cached.status == ("suspended" if target == "workspace" else "revoked")
+    with db_factory() as check:
+        assert list(check.scalars(select(models.ConnectionVersion))) == []
+        assert list(check.scalars(select(models.RuntimePoolPolicy))) == []
+        assert check.get(model, identifier).status == (
+            "suspended" if target == "workspace" else "revoked"
+        )
+
+
+def test_preloaded_pool_policy_pointer_refreshes_before_publication(
+    client, fleet, catalog, app, engine, db_factory, account
+):
+    from lotuspond_runtime.protocol import PoolPolicy, Scope
+
+    from lotuspond.fleet.management import PoolService
+    from tests.fleet.test_management import POLICY, post
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PostgreSQL identity-map/row-lock qualification required")
+    pool = create(client, fleet, "runtime-pools", "pool")
+    path = f"{fleet}/runtime-pools/{pool['id']}/policies"
+    assert post(client, path, POLICY, "initial").status_code == 201
+    scope = Scope(
+        workspace_id=account, project_id=fleet.split("/")[4], environment_id=fleet.split("/")[6]
+    )
+    with db_factory() as caller:
+        actor = caller.scalar(select(models.User)).id
+        cached = caller.get(models.RuntimePool, pool["id"])
+        assert cached.current_policy_version == 1
+        # The second HTTP request uses a separate caller transaction and commits.
+        assert post(client, path, dict(POLICY, max_instances=2), "second").status_code == 201
+        assert cached.current_policy_version == 1
+        published = PoolService(caller, catalog=app.state.fleet_catalog, actor_id=actor).publish(
+            scope, pool["id"], PoolPolicy.model_validate(dict(POLICY, max_instances=3)), "third"
+        )
+        assert published.version == 3
+        assert cached.current_policy_version == 3
+        # A service may flush, but leaves both revision and pointer under caller control.
+        caller.rollback()
+    with db_factory() as check:
+        assert check.get(models.RuntimePool, pool["id"]).current_policy_version == 2
+        assert sorted(check.scalars(select(models.RuntimePoolPolicy.version))) == [1, 2]
