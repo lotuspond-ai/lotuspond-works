@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 from lotuspond_sdk import canonical_package_json, package_digest, validate_package
+from lotuspond_sdk.contract import MAX_JSON_ITEMS, MAX_PACKAGE_BYTES, check_json_bounds
 
 
 def reviewed_package() -> dict:
@@ -447,3 +448,39 @@ def test_non_ascii_instructions_and_normalized_default(example):
     assert "हिंदी café".encode() in content
     assert b'"secret_ref":null' in content
     assert canonical_package_json(validate_package(package)) == content
+
+
+@pytest.mark.parametrize("nested", [False, True], ids=["flat", "nested"])
+def test_json_item_budget_accepts_exact_boundary_and_rejects_one_more(nested):
+    # Freeze the public limit rather than allowing a changed constant to move the test.
+    assert MAX_JSON_ITEMS == 10_000
+    # Count includes containers and every JSON value. Each nested list is smaller
+    # than the budget, so that case demands a cumulative bound across branches.
+    raw = [[None] * 4_998, [None] * 4_999] if nested else [None] * 9_999
+    assert len(json.dumps(raw).encode()) < MAX_PACKAGE_BYTES
+    check_json_bounds(raw)  # Exactly 10,000 JSON items, at depth at most two.
+    (raw[0] if nested else raw).append(None)
+    assert len(json.dumps(raw).encode()) < MAX_PACKAGE_BYTES
+    with pytest.raises(ValueError) as raised:
+        check_json_bounds(raw)
+    assert raised.value.type == "input_too_complex"
+
+
+@pytest.mark.parametrize("typed", [False, True], ids=["raw-package", "mutated-model"])
+def test_excessive_package_items_fail_with_item_budget_error(example, typed):
+    package = validate_package(example) if typed else example
+    operations = ["read-case"] * 10_000
+    # Both forms remain shallow and well below the byte bound. List-length or
+    # duplicate-operation schema errors must not mask the item budget rejection.
+    if typed:
+        package.connectors[0].operations = operations
+        raw = package.model_dump(mode="json")
+    else:
+        package["connectors"][0]["operations"] = operations
+        raw = package
+    assert len(json.dumps(raw).encode()) < MAX_PACKAGE_BYTES
+    with pytest.raises(ValidationError) as raised:
+        validate_package(package)
+    assert {error["type"] for error in raised.value.errors(include_input=False)} == {
+        "input_too_complex"
+    }

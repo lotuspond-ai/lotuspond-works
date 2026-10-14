@@ -35,3 +35,19 @@ Controller-owned independent review, full application/database tests, actual API
 image build/content proof and airgap smoke remain pending here. CI includes the
 3.13/3.14 SDK matrix; no hosted CI, publication, production deployment or customer
 qualification is claimed by local tests.
+
+### Task 1 review fix I1 — JSON item-budget regression
+
+Independent review identified missing standalone item-limit coverage. Four added
+cases freeze the 10,000-item limit: flat and nested programmatic JSON pass at
+exactly 10,000 items and reject 10,001 with `input_too_complex`; package-shaped
+raw input and a mutated model reject excessive operations with that same code.
+All cases stay shallow and below the byte limit.
+
+The four cases passed with the existing guard. Temporarily disabling all four
+item-budget rejection sites made all four cases fail: programmatic overflows
+stopped raising, while package/model inputs returned the schema `too_long` error
+instead. Exact contract source bytes were restored and checked against fix base
+`1d317ad8fc9260f56daf9749968b3e4941b844a3`. Focused contract/input verification then
+passed 38 tests and 68 subtests; SDK Ruff and whitespace checks passed. No v1
+semantics or committed schema changed; broader integration remains controller-owned.
