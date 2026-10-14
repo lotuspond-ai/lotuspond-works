@@ -536,3 +536,62 @@ __all__ += [
     "PoolPolicyList",
     "SecretReferenceList",
 ]
+
+
+class EnrollmentIssued(FleetModel):
+    enrollment_id: CanonicalUUID
+    token: Secret
+    expires_at_ms: SafeInt
+
+
+class EnrollmentView(FleetModel):
+    id: CanonicalUUID
+    scope: Scope
+    pool_id: CanonicalUUID
+    status: Literal["issued", "consumed", "revoked"]
+    policy_version: Revision
+    expires_at_ms: SafeInt
+    consumed_at_ms: SafeInt | None
+    created_at_ms: SafeInt
+
+
+class InstanceView(FleetModel):
+    id: CanonicalUUID
+    scope: Scope
+    pool_id: CanonicalUUID
+    status: Literal["active", "revoked"]
+    installation_id: OpaqueId
+    recovery_epoch: SafeInt
+    generation: SafeInt
+    current_policy_version: Revision | None
+    last_seen_at_ms: SafeInt | None
+    created_at_ms: SafeInt
+
+
+class EnrollmentList(FleetModel):
+    items: Annotated[tuple[EnrollmentView, ...], BeforeValidator(_array), Field(max_length=100)]
+    next_after_id: CanonicalUUID | None
+
+
+class InstanceList(FleetModel):
+    items: Annotated[tuple[InstanceView, ...], BeforeValidator(_array), Field(max_length=100)]
+    next_after_id: CanonicalUUID | None
+
+
+def encode_enrollment_issued(raw: EnrollmentIssued) -> dict[str, object]:
+    model = _validate(EnrollmentIssued, raw)
+    return {
+        "enrollment_id": model.enrollment_id,
+        "token": model.token.get_secret_value(),
+        "expires_at_ms": model.expires_at_ms,
+    }
+
+
+__all__ += [
+    "EnrollmentIssued",
+    "EnrollmentView",
+    "InstanceView",
+    "EnrollmentList",
+    "InstanceList",
+    "encode_enrollment_issued",
+]

@@ -984,6 +984,14 @@ class RuntimeInstance(FleetMachine, Base):
     last_seen_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     __table_args__ = fleet_machine(
         UniqueConstraint(*FLEET_MACHINE[:-1], "id"),
+        Index(
+            "runtime_instances_active_idx",
+            *FLEET_SCOPE,
+            "pool_id",
+            "id",
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
         fleet_status("'active','revoked'"),
         CheckConstraint("generation BETWEEN 0 AND 9007199254740991"),
         CheckConstraint("length(observation_ceiling) BETWEEN 1 AND 32768"),
@@ -1002,6 +1010,15 @@ class RuntimeEnrollment(FleetMachine, Base):
     expires_at_ms: Mapped[int] = mapped_column(BigInteger)
     consumed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     __table_args__ = fleet_machine(
+        Index("runtime_enrollments_inventory_idx", *FLEET_SCOPE, "pool_id", "id"),
+        Index(
+            "runtime_enrollments_live_idx",
+            *FLEET_SCOPE,
+            "pool_id",
+            "expires_at_ms",
+            postgresql_where=text("status = 'issued'"),
+            sqlite_where=text("status = 'issued'"),
+        ),
         fleet_fk(
             "runtime_pool_policies",
             (*FLEET_SCOPE, "pool_id", "policy_version"),

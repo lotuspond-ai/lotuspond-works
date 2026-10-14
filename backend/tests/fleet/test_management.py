@@ -49,14 +49,23 @@ def fleet(client, account, app, db_factory):
 
 
 @pytest.fixture
-def catalog(app):
+def fleet_dependencies(request):
+    if "catalog" not in request.fixturenames:
+        return None
     from lotuspond_runtime.protocol import ConnectorPin
 
+    from lotuspond.fleet.authority import FleetDependencies, UnavailableRecoveryAuthority
     from lotuspond.fleet.catalog import InstalledCatalog
 
-    app.state.fleet_catalog = InstalledCatalog.fixture(
+    catalog = InstalledCatalog.fixture(
         ConnectorPin(**PIN), secret_bindings=frozenset({("fixture-binding", 1)}), test_mode=True
     )
+    return FleetDependencies(UnavailableRecoveryAuthority(), catalog)
+
+
+@pytest.fixture
+def catalog(app):
+    assert app.state.fleet_dependencies.catalog.test_only
 
 
 def post(client, path, body, key="key"):
@@ -470,9 +479,9 @@ def test_caller_transaction_rollback_preserves_no_partial_mutation(
                     project_id=fleet.split("/")[4],
                     environment_id=fleet.split("/")[6],
                 )
-                ConnectionService(db, catalog=app.state.fleet_catalog, actor_id=actor).create(
-                    scope, "Rollback", "rollback"
-                )
+                ConnectionService(
+                    db, catalog=app.state.fleet_dependencies.catalog, actor_id=actor
+                ).create(scope, "Rollback", "rollback")
                 raise RuntimeError("Synthetic caller rollback")
     with db_factory() as db:
         assert list(db.scalars(select(models.Connection))) == []

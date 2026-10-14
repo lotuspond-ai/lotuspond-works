@@ -1,6 +1,7 @@
 import logging
 import re
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,9 +11,11 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .config import Settings
 from .database import engine_for, sessions_for
+from .fleet.authority import FleetDependencies, UnavailableRecoveryAuthority
 from .fleet.catalog import InstalledCatalog
 from .fleet.management_routes import FleetRequestBoundary
 from .fleet.management_routes import router as fleet_management_router
+from .fleet.runtime_routes import router as fleet_runtime_router
 from .gateway import router as gateway_router
 from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
@@ -148,15 +151,29 @@ class RequestBoundary:
         await self.app(scope, replay, secure_send)
 
 
-def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    engine=None,
+    fleet_dependencies: FleetDependencies | None = None,
+) -> FastAPI:
     settings = settings or Settings()
+    if fleet_dependencies is not None and settings.env != "test":
+        raise ValueError("Fleet fixture injection requires test mode")
     owned_engine = engine is None
     engine = engine if engine is not None else engine_for(settings)
     limiter = RateLimiter(settings)
 
+    dependencies = replace(
+        fleet_dependencies or FleetDependencies(UnavailableRecoveryAuthority(), InstalledCatalog()),
+        installation_id=settings.fleet_installation_id,
+        limiter=limiter,
+    )
+
     @asynccontextmanager
     async def lifespan(_):
         yield
+        dependencies.close()
         if limiter.client:
             limiter.client.close()
         if owned_engine:
@@ -166,7 +183,7 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
         title="Lotuspond API", version="0.2.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.state.settings = settings
-    app.state.fleet_catalog = InstalledCatalog()
+    app.state.fleet_dependencies = dependencies
     app.state.engine = engine
     app.state.sessions = sessions_for(engine)
     app.state.limiter = limiter
@@ -243,6 +260,13 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.2.0",
+                    "id": "fleet-runtime-identity",
+                    "date": "2026-10-14",
+                    "title": "Revocable runtime enrollment and process sessions",
+                    "description": "The opt-in fleet API adds one-use enrollment, scoped runtime inventory and revocation, and expiring process sessions. Current installation recovery authority and pool policy fence machine authentication. Production recovery authority remains unavailable until a qualified provider is integrated; business execution is a later capability.",
+                },
                 {
                     "version": "0.2.0",
                     "id": "fleet-management",
@@ -428,6 +452,7 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
     app.include_router(operations_router)
     app.include_router(packages_router)
     app.include_router(fleet_management_router)
+    app.include_router(fleet_runtime_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)
     app.include_router(gateway_router)

@@ -10,8 +10,6 @@ from sqlalchemy import func, select
 from lotuspond import models
 from tests.fleet.test_management import CONFIG, create
 
-pytest_plugins = ["tests.fleet.test_management"]
-
 
 def race(app, client, path, bodies, keys):
     barrier = Barrier(2)
@@ -178,7 +176,7 @@ def test_preloaded_authority_refreshes_under_service_lock(
             )
         assert cached.status == "active"
         service_type = PoolService if target == "pool" else ConnectionService
-        service = service_type(caller, catalog=app.state.fleet_catalog, actor_id=actor)
+        service = service_type(caller, catalog=app.state.fleet_dependencies.catalog, actor_id=actor)
         with pytest.raises(FleetError, match=f"^{denial}$"):
             if operation == "activate":
                 service.set_status(scope, identifier, "active", "reactivate")
@@ -225,7 +223,9 @@ def test_preloaded_pool_policy_pointer_refreshes_before_publication(
         # The second HTTP request uses a separate caller transaction and commits.
         assert post(client, path, dict(POLICY, max_instances=2), "second").status_code == 201
         assert cached.current_policy_version == 1
-        published = PoolService(caller, catalog=app.state.fleet_catalog, actor_id=actor).publish(
+        published = PoolService(
+            caller, catalog=app.state.fleet_dependencies.catalog, actor_id=actor
+        ).publish(
             scope, pool["id"], PoolPolicy.model_validate(dict(POLICY, max_instances=3)), "third"
         )
         assert published.version == 3

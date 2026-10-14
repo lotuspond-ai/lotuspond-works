@@ -1232,6 +1232,12 @@ CREATE INDEX package_project_page_idx ON workflow_package_versions (workspace_id
 
 CREATE INDEX runs_workspace_status ON runs (workspace_id, status);
 
+CREATE INDEX runtime_enrollments_inventory_idx ON runtime_enrollments (workspace_id, project_id, environment_id, pool_id, id);
+
+CREATE INDEX runtime_enrollments_live_idx ON runtime_enrollments (workspace_id, project_id, environment_id, pool_id, expires_at_ms) WHERE status = 'issued';
+
+CREATE INDEX runtime_instances_active_idx ON runtime_instances (workspace_id, project_id, environment_id, pool_id, id) WHERE status = 'active';
+
 CREATE UNIQUE INDEX runtime_one_active_credential ON runtime_credentials (workspace_id, project_id, environment_id, pool_id, installation_id, recovery_epoch, instance_id) WHERE status = 'active';
 
 CREATE UNIQUE INDEX runtime_one_active_session ON runtime_sessions (workspace_id, project_id, environment_id, pool_id, installation_id, recovery_epoch, instance_id) WHERE status = 'active';

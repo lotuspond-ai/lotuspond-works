@@ -6,6 +6,12 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from tests.fleet.identity_fixtures import authority_store as authority_store
+from tests.fleet.identity_fixtures import identity_env as identity_env
+from tests.fleet.test_management import catalog as catalog
+from tests.fleet.test_management import fleet as fleet
+from tests.fleet.test_management import fleet_dependencies as fleet_dependencies
+
 
 @pytest.fixture
 def schema_database():

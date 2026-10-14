@@ -73,7 +73,8 @@ class FleetRequestBoundary:
         self.app, self.settings = app, settings
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or not MANAGEMENT_PATH.match(scope["path"]):
+        runtime = scope["type"] == "http" and scope["path"].startswith("/api/v1/runtime/")
+        if scope["type"] != "http" or not (runtime or MANAGEMENT_PATH.match(scope["path"])):
             await self.app(scope, receive, send)
             return
 
@@ -87,6 +88,28 @@ class FleetRequestBoundary:
         if not self.settings.fleet_enabled:
             await error("not_found")
             return
+        if runtime and scope["path"] == "/api/v1/runtime/enroll":
+            from .authentication import token_digest
+
+            dependencies = scope["app"].state.fleet_dependencies
+            try:
+                peer = scope.get("client")
+                dependencies.limit("exchange:peer:" + (peer[0] if peer else "unknown"), 20)
+                # Charge recognizable proof before decoding or rejecting bodies.
+                auth_headers = [v for k, v in scope["headers"] if k.lower() == b"authorization"]
+                if len(auth_headers) == 1 and len(auth_headers[0]) == 54:
+                    try:
+                        header = auth_headers[0].decode("ascii")
+                        digest = token_digest(
+                            header[7:] if header.startswith("Bearer ") else "", "lpe_"
+                        )
+                    except (UnicodeError, FleetError):
+                        pass
+                    else:
+                        dependencies.limit("exchange:token:" + digest, 5)
+            except FleetError as failure:
+                await error(failure.code)
+                return
         headers = {}
         for name, value in scope["headers"]:
             headers.setdefault(name.lower(), []).append(value)
@@ -106,7 +129,11 @@ class FleetRequestBoundary:
             await error("input_limit")
             return
         authorization = headers.get(b"authorization", [b""])[0]
-        if b"," in authorization or b"x-lotuspond-runtime-session" in headers:
+        if (
+            b"," in authorization
+            or (not runtime and b"x-lotuspond-runtime-session" in headers)
+            or b"," in headers.get(b"x-lotuspond-runtime-session", [b""])[0]
+        ):
             await error("unauthenticated")
             return
         if headers.get(b"content-encoding", [b"identity"])[0].lower() != b"identity":
@@ -195,7 +222,7 @@ ADMIN = Depends(require_fleet_admin)
 
 
 def service(request, db, principal, cls):
-    catalog = request.app.state.fleet_catalog
+    catalog = request.app.state.fleet_dependencies.catalog
     if catalog.test_only and request.app.state.settings.env != "test":
         raise FleetError("authority_unavailable")
     return cls(db, catalog=catalog, actor_id=principal.actor_id)
