@@ -41,3 +41,18 @@ Publication and request-key results share the caller transaction. Full-scope par
 - A non-UTC timestamp conversion issue was reproduced and corrected before independent review. The only remaining test warning is the existing upstream Starlette/AnyIO deprecation.
 
 Enrollment, machine sessions, rotation and signed command admission remain subsequent tasks. Final installed artifacts must be rebuilt because protocol additions supersede Task 1's artifact bytes. Full root checks, API-image build and hosted CI remain Task 9; local administration evidence does not establish production readiness.
+
+
+## Task 4 — enrollment, runtime identity and process sessions
+
+Implementation `2df4dac5e356a16c806a70615ff0e20684acbdb9`, lock-order correction `9e79f77e38d7753d2318692667475bf8783ddddb` and review correction `a6e37da70e9b834aefe4aaf761e30f6989eef007` passed independent specification and code-quality reviews with no open findings. One-use enrollment creates digest-only runtime credentials; process sessions prevent copied credentials from displacing a live process. Current workspace/pool policy, independent recovery authority, fresh database time and scoped refreshed locks govern acquisition, heartbeat and revocation. Runtime principals remain separate from human authentication. Production recovery and connector defaults grant no authority.
+
+Clock-fence denials roll back authority changes before a bounded audit-only transaction records the fixed event. Recovery lookups have one bounded in-flight slot and deny on timeout or unavailable authority. Three narrow fleet indexes support enrollment inventories, live-enrollment quotas and active-instance queries; index usability tests do not establish production load capacity.
+
+Independent review found two Important defects: session acquisition could decide expiry before waiting for a pending-credential lock, and synchronous quota I/O could block the ASGI event loop. The correction performs final authority/time/expiry checks after that lock and before mutation, and awaits quota checks through the existing bounded worker facility. Five regressions first failed and then passed, covering changed epoch, expired credential, valid delayed acquisition, and unrelated request progress during blocked peer/token quotas.
+
+- At the final correction, **75 affected PostgreSQL tests passed, zero skips**; backend Ruff and diff checks passed. Both closure reviewers checked the final source manifest and retained receipts.
+- The preceding all-fleet gate passed **187 tests, zero skips**, at `9e79f77`; the protocol gate passed **335 tests, zero skips**, at unchanged runtime source. A broader earlier 317-test PostgreSQL receipt predates later identity corrections. These overlapping counts are not summed or attributed to the final correction.
+- A restricted local execution run exhibited worker-wakeup timeouts; the same source passed with the documented execution permission. The environment cause is not proven. Failed receipts remain preserved, and no product workaround was added.
+
+Credential rotation, the runtime client and signed command admission remain subsequent tasks. Production recovery/Redis integrations, resource and outage qualification, rebuilt installed artifacts, the full root check, API-image verification and hosted CI remain later gates. This local identity evidence is not a production-readiness claim.
