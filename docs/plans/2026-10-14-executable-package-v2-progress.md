@@ -796,3 +796,42 @@ with their costs, artifact identities and publication receipts are retained at
 subsystem, not the complete product: durable execution, authenticated action
 services, first-customer workflow acceptance, Studio/operations UX, licensing,
 enterprise breadth and production qualification remain in the master scope.
+
+## SDK dependency metadata repair
+
+Subsequent E03 integration inspection found that the backend declared
+`lotuspond-sdk==0.1.0` although its source override and frozen lock installed the
+reviewed SDK 0.2.0. Frozen sync succeeded, but `uv pip check` correctly rejected
+the installed metadata. Commit `acd1b0930a4608d66ae72ccbbfa78167419ce41f`
+aligns the requirement to 0.2.0 and adds a backend dependency-metadata CI gate
+immediately after frozen sync. Lock regeneration records the SDK's existing
+dev-only jsonschema requirement; all 77 locked package identities, versions,
+sources and artifacts remain unchanged. No product code or SDK payload changed.
+
+The actual old backend wheel plus SDK 0.2.0 fails offline resolver dry-run;
+the repaired pair resolves. Before/after backend wheels differ only in
+distribution metadata and RECORD. Frozen sync, lock verification and installed
+dependency checking pass. The full application gate passes with the existing
+cloud serial Node/subreaper harness: 105 Node tests, 300 backend tests plus 97
+subtests (39 database-dependent skips), 1472 SDK tests plus 68 subtests, lint,
+schema parity, TypeScript and web build. This metadata-only repair changes no
+database behavior; it does not claim a new database integration run.
+
+Independent review of the exact three-file repair reports zero Critical,
+Important or Minor findings. The reviewer freshly reproduced both wheel
+resolver outcomes and confirmed the installed dependency check, unchanged
+package payloads and complete lock equality except for that dev metadata entry.
+Reports, wheel metadata, failures and successful logs are retained at
+`/tmp/lotuspond-sdk-alignment.pmir2rcb`.
+
+A fresh API image built from an exact archive of `acd1b0930a4608d66ae72ccbbfa78167419ce41f`:
+`sha256:8ea1a7a5bc1f1a9e3e9af365cae4c4fbc113d489b0ba731be8fc2909637b01cf`.
+It verifies non-editable backend/SDK 0.2.0 metadata, all 43 installed package
+requirements, and the existing installed v1 validation/digest and literal-v2
+compilation checks. These checks ran as UID 10001 with no network, a read-only
+root and bounded temporary scratch; their containers were removed. Build-only
+CA mounts and a temporary Buildx cache are environment adaptations. Initial
+cache/scratch/stdin probe failures were diagnosed and retained separately.
+The prior offline installation drill remains evidence for its earlier source
+and image; it was not rerun or relabeled as proof of this new image. Current
+hosted CI results are recorded on PR #6 for its exact published head.
