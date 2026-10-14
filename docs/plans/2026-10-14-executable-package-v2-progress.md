@@ -202,3 +202,25 @@ and intent/target provenance, expansion limits and every-path verification.
 Constructors and structural admission do not establish those compiler properties.
 The runtime must independently authenticate authority and enforce budgets.
 Independent Task 3 review and later whole-branch/product gates remain pending.
+
+### Task 3 controller correction — identical catalog documents
+
+Before dispatching independent review, the controller identified that Task 4's
+closure contract needs identical supplied definitions to pass catalog admission.
+The initial Task 3 source rejected those repetitions. Catalog validation now
+retains every identical normalized document in input order, counting every
+occurrence toward its family and complete raw/normalized bundle limits. Only
+differing normalized content for one identity/version is `dependency_conflict`.
+Task 4 owns deduplication of admitted definitions in the resolved closure.
+
+Three new initial regression failures and a separate byte-boundary failure
+reproduced the over-strict admission. The corrected focused package/catalog
+command passes 119 tests, including omitted/explicit default equivalence,
+64/65 identical-document family bounds, conflict refusal, complete normalized
+item overflow and an identical-document bundle of 1,048,575 bytes that rereads
+successfully but refuses after two added bytes despite the raw source fitting.
+Raw duplicate bundles still count all bytes. Frozen SDK Ruff and whitespace
+checks pass. Red/green outputs are retained in Task 3 evidence. No full SDK or
+other broad suite was repeated for this narrow controller-approved correction;
+the earlier 678-test standalone result describes the initial source commit.
+Independent review will cover the complete Task 3 range including this fix.

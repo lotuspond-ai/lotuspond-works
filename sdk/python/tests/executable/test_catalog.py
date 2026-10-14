@@ -244,3 +244,121 @@ def test_catalog_schema_count_is_preflighted(catalog_case):
     with pytest.raises(ExecutableError) as error:
         validate_catalog(source)
     assert error.value.code == "invalid_schema"
+
+
+def test_identical_normalized_documents_are_retained(catalog_case):
+    from lotuspond_sdk.executable import canonical_catalog_document, decode_executable_bytes
+
+    source = catalog_case()["documents"][0]
+    explicit = decode_executable_bytes(canonical_catalog_document(source))
+    assert source != explicit  # Defaults differ in the authored representations.
+    bundle = validate_catalog({"documents": [source, explicit]})
+    assert len(bundle.documents) == 2
+    assert bundle.documents[0] == bundle.documents[1]
+    assert bundle.documents[0] is not bundle.documents[1]
+
+
+def test_identical_documents_count_toward_family_limit(catalog_case):
+    document = catalog_case()["documents"][-1]
+    source = {"documents": [copy.deepcopy(document) for _ in range(64)]}
+    assert len(validate_catalog(source).documents) == 64
+    source["documents"].append(copy.deepcopy(document))
+    with pytest.raises(ExecutableError) as error:
+        validate_catalog(source)
+    assert error.value.code == "invalid_catalog"
+
+
+def test_identical_documents_count_toward_normalized_item_limit(catalog_case):
+    from lotuspond_sdk.executable.input import project_json
+
+    document = catalog_case()["documents"][1]
+    document["definition"]["output_schema"] = {
+        "kind": "object",
+        "fields": [
+            {"name": f"f{i}", "schema": {"kind": "integer"}, "required": True} for i in range(64)
+        ],
+    }
+    source = {"documents": [copy.deepcopy(document) for _ in range(12)]}
+    project_json(source)  # Raw item count fits; defaults push the complete bundle over.
+    with pytest.raises(ExecutableError) as error:
+        validate_catalog(source)
+    assert error.value.code == "input_too_complex"
+
+
+def test_identical_documents_count_toward_complete_byte_limit(catalog_case):
+    from lotuspond_sdk.executable import canonical_catalog_document
+
+    document = catalog_case()["documents"][3]
+    schema = {
+        "kind": "object",
+        "fields": [
+            {
+                "name": f"f{i}",
+                "schema": {"kind": "string", "max_length": 65536},
+                "required": True,
+            }
+            for i in range(10)
+        ],
+    }
+    document["definition"]["rules"][0]["rule"] = {
+        "op": "eq",
+        "readback_pointer": "",
+        "expected": {
+            "kind": "literal",
+            "schema": schema,
+            "value": {f"f{i}": "x" * 60000 for i in range(10)},
+        },
+    }
+    assert len(canonical_catalog_document(document)) < 1048576
+    with pytest.raises(ExecutableError) as error:
+        validate_catalog({"documents": [document, copy.deepcopy(document)]})
+    assert error.value.code == "input_too_large"
+
+
+def test_identical_bundle_normalized_byte_boundary(catalog_case):
+    import json
+
+    from lotuspond_sdk.executable import canonical_catalog_document, decode_executable_bytes
+    from lotuspond_sdk.executable._canonical import jcs_bytes
+    from lotuspond_sdk.executable.catalog import CATALOG_MODELS
+    from lotuspond_sdk.executable.input import project_json
+
+    document = catalog_case()["documents"][3]
+    schema = {
+        "kind": "object",
+        "fields": [
+            {
+                "name": f"f{i}",
+                "schema": {"kind": "string", "max_length": 65536},
+                "required": True,
+            }
+            for i in range(8)
+        ]
+        + [{"name": "n", "schema": {"kind": "number"}, "required": True}],
+    }
+    values = {f"f{i}": "" for i in range(8)}
+    values["n"] = 1
+    document["definition"]["rules"][0]["rule"] = {
+        "op": "eq",
+        "readback_pointer": "",
+        "expected": {"kind": "literal", "schema": schema, "value": values},
+    }
+    overhead = len(b'{"documents":[') + len(b"]}") + 1
+    remaining = (1048576 - overhead) // 2 - len(canonical_catalog_document(document))
+    for i in range(8):
+        amount = min(remaining, 65536)
+        values[f"f{i}"] = "x" * amount
+        remaining -= amount
+    assert remaining == 0
+    source = {"documents": [document, copy.deepcopy(document)]}
+    bundle = validate_catalog(source)
+    encoded = jcs_bytes(project_json(bundle, model_types=CATALOG_MODELS))
+    assert len(encoded) == 1048575
+    assert len(validate_catalog(decode_executable_bytes(encoded)).documents) == 2
+    values["f7"] += "x"
+    source["documents"][1] = copy.deepcopy(document)
+    raw = json.dumps(source, separators=(",", ":")).encode()
+    assert len(raw) <= 1048576  # Omitted schema defaults leave raw input below its cap.
+    with pytest.raises(ExecutableError) as error:
+        validate_catalog(decode_executable_bytes(raw))
+    assert error.value.code == "input_too_large"

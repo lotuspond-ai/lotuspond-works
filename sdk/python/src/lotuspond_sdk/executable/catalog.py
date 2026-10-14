@@ -206,7 +206,7 @@ def _check_document(document):
 
 
 def validate_catalog(raw: object) -> CatalogBundle:
-    """Validate documents; complete dependency closure belongs to compilation."""
+    """Validate every occurrence; compilation deduplicates identical resolved definitions."""
     from .validation import preflight_catalog, shape_model
 
     projected = project_json(raw, model_types=CATALOG_MODELS)
@@ -221,9 +221,8 @@ def validate_catalog(raw: object) -> CatalogBundle:
             raise ExecutableError("invalid_catalog")
         key = (document.kind, document.name, document.version)
         content = jcs_bytes(project_json(document, model_types=CATALOG_MODELS))
-        if key in identities:
-            code = "duplicate_identifier" if identities[key] == content else "dependency_conflict"
-            raise ExecutableError(code)
+        if key in identities and identities[key] != content:
+            raise ExecutableError("dependency_conflict")
         identities[key] = content
     return validate_model(
         bundle, model_type=CatalogBundle, model_types=CATALOG_MODELS, code="invalid_catalog"

@@ -315,9 +315,12 @@ unsupported. Rules declare deterministic checks and are not evaluated here.
 ### Catalog documents
 
 `CatalogBundle` is `{documents: [...]}`, bounded to 64 documents per non-workflow
-kind and to the complete 1 MiB/depth-32/10,000-item budget. Duplicate document
-identities are refused; differing content for one identity/version is
-`dependency_conflict`. Workflows are separately supplied complete v2 packages.
+kind and to the complete 1 MiB/depth-32/10,000-item budget. Documents with the
+same identity/version and identical normalized content are retained in order;
+every occurrence counts toward the family and complete raw/normalized bundle
+limits. Differing normalized content for one identity/version is
+`dependency_conflict`. The compiler deduplicates admitted definitions in its
+resolved closure. Workflows are separately supplied complete v2 packages.
 `CatalogDocument` requires exact integer `format_version=1`, `kind`, `name`,
 `version`, local `schemas`, and one `definition` matching its outer `kind`.
 There is no redundant inner kind field.

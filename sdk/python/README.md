@@ -437,7 +437,10 @@ model constructors alone. V1 root APIs, registry format and bytes stay fixed.
 
 `canonical_catalog_document` and `catalog_document_digest` bind the complete
 normalized catalog definition document, excluding the separate `ArtifactRef`
-wrapper. External binary/content checksums remain unverified claims. All
+wrapper. Identical normalized catalog documents are retained and every occurrence
+counts toward the family and complete bundle limits; the later compiler
+deduplicates resolved definitions. Conflicting normalized content for one
+identity/version is refused. External binary/content checksums remain unverified claims. All
 examples in `contracts/examples/executable-v2/` are synthetic and include actual
 local definition pins; they do not establish provider support or authority.
 Secrets and customer documents belong outside packages. The compiler, full
