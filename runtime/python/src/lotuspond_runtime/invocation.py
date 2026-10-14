@@ -330,6 +330,7 @@ def invoke_fixture(
                 ):
                     raise FleetError("transport_failed")
                 child.wait(timeout=remaining(deadline))
+                remaining(deadline)
                 if child.returncode:
                     raise FleetError("transport_failed")
                 if message["result"] == "denied":

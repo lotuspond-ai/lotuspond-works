@@ -870,3 +870,78 @@ def test_socket_close_error_retains_uncertainty_and_fences(tmp_path, monkeypatch
             assert m._active == 0 and m._pools == {}
         finally:
             m._cleanup_failed = False
+
+
+@pytest.mark.parametrize("late", [False, True], ids=["timely-proof", "late-proof"])
+def test_clean_child_completion_must_be_observed_before_deadline(tmp_path, monkeypatch, late):
+    import os
+    import time
+
+    from tls_fixtures import tls_server
+
+    import lotuspond_runtime.invocation as m
+
+    popen, send = m.subprocess.Popen, m._send
+    grant_deadline = None
+    completion_observed_ns = None
+    children = []
+
+    def record_grant(channel, value, deadline):
+        nonlocal grant_deadline
+        if value == {"authorized": True}:
+            grant_deadline = deadline
+        return send(channel, value, deadline)
+
+    def spawn(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        wait = child.wait
+        first = True
+
+        def observe_completion(*args, **kwargs):
+            nonlocal first, completion_observed_ns
+            if first:
+                first = False
+                assert grant_deadline is not None
+                if late:
+                    time.sleep(
+                        max(0, (grant_deadline - time.monotonic_ns()) / 1_000_000_000) + 0.04
+                    )
+                result = wait(*args, **kwargs)
+                completion_observed_ns = time.monotonic_ns()
+                return result
+            return wait(*args, **kwargs)
+
+        child.wait = observe_completion
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(m, "_send", record_grant)
+    monkeypatch.setattr(m.subprocess, "Popen", spawn)
+    with tls_server(tmp_path, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n") as (
+        origin,
+        ca,
+        requests,
+    ):
+        request, destination, resolver = invocation_setup(tmp_path, origin, ca, timeout=800)
+        # The actual fixed child receives the grant and refuses this header before sending.
+        (tmp_path / "secret-v1").write_bytes(b"invalid-header-value\n")
+        authority = Allow()
+        start = time.monotonic()
+        result = m.invoke_fixture(
+            request, authority=authority, destination=destination, resolver=resolver
+        )
+        assert grant_deadline is not None and authority.calls >= 2
+        assert (completion_observed_ns > grant_deadline) is late
+        assert requests == []
+        assert children[0].returncode == 0
+        expected = (
+            m.FixtureResult("uncertain", len(request.input_bytes), 0)
+            if late
+            else m.FixtureResult("denied", 0, 0)
+        )
+        assert result == expected
+        assert time.monotonic() - start < 1.5
+        with pytest.raises(ProcessLookupError):
+            os.killpg(children[0].pid, 0)
+        assert not m._cleanup_failed
+        assert m._active == 0 and m._pools == {}
