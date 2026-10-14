@@ -96,6 +96,11 @@ def migrate(settings: Settings):
     try:
         with engine.begin() as connection:
             connection.execute(text("SELECT pg_advisory_xact_lock(736183)"))
+            inspector = inspect(connection)
+            if "schema_version" not in inspector.get_table_names() or {
+                column["name"] for column in inspector.get_columns("schema_version")
+            } != {"version", "installed_at"}:
+                raise ValueError("Unexpected schema state; no changes made")
             versions = list(connection.execute(SchemaVersion.__table__.select()).scalars())
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")

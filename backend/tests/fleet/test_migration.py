@@ -318,3 +318,21 @@ def test_ddl_failure_rolls_back_parent_unique_tables_and_ledger(schema_database,
         assert rows(connection) == before_rows
         assert signature(connection) == before_signature
         assert connection.scalar(select(SchemaVersion.version)) == 12
+
+
+@pytest.mark.parametrize("corruption", ["table", "column"])
+def test_missing_ledger_shape_refused_atomically(schema_database, monkeypatch, corruption):
+    engine = schema_database(v12=True)
+    with engine.begin() as connection:
+        seed(connection)
+        if corruption == "table":
+            connection.execute(text("DROP TABLE schema_version"))
+        else:
+            connection.execute(text("ALTER TABLE schema_version DROP COLUMN version"))
+        before_rows, before_signature = rows(connection), signature(connection)
+    with pytest.raises(ValueError) as error:
+        upgrade(engine, monkeypatch)
+    assert str(error.value) == "Unexpected schema state; no changes made"
+    with engine.connect() as connection:
+        assert rows(connection) == before_rows
+        assert signature(connection) == before_signature
