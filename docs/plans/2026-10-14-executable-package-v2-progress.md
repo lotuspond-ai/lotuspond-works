@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–3 are complete after independent review and correction; Tasks 4–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–4 are complete after independent review and correction; Tasks 5–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -316,3 +316,22 @@ is unchanged; no broad artifact suite was repeated. The local Task 4 report hold
 exact commands, retained failures and final source hashes. This correction remains
 subject to independent review; runtime authority and provider/artifact behavior
 remain unchecked.
+
+
+## Task 4 review closure
+
+Task 4 is complete through `9bf785d9fb5b790dbffd79162824796618f39693`. The initial independent review identified three Important defects: cross-iteration selector identity allowed a mismatched target, shared-choice projection could expand exponentially, and complete structured literal plans were missing. Correction round 1 and scoped independent re-review passed specification and quality, with all three addressed and no open or new findings.
+
+The corrected source passes 85 dependency/compiler tests and 344 earlier executable contract tests, plus Ruff and whitespace checks. All seven independent literal plan artifacts match their fixed hashes, including decision, parallel, ordered iteration, pinned subworkflow and receipt-bearing decision coverage. The reviewer also checked all 14 changed source/artifact hashes against the committed correction. The earlier full SDK result of 746 tests and 68 subtests remains scoped to its recorded earlier source. Final dual-Python, complete application, verified localhost database, installed/offline artifacts, whole-branch review and exact-head hosted CI remain Task 10 gates.
+
+Decision selectors now retain complete occurrence paths and ordered owner bindings; consumers must preserve both rather than comparing only authored paths or decision IDs. Projection and iteration-item distribution preserve shared structures under a bounded per-operation work budget. Plans retain stable authored region IDs separately from source pointers. The approved plan's agent row now explicitly includes the required typed input mapping correction.
+
+Ruling: reject unreachable supplied catalog definitions as well as workflow definitions after full admission, with all declared dependencies and catalog-internal pins reachable even when unused by steps — unrelated inputs should not alter plan identity — cost if wrong: callers must select a precise catalog closure or the not-yet-stable input policy must be refined.
+
+Ruling: require explicit AgentStep input mapping and check the selected model/agent input schema — typed agents need an explicit way to consume mapped data — cost if wrong: draft v2 authors/fixtures must add the field or refine the not-yet-stable contract; v1 is unchanged.
+
+Ruling: give catalog reconciliation mappings the write operation input context and read operation output context, and evaluation rules their declared input schema — catalog rules have no workflow/iteration scope — cost if wrong: catalog mappings or the not-yet-stable context contract need refinement.
+
+Ruling: preserve static verification-target identity with private symbolic provenance across aliases, choices and occurrences, retaining exact connector and reconciliation operation checks — mapping digest equality or runtime-only deferral cannot prove the approved static binding — cost if wrong: refine proof rules or conservatively rejected equivalent expressions before v2 stabilization; no authority boundary is weakened.
+
+Task 5 receives the bounded model/JCS helpers and reviewed compiler metadata contract. Real persistence, authentication, provider read-back, current authority and production qualification remain separate requirements in the approved master register.
