@@ -184,3 +184,39 @@ noncanonical provisioned trust keys using established encoding guards (those
 keys must be replaced). Neither changes historical package bytes or grants
 execution authority. Final whole-branch artifact/application/CI checks remain
 the shipping gate.
+
+### Task 4 — strict synthetic capability comparison
+
+Implemented `check_declared_compatibility` with required synthetic profile and
+explicit platform requirements, strict typed records and safe bounded reports.
+Comparison checks current schema/canonicalizer declarations, every node kind,
+connector exact version and every declared operation, model exact revision, and
+explicit OS/architecture/capabilities. Unused connector/model/operation declarations
+are checked. Unknown metadata, missing/extra fields, duplicates, conflicting
+platform declarations, wildcard-like inputs and mutated typed records are rejected.
+Controller clarified natural keys as (connector, version), (profile, revision) and
+(os, architecture); explicitly listed multiple versions/revisions are allowed,
+without operation sharing between versions or merging duplicate platform pairs.
+
+The first focused run failed collection for the intentionally absent public
+`CapabilityProfile` interface. After implementation, all 82 initial behavioral
+cases passed. Clarification and self-review coverage added four cases for explicit
+multiple versions/revisions, constructed/nested typed mutations, hostile JSON
+shapes and strict report consistency; **86 focused tests pass**. Assessment digests
+bind normalized profile/requirements, while golden v1 bytes and package digest stay
+unchanged. More than 20 sorted refusal reasons preserve incompatibility and report
+truncation. No supplied instructions, identifiers, revisions or credentials appear
+in report reasons; signature status remains `not_checked`, assurance is always
+`synthetic-declaration`, and authority is always false. Reused report serialization
+checks both the complete record and actual formatted JSON against 8 MiB.
+
+Complete `npm run check:sdk` passed frozen sync, Ruff and **299 tests plus 68
+subtests**, zero skips, on Python 3.14.5. An isolated frozen Python 3.13.13
+environment passed the same suite, including existing wheel/sdist installations
+and OpenSSL checks; uv used the ordinary full-copy fallback across filesystems.
+Strict MkDocs build to `/tmp/lotuspond-task4-docs` and whitespace checks passed.
+Synthetic example files, SDK README, repository README and SDK guide document
+explicit inputs, exact matching, bounded sanitized reasons and assurance limits.
+No application/database/artifact checks, pushes, deployment or external package
+publication were performed. Independent task review and final integration remain
+controller-owned.

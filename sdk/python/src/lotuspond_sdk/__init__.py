@@ -1,5 +1,13 @@
-"""Local v1 workflow-package validation, differences and detached trust tooling."""
+"""Local v1 package validation, differences, detached trust and declared capabilities."""
 
+from .compatibility import CapabilityProfile as CapabilityProfile
+from .compatibility import CompatibilityReason as CompatibilityReason
+from .compatibility import CompatibilityReport as CompatibilityReport
+from .compatibility import CompatibilityRequirements as CompatibilityRequirements
+from .compatibility import ConnectorCapability as ConnectorCapability
+from .compatibility import ModelCapability as ModelCapability
+from .compatibility import PlatformCapability as PlatformCapability
+from .compatibility import check_declared_compatibility as check_declared_compatibility
 from .contract import (
     MAX_JSON_DEPTH as MAX_JSON_DEPTH,
 )

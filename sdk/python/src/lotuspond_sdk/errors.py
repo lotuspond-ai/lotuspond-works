@@ -1,6 +1,8 @@
 """Fixed, value-free operational failures for local SDK tools."""
 
 SDK_ERRORS = {
+    "invalid_capability_profile": "The synthetic capability profile is invalid.",
+    "invalid_compatibility_requirements": "The explicit compatibility requirements are invalid.",
     "file_unreadable": "The input must be a readable regular file.",
     "input_too_large": "The input exceeds the byte limit.",
     "unsafe_private_key": "Private key material must be owner-only and owned by the current user.",

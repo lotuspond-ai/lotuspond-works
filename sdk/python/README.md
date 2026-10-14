@@ -181,6 +181,81 @@ It grants no tenant authority, registry admission, release approval, deployment
 admission, runtime compatibility or permission to execute. No hosted issuer or
 trust registry is introduced. CLI signature/key commands are a separate increment.
 
+## Synthetic declared compatibility
+
+Two separate synthetic JSON inputs accompany the reviewed-action example:
+`contracts/examples/synthetic-capabilities.v1.json` declares support, and
+`contracts/examples/synthetic-requirements.v1.json` supplies explicit platform
+requirements. They are demonstration declarations, not a production qualification.
+
+```python
+from pathlib import Path
+from lotuspond_sdk import (
+    MAX_PACKAGE_BYTES, check_declared_compatibility, decode_package_bytes,
+    load_package, read_regular,
+)
+
+package = load_package(Path("contracts/examples/reviewed-action.v1.json"))
+profile = decode_package_bytes(read_regular(
+    Path("contracts/examples/synthetic-capabilities.v1.json"), max_bytes=MAX_PACKAGE_BYTES,
+))
+requirements = decode_package_bytes(read_regular(
+    Path("contracts/examples/synthetic-requirements.v1.json"), max_bytes=MAX_PACKAGE_BYTES,
+))
+report = check_declared_compatibility(package, profile, requirements)
+print(report.model_dump_json())
+# compatible=True; assurance="synthetic-declaration";
+# contract_valid=True; signature_status="not_checked"; authority_granted=False
+```
+
+`CapabilityProfile` requires format `lotuspond.workflow-capabilities.v1`, assurance
+`synthetic-declaration`, and explicit `schema_versions`, `canonicalizations`,
+`node_kinds`, `connectors`, `models` and `platforms` lists. Only the current package
+schema and canonicalization identifiers are accepted. Connector entries contain
+`connector`, exact `version` and `operations`; model entries contain `profile`
+and exact `revision`; platform entries contain `os`, `architecture` and
+`capabilities`. All lists allow zero support, have at most 64 entries and require
+unique natural keys; connector operations are limited to 32. Connector keys are
+(connector, version), model keys are (profile, revision), and platform keys are
+(os, architecture). Multiple explicitly listed versions/revisions are allowed;
+duplicate pairs and conflicting platform entries are rejected, without merging.
+
+`CompatibilityRequirements` requires **integer** `format_version: 1`, explicit
+`os`, `architecture` and `required_capabilities` (up to 64 unique identifiers).
+No platform default, wildcard, version range or inferred support is provided.
+Requirements are assessment context because workflow-package v1 has no platform
+field; they never change its canonical bytes or digest. Names, connector versions
+and model revisions use the package contract's existing constraints.
+
+`check_declared_compatibility(raw, profile, requirements)` revalidates the package
+and both inputs, including mutated nested typed models. It checks every node kind,
+declared connector version/operation and model revision, including unused
+references, then the exact platform and every required platform capability.
+Invalid profile/requirements shapes, missing fields, unknown fields or identifiers,
+and duplicate/conflicting keys raise fixed `SdkError.code` values
+`invalid_capability_profile` or `invalid_compatibility_requirements`. Package errors
+retain their existing contract. Well-formed declarations lacking exact support
+return `compatible=False`; empty support lists do not imply support.
+
+`CompatibilityReport` includes the unchanged `package_sha256` and separate
+`profile_sha256` and `requirements_sha256` digests. Assessment digests use sorted-key,
+compact UTF-8 JSON of validated normalized content, retaining list order. At most
+20 unique reasons sort by `(code, path)`. Codes distinguish `unsupported_schema`,
+`unsupported_canonicalization`, `unsupported_node`, `unsupported_connector`,
+`unsupported_operation`, `unsupported_model`, `unsupported_platform` and
+`missing_capability`. Paths use fixed fields and numeric offsets; no supplied
+identifiers, instructions, credentials, revisions or private values are returned.
+Truncation sets `reasons_truncated=True` and preserves `compatible=False`.
+Strict report serialization revalidates mutations, forces ASCII-safe JSON and
+checks both the complete record and actual caller formatting against the 8 MiB
+cap, raising `report_too_large` when exceeded.
+
+A compatible result establishes only agreement with the supplied synthetic
+declarations. It does not check signatures, credential availability, tenant policy,
+real providers or runtime support, and grants no tenant authority, approval,
+deployment admission or execution permission. Detached verification remains a
+separate assessment. Compatibility CLI commands are a separate increment.
+
 For development, run `uv sync --frozen --project sdk/python`, then `npm run
 check:sdk`. Distribution tests build wheel and sdist and install each into a
 fresh environment outside the checkout. Public package-index publication is
