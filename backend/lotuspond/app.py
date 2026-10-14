@@ -240,6 +240,13 @@ def create_app(settings: Settings | None = None, *, engine=None) -> FastAPI:
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "executable-v2-local-tooling",
+                    "date": "2026-10-14",
+                    "title": "Executable definition SDK and local tooling",
+                    "description": "The standalone SDK adds explicit v2 commands for bounded typed definitions, exact local-source compilation, JCS content, private differences, detached package signatures, synthetic capability checks and structural package/plan/runtime schemas. Runtime-command signing and pure binding/transition APIs remain local contracts. V1 bytes and registry admission remain unchanged. These outputs grant no authority; engine execution, Studio, provider support, commercial licensing and production qualification remain separate work.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "standalone-package-sdk",
                     "date": "2026-10-14",
                     "title": "Standalone workflow package SDK",

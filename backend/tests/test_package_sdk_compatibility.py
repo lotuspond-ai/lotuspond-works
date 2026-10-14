@@ -30,3 +30,14 @@ def test_legacy_cli_retains_decoded_object_and_output(capsys):
         json.loads(old.out)["sha256"]
         == "305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3"
     )
+
+
+def test_legacy_entrypoint_explicit_v2_dispatch(capsys, tmp_path):
+    path = Path(__file__).resolve().parents[2] / "contracts/examples/executable-v2/minimal.json"
+    assert main(["v2", "validate", str(path)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["result"]["schema_version"] == "lotuspond.workflow-package.v2"
+    assert result["result"]["compilation_status"] == "not_checked"
+    assert result["result"]["authority_granted"] is False
+    assert main(["validate", str(path)]) == 2
+    capsys.readouterr()

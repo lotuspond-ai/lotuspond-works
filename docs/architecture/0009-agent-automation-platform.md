@@ -79,3 +79,22 @@ E02 remains partial: executable-v2/authoring, trusted admission, runtime
 qualification, Studio and production execution retain their own open gates.
 Installed wheel and independently rebuilt sdist-wheel checks are local artifact
 evidence; they do not establish hosted or customer readiness.
+
+## Executable-v2 local tooling (14 October 2026)
+
+SDK 0.2.0 adds a separate executable namespace with bounded typed definitions,
+explicit pinned dependency/catalog compilation, normalized RFC 8785 JCS, private
+diffs, distinct package-v2/runtime-command-v1 signature contexts, synthetic
+capabilities and pure runtime-wire/transition contracts. Explicit `v2` CLI forms
+and structural package/plan/runtime exports expose those reviewed producers.
+Root v1 APIs, identifiers, canonical bytes and v1-only registry remain stable.
+
+These local contracts support future agent authoring and oversight around
+customer goals, instructions, models, tools, context, evaluation and debugging;
+see the [customer rationale](../AGENT_PRODUCT_RATIONALE.md). They add no UI or
+engine. Every runtime must authenticate records and reload/revalidate pinned
+sources, reauthorize actions and persist replay/reconciliation state. A signature,
+compiled plan, transition result or synthetic match grants no authority. Real
+provider/runtime/Studio/licensing and production qualification remain open;
+installed artifacts and source-content matching are local evidence, not signed
+Git provenance or customer readiness.

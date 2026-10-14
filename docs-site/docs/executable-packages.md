@@ -1,12 +1,13 @@
-# Executable package v2 foundations
+# Executable definitions and local tooling
 
 The standalone Python SDK has a separate `lotuspond_sdk.executable` namespace
 for executable definitions. This increment provides bounded JSON decoding,
 reviewed RFC 8785 canonicalization, strict validation/report helpers, closed data schemas, static mapping inference,
 fixed value-free errors, structured package/control authoring and exact local
-catalog documents. Compilation, runtime-facing records and explicit v2 CLI
-commands are subsequent implementation tasks. No workflow is
-executed and no local artifact grants authority.
+catalog documents, deterministic explicit-source compilation, runtime-facing
+wire/transition declarations, separate package/command signatures, synthetic
+compatibility and explicit v2 CLI/schema tooling. No workflow is executed and no
+local artifact grants authority.
 
 The schema identifier is `lotuspond.workflow-package.v2`; the canonicalizer is
 `lotuspond.workflow-package.jcs.v2`. V1 retains its existing APIs, registry
@@ -1101,3 +1102,86 @@ reports as well as parsed records.
 Synthetic examples live in `contracts/examples/executable-v2/capability-profile.json`
 and `requirements.json`. These declarations perform no I/O or provider call and
 establish neither current policy/credentials nor actual runtime availability.
+
+## Explicit v2 CLI and structural schemas
+
+The standalone `lotuspond-package` and `python -m lotuspond_sdk` entry points
+select executable definitions only with a **leading `v2` token**. The backend
+compatibility command delegates to that same entry point. Ordinary v1 forms,
+canonical bytes, root imports and registry admission remain v1. Sending v2 to
+ordinary `validate`, or v1 to `v2 validate`, fails; there is no conversion.
+
+| Command after `lotuspond-package v2` | Result |
+| --- | --- |
+| `validate PATH` / `digest PATH` | Structural admission and SHA-256, `compilation_status=not_checked`, `authority_granted=false`. |
+| `canonicalize PATH --output PATH` | Exclusive complete normalized JCS content; digest on stdout. |
+| `compile PATH --catalog PATH [--dependency PATH ...] --output PATH` | Exclusive complete compiled-plan JCS; package/plan digests, compiler revision and false authority on stdout. |
+| `diff BEFORE AFTER [--include-values]` | Deterministic content report; private values require explicit opt-in. Changes still exit 0. |
+| `sign PATH --key PATH --output PATH` | Exclusive v2 package signature, using the shared owner-only Ed25519 key rules. |
+| `verify PATH --signature PATH --trust PATH` | Package-context verification against explicitly provisioned independent allow/revoke trust. |
+| `compatibility PATH --profile PATH --requirements PATH --catalog PATH [--dependency PATH ...]` | Exact synthetic declaration assessment; incomplete closure is explicit, no target is inferred. |
+| `schema --kind package\|plan\|runtime --output PATH` | Exclusive deterministic Draft 2020-12 structural schema; content digest and format on stdout. |
+
+Global `lotuspond-package keygen --private PATH --public PATH` supplies the same
+reviewed key implementation for both versions. Runtime-command signing and
+binding stay Python APIs, documented above; there is no transport or execution
+command. For a small explicit-source journey:
+
+```sh
+printf '{"documents":[]}' > empty-catalog.json
+lotuspond-package v2 validate contracts/examples/executable-v2/minimal.json
+lotuspond-package v2 compile contracts/examples/executable-v2/subworkflow.json \
+  --catalog empty-catalog.json \
+  --dependency contracts/examples/executable-v2/minimal.json --output plan.jcs
+lotuspond-package v2 schema --kind runtime --output runtime.schema.json
+npm run check:executable-contracts
+```
+
+All package/catalog/dependency sources are supplied as explicit bounded regular
+files; authored references never become filenames or URLs. At most 63 supplied
+dependency files plus root fit the 64 MiB aggregate source budget, with a 1 MiB
+raw cap for each and a separate 1 MiB complete normalized package cap. Duplicate
+inputs count before deduplication. Complete closure must include unused declared
+and catalog-internal pins and refuses unrelated supplied definitions. Profiles
+and trust files cap at 65,536 bytes; requirements at 16,384; private keys and
+package envelopes at 4,096. Decoder depth is 32 and source item count is 10,000.
+Plans, schemas and complete ASCII stdout including wrapper/newline cap at 8 MiB.
+Public producer validators revalidate known models before rendering; no supplied
+serializer bypasses admission. Errors contain at most 20 sanitized fixed-code
+issues with an explicit truncation flag; no input path, unknown argument or
+private value is echoed. Truncation cannot create success.
+
+Exit 0 means local success, 2 means malformed arguments/input, file failure or
+compiler refusal, and 3 means a well-formed signature/trust refusal or an
+incompatible declaration. Named pipes refuse without waiting. Files are created
+exclusively, never implicitly overwritten. A failed write keeps its partial
+output for inspection and reports `output_incomplete`; retry requires a new
+explicit destination. `--help` exits 0 and options cannot be abbreviated.
+
+`export_schema("package"|"plan"|"runtime")` in `lotuspond_sdk.executable` returns
+a fresh schema dictionary. Committed exports are
+`contracts/workflow-package.v2.schema.json`, `compiled-workflow.v2.schema.json`
+and `runtime-contracts.v1.schema.json`. `npm run schema:executable` regenerates
+them for review; `npm run check:executable-contracts` compares exact committed
+bytes without writing and is included in normal checks and dual-Python SDK CI.
+The runtime export discriminates the seven complete versioned wire records and
+correlates each outer event kind with its strict payload and required/non-null or
+null step/action/attempt references. Fragments, contexts and transition reports
+are not extra transport record types. Independent Draft 2020-12 tests exercise
+all seven records and seventeen event variants.
+
+JSON Schema checks structural shape. It cannot recompute intent/payload digests,
+resolve typed dependencies, prove a trusted compilation, authenticate records,
+apply replay state or grant permission. Use the public package/compiler/wire
+validators and authenticated runtime reloads for those obligations. JSON Schema's
+mathematical integer domain also does not replace Python's exact type checks;
+Python integer fields reject `1.0` and booleans. The installed wheel and a wheel
+rebuilt independently from the sdist run every CLI form from sanitized temporary
+directories, preserve the v1 digest and compare literal plan bytes. Node and
+OpenSSL are explicit independent test oracles, never SDK runtime dependencies.
+
+This is SDK authoring and local contract tooling. It supports customer needs for
+agent goals, instructions, models, tools, context, evaluation, debugging and
+oversight; the future Studio writes the same definitions. It supplies no engine,
+provider execution, tenant authority, v2 registry admission, commercial licensing
+or production qualification. Automation Anywhere remains a category reference.

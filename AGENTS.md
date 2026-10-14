@@ -38,3 +38,16 @@
 - Prefer the AWS MCP server and a relevant AWS skill. Use profile `lotuspond-aws`, workload region `ap-south-2`, and toolkit endpoint region `us-east-1` unless instructed otherwise.
 - Prefer infrastructure-as-code. Inventory live resources before changing them.
 - Load the AWS secrets-manager skill before AWS secret tasks; resolve secrets at runtime with `asm-exec`. Never return secret values into conversation context.
+
+## Executable-v2 ownership (14 October 2026)
+
+`sdk/python/src/lotuspond_sdk/executable/` owns typed authoring, deterministic
+explicit-source compilation, JCS, private diffs, detached package/command
+signatures, synthetic capability and pure wire/transition contracts. Only a
+leading `v2` token selects its local CLI; root v1 APIs/bytes and registry admission
+remain unchanged. Schemas are structural, and every authenticated runtime must
+reload pinned sources/records and enforce current authority independently.
+Engine, Studio, providers, licensing and production qualification remain open.
+Agent goals/instructions/models/tools/context/evaluation/debugging/oversight
+follow customer needs in `docs/AGENT_PRODUCT_RATIONALE.md`; Automation Anywhere
+is a reference only. This SDK increment adds no UI or runtime behavior.

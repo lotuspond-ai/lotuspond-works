@@ -78,6 +78,7 @@ class SdkProofTests(unittest.TestCase):
                 "dist/index.html": b"ui",
                 "sdk/python/src/lotuspond_sdk/__init__.py": b"sdk",
                 "sdk/python/src/lotuspond_sdk/py.typed": b"",
+                "sdk/python/src/lotuspond_sdk/executable/compiler.py": b"nested compiler",
                 "bundle": b"bundle", "smoke": b"smoke",
             }.items():
                 full = repo / path
@@ -95,7 +96,7 @@ class SdkProofTests(unittest.TestCase):
                 proof, "embedded_tree", side_effect=lambda image, root: embedded[root]
             ):
                 self.assertTrue(all(proof.build(repo, args)["embedded_matches_source"].values()))
-                (sdk / "__init__.py").write_bytes(b"changed sdk only")
+                (sdk / "executable/compiler.py").write_bytes(b"changed nested sdk only")
                 matches = proof.build(repo, args)["embedded_matches_source"]
                 self.assertFalse(matches["sdk_runtime_module"])
                 self.assertTrue(matches["backend_runtime_module"])

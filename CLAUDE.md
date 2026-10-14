@@ -37,3 +37,16 @@ Public pages follow the rules in `DESIGN.md` and the structure in `docs/design-s
 ## Delivery
 
 Do not infer hosted readiness from a build. Remote repository creation, cloud resources, hosted databases, DNS, billing, and production cutovers need explicit scope. The local initializer is not a production migration tool. Preserve existing data and prove any additive local migration independently before changing a database.
+
+## Executable-v2 ownership (14 October 2026)
+
+`sdk/python/src/lotuspond_sdk/executable/` owns typed authoring, deterministic
+explicit-source compilation, JCS, private diffs, detached package/command
+signatures, synthetic capability and pure wire/transition contracts. Only a
+leading `v2` token selects its local CLI; root v1 APIs/bytes and registry admission
+remain unchanged. Schemas are structural, and every authenticated runtime must
+reload pinned sources/records and enforce current authority independently.
+Engine, Studio, providers, licensing and production qualification remain open.
+Agent goals/instructions/models/tools/context/evaluation/debugging/oversight
+follow customer needs in `docs/AGENT_PRODUCT_RATIONALE.md`; Automation Anywhere
+is a reference only. This SDK increment adds no UI or runtime behavior.

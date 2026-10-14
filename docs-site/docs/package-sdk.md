@@ -353,3 +353,21 @@ are absent, and run complete CLI journeys and refusal cases against both origins
 local verification. The API image installs the SDK noneditably, with no SDK source
 directory in the final image. Deployment content proof includes installed SDK
 source bytes and the airgap smoke checks shared types and the historical digest.
+
+
+## Executable-v2 tooling
+
+The separate [executable guide](executable-packages.md) documents typed authoring,
+explicit pinned compilation, v2 JCS, private diff, package/runtime-command
+signatures, synthetic capabilities and pure wire/transition contracts. Select
+CLI commands with a leading `v2`; ordinary forms preserve v1. Package/plan/runtime
+structural schemas are checked by `npm run check:executable-contracts`. SDK CI
+sets up the repository's Node version and uses Node/OpenSSL only as independent
+test tools. The installed runtime omits the dev-only JSON Schema validator.
+
+The actual image probe retains the v1 identity/digest and compiles an explicit
+small v2 source against a literal plan digest using installed SDK code. A nested
+executable-module-only mutation regression protects recursive content proof.
+Actual immutable image/offline recovery is a separate integration gate; source
+matching is not signed Git provenance or production qualification. V2 registry
+admission, engine, Studio, providers and licensing remain separate work.

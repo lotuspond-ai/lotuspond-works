@@ -130,6 +130,11 @@ def _error(code: str, message: str) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    explicit = sys.argv[1:] if argv is None else argv
+    if explicit and explicit[0] == "v2":
+        from .executable.cli import main as executable_main
+
+        return executable_main(explicit[1:])
     try:
         args = _parser().parse_args(argv)
         result, status = _execute(args)

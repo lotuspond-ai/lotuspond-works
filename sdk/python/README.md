@@ -1,6 +1,7 @@
 # Lotuspond Python SDK
 
-Independent local tooling for workflow-package v1; Python 3.13 or later. Runtime
+Independent local tooling for workflow-package v1 and executable-v2 definitions;
+Python 3.13 or later. Runtime
 dependencies are Pydantic, cryptography and exactly pinned rfc8785 0.1.4. No API server, database, Redis,
 HTTP client, model provider or runtime execution is needed.
 
@@ -443,8 +444,8 @@ deduplicates resolved definitions. Conflicting normalized content for one
 identity/version is refused. External binary/content checksums remain unverified claims. All
 examples in `contracts/examples/executable-v2/` are synthetic and include actual
 local definition pins; they do not establish provider support or authority.
-Secrets and customer documents belong outside packages. Runtime-facing records,
-v2 CLI and execution remain later work. See [the complete structural contracts and compiler obligations](../../docs-site/docs/executable-packages.md#structured-packages-and-exact-catalogs).
+Secrets and customer documents belong outside packages. Runtime-facing records
+and explicit v2 CLI tooling are local contracts; engine execution remains later work. See [the complete structural contracts and compiler obligations](../../docs-site/docs/executable-packages.md#structured-packages-and-exact-catalogs).
 
 
 ### Compile a pinned v2 package locally
@@ -605,3 +606,48 @@ Canonical declaration serializers are `canonical_capability_profile_json` and
 newline under the complete 8 MiB cap. See the [full synthetic assessment contract](../../docs-site/docs/executable-packages.md#explicit-synthetic-capability-assessment)
 for record fields, exact bounds, refusal vocabulary and caller obligations.
 Root v1 compatibility APIs and profiles remain unchanged.
+
+## Explicit executable-v2 commands and schemas
+
+Use a leading `v2` with either installed entry point. Ordinary commands and root
+imports preserve v1. `v2 validate PATH` and `v2 digest PATH` structurally validate
+and identify content with `compilation_status=not_checked` and false authority.
+`v2 canonicalize PATH --output PATH` creates complete JCS bytes exclusively.
+`v2 compile PATH --catalog PATH [--dependency PATH ...] --output PATH` creates
+complete compiled-plan JCS and reports both digests. Supply exact local closure
+files explicitly, including unused pins; no authored path or URL is resolved.
+`v2 diff BEFORE AFTER [--include-values]`, `v2 sign PATH --key PATH --output PATH`,
+`v2 verify PATH --signature PATH --trust PATH`, and
+`v2 compatibility PATH --profile PATH --requirements PATH --catalog PATH
+[--dependency PATH ...]` use the producer APIs described above. Global `keygen`
+is shared. Runtime-command signing/binding remain separate Python APIs.
+
+`v2 schema --kind package|plan|runtime --output PATH` exclusively writes a
+Draft 2020-12 schema. `export_schema(kind)` is available from the executable
+namespace. Repository `npm run schema:executable` regenerates the three committed
+exports for review; `npm run check:executable-contracts` compares bytes without
+writing. Runtime schema checks the seven complete versioned records, outer
+kind/payload correlation and the required/null step/action/attempt matrix.
+Schemas do not recompute hashes, prove compilation, authenticate records or
+replace public semantic validators. JSON Schema mathematical integers do not
+replace Python exact int/bool guards.
+
+Package/catalog/dependency files cap at 1 MiB each; at most 63 dependency files
+plus root cap aggregate sources at 64 MiB before deduplication. Profile/trust
+cap at 65,536 bytes, requirements at 16,384, private key/package envelope at
+4,096. Plans/schemas and ASCII stdout including wrapper/newline cap at 8 MiB.
+Existing depth/item and canonical bounds still apply. Regular-file reads refuse
+pipes; outputs refuse existing files and retain incomplete writes for inspection.
+Exit 0 means local success (also a nonempty diff), 2 malformed/argument/file/
+compiler failure, 3 a well-formed signature or declaration refusal. Sanitized
+errors cap at 20 with an explicit truncation flag, never input paths or values.
+
+Both real wheel and independently rebuilt-sdist-wheel journeys run every command
+outside the checkout with sanitized environments and timeouts. Independent
+Node/OpenSSL oracles remain required test tooling. Exactly pinned dev-only
+jsonschema 4.26.0 independently checks structural schema behavior; its MIT
+source/license/hash provenance is in
+`tests/fixtures/executable-v2/schema-validator-provenance.md` and `uv.lock`.
+The installed SDK runtime needs none of these test tools, an API, database or
+provider. The registry remains v1-only; engine, Studio, authenticated runtime
+admission, commercial licensing and production qualification remain separate.

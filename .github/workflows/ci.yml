@@ -108,6 +108,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.node-version'
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -117,6 +120,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --frozen --project sdk/python
       - run: uv run --frozen --project sdk/python ruff check sdk/python
+      - run: uv run --frozen --project sdk/python python -m lotuspond_sdk.executable.schema --check
       - run: uv build --project sdk/python
       - name: SDK suite and installed wheel/sdist-wheel CLI journeys
         run: uv run --frozen --project sdk/python pytest sdk/python/tests -q

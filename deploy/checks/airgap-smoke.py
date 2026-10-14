@@ -58,6 +58,31 @@ def command(*args, data=None, timeout=60, check=True):
     return result
 
 
+SDK_PROBE = r"""
+import json, sys
+from pathlib import Path
+import lotuspond_sdk
+from lotuspond import package_contract, package_input
+from lotuspond_sdk import input as sdk_input
+assert package_contract.WorkflowPackage is lotuspond_sdk.WorkflowPackage
+assert package_input.PackageReadError is sdk_input.PackageReadError
+assert Path(lotuspond_sdk.__file__).is_relative_to(Path(sys.prefix))
+assert not Path('/app/sdk/python').exists()
+package = lotuspond_sdk.validate_package(json.loads(sys.stdin.read()))
+assert lotuspond_sdk.package_digest(package) == '305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3'
+
+"""
+
+V2_SDK_PROBE = r"""
+from lotuspond_sdk.executable import compile_package, compiled_plan_digest
+source = {"schema_version":"lotuspond.workflow-package.v2","package_id":"synthetic-minimal","version":"1.0.0","name":"Synthetic only","input_schema":{"kind":"null"},"output_schema":{"kind":"null"},"schemas":[],"body":{"steps":[],"result":{"kind":"literal","schema":{"kind":"null"},"value":None},"result_schema":{"kind":"data","schema":{"kind":"null"}}},"secret_refs":[],"environment":{"runtime_contract":"lotuspond.runtime-contract.v1","platforms":[{"os":"linux","architecture":"amd64"}],"required_capabilities":[],"destination_classes":[],"operation_classes":[]},"limits":{"max_steps":100,"active_seconds":100,"elapsed_seconds":1000,"retained_waits":10,"max_input_tokens":1000,"max_output_tokens":1000,"max_cost_microusd":100000},"assurance":{"evaluation_refs":[],"outcome_rule_refs":[],"required_classification":"synthetic"},"models":[],"connectors":[],"agents":[],"subworkflows":[],"evaluations":[],"policies":[],"knowledge":[],"artifacts":[]}
+plan = compile_package(source, dependencies=[], catalog={"documents":[]})
+assert plan.authority_granted is False
+assert compiled_plan_digest(plan) == '165a88a9b79038fc3d1f6b0059a02cf1d049898c49643ecbd7f968aaf7374258'
+"""
+SDK_PROBE += V2_SDK_PROBE
+
+
 def packaged_schema_version(path: Path) -> int:
     """Read the version the bundle's own reviewable schema installs.
 
@@ -683,21 +708,8 @@ def drill(archive: Path, checksum: Path, *, failure_recovery: bool = False) -> d
                     == 0
                 )
             )
-            sdk_probe = r"""
-import json, sys
-from pathlib import Path
-import lotuspond_sdk
-from lotuspond import package_contract, package_input
-from lotuspond_sdk import input as sdk_input
-assert package_contract.WorkflowPackage is lotuspond_sdk.WorkflowPackage
-assert package_input.PackageReadError is sdk_input.PackageReadError
-assert Path(lotuspond_sdk.__file__).is_relative_to(Path(sys.prefix))
-assert not Path('/app/sdk/python').exists()
-package = lotuspond_sdk.validate_package(json.loads(sys.stdin.read()))
-assert lotuspond_sdk.package_digest(package) == '305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3'
-"""
             command(
-                "docker", "exec", "-i", api, "python", "-c", sdk_probe,
+                "docker", "exec", "-i", api, "python", "-c", SDK_PROBE,
                 data=(Path(__file__).resolve().parents[2]
                       / "contracts/examples/reviewed-action.v1.json").read_bytes(),
             )
@@ -738,6 +750,7 @@ assert lotuspond_sdk.package_digest(package) == '305efc96011ba5fc2f527cefbe41689
             )
             report = json.loads(execute(api, VERIFY, context).stdout)
             report["standalone_sdk_identity_and_digest"] = True
+            report["standalone_executable_v2_literal_compile"] = True
             if failure_recovery:
                 owned_container_action(worker, run, "stop")
                 recovery = json.loads(execute(api, FAILURE_ENQUEUE, context).stdout)

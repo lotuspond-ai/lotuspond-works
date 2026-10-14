@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -50,7 +51,14 @@ def installed_artifacts(tmp_path_factory):
         )
     }
     artifacts = root / "artifacts"
-    artifact_run(["uv", "build", "--project", str(SDK), "--out-dir", str(artifacts)], root, env)
+    # uv build without selectors builds its wheel from the sdist. Explicit
+    # selectors retain genuinely independent direct-wheel and sdist-wheel origins.
+    artifact_run(
+        ["uv", "build", "--wheel", "--project", str(SDK), "--out-dir", str(artifacts)], root, env
+    )
+    artifact_run(
+        ["uv", "build", "--sdist", "--project", str(SDK), "--out-dir", str(artifacts)], root, env
+    )
     source = root / "source"
     with tarfile.open(next(artifacts.glob("*.tar.gz"))) as archive:
         archive.extractall(source, filter="data")
@@ -68,6 +76,21 @@ def installed_artifacts(tmp_path_factory):
         root,
         env,
     )
+    manifest = {
+        "source": {
+            str(path.relative_to(SDK)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted((SDK / "src").rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts
+        },
+        "artifacts": {
+            str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+            for directory in (artifacts, rebuilt)
+            for path in sorted(directory.iterdir())
+            if path.is_file()
+        },
+        "interpreter": sys.version,
+    }
+    (root / "artifact-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     installed = []
     for index, wheel in enumerate((next(artifacts.glob("*.whl")), next(rebuilt.glob("*.whl")))):
         venv = root / f"venv-{index}"

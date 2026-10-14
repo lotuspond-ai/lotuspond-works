@@ -87,3 +87,12 @@ The canonical private repository is [lotuspond-ai/lotuspond](https://github.com/
 Use [Operations](docs-site/docs/operations.md) to inspect queue eligibility, expired leases and worker poll observations. The collector offers separately authenticated Prometheus metrics; optional scrape/alert examples are under `deploy/monitoring/`.
 
 [Evaluation runners](docs-site/docs/runners.md) execute reviewed adapters in supervised processes. Use the HTTP adapter for an operator-configured text agent or the MCP adapter for a specific tool; frozen scenarios, complete evidence and a current lease remain required.
+
+Executable-v2 authoring is available through the standalone SDK's explicit
+`lotuspond-package v2` commands: bounded validation/JCS, explicit-source
+compilation, private diffs, signatures, synthetic compatibility and structural
+schemas. See the [executable guide](docs-site/docs/executable-packages.md). The
+registry remains v1-only. Studio, engine execution, authenticated runtime
+admission, providers, commercial licensing and production qualification retain
+their separate gates. `npm run check:executable-contracts` verifies all three
+committed schema exports; Node/OpenSSL are SDK test tools only.

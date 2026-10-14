@@ -1,5 +1,7 @@
 """V2 executable-definition foundations; local checks confer no authority."""
 
+from typing import Literal
+
 from .actions import (
     ActionBinding,
     ActionIntent,
@@ -133,6 +135,7 @@ from .wire import (
 )
 
 __all__ = [
+    "export_schema",
     "ExecutableCapabilityProfile",
     "ExecutableRequirements",
     "ExecutableCompatibilityReport",
@@ -260,3 +263,10 @@ __all__ = [
     "select_array_item",
     "validate_value",
 ]
+
+
+def export_schema(kind: Literal["package", "plan", "runtime"]) -> dict:
+    """Export deterministic structural package, plan or runtime JSON Schema."""
+    from .schema import export_schema as export
+
+    return export(kind)
