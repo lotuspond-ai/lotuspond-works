@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–4 are complete after independent review and correction; Tasks 5–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–5 are complete after independent review and correction; Tasks 6–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -372,3 +372,14 @@ The local Task 5 report and wire consumer handoff retain exact commands, all
 failed and successful logs, exact public contracts and downstream obligations.
 Independent review is pending. No runtime, authority, transport, database,
 provider execution, public release or deployment is added or claimed.
+
+
+## Task 5 review closure
+
+Task 5 is complete through `ed262802d504f46fc49ed17b933479ded8d0d5bf`. Independent review of the entire action/wire change passed specification and quality with no findings. Review covered exact context and approval binding, half-open lifetimes, ordered refusals, complete normalized wire limits, mutation revalidation, all 17 closed event variants and their references, nested digests, declared evidence, public helpers and the independent 1,064-byte intent-binding oracle.
+
+Final Python 3.14 evidence is 116 focused tests, 429 preceding tests, and the full standalone SDK suite of 884 tests plus 68 subtests, with no skips or warnings. Ruff and whitespace checks pass. The reviewer verified all eight source/test/oracle hashes against the inspected commit. The initial full run's 38 installed-artifact setup errors were traced to sandbox denial of the Hatchling download; the authorized network rerun passed with TLS verification unchanged. Failed and successful outputs remain retained. This resolves the setup failure, without claiming that test stdout independently certifies execution permissions or TLS settings.
+
+Task 6 receives complete record admission and full-event digest helpers, the exact event/reference matrix, binding refusal order and explicit context requirements. Full-event replay identity must include headers, sequence and time; an intent's binding digest differs from its full wire-record digest. Signing must cover the full admitted command. Constructor validation alone is not complete admission, and exported schema must preserve event kind/payload/reference correlations.
+
+Actual authentication, durable state, provider read-back, authority and production qualification remain unimplemented consumers. Final Python 3.13, complete application/database, actual offline-image recovery, whole-branch review and exact-head hosted CI gates remain Task 10. No earlier task finding is parked or open.
