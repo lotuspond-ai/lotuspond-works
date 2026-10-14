@@ -42,8 +42,52 @@ returns sanitized errors. Operational file errors use `SdkError.code`.
 
 Only v1 declarations are supported. Validation and digests do not install or run
 workflows, resolve credentials, grant approval or tenant authority, establish
-publisher trust, or demonstrate runtime compatibility. Signature and difference
-tooling remain separate increments.
+publisher trust, or demonstrate runtime compatibility. Signature tooling remains
+a separate increment.
+
+## Deterministic local differences
+
+```python
+from copy import deepcopy
+from lotuspond_sdk import diff_packages
+
+after = deepcopy(package)
+after.nodes[2].instructions = "Propose a different update."
+after.nodes.reverse()
+report = diff_packages(package, after)
+[(c.category, c.operation, c.before_path, c.after_path) for c in report.changes]
+# [('graph', 'reordered', '/nodes', '/nodes'),
+#  ('instructions', 'modified', '/nodes/2/instructions', '/nodes/3/instructions')]
+print(report.model_dump_json())
+```
+
+This example uses the reviewed-action package. `diff_packages(before, after,
+include_values=False)` validates both inputs and compares normalized declarations.
+The strict `PackageDiff` contains before/after SHA-256 digests, a tuple of
+`PackageChange` records and `authority_granted=False`. Categories are `graph`,
+`model`, `instructions`, `limits`, `connector`, `secret_reference` and `metadata`;
+operations are `added`, `removed`, `modified` and `reordered`. Each change gives
+its declaration ID and RFC 6901 paths into the corresponding normalized document.
+Absent locations are null. Names, instructions, revisions and other values are
+omitted by default; declaration IDs remain visible.
+
+Declarations match by ID, edges by source/target, and connector operations by
+value. Reordering the common elements of a sequence produces its own change,
+including when fields are edited or declarations added/removed. Insertion alone
+does not count as a reorder. Node kind changes produce one graph replacement.
+Records sort by category, declaration ID, before path, after path and operation,
+using empty strings for absent IDs/paths. Equal digests yield no changes;
+object key order and explicit normalized defaults do not affect content identity.
+
+`include_values=True` explicitly enables potentially sensitive **local-only**
+detail. Invalid flag types raise `TypeError`; the string `"false"` cannot enable
+detail. Detail carries JSON `values.before` and `values.after`, with null for
+absent values. Reorder values contain ordered IDs, edge pairs or operations.
+Report models forbid extra fields and revalidate typed instances and serialization.
+ASCII-safe JSON serialization is bounded at 8 MiB; `SdkError.code` is
+`report_too_large` when the cap is exceeded, without silently dropping changes.
+Diffs describe content only and cannot establish behavioral compatibility,
+safety, trust, approval, tenant authority or permission to execute.
 
 ## Local verification
 

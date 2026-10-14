@@ -24,6 +24,9 @@ from .contract import (
 from .contract import (
     validate_package as validate_package,
 )
+from .diff import PackageChange as PackageChange
+from .diff import PackageDiff as PackageDiff
+from .diff import diff_packages as diff_packages
 from .errors import SdkError as SdkError
 from .files import load_package as load_package
 from .files import read_regular as read_regular

@@ -61,3 +61,32 @@ Controller verification on implementation `1d317ad` passed full checks (105 Node
 The actual API image and immutable offline bundle passed installation and worker/Redis failure-recovery in 210.4 seconds on internal-only networking, zero published ports, synthetic data only. SDK import/type identity and historical digest passed inside the image without a checkout. Source-content proof matched backend, installed SDK and static UI. Five drill containers and three anonymous volumes were removed with confirmed cleanup.
 
 The cloud's default Buildx config directory was read-only; a workspace-local Buildx directory resolved it. The unmodified Dockerfile initially failed the cloud proxy certificate check; a local derived Dockerfile supplied CA certificates through build-only secret mounts with TLS verification enabled. Product sources and image trust stores were unchanged. Final hosted CI will independently exercise the ordinary Dockerfile. Logs and artifact reports are local test evidence, not deployment or public distribution.
+
+## Task 2 — deterministic private package differences
+
+The SDK now exposes `diff_packages`, `PackageDiff` and `PackageChange`. Both inputs
+use the preserved contract validation and digests. Declaration identity and
+relative common-element order are compared independently: reversing nodes while
+editing instructions reports both changes with the actual normalized pointers.
+Default serialization contains identifiers, categories, operations, paths and
+digests, with no value payloads. Explicit boolean `include_values=True` enables
+potentially sensitive local detail. Non-boolean flags, including `"false"`, fail
+closed with `TypeError`. Strict report models revalidate mutable instances; JSON
+is ASCII-safe and capped at 8 MiB with fixed `report_too_large` errors.
+
+The initial focused run failed on the absent diff exports. Independent literal
+expectations cover every category, all declaration/edge/operation sequence types,
+add/remove and reorder coexistence, kind replacements, normalized defaults,
+privacy, unchanged source inputs, invalid/mutated inputs and the exact normalized
+1,048,576-byte boundary. One operation-order expectation was corrected to follow
+the approved sort tuple, where an absent before path sorts as an empty string.
+Separate red/green checks found and fixed Pydantic's acceptance of integer `0` as
+`Literal[False]` and nonfinite detail numbers that would otherwise serialize as
+null. Redacted and detailed oversized reports are rejected without dropping records.
+
+Local `npm run check:sdk` passed frozen sync, Ruff, **83 tests and 68 subtests** on
+Python 3.14.5, including installed wheel/sdist checks. The full SDK suite also
+passed **83 tests and 68 subtests** in isolated Python 3.13.13. The 39 diff cases
+have no skips. Strict MkDocs build passed with output under `/tmp`.
+Independent Task 2 review, whole-application checks and hosted CI remain
+controller-owned; no database access, publication or runtime authority was added.
