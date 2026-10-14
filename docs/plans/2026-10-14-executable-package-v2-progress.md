@@ -59,3 +59,13 @@ no skips. Fresh wheel and independently rebuilt sdist-wheel direct v2 probes
 pass on both interpreters. Frozen SDK Ruff and diff whitespace checks pass.
 The correction and exact commands/logs are recorded in the implementation
 report; independent review and completion state remain controller-owned.
+
+## Task 1 review closure
+
+Task 1 is complete through `897484cc2bbfaf2add68552731c3926430d6895f`. Independent review found and reproduced one Important exact-byte-boundary defect; correction and scoped re-review passed with no remaining findings. The final 115 focused tests pass on both Python 3.13.13 and 3.14.5. Corrected wheel and independently rebuilt-sdist probes pass on both interpreters, and reviewer inspection confirms every retained executable module matches reviewed source. Earlier unchanged v1 regression evidence remains recorded above.
+
+Projection now provides only a structural byte lower bound. Actual raw JSON, normalized/default JCS and final ASCII reports each enforce their own complete byte limits. Later model validators must select declared numeric domains before complete normalized measurement. Required full-cap, mixed numeric, default-expansion and actual overflow regressions are present; no package limit was raised.
+
+Ruling: update the inherited installed-distribution version assertion with Task 1's approved SDK 0.2.0 bump, retaining broader installed v2 CLI journeys for Task 10 — otherwise the required existing artifact gate would knowingly fail — cost if wrong: moving one test-line change between task commits, with no runtime or compatibility change.
+
+Tasks 2–10 and final application/database/artifact/hosted gates remain pending. This does not qualify an execution runtime or the complete product for production.
