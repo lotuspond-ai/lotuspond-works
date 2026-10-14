@@ -467,3 +467,45 @@ Ruling: Interpret runtime attempt as a zero-based index, allowing dispatch only 
 Ruling: Allow exact qualified-absence reconciliation to make an accepted acknowledgement retry-eligible, while preserving observed/verified effects and contradictory positive evidence — accepted records transport acknowledgement, not a known target effect, and the approved retry contract permits qualified absence under the same intent — cost if wrong: refine the pre-stable transition policy and callers; future authority must still authenticate absence and issue fresh permission before any retry.
 
 Ruling: Treat qualified absence as its own structural retry basis, without requiring the timeout_before_dispatch retry code; ordinary failures and no-dispatch timeouts still require their actual allowed retry code — a qualified-absence payload contains no failure code and the approved contract separately permits that recovery condition — cost if wrong: refine the pre-stable retry-policy interpretation and callers; bounded attempts, current binding/lifetime/epoch, positive-effect preservation and fresh authority remain mandatory.
+
+## Task 7 implementation evidence
+
+Added private deterministic authored-source `ExecutableChange`, `ExecutableDiff`,
+`diff_executable_packages`, `validate_executable_diff` and `executable_diff_json`.
+Sources use full structural v2 admission and normalized canonical hashes without
+catalog resolution or compilation. Global step IDs, stable owner-scoped regions
+and exact declaration aliases preserve movement plus edits, child independence
+and significant common-item order. Public schemas, result exports, every
+declaration/pin, controls, model/tool/input declarations, approval/compensation/
+verification and budgets participate. Default details are normalized `values:null`;
+exact boolean opt-in permits private local detail. Source paths never contain
+authored data-member names/pointer values. Report admission and ASCII/newline
+serialization revalidate privacy, exact flags, identity/path/operation consistency,
+order and complete normalized/actual output limits without truncation.
+
+Initial exact focused red command failed at collection because the new
+`ExecutableChange` interface was absent. First focused green: **21 passed**.
+Self-review added independently literal cases for nested parent movement, scoped
+branch identities, all declarations/public schemas and compensation verification;
+it exposed one category defect (**1 failed, 27 passed**) before correction.
+Final focused green: **28 passed**. Ruff initially reported one lambda-style
+violation, corrected without changing behavior; final Ruff and whitespace pass.
+
+Python 3.14.5 task-named suites grouped by fixture scope: **161 v2 tests passed**,
+**66 v1 tests and 68 subtests passed**. An earlier mixed explicit command that
+switched from v2 to v1 and back produced **137 passes, 90 setup errors and 68
+subtest passes** (`case` fixture unavailable for later v2 package tests). Its
+exact command and all outcomes are retained; no assertion or fixture was weakened.
+This is an observed fixture-resolution issue, not a proven pre-existing defect.
+Normal full SDK discovery passed **1,075 tests and 68 subtests**, no skips or
+warnings, including standalone wheel/sdist journeys. The full run used authorized
+network access initially, with TLS intact. Complete red/intermediate/green output
+and tested source hashes are retained in Task 7 SDD evidence and its report.
+
+The controller approved the public report spelling and final admission/ASCII
+API, explicit no-behavior/authority flags, top-level local detail and scoped
+identities. The normalized null detail marker follows explicit-default/privacy
+rules and adds no private payload. Task 10 must revalidate the inner report and
+count its complete CLI wrapper/newline with the shared report boundary. Fresh
+independent Task 7 review is pending. Python 3.13/application/database/offline/
+whole-branch/hosted gates remain Task 10; no production qualification is claimed.

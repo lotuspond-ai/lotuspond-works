@@ -673,6 +673,71 @@ use full canonical command bytes with the runtime-command context. Schema
 consumers must retain the outer-kind/payload/reference correlation and domain
 checks above; a raw Pydantic union schema alone does not encode all these rules.
 
+## Private authored-source differences
+
+`diff_executable_packages(before, after, include_values=False)` revalidates both
+inputs through structural v2 admission and compares their normalized authored
+source. It requires no dependency catalog, compiler, provider or filesystem
+access. Source hashes cover the complete canonical packages. The report grants
+no authority, does not assess behavioral compatibility and cannot establish
+publisher trust or runtime admission. V1 differences retain their separate API.
+
+`ExecutableDiff` contains `before_sha256`, `after_sha256`, ordered `changes`, exact
+boolean `include_values`, fixed `authority_granted=false` and fixed
+`behavioral_compatibility="not_assessed"`. Each `ExecutableChange` contains
+`category`, `operation`, `identity`, `before_path`, `after_path` and optional
+`values` with `before`/`after` local detail. Ordinary reports contain no instruction,
+literal, label, schema-member name, payload or authored JSON-pointer values.
+They emit the explicit normalized marker `values:null`; this supplies no payload.
+Only an actual `True` enables private local details; integer/string lookalikes
+are refused. Stable authored identifiers are deliberately visible.
+
+Categories are `metadata`, `data_mapping`, `control_flow`, `model_tools`,
+`connector_action`, `approval_policy`, `outcome` and `limits`; operations are
+`added`, `removed`, `changed`, `moved` and `reordered`. Results sort by category,
+identity, before path, after path and operation, treating absent paths as empty
+strings. Source object-member order has no effect; significant arrays do.
+Mapping/schema/rule/tool arrays may be reported as one complete changed field
+subtree, keeping untrusted member names out of report paths.
+
+Steps match globally unique authored IDs as `step:<id>`. Regions match `body`,
+`decision:<owner_id>:then`, `decision:<owner_id>:else`,
+`parallel:<owner_id>:<branch_id>` and `iteration:<owner_id>:body`. Branch IDs are
+scoped to their parallel owner. Moving a parent preserves its descendants'
+region identities. Moving and editing a step yields both changes. Kind
+replacement yields one `control_flow` step change, with child region/step
+additions and removals reported independently. Parent content excludes child
+bodies because their steps, results and export schemas are compared separately.
+Branch order and relative order among common steps remaining in the same region
+are independent changes; additions, removals and moves cause no reorder noise.
+
+Declarations match exact family-local aliases as `<family>:<id>`, schemas as
+`schemas:<name>` and secret references as `secret_refs:<reference>`. Aliases
+remain distinct even when they pin the same definition. Every declaration
+family, exact artifact pin, public input/output schema, package/region result,
+assurance requirement, environment declaration and budget participates. A family
+name alone identifies relative declaration order; `package` identifies package
+fields. Paths use fixed SDK field tokens and numeric positions in each normalized
+source; they never interpolate private data-member names or authored pointers.
+
+`validate_executable_diff(raw)` is the final report admission boundary and
+`executable_diff_json(raw)` emits complete compact ASCII JSON plus newline. Both
+revalidate constructed/mutated reports without calling arbitrary serializers,
+enforce exact flags, operation/path consistency, permitted identities/path
+tokens, deterministic order and detail privacy, and admit the complete normalized
+report under the 8,388,608-byte limit. Actual emitted ASCII bytes including the
+newline must also fit; failure never truncates away changes. Report admission
+checks structure, not whether supplied hashes/changes are authentic.
+`ExecutableDiff.model_dump()` and `.model_dump_json()` use this same complete
+fixed format; partial/custom formatting arguments are refused.
+
+Future CLI wrappers must include wrapper fields and the newline within the same
+budget, revalidate the nested report, and use the explicit `DIFF_MODELS` allowlist
+from `lotuspond_sdk.executable.diff` with the common `report_bytes` boundary.
+Appending wrapper text after serializing an already maximal inner report does
+not satisfy the complete-output limit. Opt-in detail remains untrusted private
+data and must be deliberately stored/displayed by the caller.
+
 ## Pure event transition checks
 
 `check_event_transition(state, event, context)` evaluates one fully admitted

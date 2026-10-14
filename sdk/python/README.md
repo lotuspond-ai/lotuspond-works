@@ -519,3 +519,22 @@ zero-based. All context, time and durable-state claims are supplied and remain
 unauthenticated; reports grant no authority, persistence, dispatch or retry
 permission. See the [exact transition contract](../../docs-site/docs/executable-packages.md#pure-event-transition-checks)
 for required context facts, phases, retry qualifications and consumer obligations.
+
+Private v2 authored-source differences are available through `ExecutableChange`,
+`ExecutableDiff` and `diff_executable_packages(before, after, include_values=False)`.
+Both sources undergo structural admission; no catalog, compilation or execution
+is required. Steps match global authored IDs, regions match stable owner-scoped
+identities and declarations match exact family-local aliases. Movement, content
+edits and common-item relative order remain separate. Every public schema,
+declaration pin, result, control setting and budget participates.
+
+Ordinary reports expose stable IDs and fixed/numeric source paths, with
+`values:null` and no instruction/literal/private data details. Only an actual
+boolean `True` enables local `before`/`after` detail. All reports retain
+`authority_granted=false` and `behavioral_compatibility="not_assessed"`.
+`validate_executable_diff` revalidates report structure and privacy;
+`executable_diff_json` emits complete compact ASCII JSON plus newline within
+8,388,608 bytes. Mutated/constructed reports cannot bypass exact flags or bounds.
+CLI consumers must count their complete wrapper in that same budget. See the
+[complete authored-source diff contract](../../docs-site/docs/executable-packages.md#private-authored-source-differences)
+for categories, identity/path/order rules and serialization obligations.

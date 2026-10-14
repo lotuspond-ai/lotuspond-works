@@ -29,6 +29,13 @@ from .catalog import (
 )
 from .compiler import compile_package
 from .dependencies import DependencyClosure, resolve_dependencies
+from .diff import (
+    ExecutableChange,
+    ExecutableDiff,
+    diff_executable_packages,
+    executable_diff_json,
+    validate_executable_diff,
+)
 from .errors import ExecutableError, ExecutableIssue
 from .expressions import Mapping, TypeEnvironment, infer_mapping, parse_mapping, presence_guard
 from .input import decode_executable_bytes
@@ -94,6 +101,11 @@ from .wire import (
 )
 
 __all__ = [
+    "ExecutableChange",
+    "ExecutableDiff",
+    "diff_executable_packages",
+    "validate_executable_diff",
+    "executable_diff_json",
     "ContractState",
     "EventContext",
     "KnownEvent",
