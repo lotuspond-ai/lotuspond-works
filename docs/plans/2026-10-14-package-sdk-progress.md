@@ -6,7 +6,7 @@ The scope is the approved standalone SDK/diff/detached trust/declared compatibil
 
 ## Task evidence
 
-Implementation has started with isolated dependency installation and baseline checks. Each completed task will record commits, meaningful red/green tests and independent specification/quality review. The controller coordinates whole-branch review and draft PR publication after the final task; implementers do not spawn additional agents or publish.
+All five implementation tasks have completed independent specification and quality review. The evidence below records their red/green tests, corrective reviews and final local integration. Draft publication and exact-head hosted CI are the remaining delivery gates; implementers do not spawn additional agents or publish.
 
 ## Task 1 — standalone extraction
 
@@ -287,3 +287,75 @@ failure-recovery and content proof, all independent reviews, publication and
 exact-head hosted CI remain controller-owned gates. No DB, production/customer
 access, push, merge, deployment or public package publication was performed by
 the Task 5 implementer.
+
+
+### Task 5 independent review and final local integration
+
+Task5 source `d94aa62f6d006223e861ce3a181d53eb83bd2344` passed independent
+specification and quality review of `bf92875..d94aa62` with zero findings.
+All five task reviews are complete; the separate whole-branch review also passed as recorded below.
+
+Final `npm run check` passed 105 Node tests, 299 backend tests plus 97 subtests
+(39 database-dependent skips), 339 SDK tests plus 68 subtests, lint/schema parity
+and the production UI build. This cloud used the saved serial Node wrapper and
+subreaper. Separately identity-verified loopback PostgreSQL passed **338 tests
+plus 97 subtests, no skips**. The only warning is the inherited Starlette
+BlockingPortal deprecation. Deployment checks passed 36 tests plus 13 subtests.
+
+The actual API image from `d94aa62` is
+`sha256:f2c9b56731b923da9f95b3a54794e0c63b6ba7ca3e90d6f1e8be08ae1be2ddb2`.
+The local build used the previously documented build-only cloud CA secret with
+TLS verification enabled; the ordinary Dockerfile remains a hosted CI gate.
+The unchanged collector image was reused after verifying no collector delta.
+The immutable offline bundle SHA-256 is
+`a03c29c52d73dafe8c0db799c4bae19d93376e385b737e51d8e0e89a3a116cc1`.
+
+Offline installation and failure-recovery passed in **202.2 seconds**: schema12,
+SDK import/type identity and the historical digest, MFA/enrollment/revocation,
+worker crash/backlog recovery and Redis outage/recovery. Networking was internal
+with zero published ports and synthetic data only. Cleanup confirmed five
+containers and three anonymous volumes removed. Content proof matched all three
+embedded source trees: backend, SDK and static UI. The inherited proof helper
+provides content hashes with null Git provenance and a stale no-HEAD note; source
+SHA is separately recorded by the controller, without claiming signed Git provenance.
+
+Local logs are `/tmp/lotuspond-sdk-final-{full-check,database,deploy-tests}.log`;
+image/bundle/recovery/proof reports are in `/tmp/lotuspond-sdk-final.ayKchm`.
+These are local reproducible checks, not hosted CI, customer acceptance or a
+production deployment. No product source changed during final checks.
+
+
+### Independent whole-branch review
+
+The strongest available review model independently reviewed the complete immutable
+`c2d3e3685db79f37758095403b3bab4a94212e32..d94aa62f6d006223e861ce3a181d53eb83bd2344`
+range. Specification **PASS**, code quality **APPROVE**, zero Critical, Important
+or Minor findings. Exact comparisons confirmed the contract, decoder (except its
+relative import) and committed schema are unchanged. One narrow fresh probe
+injected unknown Pydantic extra fields into envelope, trust set and nested key
+instances; all were rejected with the correct fixed errors. The reviewer inspected
+actual final recovery/content-proof reports. No corrective source change is needed.
+There are no open, parked or deferred SDK findings. Publication and exact-head
+hosted CI remain separate delivery gates.
+
+### Controller decisions and cost if wrong
+
+1. The controller owns Task5 reviews and draft publication so implementers do not
+   spawn duplicate reviewers. Cost if wrong: review scheduling/PR organization
+   rework; no production effect.
+2. The Unicode regression uses the historical fixture name, `Synthetic reviewed
+   action example`, rather than the plan's shortened example. Cost if wrong:
+   correcting a fixture assertion; canonical bytes remain unchanged.
+3. A failed output/keypair publication retains created partial files because an
+   inode comparison followed by pathname unlink has a race. Cost if wrong:
+   operators must inspect/remove their partial outputs before retrying. Existing
+   files remain refused and preserved.
+4. Trusted public keys reject known small-order/noncanonical Ed25519 encodings
+   using attributed established constants, after an identity-point forgery was
+   reproduced against the crypto library. Cost if wrong: an affected provisioned
+   key must be replaced; ordinary generated/RFC/OpenSSL keys remain compatible.
+   This is not full subgroup validation or Rust `verify_strict` equivalence.
+5. Capability identity includes connector version, model revision and the exact
+   OS/architecture pair, permitting explicit multiple versions without merging
+   duplicates. Cost if wrong: future policy may restrict one version per name;
+   current matching still requires exact declarations and grants no authority.
