@@ -51,3 +51,13 @@ instead. Exact contract source bytes were restored and checked against fix base
 `1d317ad8fc9260f56daf9749968b3e4941b844a3`. Focused contract/input verification then
 passed 38 tests and 68 subtests; SDK Ruff and whitespace checks passed. No v1
 semantics or committed schema changed; broader integration remains controller-owned.
+
+## Task 1 independent review and integration
+
+Task 1 review confirmed identical contract/schema/digest behavior and required one missing item-budget regression. Fix `a60a8d5` adds four boundary/overflow cases; each fails when the preserved guard is temporarily disabled, and all pass after restoring identical source bytes. Scoped re-review passed specification and code quality with no remaining findings.
+
+Controller verification on implementation `1d317ad` passed full checks (105 Node, 298 backend +89 subtests with 39 DB-only skips, 40 SDK +68 subtests), separately identity-verified loopback PostgreSQL (337 +89, no skips), and strict documentation build. The test-only follow-up passed 38 contract/input tests +68 subtests and Ruff; no runtime change required repeating unchanged integration tests.
+
+The actual API image and immutable offline bundle passed installation and worker/Redis failure-recovery in 210.4 seconds on internal-only networking, zero published ports, synthetic data only. SDK import/type identity and historical digest passed inside the image without a checkout. Source-content proof matched backend, installed SDK and static UI. Five drill containers and three anonymous volumes were removed with confirmed cleanup.
+
+The cloud's default Buildx config directory was read-only; a workspace-local Buildx directory resolved it. The unmodified Dockerfile initially failed the cloud proxy certificate check; a local derived Dockerfile supplied CA certificates through build-only secret mounts with TLS verification enabled. Product sources and image trust stores were unchanged. Final hosted CI will independently exercise the ordinary Dockerfile. Logs and artifact reports are local test evidence, not deployment or public distribution.
