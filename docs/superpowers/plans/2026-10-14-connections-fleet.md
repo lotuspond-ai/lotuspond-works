@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.13, Python 3.13/3.14 artifact tests, existing FastAPI/SQLAlchemy/PostgreSQL, Pydantic >=2.12,<3, cryptography >=50,<51, rfc8785==0.1.4, Hatchling and uv 0.11.16. Standard-library direct TLS/socket transport, Linux file descriptors and subprocess boundaries; no Temporal, custom cryptography, new vault or arbitrary plugin loader.
 
-**Spec:** [Connections and runtime identity foundation](../specs/2026-10-14-connections-fleet-design.md), approved for detailed planning on 14 October 2026. The owner already selected subagents with independent review after each task. This implementation plan awaits owner review; implementation has not started.
+**Spec:** [Connections and runtime identity foundation](../specs/2026-10-14-connections-fleet-design.md), approved for detailed planning on 14 October 2026. The owner already selected subagents with independent review after each task. The owner approved this implementation plan and authorized implementation on 15 October 2026 (Asia/Calcutta); execute all nine tasks with the selected subagent method and independent task reviews.
 
 ## Global Constraints
 
