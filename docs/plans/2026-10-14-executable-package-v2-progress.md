@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–9 are complete after independent review and correction. Task 10 implementation and task review plus local application/database/actual-artifact gates pass; whole-branch review and draft publication/exact-head CI remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–9 are complete after independent review and correction. Task 10 implementation, task review, whole-branch review with corrections, and local application/database/actual-artifact gates pass; draft publication and exact-head CI remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -712,3 +712,59 @@ remain pending. Real runtime/provider support, Studio, commercial licensing and
 customer/operational production qualification remain open product requirements.
 The customer-need rationale in `docs/AGENT_PRODUCT_RATIONALE.md` preserves every
 approved goal and treats Automation Anywhere as a reference only.
+
+
+## Whole-branch corrections and final source validation
+
+Whole-branch review of `4685507..2e1c2c0` found four Important compiler boundary
+issues and two Minor documentation/proof issues. One coordinated correction at
+`2b4b3ee908daf164dc3ad19759a23bfd3b20bf36` fixes nonarray iteration diagnostics,
+forwards owning named schemas into decision validation, admits complete ordinary
+structured wait correlations, and rejects review/decision use with automatic
+intents. It also corrects stale delivery descriptions and the inaccurate Git
+provenance note. No wire implementation, v1 contract, schema or independent plan
+oracle was changed. Fresh scoped review passed all six corrections with zero
+open or new findings; none were waived or parked.
+
+Correction evidence preserves genuine baseline-source failures (20 failed,
+79 passed) and the matching final 99 passes. Broader covering tests pass 709 on
+each interpreter. Named legacy/installed tests pass 152 plus 68 subtests on each;
+initial restricted-network artifact setup errors are retained separately. Five
+content-proof tests, Ruff, whitespace and strict documentation build pass.
+
+The controller independently verified the corrected source:
+
+- Full `npm run check`: 105 Node tests; 300 backend tests plus 97 subtests
+  (39 PostgreSQL-only skips); 1,472 SDK tests plus 68 subtests on Python 3.14.5;
+  TypeScript, Ruff, both schema checks and production build pass.
+- Complete Python 3.13.13 SDK discovery: 1,472 tests plus 68 subtests, no skips.
+  Both full suites use actual checkout wheels and independently rebuilt-sdist
+  wheels. Retained artifact manifests match all 36 current SDK source files.
+- Deployment tests: 37 plus 13 subtests. Database/backend/v1/schema/lock sources
+  remain identical to the previously verified 339-test/97-subtest localhost
+  PostgreSQL gate; that evidence remains attributed to `29052f5e`, not rerun or
+  mislabelled as a new database check.
+- Final wheel SHA-256 is
+  `ed5aeaa0fd4cc417eaa4a9ba69627e5dccb7c9e000e4716397a4d2ea5e216118`;
+  sdist SHA-256 is
+  `de474ab6850d43cd2ef198d12467eb1cbe459976280b01e01c3e16c86c0d03d6`.
+  Checkout and rebuilt wheels match. The full 3.13 run's pytest temporary
+  manifest was cleaned before retention; separately retained final-source 3.13
+  installed-test manifests establish the same artifact hashes. Actual 3.14
+  artifacts and manifests are retained, without rerunning a passing suite just
+  to recreate temporary files.
+- Fresh actual API image:
+  `sha256:78c016f4a2eb02c84035d6c062dd57573bac734508d6cfbb382efeb1008c9b0f`.
+  Fresh archive: 214,655,196 bytes, SHA-256
+  `241e79c44b595bfb65cfa78968e01bd3c18dd1ebd16fb1ee36f2861b7a543561`.
+  The 200.7-second offline drill passes installed v1/v2 compilation, schema 12,
+  MFA/replay/revocation and worker/Redis failure-recovery. Internal network,
+  zero published ports, synthetic data and cleanup of five containers/three
+  volumes are confirmed. Backend (42), SDK (36) and static UI (4) file content
+  matches are exact. The corrected proof accurately states content identity
+  only; Git provenance has not been established.
+
+Final artifacts are retained at `/tmp/lotuspond-v2-final.zwU1UW`; older
+`/tmp/lotuspond-v2-final.5WdOFT` evidence remains unchanged. Cloud-only serial
+Node/subreaper and build-only CA handling remain distinct from ordinary hosted
+CI. All product/runtime/customer qualification boundaries above remain open.
