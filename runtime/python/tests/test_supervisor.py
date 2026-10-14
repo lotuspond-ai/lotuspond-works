@@ -40,6 +40,7 @@ class Authority:
         self.clock, self.stop = clock, stop
         self.active, self.version, self.calls = TOKEN, 1, []
         self.lease = None
+        self.generation = 1
         self.expiry = 900000
         self.prepared = False
 
@@ -47,7 +48,9 @@ class Authority:
         return SelfState.model_validate(
             dict(
                 STATE,
-                identity=dict(IDENTITY, credential_version=self.version),
+                identity=dict(
+                    IDENTITY, credential_version=self.version, generation=self.generation
+                ),
                 server_time_ms=self.clock.now,
                 credential_expires_at_ms=self.expiry,
                 session_expires_at_ms=self.lease,
@@ -64,6 +67,7 @@ class Authority:
         self.calls.append("acquire")
         if self.lease is not None and self.clock.now < self.lease:
             raise FleetError("conflict")
+        self.generation += 1
         self.lease = self.clock.now + 60000
         self.prepared = False
         return AcquiredSession(
@@ -376,7 +380,8 @@ def test_unconfirmed_cleanup_overrides_clean_stop(tmp_path):
         ("self_state", "instance_id", "11234567-89ab-cdef-0123-456789abcdef"),
         ("heartbeat", "installation_id", "wrong-install"),
         ("heartbeat", "pool_id", "11234567-89ab-cdef-0123-456789abcdef"),
-        ("heartbeat", "generation", 2),
+        ("heartbeat", "generation", 1),
+        ("heartbeat", "generation", 3),
         ("heartbeat", "recovery_epoch", 2),
     ],
 )
@@ -783,7 +788,7 @@ def test_slow_command_poll_preserves_heartbeat_and_rotation_lead(tmp_path, jitte
 def test_slow_poll_records_and_claim_preserve_control_priority(tmp_path, stamp):
     from command_fixtures import command_case, delivery, records, snapshot
 
-    from lotuspond_runtime.protocol import AdmissionView, RuntimeIdentity
+    from lotuspond_runtime.protocol import AdmissionView
 
     clock, stop = Clock(), threading.Event()
     clock.now = 2000
@@ -795,9 +800,7 @@ def test_slow_poll_records_and_claim_preserve_control_priority(tmp_path, stamp):
 
         def poll(self, token, session):
             clock.now += 10000
-            self.case = command_case(
-                identity=RuntimeIdentity.model_validate(IDENTITY), now=clock.now
-            )
+            self.case = command_case(identity=self.state().identity, now=clock.now)
             return delivery(self.case)
 
         def claim(self, token, session, command_id, digest):
@@ -838,3 +841,138 @@ def test_slow_poll_records_and_claim_preserve_control_priority(tmp_path, stamp):
         assert runner.run(stop) == 0
     assert authority.prepared_at is not None
     assert authority.claimed > 0
+
+
+@pytest.mark.parametrize("previous_generation", [1, 7], ids=["fresh", "restart"])
+def test_acquired_generation_survives_poll_claim_and_first_heartbeat(previous_generation):
+    from types import SimpleNamespace
+
+    from command_fixtures import command_case, delivery, records, snapshot
+    from lotuspond_sdk.executable.wire import wire_digest
+
+    from lotuspond_runtime.protocol import AdmissionView
+
+    clock, stop = Clock(), threading.Event()
+    clock.now = 2000
+    observed = []
+
+    class Lifecycle(Authority):
+        case = None
+        runner = None
+
+        def poll(self, token, session):
+            observed.append(("poll", self.generation, self.runner._identity.generation))
+            if self.case is None:
+                self.case = command_case(identity=self.state().identity, now=clock.now)
+                return delivery(self.case)
+            return None
+
+        def claim(self, token, session, command_id, digest):
+            observed.append(("claim", self.generation, self.runner._identity.generation))
+            assert command_id == self.case.command.command_id
+            assert digest == wire_digest(self.case.command)
+            return AdmissionView(command_id=command_id, command_sha256=digest, status="claimed")
+
+        def heartbeat(self, token, session):
+            observed.append(("heartbeat", self.generation, self.runner._identity.generation))
+            stop.set()
+            return super().heartbeat(token, session)
+
+    authority = Lifecycle(clock, stop)
+    authority.generation = previous_generation
+
+    class Records:
+        def load(self, command):
+            assert command == authority.case.command
+            return records(authority.case)
+
+    class Trust:
+        def current(self, installation_id):
+            return snapshot(authority.case)
+
+    runner = supervisor(
+        authority,
+        SimpleNamespace(load=credential),
+        clock,
+        command_records=Records(),
+        command_trust=Trust(),
+    )
+    authority.runner = runner
+    assert runner.run(stop) == 0
+    expected = previous_generation + 1
+    assert authority.generation == expected
+    assert any(event[0] == "claim" for event in observed)
+    assert observed[-1] == ("heartbeat", expected, expected)
+    assert all(server == worker == expected for _, server, worker in observed)
+    assert "prepare" not in authority.calls
+
+
+def test_installed_acquired_generation_survives_poll_and_heartbeat(installed_runtime, tmp_path):
+
+    from conftest import artifact_run
+
+    script = (
+        "identity_data = "
+        + repr(IDENTITY)
+        + """
+from pathlib import Path
+from types import SimpleNamespace
+import sys, threading
+from pydantic import SecretStr
+import lotuspond_runtime.supervisor as supervisor_module
+from lotuspond_runtime.protocol import (
+    AcquiredSession, CredentialState, RuntimeIdentity, RuntimeObservation, SelfState,
+)
+assert Path(supervisor_module.__file__).is_relative_to(Path(sys.prefix))
+clock = SimpleNamespace(now=2000)
+stop = threading.Event()
+observed = []
+token = SecretStr('lpr_' + 'A' * 43)
+session = SecretStr('lps_' + 'A' * 43)
+class Authority:
+    generation = 1
+    lease = None
+    runner = None
+    def state(self):
+        return SelfState(identity=RuntimeIdentity.model_validate(
+            dict(identity_data, generation=self.generation)),
+            credential_expires_at_ms=900000, session_expires_at_ms=self.lease,
+            server_time_ms=clock.now)
+    def self_state(self, token):
+        return self.state()
+    def acquire(self, token):
+        self.generation += 1
+        self.lease = clock.now + 60000
+        return AcquiredSession(secret=session, identity=self.state().identity,
+            expires_at_ms=self.lease, server_time_ms=clock.now)
+    def poll(self, token, session):
+        observed.append(('poll', self.generation, self.runner._identity.generation))
+        return None
+    def heartbeat(self, token, session):
+        observed.append(('heartbeat', self.generation, self.runner._identity.generation))
+        self.lease = clock.now + 60000
+        stop.set()
+        return self.state()
+    def close(self):
+        pass
+client = Authority()
+def wait(stop, seconds):
+    clock.now += int(seconds * 1000)
+    return stop.is_set()
+store = SimpleNamespace(load=lambda: CredentialState(revision=0,
+    instance_id=identity_data['instance_id'], active_token=token,
+    pending_token=None, pending_version=None))
+runner = supervisor_module.RuntimeSupervisor(client, store,
+    RuntimeObservation(platform='linux', connectors=()),
+    installation_id=identity_data['installation_id'],
+    wall_ms=lambda: clock.now, monotonic=lambda: clock.now / 1000,
+    jitter_ms=lambda: 0, wait=wait)
+client.runner = runner
+assert runner.run(stop) == 0
+assert observed[0] == ('poll', 2, 2)
+assert observed[-1] == ('heartbeat', 2, 2)
+assert all(server == worker == 2 for _, server, worker in observed)
+"""
+    )
+    venv, env = installed_runtime
+    artifact_run([str(venv / "bin/python"), "-I", "-c", script], tmp_path, env)

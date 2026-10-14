@@ -267,6 +267,15 @@ class RuntimeSupervisor:
             or session.identity.generation < active.identity.generation
         ):
             raise FleetError("forbidden")
+        # Acquisition advances process generation. Retain that validated identity
+        # in the working self-state too, so polling cannot restore the earlier
+        # pre-acquisition generation. Credential expiry is never extended here.
+        active = SelfState(
+            identity=session.identity,
+            credential_expires_at_ms=active.credential_expires_at_ms,
+            session_expires_at_ms=session.expires_at_ms,
+            server_time_ms=session.server_time_ms,
+        )
         self._session, self._identity = session.secret, session.identity
         if state.pending_token is not None:
             state = self._replace(state, state.active_token)
