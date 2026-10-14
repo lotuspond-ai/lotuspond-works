@@ -335,3 +335,40 @@ Ruling: give catalog reconciliation mappings the write operation input context a
 Ruling: preserve static verification-target identity with private symbolic provenance across aliases, choices and occurrences, retaining exact connector and reconciliation operation checks — mapping digest equality or runtime-only deferral cannot prove the approved static binding — cost if wrong: refine proof rules or conservatively rejected equivalent expressions before v2 stabilization; no authority boundary is weakened.
 
 Task 5 receives the bounded model/JCS helpers and reviewed compiler metadata contract. Real persistence, authentication, provider read-back, current authority and production qualification remain separate requirements in the approved master register.
+
+## Task 5 implementation — independent review pending
+
+Implemented bounded action bindings/intents, human decisions, complete command
+records, strict event variants, receipts/outcomes and explicit supplied binding
+contexts. Public validators revalidate known typed objects, recompute embedded
+intent/payload hashes, enforce normalized wire bounds and expose complete
+canonical/digest helpers. Ordered consistency reports keep signature checking
+unchecked and authority false. Every event payload/reference combination is
+closed and documented for the later transition, signing and schema tasks.
+
+The initial exact focused command failed with the expected two missing-module
+collection errors. A first implementation passed 94 tests; subsequent red tests
+caught malformed-object error mapping, missing payload helpers and command
+decision-digest refusal precedence. Final focused result: **116 passed**.
+Named preceding compiler/dependency/type/expression/package/catalog/input/JCS
+checks: **429 passed**. Ruff and whitespace checks pass. The intent byte oracle
+is independently calculated from ASCII/exact-integer synthetic data with stdlib
+JSON/hashlib, frozen at 1,064 bytes and SHA-256
+`e3860ea56b81199fb42870a5ee4e17bc0d4c90e54026fe2d36e21debd5cc7c7c`.
+Tests include every binding-field hash contribution, changed context/recipient/
+epoch/generation, independent human review, exact expiry equality, mutated and
+constructed models, nested record checks, and the exact 65,536-byte wire boundary.
+
+The full standalone SDK run first reached **846 passed, 38 setup errors and 68
+subtests passed**: the common installed-artifact fixture could not fetch hatchling
+under restricted network access. A retained direct build probe confirmed the
+sandbox network denial. Retrying the same full command with already-authorized
+network access, with TLS verification retained, passed **884 tests and 68
+subtests**, including wheel and rebuilt-sdist-wheel journeys. No skips occurred.
+These results use Python 3.14.5; the final dual-Python/application/database/offline
+and hosted gates remain Task 10 work.
+
+The local Task 5 report and wire consumer handoff retain exact commands, all
+failed and successful logs, exact public contracts and downstream obligations.
+Independent review is pending. No runtime, authority, transport, database,
+provider execution, public release or deployment is added or claimed.

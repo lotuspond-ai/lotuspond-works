@@ -483,3 +483,25 @@ source definitions, bind authenticated records and call instances, and enforce
 dynamic quotas and real outcome evidence. These APIs perform no I/O or execution.
 See [the compiler contract](../../docs-site/docs/executable-packages.md#pinned-local-compilation)
 for plan fields, catalog rule contexts, provenance identities and proof limits.
+
+Action and runtime record contracts are also available in
+`lotuspond_sdk.executable`: `build_action_intent`, `intent_digest`,
+`decision_digest`, `check_decision`, `check_command_binding`, `validate_wire`,
+`canonical_wire_json`, `wire_digest` and kind-specific validators.
+`event_payload_digest(event_kind, payload)` validates the selected closed payload
+and nested records before computing its normalized hash. Complete event admission
+also checks outer references. All records fit 65,536 bytes, depth 32 and 10,000
+items. Exact current time comes only from the required `BindingContext`.
+
+`intent_digest` accepts a complete `ActionIntent` and rechecks the embedded
+binding; it returns the binding hash. `wire_digest` hashes the entire record,
+including command delivery/replay fields. Mutated models are always revalidated.
+Use public validators rather than constructors as admission boundaries. Human
+approval, tenant/configuration/policy/epoch/recipient bindings and expiry are
+structural comparisons of supplied declarations. Valid reports retain
+`signature_status="not_checked"` and `authority_granted=false`. Receipts distinguish
+acceptance, observed effect and unknown; verified outcome declarations require
+rule identity and evidence references. These checks authenticate neither people
+nor artifacts and perform no dispatch or transition execution. See the
+[complete wire contract](../../docs-site/docs/executable-packages.md#action-bindings-and-runtime-wire-declarations)
+for exact fields, error precedence, event variants and downstream obligations.

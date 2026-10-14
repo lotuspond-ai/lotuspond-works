@@ -500,3 +500,175 @@ frames must retain the call-site identity when instantiating those templates.
 All immutable intent/review/receipt symbols are compiler metadata, not authority.
 External artifacts, provider behavior, actual effects and dynamic enforcement
 remain unchecked.
+
+## Action bindings and runtime wire declarations
+
+These local contracts compare supplied declarations. They do not authenticate an
+actor, resolve evidence, verify a signature, dispatch a request or confer authority.
+A later runtime must reload authenticated tenant-bound records and supply current
+installation, generation, recovery epoch, recipient and time independently.
+
+```python
+from lotuspond_sdk.executable import (
+    build_action_intent, check_decision, check_command_binding,
+    canonical_wire_json, event_payload_digest, validate_runtime_event,
+)
+
+intent = build_action_intent(binding)
+decision_result = check_decision(intent, decision, context)
+command_result = check_command_binding(command, intent, decision, context)
+# Even a valid result has authority_granted=False and signature_status="not_checked".
+event["payload_sha256"] = event_payload_digest(event["event_kind"], event["payload"])
+checked_event = validate_runtime_event(event)
+record_bytes = canonical_wire_json(checked_event)
+```
+
+Every complete record has a fixed `record_type` and exact integer
+`format_version=1`. Specialized validators normalize omitted fixed metadata;
+`validate_wire` requires a `record_type` to select a record. Optional fields below
+normalize to null; every other field is required. Payloads and evidence references
+are fragments within records, with no separate version/tag. Contexts and reports
+are local inputs/results, not wire records. No raw target, input, secret, evidence
+body or evidence URL is included.
+
+Runtime opaque IDs are 1–128 ASCII characters matching
+`[A-Za-z0-9][A-Za-z0-9._:-]*`. Authored `step_id`, connector name, operation and
+`rule_id` use the existing 1–64 character `Identifier`; connector version uses
+`Version`; rule version and target operation reference use `ReferenceRevision`.
+All SHA-256 fields are 64 lowercase hexadecimal characters. Timestamps, epochs,
+generations, sequences and attempts are exact nonnegative safe integers; bool and
+float lookalikes refuse. Timestamps are UTC epoch milliseconds. Record projection
+and complete normalized JCS each enforce 65,536 bytes, depth 32 and 10,000 items.
+Evidence lists have at most 64 entries. Unicode code points are preserved.
+
+| Record | Fields in addition to fixed metadata |
+| --- | --- |
+| `ActionBinding` / `action_binding` | `installation_id`, `recovery_epoch`, `workspace_id`, `project_id`, `environment_id`, `execution_id`, `step_id`, `action_id`, `package_sha256`, `configuration_sha256`, `plan_sha256`, `connector_name`, `connector_version`, `connector_artifact_sha256`, `operation`, `target_sha256`, `input_sha256`, `policy_sha256`, `approval_mode` (`none`/`human`), `independent_approval` (exact bool), `requester_id`, `issued_at_ms`, `expires_at_ms` |
+| `ActionIntent` / `action_intent` | `binding` (`ActionBinding`), `sha256` |
+| `HumanDecision` / `human_decision` | `decision_id`, `intent_sha256`, `decision` (`allow`/`deny`), `actor_id`, `actor_kind` (`human`/`service`/`worker`/`model`), `policy_sha256`, `issued_at_ms`, `expires_at_ms` |
+| `RuntimeCommand` / `runtime_command` | `command_id`, `replay_id`, `intent_sha256`, optional `decision_sha256`, `installation_id`, `recovery_epoch`, `workspace_id`, `project_id`, `environment_id`, `execution_id`, `action_id`, `worker_id`, `fencing_generation`, `issued_at_ms`, `expires_at_ms` |
+| `ActionReceipt` / `action_receipt` | `receipt_id`, `action_id`, `intent_sha256`, `attempt`, `target_operation_ref`, `status` (`accepted`/`observed_effect`/`unknown`), `evidence_refs` |
+| `OutcomeRecord` / `outcome_record` | `outcome_id`, `action_id`, `intent_sha256`, `receipt_id`, `state` (`verified`/`not_verified`/`unknown`), `rule_id`, `rule_version`, `evidence_refs`, `observed_at_ms` |
+| `RuntimeEvent` / `runtime_event` | `event_id`, `installation_id`, `recovery_epoch`, `workspace_id`, `project_id`, `environment_id`, `execution_id`, optional `step_id`, `action_id`, `attempt`, then required `source_id`, `source_generation`, `source_sequence`, `event_kind`, `observed_at_ms`, `payload`, `payload_sha256` |
+
+`EvidenceRef` requires `artifact_id`, `sha256`, `media_type` (1–128 code points),
+`classification` (`public`/`internal`/`confidential`/`restricted`) and `source_kind`
+(`target_readback`/`signed_receipt`/`deterministic_check`). `verified` outcomes
+require nonempty evidence; every outcome state requires rule identity/version.
+The SDK checks declarations only: even `signed_receipt` provenance is unverified,
+and receipt acceptance or a claimed observed effect never implies verification.
+
+### Binding checks and canonical identities
+
+`BindingContext` requires all of `installation_id`, `recovery_epoch`,
+`workspace_id`, `project_id`, `environment_id`, `execution_id`, `step_id`,
+`action_id`, `package_sha256`, `configuration_sha256`, `plan_sha256`,
+`policy_sha256`, `worker_id`, `fencing_generation`, `requester_id`, `now_ms`.
+No environment or wall clock is read. `check_decision` uses the applicable
+intent/decision fields; worker/generation checks apply to commands.
+
+Intent and decision lifetimes must be positive and at most 2,592,000,000 ms
+(30 days); commands at most 300,000 ms. At comparison time each applicable
+interval must satisfy `issued_at_ms <= now_ms < expires_at_ms`. Decisions must
+start no earlier than the intent and expire no later. `none` approval requires
+no decision and a null command decision hash; `human` requires the exact allowed
+human decision. Independent review excludes the requester. When approval is
+`none`, the independence declaration remains hashed but has no reviewer to check.
+Logical action identity has no attempt number; safe retry delivery IDs and
+attempts do not alter the binding digest.
+
+All public helpers reproject exact known model classes and revalidate, including
+mutated or `model_construct` instances. Constructors and `model_validate` alone
+perform shape checks and are **not complete admission**. Subclasses and arbitrary
+serializers are not trusted. Malformed shape, lifetime, digest or cross-record
+references raise `ExecutableError("invalid_wire")`; malformed context raises
+`invalid_context`. Explicit traversal/Unicode/numeric bounds retain their fixed
+errors, including `input_too_large`, `input_too_deep`, `input_too_complex`,
+`cyclic_input`, `invalid_unicode`, `nonfinite_number` and `safe_integer` when
+raised by input projection. Errors do not echo supplied strings or identifiers.
+
+All inputs are admitted before comparison. Well-formed inconsistencies return a
+`BindingReport`, in this order: scope and hashes (`context_mismatch`), epoch
+(`stale_epoch`), command generation (`stale_generation`), command recipient
+(`wrong_recipient`), time (`not_yet_valid`/`expired`), then intent/decision identity
+(`intent_mismatch`) and approval/actor consistency (`approval_required`,
+`approval_unexpected`, `approval_denied`, `invalid_approver`,
+`independence_required`). Time checks visit intent, then command if present,
+then decision. An unexpected decision in `none` mode refuses; a missing decision
+in `human` mode refuses. A supplied human-mode decision's full digest is compared
+before denial/actor checks. A structurally matching result is `binding_valid`.
+
+`BindingReport` requires `valid` (exact bool) and `code` from that fixed vocabulary;
+`valid` must equal `code == "binding_valid"`. Its fixed defaults are
+`signature_status="not_checked"`, `assurance="synthetic-contract-evaluation"`
+and `authority_granted=false`. `binding_report_json` validates and emits bounded
+ASCII JSON plus newline. It contains no source records.
+
+| Public helper | Complete validation and digest coverage |
+| --- | --- |
+| `validate_action_binding`, `validate_action_intent`, `validate_human_decision`, `validate_runtime_command`, `validate_runtime_event`, `validate_action_receipt`, `validate_outcome_record` | Admit their named record with wire bounds and domain checks; every contained intent binding hash and event payload hash is recomputed. |
+| `validate_wire(raw)` | Selects one of the seven complete records by tag and performs the same admission. |
+| `build_action_intent(binding)` | Admits an `ActionBinding`, hashes its complete normalized JCS including fixed metadata, and returns an admitted `ActionIntent`. |
+| `canonical_binding_json(binding)` | Complete normalized `ActionBinding` JCS bytes, without a newline. |
+| `intent_digest(intent)` | Takes an **ActionIntent**, rechecks its embedded binding, returns the binding hash. It does not hash the intent wrapper. |
+| `canonical_decision_json(decision)`, `decision_digest(decision)` | Complete normalized `HumanDecision` JCS and its SHA-256, including actor, policy, times and fixed metadata. |
+| `canonical_wire_json(record)`, `wire_digest(record)` | Complete admitted record JCS and its SHA-256, including every record/delivery field. An intent's full wire hash differs from its binding hash. Task 8 command signatures must cover the complete command bytes. |
+| `canonical_event_payload_json(event_kind, payload)`, `event_payload_digest(event_kind, payload)` | Admit the exact payload variant and every nested record/hash; encode/hash the normalized payload, including nested defaults. Outer event identity references are checked only by complete event admission. |
+| `validate_binding_context`, `validate_binding_report`, `binding_report_json` | Revalidate the explicit local context/report, including fixed report flags. |
+| `check_decision(intent, decision, context)`, `check_command_binding(command, intent, decision_or_none, context)` | Admit every argument, then apply the ordered consistency checks. They do not verify signatures or authenticate supplied context. |
+
+A standalone decision/command/receipt/outcome has an intent hash but no embedded
+binding, so its admission checks shape/lifetime/evidence declarations only.
+Use the binding checks with the corresponding complete intent; later transition
+logic must reload and correlate receipts, decisions and outcomes. Never treat
+standalone syntactic admission as proof that an intent exists or was approved.
+
+### Strict runtime event payloads
+
+`event_kind` selects the payload model; payloads have no redundant discriminator
+and reject every extra field. `S` means `step_id` and `attempt` required, with
+`action_id=null`. `A` means all three required. `E` means all three null.
+Omitted null references normalize to explicit null. All fields listed in each
+payload row are required.
+
+| Event kind | Payload fields | References |
+| --- | --- | --- |
+| `admission` | `package_sha256`, `configuration_sha256`, `plan_sha256`, `recovery_epoch` | E |
+| `step_started` | `input_sha256` | S |
+| `step_result` | `output_sha256` | S |
+| `step_failed` | `code` | S |
+| `wait_started` | `wait_id`, `kind` (`timer`/`external`/`human`), `correlation_sha256`, `not_before_ms`, `expires_at_ms` | S |
+| `signal_received` | `wait_id`, `correlation_sha256`, `signal_sha256` | S |
+| `timer_elapsed` | `wait_id` | S |
+| `intent_created` | `intent` (`ActionIntent`) | A |
+| `decision_recorded` | `decision` (`HumanDecision`) | A |
+| `action_dispatched` | `command` (`RuntimeCommand`) | A |
+| `action_receipt` | `receipt` (`ActionReceipt`) | A |
+| `dispatch_timeout` | `intent_sha256`, `may_have_dispatched` (exact bool) | A |
+| `reconciliation_observed` | `intent_sha256`, `observation` (`effect_present`/`effect_absent`/`unknown`), `rule_id`, `rule_version`, `evidence_refs`, `qualified_absence` (exact bool) | A |
+| `outcome_recorded` | `outcome` (`OutcomeRecord`) | A |
+| `execution_completed` | `output_sha256` | E |
+| `cancellation_requested` | `reason_code` | E |
+| `execution_failed` | `code` | E |
+
+Failure `code` is `unavailable`, `rate_limited`, `timeout_before_dispatch`,
+`invalid_output`, `cancelled` or `unknown`. Cancellation `reason_code` is
+`owner_requested`, `policy_revoked` or `recovery_fence`. Wait intervals require
+`not_before_ms < expires_at_ms`. `qualified_absence=true` requires
+`observation="effect_absent"` and nonempty evidence; this is still an unauthenticated
+declaration. Every reconciliation result requires rule identity/version.
+
+Complete event admission requires admission payload/outer epoch equality. Nested
+intent bindings and dispatch commands must match every shared outer scope,
+epoch and action field; intent step IDs also match. Receipt action/attempt and
+outcome action IDs must match. A decision has no scope fields to compare: its
+intent/actor/policy consistency requires the corresponding intent and context.
+Each payload hash covers exactly the normalized payload. Event observation time
+is a declaration and does not substitute for `BindingContext.now_ms`.
+
+Transition consumers must separately enforce source sequences, replay/conflict,
+current state, cancellation, cross-event intent/receipt/rule correlation and
+reconciliation before any unknown dispatch is retried. Signature consumers must
+use full canonical command bytes with the runtime-command context. Schema
+consumers must retain the outer-kind/payload/reference correlation and domain
+checks above; a raw Pydantic union schema alone does not encode all these rules.
