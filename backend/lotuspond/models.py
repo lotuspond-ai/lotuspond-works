@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -404,6 +405,7 @@ class Environment(Scoped, Base):
     __table_args__ = scoped(
         within("projects", "project_id"),
         CheckConstraint("kind IN ('local','sandbox','production')"),
+        UniqueConstraint("workspace_id", "project_id", "id", name="environments_fleet_scope_unique"),
     )
 
 
@@ -788,3 +790,391 @@ def serialize(row, *, exclude: set[str] | None = None) -> dict[str, Any]:
             value = float(value)
         result[column.name] = value
     return result
+
+
+# Fleet records use full scope; workspace-only `within` is deliberately insufficient.
+FLEET_SCOPE = ("workspace_id", "project_id", "environment_id")
+FLEET_MACHINE = (
+    *FLEET_SCOPE,
+    "pool_id",
+    "installation_id",
+    "recovery_epoch",
+    "instance_id",
+)
+
+
+class FleetScoped(Scoped):
+    project_id: Mapped[str] = mapped_column(String(36))
+    environment_id: Mapped[str] = mapped_column(String(36))
+
+
+def fleet_fk(
+    table: str, fields: tuple[str, ...], targets: tuple[str, ...] | None = None
+):
+    return ForeignKeyConstraint(
+        fields, [f"{table}.{field}" for field in (targets or fields)]
+    )
+
+
+def fleet_scoped(*constraints):
+    return (
+        UniqueConstraint(*FLEET_SCOPE, "id"),
+        fleet_fk("projects", ("workspace_id", "project_id"), ("workspace_id", "id")),
+        fleet_fk("environments", FLEET_SCOPE, ("workspace_id", "project_id", "id")),
+        *constraints,
+    )
+
+
+def fleet_parent(table: str, field: str):
+    return fleet_fk(table, (*FLEET_SCOPE, field), (*FLEET_SCOPE, "id"))
+
+
+def fleet_instance():
+    return fleet_fk("runtime_instances", FLEET_MACHINE, (*FLEET_MACHINE[:-1], "id"))
+
+
+def fleet_status(values: str):
+    return CheckConstraint(f"status IN ({values})")
+
+
+def fleet_positive(field: str):
+    return CheckConstraint(f"{field} BETWEEN 1 AND 2147483647")
+
+
+class Connection(FleetScoped, Base):
+    __tablename__ = "connections"
+    name: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    __table_args__ = fleet_scoped(fleet_status("'active','disabled','revoked'"))
+
+
+class ConnectionVersion(FleetScoped, Base):
+    __tablename__ = "connection_versions"
+    connection_id: Mapped[str] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer)
+    canonical_config: Mapped[bytes] = mapped_column(LargeBinary)
+    config_digest: Mapped[str] = mapped_column(String(64), index=True)
+    __table_args__ = fleet_scoped(
+        fleet_parent("connections", "connection_id"),
+        UniqueConstraint(*FLEET_SCOPE, "connection_id", "version"),
+        fleet_positive("version"),
+        CheckConstraint("length(canonical_config) BETWEEN 1 AND 32768"),
+        CheckConstraint("length(config_digest) = 64"),
+    )
+
+
+class SecretReference(FleetScoped, Base):
+    __tablename__ = "secret_references"
+    binding_id: Mapped[str] = mapped_column(String(128))
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    __table_args__ = fleet_scoped(
+        UniqueConstraint(*FLEET_SCOPE, "binding_id", "version"),
+        UniqueConstraint(*FLEET_SCOPE, "id", "version"),
+        fleet_positive("version"),
+        fleet_status("'active','revoked'"),
+    )
+
+
+class ConnectionVersionSecret(FleetScoped, Base):
+    __tablename__ = "connection_version_secrets"
+    connection_id: Mapped[str] = mapped_column(String(36))
+    connection_version: Mapped[int] = mapped_column(Integer)
+    secret_reference_id: Mapped[str] = mapped_column(String(36))
+    secret_version: Mapped[int] = mapped_column(Integer)
+    __table_args__ = fleet_scoped(
+        fleet_fk(
+            "connection_versions",
+            (*FLEET_SCOPE, "connection_id", "connection_version"),
+            (*FLEET_SCOPE, "connection_id", "version"),
+        ),
+        fleet_fk(
+            "secret_references",
+            (*FLEET_SCOPE, "secret_reference_id", "secret_version"),
+            (*FLEET_SCOPE, "id", "version"),
+        ),
+        UniqueConstraint(
+            *FLEET_SCOPE,
+            "connection_id",
+            "connection_version",
+            "secret_reference_id",
+            "secret_version",
+        ),
+        fleet_positive("connection_version"),
+        fleet_positive("secret_version"),
+    )
+
+
+class RuntimePool(FleetScoped, Base):
+    __tablename__ = "runtime_pools"
+    name: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    current_policy_version: Mapped[int | None] = mapped_column(Integer)
+    __table_args__ = fleet_scoped(
+        ForeignKeyConstraint(
+            (*FLEET_SCOPE, "id", "current_policy_version"),
+            [
+                f"runtime_pool_policies.{field}"
+                for field in (*FLEET_SCOPE, "pool_id", "version")
+            ],
+            name="runtime_pools_current_policy_fk",
+            use_alter=True,
+        ),
+        fleet_status("'active','disabled','revoked'"),
+        CheckConstraint(
+            "current_policy_version IS NULL OR current_policy_version BETWEEN 1 AND 2147483647"
+        ),
+    )
+
+
+class RuntimePoolPolicy(FleetScoped, Base):
+    __tablename__ = "runtime_pool_policies"
+    pool_id: Mapped[str] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer)
+    canonical_policy: Mapped[bytes] = mapped_column(LargeBinary)
+    policy_digest: Mapped[str] = mapped_column(String(64), index=True)
+    __table_args__ = fleet_scoped(
+        fleet_parent("runtime_pools", "pool_id"),
+        UniqueConstraint(*FLEET_SCOPE, "pool_id", "version"),
+        fleet_positive("version"),
+        CheckConstraint("length(canonical_policy) BETWEEN 1 AND 32768"),
+        CheckConstraint("length(policy_digest) = 64"),
+    )
+
+
+class RuntimePoolPolicyConnection(FleetScoped, Base):
+    __tablename__ = "runtime_pool_policy_connections"
+    pool_id: Mapped[str] = mapped_column(String(36))
+    policy_version: Mapped[int] = mapped_column(Integer)
+    connection_id: Mapped[str] = mapped_column(String(36))
+    __table_args__ = fleet_scoped(
+        fleet_fk(
+            "runtime_pool_policies",
+            (*FLEET_SCOPE, "pool_id", "policy_version"),
+            (*FLEET_SCOPE, "pool_id", "version"),
+        ),
+        fleet_parent("connections", "connection_id"),
+        UniqueConstraint(*FLEET_SCOPE, "pool_id", "policy_version", "connection_id"),
+        fleet_positive("policy_version"),
+    )
+
+
+class FleetMachine(FleetScoped):
+    pool_id: Mapped[str] = mapped_column(String(36))
+    installation_id: Mapped[str] = mapped_column(String(128))
+    recovery_epoch: Mapped[int] = mapped_column(BigInteger)
+
+
+def fleet_machine(*constraints):
+    return fleet_scoped(
+        fleet_parent("runtime_pools", "pool_id"),
+        CheckConstraint("recovery_epoch BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint("length(installation_id) BETWEEN 1 AND 128"),
+        *constraints,
+    )
+
+
+class RuntimeInstance(FleetMachine, Base):
+    __tablename__ = "runtime_instances"
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    generation: Mapped[int] = mapped_column(BigInteger, default=0)
+    observation_ceiling: Mapped[bytes] = mapped_column(LargeBinary)
+    last_seen_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    __table_args__ = fleet_machine(
+        UniqueConstraint(*FLEET_MACHINE[:-1], "id"),
+        fleet_status("'active','revoked'"),
+        CheckConstraint("generation BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint("length(observation_ceiling) BETWEEN 1 AND 32768"),
+        CheckConstraint(
+            "last_seen_at_ms IS NULL OR last_seen_at_ms BETWEEN 0 AND 9007199254740991"
+        ),
+    )
+
+
+class RuntimeEnrollment(FleetMachine, Base):
+    __tablename__ = "runtime_enrollments"
+    policy_version: Mapped[int] = mapped_column(Integer)
+    observation_ceiling: Mapped[bytes] = mapped_column(LargeBinary)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="issued")
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    consumed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    __table_args__ = fleet_machine(
+        fleet_fk(
+            "runtime_pool_policies",
+            (*FLEET_SCOPE, "pool_id", "policy_version"),
+            (*FLEET_SCOPE, "pool_id", "version"),
+        ),
+        fleet_positive("policy_version"),
+        fleet_status("'issued','consumed','revoked'"),
+        CheckConstraint("length(token_digest) = 64"),
+        CheckConstraint("length(observation_ceiling) BETWEEN 1 AND 32768"),
+        CheckConstraint("expires_at_ms BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint(
+            "consumed_at_ms IS NULL OR consumed_at_ms BETWEEN 0 AND 9007199254740991"
+        ),
+    )
+
+
+class RuntimeSession(FleetMachine, Base):
+    __tablename__ = "runtime_sessions"
+    instance_id: Mapped[str] = mapped_column(String(36))
+    generation: Mapped[int] = mapped_column(BigInteger)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = fleet_machine(
+        fleet_instance(),
+        UniqueConstraint(*FLEET_MACHINE, "id", "generation"),
+        UniqueConstraint(*FLEET_MACHINE, "generation"),
+        CheckConstraint("generation BETWEEN 1 AND 9007199254740991"),
+        CheckConstraint("expires_at_ms BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint("length(token_digest) = 64"),
+        fleet_status("'active','revoked'"),
+        Index(
+            "runtime_one_active_session",
+            *FLEET_MACHINE,
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+
+class RuntimeCredential(FleetMachine, Base):
+    __tablename__ = "runtime_credentials"
+    instance_id: Mapped[str] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20))
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    predecessor_id: Mapped[str | None] = mapped_column(String(36))
+    successor_id: Mapped[str | None] = mapped_column(String(36))
+    session_id: Mapped[str | None] = mapped_column(String(36))
+    generation: Mapped[int | None] = mapped_column(BigInteger)
+    prepared_policy_version: Mapped[int | None] = mapped_column(Integer)
+    activation_deadline_ms: Mapped[int | None] = mapped_column(BigInteger)
+    __table_args__ = fleet_machine(
+        fleet_instance(),
+        UniqueConstraint(*FLEET_MACHINE, "id"),
+        UniqueConstraint(*FLEET_MACHINE, "version"),
+        fleet_fk(
+            "runtime_credentials",
+            (*FLEET_MACHINE, "predecessor_id"),
+            (*FLEET_MACHINE, "id"),
+        ),
+        fleet_fk(
+            "runtime_credentials",
+            (*FLEET_MACHINE, "successor_id"),
+            (*FLEET_MACHINE, "id"),
+        ),
+        fleet_fk(
+            "runtime_sessions",
+            (*FLEET_MACHINE, "session_id", "generation"),
+            (*FLEET_MACHINE, "id", "generation"),
+        ),
+        fleet_fk(
+            "runtime_pool_policies",
+            (*FLEET_SCOPE, "pool_id", "prepared_policy_version"),
+            (*FLEET_SCOPE, "pool_id", "version"),
+        ),
+        fleet_status("'pending','active','revoked'"),
+        fleet_positive("version"),
+        CheckConstraint("length(token_digest) = 64"),
+        CheckConstraint("expires_at_ms BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint(
+            "generation IS NULL OR generation BETWEEN 1 AND 9007199254740991"
+        ),
+        CheckConstraint(
+            "activation_deadline_ms IS NULL OR activation_deadline_ms BETWEEN 0 AND 9007199254740991"
+        ),
+        CheckConstraint(
+            "status <> 'pending' OR (predecessor_id IS NOT NULL AND session_id IS NOT NULL AND generation IS NOT NULL AND prepared_policy_version IS NOT NULL AND activation_deadline_ms IS NOT NULL)"
+        ),
+        CheckConstraint(
+            "(session_id IS NULL AND generation IS NULL) OR (session_id IS NOT NULL AND generation IS NOT NULL)"
+        ),
+        CheckConstraint("predecessor_id IS NULL OR predecessor_id <> id"),
+        CheckConstraint("successor_id IS NULL OR successor_id <> id"),
+        Index(
+            "runtime_one_active_credential",
+            *FLEET_MACHINE,
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+            sqlite_where=text("status = 'active'"),
+        ),
+        Index(
+            "runtime_one_pending_credential",
+            *FLEET_MACHINE,
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+
+class RuntimeCommandAdmission(FleetMachine, Base):
+    __tablename__ = "runtime_command_admissions"
+    instance_id: Mapped[str] = mapped_column(String(36))
+    session_id: Mapped[str] = mapped_column(String(36))
+    generation: Mapped[int] = mapped_column(BigInteger)
+    command_id: Mapped[str] = mapped_column(String(128))
+    replay_id: Mapped[str] = mapped_column(String(128))
+    recipient: Mapped[str] = mapped_column(String(128))
+    command_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    signature_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    command_digest: Mapped[str] = mapped_column(String(64), index=True)
+    trust_revision: Mapped[int] = mapped_column(BigInteger)
+    command_expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(20), default="admitted")
+    admitted_at_ms: Mapped[int] = mapped_column(BigInteger)
+    claimed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    terminal_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    retain_until_ms: Mapped[int | None] = mapped_column(BigInteger)
+    __table_args__ = fleet_machine(
+        fleet_instance(),
+        fleet_fk(
+            "runtime_sessions",
+            (*FLEET_MACHINE, "session_id", "generation"),
+            (*FLEET_MACHINE, "id", "generation"),
+        ),
+        UniqueConstraint(
+            "installation_id", "recovery_epoch", "workspace_id", "replay_id"
+        ),
+        UniqueConstraint(
+            "installation_id", "recovery_epoch", "workspace_id", "command_id"
+        ),
+        fleet_status("'admitted','claimed','terminal','uncertain'"),
+        CheckConstraint("generation BETWEEN 1 AND 9007199254740991"),
+        CheckConstraint("trust_revision BETWEEN 1 AND 9007199254740991"),
+        CheckConstraint("length(command_digest) = 64"),
+        CheckConstraint("length(command_bytes) BETWEEN 1 AND 65536"),
+        CheckConstraint("length(signature_bytes) BETWEEN 1 AND 65536"),
+        CheckConstraint("command_expires_at_ms BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint("admitted_at_ms BETWEEN 0 AND 9007199254740991"),
+        CheckConstraint(
+            "claimed_at_ms IS NULL OR claimed_at_ms BETWEEN 0 AND 9007199254740991"
+        ),
+        CheckConstraint(
+            "terminal_at_ms IS NULL OR terminal_at_ms BETWEEN 0 AND 9007199254740991"
+        ),
+        CheckConstraint(
+            "retain_until_ms IS NULL OR retain_until_ms BETWEEN 0 AND 9007199254740991"
+        ),
+        CheckConstraint(
+            "status <> 'terminal' OR (terminal_at_ms IS NOT NULL AND retain_until_ms IS NOT NULL AND retain_until_ms >= terminal_at_ms + 86400000 AND retain_until_ms >= command_expires_at_ms + 30000)"
+        ),
+    )
+
+
+class FleetMutationRequest(FleetScoped, Base):
+    __tablename__ = "fleet_mutation_requests"
+    operation: Mapped[str] = mapped_column(String(128))
+    request_key: Mapped[str] = mapped_column(String(128))
+    request_digest: Mapped[str] = mapped_column(String(64))
+    result: Mapped[dict] = mapped_column(JSON)
+    __table_args__ = fleet_scoped(
+        UniqueConstraint(*FLEET_SCOPE, "operation", "request_key"),
+        CheckConstraint("length(request_digest) = 64"),
+        CheckConstraint("length(request_key) BETWEEN 1 AND 128"),
+    )

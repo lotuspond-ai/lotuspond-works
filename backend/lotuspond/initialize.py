@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .database import engine_for
+from .fleet.migration import migrate_fleet_v13
 from .models import AuditEvent, Base, SchemaVersion, User
 from .schema_version import SCHEMA_VERSION
 
@@ -81,7 +82,7 @@ def main():
 
 
 def migrate(settings: Settings):
-    """Apply the reviewed additive v2 through v12 chain; never drop/import records."""
+    """Apply the reviewed additive v2 through v13 chain; never drop/import records."""
     url = make_url(settings.database_url.get_secret_value())
     if (
         settings.env == "production"
@@ -98,7 +99,7 @@ def migrate(settings: Settings):
             versions = list(connection.execute(SchemaVersion.__table__.select()).scalars())
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")
-            if len(versions) != 1 or versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+            if len(versions) != 1 or versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
                 raise ValueError("Unexpected schema state; no changes made")
             current = versions[0]
             inspector = inspect(connection)
@@ -413,6 +414,13 @@ def migrate(settings: Settings):
                 Base.metadata.tables["workflow_package_versions"].create(connection)
                 Base.metadata.tables["package_publication_requests"].create(connection)
                 current = 12
+            if current == 12:
+                # The earlier chain and fleet preflight share this transaction;
+                # intermediate v12 is never visible outside it. Any refusal
+                # rolls back the entire chain and the original version ledger.
+                connection.execute(SchemaVersion.__table__.update().values(version=12))
+                migrate_fleet_v13(connection)
+                current = 13
             connection.execute(SchemaVersion.__table__.update().values(version=current))
     finally:
         engine.dispose()
