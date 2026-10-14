@@ -69,3 +69,51 @@ Projection now provides only a structural byte lower bound. Actual raw JSON, nor
 Ruling: update the inherited installed-distribution version assertion with Task 1's approved SDK 0.2.0 bump, retaining broader installed v2 CLI journeys for Task 10 — otherwise the required existing artifact gate would knowingly fail — cost if wrong: moving one test-line change between task commits, with no runtime or compatibility change.
 
 Tasks 2–10 and final application/database/artifact/hosted gates remain pending. This does not qualify an execution runtime or the complete product for production.
+
+## Task 2 implementation evidence (independent review pending)
+
+Closed data/export schemas, bounded literal validation, lexical mapping inference,
+optional-presence checks and compiler-only handle provenance are implemented in
+`executable/types.py` and `expressions.py`. The fixed operation vocabulary is
+static: no interpreter, constant folding or runtime authority was added. Public
+data cannot declare or construct handles. Numeric literals select their declared
+domain before normalized JCS measurement, including integral spellings of large
+finite numbers and the largest finite IEEE value.
+
+The prescribed initial red command produced two missing-module collection errors.
+Subsequent red/green regressions corrected alias origin changes, first-element
+array summaries, positional/multiplicity loss, optional cross-field selection
+correlation, definition resolution in step outputs, empty handle arrays and
+nested iteration ownership. Literal 1.0, negative zero, 1e20, its neighboring
+representable float and the largest finite float round-trip through decoding,
+typed normalization and JCS with stable bytes/digests. Exact expression 64/65-node
+and 8/9-depth boundaries are tested separately. The public import also passes
+with UserWarning treated as an error; only known declaration-time schema-shadow
+warnings are suppressed in tightly scoped contexts.
+
+Final focused Task 2 tests: 90 passed. Task 1 plus Task 2: 205 passed on each of
+Python 3.14.5 and separate Python 3.13.13, with no skips or warnings. Frozen SDK
+Ruff and whitespace checks pass. The first broader SDK run had 505 passed,
+38 fixture errors and 68 subtests: all errors shared the Hatchling fetch blocked
+by sandbox networking. An authorized network-enabled repeat of the affected
+wheel/rebuilt-sdist CLI and distribution tests passed all 41 tests; no product
+or fixture change was required. The failed logs are retained with the task report.
+
+Controller-approved provenance representation extension: concrete constructor
+arrays retain immutable `elements`; unknown selections retain ordered,
+multiplicity-bearing `OriginChoice` options, including absent optional slots.
+`select_array_item` and `iteration_item_flow` preserve alias identity and only
+bind occurrence slots owned by `FlowArrayType.iteration_id`. Empty handle arrays
+have no item origin. The detailed helper contract and caller obligations are in
+the guide and Task 2 report; the controller owns the ruling and review gate.
+
+Later package validators must call `parse_mapping(raw, definitions)` to normalize
+literal numbers before Task 1's final JCS measurement. Later compilers must supply
+lexical scopes, apply direct exists guards only on valid true edges, originate
+handles only from validated producing steps, preserve complete selection
+correlation and compare exact intent origins. Wire authentication, runtime
+binding checks and the full application/database/offline/hosted gates remain
+later work. Root v1 modules and runtime behavior are unchanged.
+
+The final network-enabled SDK 3.14 rerun passes 544 tests and 68 subtests, with
+no skips or warnings, closing the earlier shared artifact-fixture errors.

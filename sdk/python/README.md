@@ -347,7 +347,8 @@ SDK 0.2.0 adds `lotuspond_sdk.executable.decode_executable_bytes`, fixed
 `ExecutableError`/`ExecutableIssue` diagnostics and v2 metadata constants.
 The v2 schema/canonicalizer identifiers are `lotuspond.workflow-package.v2`
 and `lotuspond.workflow-package.jcs.v2`. The current increment supplies bounded
-JSON/JCS and strict validation/report foundations; v2 authoring, compilation,
+JSON/JCS, closed data schemas, static typed mappings and immutable handle-origin
+metadata; package/control authoring, compilation,
 runtime-facing records and CLI commands are subsequent implementation tasks.
 
 Raw package and normalized canonical JSON stay within 1,048,576 bytes, depth 32
@@ -368,3 +369,38 @@ are refused. Diagnostics contain fixed codes/messages, sanitized pointers and
 at most 20 issues with explicit truncation. Reports revalidate known model
 fields and count complete ASCII output, including a wrapper and final newline.
 These local foundations confer no execution authority.
+
+
+Typed helpers are available in that separate namespace:
+
+```python
+from lotuspond_sdk.executable import TypeEnvironment, infer_mapping, validate_value
+
+value = validate_value("12.50", {"kind": "decimal", "precision": 4, "scale": 2}, [])
+flow = infer_mapping(
+    {"kind": "ref", "source": {"kind": "package_input"}, "pointer": ""},
+    TypeEnvironment(input_schema={"kind": "integer", "min": 0, "max": 10}),
+)
+```
+
+`DataSchema` is closed and bounded; local named schemas are acyclic. `Mapping`
+permits literals, lexical references, objects, arrays and the fixed arithmetic,
+comparison, boolean, `exists` and `coalesce` calls. It performs static inference
+only. Required consumers reject missing optional fields unless defaulted or
+refined by a direct `exists(ref)` true guard. Number literals normalize before
+JCS so integral canonical spellings remain readable; integers remain exact,
+and decimals retain canonical fixed-scale strings. Arithmetic runtime failures
+are specified, never evaluated by this layer.
+
+`ExportSchema`, `DataType`, `HandleType`, `FlowObjectType` and `FlowArrayType`
+describe internal region results. Data cannot manufacture a handle. Compiler
+metadata carries `SourceSymbol` and ordered `OriginChoice` provenance.
+`select_array_item` preserves alias origins and requires presence checking;
+`iteration_item_flow` produces a present but possibly symbolic current element.
+An array's `iteration_id` binds only its own `$item:<iteration_id>` occurrence
+slots, preserving outer-loop aliases. Empty handle arrays create no origin.
+The later compiler must enforce lexical scopes, guarded branches, originating
+operation kinds and correlated intent/decision provenance; wire records still
+require independent authenticated reload at runtime. See
+[the typed syntax and compiler handoff](../../docs-site/docs/executable-packages.md)
+for exact schemas, operation signatures, selection helpers and limits.
