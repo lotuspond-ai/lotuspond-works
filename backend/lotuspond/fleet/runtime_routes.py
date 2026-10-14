@@ -11,6 +11,7 @@ from lotuspond_runtime.protocol import (
     encode_acquired_session,
     encode_enrollment_issued,
     encode_issued_credential,
+    encode_prepared_credential,
 )
 
 from ..deps import DB
@@ -40,6 +41,7 @@ from .management_routes import (
 from .management_routes import (
     router as management_router,
 )
+from .rotation import activate_rotation, cancel_rotation, prepare_rotation
 
 router = APIRouter(prefix="/api/v1/runtime", route_class=FleetRoute)
 
@@ -100,6 +102,34 @@ def session_route(request: Request, raw=BODY, db=DB):
 def heartbeat_route(request: Request, raw=BODY, db=DB):
     EmptyManagementRequest.model_validate(raw)
     return heartbeat(db, principal(request, db, require_session=True), dependencies(request))
+
+
+@router.post("/credentials/prepare")
+def prepare_route(request: Request, raw=BODY, db=DB):
+    EmptyManagementRequest.model_validate(raw)
+    result = prepare_rotation(
+        db, principal(request, db, require_session=True), dependencies(request)
+    )
+    return one_time(encode_prepared_credential(result))
+
+
+@router.post("/credentials/activate")
+def activate_route(request: Request, raw=BODY, db=DB):
+    EmptyManagementRequest.model_validate(raw)
+    if request.query_params:
+        raise FleetError("invalid_request")
+    return activate_rotation(
+        db,
+        bearer(request),
+        request.headers.get("x-lotuspond-runtime-session"),
+        dependencies(request),
+    )
+
+
+@router.post("/credentials/cancel")
+def cancel_route(request: Request, raw=BODY, db=DB):
+    EmptyManagementRequest.model_validate(raw)
+    return cancel_rotation(db, principal(request, db, require_session=True), dependencies(request))
 
 
 @management_router.post("/runtime-pools/{pool_id}/enrollments")

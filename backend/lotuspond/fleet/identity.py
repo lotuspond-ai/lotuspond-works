@@ -298,6 +298,7 @@ def acquire_session(
         row.status = "revoked"
     for row in pending:
         row.status = "revoked"
+    credential.successor_id = None
     db.flush()  # Release partial unique indexes before creating the successor.
     instance.generation += 1
     secret = new_token("lps_")
@@ -380,7 +381,6 @@ class IdentityManagement(ManagementService):
         row = record(self.db, RuntimeInstance, scope, instance_id, lock=True)
 
         def execute():
-            row.status = "revoked"
             sessions = list(
                 self.db.scalars(
                     machine_query(RuntimeSession, row)
@@ -390,8 +390,6 @@ class IdentityManagement(ManagementService):
                     .execution_options(populate_existing=True)
                 )
             )
-            for session in sessions:
-                session.status = "revoked"
             credentials = list(
                 self.db.scalars(
                     machine_query(RuntimeCredential, row)
@@ -404,8 +402,12 @@ class IdentityManagement(ManagementService):
                     .execution_options(populate_existing=True)
                 )
             )
+            row.status = "revoked"
+            for session in sessions:
+                session.status = "revoked"
             for credential in credentials:
                 credential.status = "revoked"
+                credential.successor_id = None
             self.audit(scope, "fleet.instance.revoked", row.id)
             return instance_view(self.db, row)
 

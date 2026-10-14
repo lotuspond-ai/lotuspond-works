@@ -24,6 +24,9 @@ CODES = frozenset(
         "fleet.enrollment.revoked",
         "fleet.instance.revoked",
         "fleet.session.acquired",
+        "fleet.credential.prepared",
+        "fleet.credential.activated",
+        "fleet.credential.cancelled",
         "fleet.identity.clock_fence",
     }
 )
