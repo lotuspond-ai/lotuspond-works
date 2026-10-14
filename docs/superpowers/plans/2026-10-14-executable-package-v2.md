@@ -365,7 +365,7 @@ Report contains contract_valid=true for returned structurally valid packages, cl
 
 Reason codes are dependency_missing, unsupported_schema, unsupported_compiler, unsupported_canonicalization, unsupported_step, unsupported_expression, unsupported_value, unsupported_artifact, unsupported_operation, unsupported_model_configuration, unsupported_platform, missing_capability and insufficient_limit; sort by code then sanitized path.
 
-- [ ] **Step 1: Write complete/partial/refusal tests.** Match every declared feature/pin, including unused declarations, all step/expression/value kinds, platform capabilities and package budget limits. Remove one requirement at a time. Test empty support, duplicate pairs, unknown formats, omitted fields, max lists, modified typed inputs, missing closure and truncation that remains incompatible.
+- [x] **Step 1: Write complete/partial/refusal tests.** Match every declared feature/pin, including unused declarations, all step/expression/value kinds, platform capabilities and package budget limits. Remove one requirement at a time. Test empty support, duplicate pairs, unknown formats, omitted fields, max lists, modified typed inputs, missing closure and truncation that remains incompatible.
 
 ```python
 def test_missing_expression_or_model_pin_refuses(case, catalog_case, profile, requirements):
@@ -378,10 +378,10 @@ def test_missing_expression_or_model_pin_refuses(case, catalog_case, profile, re
     assert result.authority_granted is False
 ```
 
-- [ ] **Step 2: Run uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_compatibility.py -q; expect missing interfaces.** Existing v1 profiles must still be accepted only by v1 APIs.
-- [ ] **Step 3: Implement strict projection and exact assessment.** Use Tasks 3–4 validation/closure/compiler, compare every declaration and each package limit against declared support, and never merge conflicting entries. Hash normalized profile/requirements separately from package content. Derive incompatible from the complete refusal set before truncating display; include no raw values in reasons.
-- [ ] **Step 4: Verify v1/v2 compatibility, compiler and serialization tests plus Ruff.** Independent expected hashes, sorted reasons and actual formatted-output cap must pass on both Python versions. Document structurally valid versus compiled versus declared support explicitly.
-- [ ] **Step 5: Commit feat: assess synthetic executable capability declarations.** Independent review verifies complete feature accounting, closure/report truth and exact-version behavior.
+- [x] **Step 2: Run uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_compatibility.py -q; expect missing interfaces.** Existing v1 profiles must still be accepted only by v1 APIs.
+- [x] **Step 3: Implement strict projection and exact assessment.** Use Tasks 3–4 validation/closure/compiler, compare every declaration and each package limit against declared support, and never merge conflicting entries. Hash normalized profile/requirements separately from package content. Derive incompatible from the complete refusal set before truncating display; include no raw values in reasons.
+- [x] **Step 4: Verify v1/v2 compatibility, compiler and serialization tests plus Ruff.** Independent expected hashes, sorted reasons and actual formatted-output cap must pass on both Python versions. Document structurally valid versus compiled versus declared support explicitly.
+- [x] **Step 5: Commit feat: assess synthetic executable capability declarations.** Independent review verifies complete feature accounting, closure/report truth and exact-version behavior.
 
 ## Task 10: Deliver explicit v2 CLI, schemas and verified artifacts
 

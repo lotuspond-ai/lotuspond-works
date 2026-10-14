@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–8 are complete after independent review and correction; Tasks 9–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–9 are complete after independent review and correction; Task 10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -622,3 +622,24 @@ independent Task 9 review is pending. No task defect is knowingly deferred or
 waived. Full application/database/offline-image, installed v2 CLI, whole-branch
 and exact-head hosted gates remain Task 10; real runtime/provider qualification
 is not asserted.
+
+
+## Task 9 review and correction closure
+
+Task 9 is complete through `814b6b2b657659796728acf08b991e11152ba7cc`. Independent review of `e3f0a945ca6be117dda6389d784688069dd486f7` found one Important omission: a workflow with an automatic main action and independently human-approved compensation could be declared compatible without human_decision support. The explicit main-path review/output scan did not account for compensation's implicit review. A retained independent reproduction compiled successfully with two outcome obligations and demonstrated the false compatibility result.
+
+The correction walks admitted CompensationSpec records and requires their own action_intent, action_receipt and verification_evidence handles plus human_decision when approval is human. Root and called-subworkflow tests isolate the compensation requirement from explicit main-path review, with positive full-support and non-human controls. No compiler, dependency resolver, v1 API or authority semantics changed. The guide documents the conditional requirement.
+
+Correction red was eight failures and six passes; the exact targeted green has 14 passes. Named compatibility/dependency/compiler suites pass 263 tests on each Python3.14.5 and3.13.13, without skips; the original reviewer probe now refuses missing support. Ruff and whitespace pass. All three corrected source/test/guide hashes match the retained tested manifest. The earlier 1,394-test/68-subtest full SDK results remain tied to the pre-correction source; a broad artifact repeat was not substituted for the focused correction checks. Final integrated matrix remains Task10.
+
+Fresh independent scoped re-review passed specification and quality with one addressed, zero open and zero new findings; no Critical, Important or Minor findings remain. No finding was waived or deferred. Actual availability, policy, credentials and live runtime qualification remain explicitly unchecked and are separate product gates.
+
+Controller rulings carried through the reviewed implementation:
+
+Ruling: Give v2 profiles explicit artifacts, connector-operation and model-configuration records, enforce immutable kind/name/version pin consistency and exact digest comparison, and make every supported PackageLimits field required with zero meaning no capacity — the plan names these support dimensions without their record shapes, and partial support must remain representable without silent defaults — cost if wrong: refine pre-stable profile schema, hashes and fixtures before stabilization; v1 profiles remain unchanged.
+
+Ruling: Requirements name only the current literal lotuspond.runtime-contract.v1, which this v2 profile format describes, and the explicitly selected OS/architecture must appear in every applicable package platform whitelist and the profile, with empty lists meaning no support — there is no supported alternate runtime contract or inferred environment, and a dependency cannot silently broaden the selected deployment — cost if wrong: revise pre-stable runtime/platform declaration semantics and caller fixtures; no real runtime support or permission is asserted.
+
+Ruling: V2 value_kinds includes the nine existing DataSchema kinds and four existing opaque HandleKind literals, with originating steps requiring their handle support even when that output is discarded — complete typed-feature accounting must not disappear merely because an authored result is unused — cost if wrong: refine the pre-stable feature vocabulary and profile fixtures; handles remain compiler-originated and untrusted on the wire.
+
+Ruling: Missing-dependency compatibility results require full admission and a bounded audit of all available supplied pins/graph errors before returning unresolved; share dependency inventory/traversal rather than copy a second resolver, and defer lexical/type compilation until closure is complete — a missing first pin must not hide detectable bad digests, conflicts, cycles or extra supplied definitions, while an unresolved report promises only structural validity — cost if wrong: refine private dependency factoring and partial-closure diagnostics, with complete-input resolver/compiler behavior and public authority boundaries preserved.
