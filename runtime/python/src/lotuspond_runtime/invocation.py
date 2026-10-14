@@ -222,7 +222,9 @@ def invoke_fixture(
 ) -> FixtureResult:
     global _active, _cleanup_failed
     child = parent = channel = None
-    admitted = sent = False
+    admitted = sent = possible_send = proven_pre_send = False
+    result = None
+    cleanup_error = False
     key = None
     started_ns = time.monotonic_ns()
     deadline = started_ns + 30_000_000_000
@@ -295,7 +297,10 @@ def invoke_fixture(
         _send(parent, envelope, deadline)
         events = 0
         while True:
-            if sent and not select.select([parent], [], [], min(0.05, remaining(deadline)))[0]:
+            if (
+                possible_send
+                and not select.select([parent], [], [], min(0.05, remaining(deadline)))[0]
+            ):
                 _authorize(authority, request, deadline)
                 continue
             message = _receive(parent, deadline)
@@ -304,9 +309,12 @@ def invoke_fixture(
                 raise FleetError("transport_failed")
             if message == {"event": "authorize"}:
                 _authorize(authority, request, deadline)
+                # Grant delivery can succeed even if this call reports failure or the
+                # parent stalls before consuming the child's later send notification.
+                possible_send = True
                 _send(parent, {"authorized": True}, deadline)
             elif message == {"event": "sending"}:
-                sent = True
+                sent = possible_send = True
                 _observe("sending")
             elif message == {"event": "secret_open"}:
                 _observe("secret_open")
@@ -324,17 +332,25 @@ def invoke_fixture(
                 child.wait(timeout=remaining(deadline))
                 if child.returncode:
                     raise FleetError("transport_failed")
-                return FixtureResult(
+                if message["result"] == "denied":
+                    if sent or message["request_bytes"] or message["response_bytes"]:
+                        raise FleetError("transport_failed")
+                    # Complete fixed-child result, successful exit and no contradictory
+                    # notification provide positive proof of a pre-send refusal.
+                    proven_pre_send = True
+                result = FixtureResult(
                     message["result"], message["request_bytes"], message["response_bytes"]
                 )
+                break
             else:
                 raise FleetError("transport_failed")
     except (FleetError, OSError, ValueError, TypeError, subprocess.SubprocessError):
-        return FixtureResult(
-            "uncertain" if sent else "denied", len(request.input_bytes) if sent else 0, 0
+        result = FixtureResult(
+            "uncertain" if possible_send else "denied",
+            len(request.input_bytes) if possible_send else 0,
+            0,
         )
     finally:
-        cleanup_error = False
         if child is not None:
             try:
                 try:
@@ -352,7 +368,10 @@ def invoke_fixture(
                 cleanup_error = True
         for stream in (parent, channel):
             if stream is not None:
-                stream.close()
+                try:
+                    stream.close()
+                except OSError:
+                    cleanup_error = True
         with _lock:
             if cleanup_error:
                 _cleanup_failed = True
@@ -361,5 +380,14 @@ def invoke_fixture(
                 _pools[key] -= 1
                 if not _pools[key]:
                     del _pools[key]
-        if cleanup_error:
-            raise FleetError("transport_failed")
+    # Finalization never overrides an unexpected exception. Expected failures keep
+    # their safe outcome; incomplete cleanup fences future work and cannot erase
+    # evidence that permission to transmit may already have reached the child.
+    if cleanup_error:
+        exposed = possible_send and not proven_pre_send
+        return FixtureResult(
+            "uncertain" if exposed else "denied",
+            len(request.input_bytes) if exposed else 0,
+            result.response_bytes if exposed else 0,
+        )
+    return result

@@ -387,7 +387,8 @@ def test_lost_authority_stops_already_sent_slow_request(tmp_path):
         assert len(requests) == 1
 
 
-def test_cleanup_failure_fences_further_children(tmp_path, monkeypatch):
+@pytest.mark.parametrize("stage", ["before-grant", "proven-presend", "observed", "uncertain"])
+def test_cleanup_failure_fences_further_children(tmp_path, monkeypatch, stage):
     import os
 
     from tls_fixtures import tls_server
@@ -398,21 +399,33 @@ def test_cleanup_failure_fences_further_children(tmp_path, monkeypatch):
 
     def failed_probe(pid, sig):
         if sig == 0:
-            raise PermissionError
+            raise PermissionError("synthetic acknowledgement failure")
         return kill(pid, sig)
 
-    with tls_server(tmp_path, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n") as (
+    with tls_server(tmp_path, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok") as (
         origin,
         ca,
         requests,
     ):
-        request, destination, resolver = invocation_setup(tmp_path, origin, ca)
+        request, destination, resolver = invocation_setup(
+            tmp_path, origin, ca, response_limit=1 if stage == "uncertain" else 10
+        )
+        if stage == "before-grant":
+            (tmp_path / "secret-v1").unlink()
+        elif stage == "proven-presend":
+            (tmp_path / "secret-v1").write_bytes(b"invalid-header-value\n")
         monkeypatch.setattr(os, "killpg", failed_probe)
         try:
-            with pytest.raises(FleetError, match="transport_failed"):
-                m.invoke_fixture(
-                    request, authority=Allow(), destination=destination, resolver=resolver
-                )
+            result = m.invoke_fixture(
+                request, authority=Allow(), destination=destination, resolver=resolver
+            )
+            exposed = stage in ("observed", "uncertain")
+            assert len(requests) == int(exposed)
+            if exposed:
+                assert b"SYNTHETIC_FIXTURE_VALUE" in requests[0]
+            assert result.status == ("uncertain" if exposed else "denied")
+            assert result.request_bytes == (len(request.input_bytes) if exposed else 0)
+            assert result.response_bytes == (2 if stage == "observed" else 0)
             assert m._cleanup_failed
             assert (
                 m.invoke_fixture(
@@ -541,14 +554,11 @@ def test_real_child_and_dns_descendant_cleanup(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(m.subprocess, "Popen", spawn)
     monkeypatch.setattr(m, "_cleanup_failed", False)
     start = time.monotonic()
-    try:
-        result = m.invoke_fixture(
-            request, authority=Allow(), destination=destination, resolver=resolver
-        )
-        assert result.status == "denied"
-    except FleetError as error:
-        assert error.code == "transport_failed"
-        assert m._cleanup_failed
+    result = m.invoke_fixture(
+        request, authority=Allow(), destination=destination, resolver=resolver
+    )
+    assert result.status == "denied"
+    if m._cleanup_failed:
         assert (
             m.invoke_fixture(
                 request, authority=Allow(), destination=destination, resolver=resolver
@@ -678,3 +688,185 @@ def test_redirect_receiver_never_sees_secret(tmp_path, monkeypatch):
             assert len(requests) == 1
             assert b"SYNTHETIC_FIXTURE_VALUE" in requests[0]
             assert received == []
+
+
+def test_parent_deadline_after_fresh_grant_retains_possible_send(tmp_path, monkeypatch):
+    import os
+    import threading
+    import time
+
+    from tls_fixtures import tls_server
+
+    import lotuspond_runtime.invocation as m
+
+    received = threading.Event()
+    children = []
+    popen, send = m.subprocess.Popen, m._send
+
+    def spawn(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    def delayed(channel, value, deadline):
+        send(channel, value, deadline)
+        if value == {"authorized": True}:
+            assert received.wait(max(0, (deadline - time.monotonic_ns()) / 1_000_000_000))
+            time.sleep(max(0, (deadline - time.monotonic_ns()) / 1_000_000_000) + 0.04)
+
+    def reply(request):
+        received.set()
+        return b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+
+    monkeypatch.setattr(m.subprocess, "Popen", spawn)
+    monkeypatch.setattr(m, "_send", delayed)
+    with tls_server(tmp_path, reply) as (origin, ca, requests):
+        request, destination, resolver = invocation_setup(tmp_path, origin, ca, timeout=800)
+        start = time.monotonic()
+        result = m.invoke_fixture(
+            request, authority=Allow(), destination=destination, resolver=resolver
+        )
+        assert len(requests) == 1
+        assert result == m.FixtureResult("uncertain", len(request.input_bytes), 0)
+        assert time.monotonic() - start < 1.5
+        assert children[0].poll() is not None
+        with pytest.raises(ProcessLookupError):
+            os.killpg(children[0].pid, 0)
+        assert not m._cleanup_failed
+        assert m._active == 0 and m._pools == {}
+
+
+@pytest.mark.parametrize("delivery", ["not-delivered", "delivered"])
+def test_ambiguous_grant_delivery_is_uncertain(tmp_path, monkeypatch, delivery):
+    import os
+    import threading
+    import time
+
+    from tls_fixtures import tls_server
+
+    import lotuspond_runtime.invocation as m
+
+    received = threading.Event()
+    children = []
+    popen, send = m.subprocess.Popen, m._send
+
+    def spawn(*args, **kwargs):
+        child = popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    def ambiguous(channel, value, deadline):
+        if value == {"authorized": True}:
+            if delivery == "delivered":
+                send(channel, value, deadline)
+                assert received.wait(max(0, (deadline - time.monotonic_ns()) / 1_000_000_000))
+            raise OSError("synthetic ambiguous grant write")
+        return send(channel, value, deadline)
+
+    def reply(request):
+        received.set()
+        return b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+
+    monkeypatch.setattr(m.subprocess, "Popen", spawn)
+    monkeypatch.setattr(m, "_send", ambiguous)
+    with tls_server(tmp_path, reply) as (origin, ca, requests):
+        request, destination, resolver = invocation_setup(tmp_path, origin, ca)
+        result = m.invoke_fixture(
+            request, authority=Allow(), destination=destination, resolver=resolver
+        )
+        assert len(requests) == int(delivery == "delivered")
+        assert result == m.FixtureResult("uncertain", len(request.input_bytes), 0)
+        assert children[0].poll() is not None
+        with pytest.raises(ProcessLookupError):
+            os.killpg(children[0].pid, 0)
+        assert not m._cleanup_failed
+        assert m._active == 0 and m._pools == {}
+
+
+def test_unexpected_error_propagates_through_cleanup_fence(tmp_path, monkeypatch):
+    import os
+    import threading
+
+    from tls_fixtures import tls_server
+
+    import lotuspond_runtime.invocation as m
+
+    received = threading.Event()
+    kill = os.killpg
+
+    class Unexpected(RuntimeError):
+        pass
+
+    def observe(event):
+        if event == "sending":
+            assert received.wait(1)
+            raise Unexpected("synthetic unexpected observer failure")
+
+    def failed_probe(pid, sig):
+        if sig == 0:
+            raise PermissionError("synthetic acknowledgement failure")
+        return kill(pid, sig)
+
+    def reply(request):
+        received.set()
+        return b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+
+    monkeypatch.setattr(m, "_observe", observe)
+    monkeypatch.setattr(os, "killpg", failed_probe)
+    with tls_server(tmp_path, reply) as (origin, ca, requests):
+        request, destination, resolver = invocation_setup(tmp_path, origin, ca)
+        try:
+            with pytest.raises(Unexpected):
+                m.invoke_fixture(
+                    request, authority=Allow(), destination=destination, resolver=resolver
+                )
+            assert len(requests) == 1
+            assert m._cleanup_failed
+            assert m._active == 0 and m._pools == {}
+        finally:
+            m._cleanup_failed = False
+
+
+def test_socket_close_error_retains_uncertainty_and_fences(tmp_path, monkeypatch):
+    import socket
+
+    from tls_fixtures import tls_server
+
+    import lotuspond_runtime.invocation as m
+
+    close, send = socket.socket.close, m._send
+    parent_ids = set()
+
+    def record_parent(channel, value, deadline):
+        parent_ids.add(id(channel))
+        return send(channel, value, deadline)
+
+    def failed_close(channel):
+        close(channel)
+        if id(channel) in parent_ids:
+            raise OSError("synthetic private IPC close failure")
+
+    monkeypatch.setattr(m, "_send", record_parent)
+    monkeypatch.setattr(socket.socket, "close", failed_close)
+    with tls_server(tmp_path, b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n") as (
+        origin,
+        ca,
+        requests,
+    ):
+        request, destination, resolver = invocation_setup(tmp_path, origin, ca)
+        try:
+            result = m.invoke_fixture(
+                request, authority=Allow(), destination=destination, resolver=resolver
+            )
+            assert len(requests) == 1
+            assert result == m.FixtureResult("uncertain", len(request.input_bytes), 0)
+            assert m._cleanup_failed
+            assert (
+                m.invoke_fixture(
+                    request, authority=Allow(), destination=destination, resolver=resolver
+                ).status
+                == "denied"
+            )
+            assert m._active == 0 and m._pools == {}
+        finally:
+            m._cleanup_failed = False

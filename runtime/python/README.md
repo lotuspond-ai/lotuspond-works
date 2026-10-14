@@ -210,7 +210,12 @@ occurs. Request/response bounds and the minimum of the configuration timeout and
 30 seconds cover authorization, DNS, TLS, secret resolution, IPC and response.
 Results contain only `observed`, `denied` or `uncertain` and byte counts. A failure
 after a request may have been sent is uncertain and is never automatically retried.
-Revocation cannot undo a sent external effect.
+Possible transmission begins before the parent attempts to deliver fresh send
+permission; a missing later send notification cannot prove denial. Cleanup
+acknowledgement failure fences future work and preserves an uncertain outcome
+when sending was possible. Only a complete fixed-child pre-send denial with zero
+attempted counts, no contradictory send event and successful child completion
+can remain denied. Revocation cannot undo a sent external effect.
 
 Internal parent-owned `InvocationLimits` default to one operator child and one
 child per scoped pool. The process-wide gate uses the smaller operator/pool cap,
