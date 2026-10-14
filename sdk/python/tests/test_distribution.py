@@ -21,7 +21,7 @@ assert Path(lotuspond_sdk.__file__).with_name('py.typed').is_file()
 for forbidden in ('fastapi', 'sqlalchemy', 'psycopg', 'redis', 'httpx', 'lotuspond'):
     assert importlib.util.find_spec(forbidden) is None, forbidden
 assert not any(name.split('.')[0] in ('fastapi', 'sqlalchemy', 'psycopg', 'redis', 'httpx', 'lotuspond') for name in sys.modules)
-assert importlib.metadata.version('lotuspond-sdk') == '0.1.0'
+assert importlib.metadata.version('lotuspond-sdk') == '0.2.0'
 print(json.dumps({'module': lotuspond_sdk.__file__}))
 """,
         ],

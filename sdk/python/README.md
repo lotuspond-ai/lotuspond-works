@@ -1,14 +1,14 @@
 # Lotuspond Python SDK
 
 Independent local tooling for workflow-package v1; Python 3.13 or later. Runtime
-dependencies are Pydantic and cryptography. No API server, database, Redis,
+dependencies are Pydantic, cryptography and exactly pinned rfc8785 0.1.4. No API server, database, Redis,
 HTTP client, model provider or runtime execution is needed.
 
 Build and install from this repository:
 
 ```sh
 uv build --project sdk/python
-python -m pip install sdk/python/dist/lotuspond_sdk-0.1.0-py3-none-any.whl
+python -m pip install sdk/python/dist/lotuspond_sdk-0.2.0-py3-none-any.whl
 lotuspond-package validate contracts/examples/reviewed-action.v1.json
 python -m lotuspond_sdk validate contracts/examples/reviewed-action.v1.json
 ```
@@ -340,3 +340,29 @@ check:sdk`. Distribution tests build a wheel and independently rebuild a second
 wheel from the sdist, install both into fresh environments outside the checkout
 and run complete local CLI journeys and refusal cases against each installed
 artifact. Public package-index publication is a separate action.
+
+## Executable v2 foundations
+
+SDK 0.2.0 adds `lotuspond_sdk.executable.decode_executable_bytes`, fixed
+`ExecutableError`/`ExecutableIssue` diagnostics and v2 metadata constants.
+The v2 schema/canonicalizer identifiers are `lotuspond.workflow-package.v2`
+and `lotuspond.workflow-package.jcs.v2`. The current increment supplies bounded
+JSON/JCS and strict validation/report foundations; v2 authoring, compilation,
+runtime-facing records and CLI commands are subsequent implementation tasks.
+
+Raw package and normalized canonical JSON stay within 1,048,576 bytes, depth 32
+and 10,000 items (including object keys). Internal wire/report boundaries use
+65,536/8,388,608 bytes respectively; report limits never raise package limits.
+The decoder preserves bounded raw integers until a declared field chooses its
+domain. Integer fields require exact safe integers; numbers may normalize to
+finite IEEE-754 floats. JCS may spell a float such as `1.0` as `1`, or `1e20` as
+`100000000000000000000`; those spellings remain readable before field selection.
+
+The internal adapter calls reviewed Apache-2.0 `rfc8785==0.1.4`. Attributed RFC
+fixtures and an independent Node scalar/UTF-16 ordering oracle pin its bytes.
+Strings preserve code points without normalization; invalid Unicode, duplicate
+keys, nonfinite numbers, cycles, unknown model fields and arbitrary serializers
+are refused. Diagnostics contain fixed codes/messages, sanitized pointers and
+at most 20 issues with explicit truncation. Reports revalidate known model
+fields and count complete ASCII output, including a wrapper and final newline.
+These local foundations confer no execution authority.
