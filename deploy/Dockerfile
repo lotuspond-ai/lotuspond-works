@@ -9,6 +9,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app/backend
 RUN pip install --no-cache-dir uv==0.11.16
 COPY sdk/python /app/sdk/python
+COPY runtime/python /app/runtime/python
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-editable --no-install-project
 COPY backend/lotuspond ./lotuspond
