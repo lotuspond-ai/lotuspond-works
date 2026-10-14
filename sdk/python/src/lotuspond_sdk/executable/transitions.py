@@ -168,7 +168,9 @@ def validate_contract_state(raw: object) -> ContractState:
     ):
         raise ExecutableError("invalid_context")
     if result.phase == "completed" and (
-        result.action_state in ("dispatching", "unknown") or result.outcome == "not_verified"
+        result.action_state in ("dispatching", "unknown")
+        or result.outcome == "not_verified"
+        or (result.action_state in ("accepted", "observed") and result.outcome != "verified")
     ):
         raise ExecutableError("invalid_context")
     if result.outcome == "verified" and result.action_state in ("dispatching", "unknown"):
@@ -406,6 +408,17 @@ def check_event_transition(state: object, event: object, context: object) -> Tra
                 s, phase="cancelled" if kind == "cancellation_requested" else "failed"
             ),
         )
+    # A supplied receipt is a fact about the relevant current action, not an
+    # unrelated historical record. Check it after replay/sequence/stop guards,
+    # before any fresh progression can claim no dispatch or complete execution.
+    if c.receipt is not None:
+        code = _intent_code(c, current=False)
+        if code is not None:
+            return result("binding_refused", binding_code=code)
+        if not _receipt_matches(c.receipt, c):
+            return result("binding_refused", binding_code="intent_mismatch")
+        if c.receipt.status == "observed_effect" and s.action_state == "not_dispatched":
+            return result("illegal_transition")
     if kind == "admission":
         if s.phase != "new":
             return result("illegal_transition")

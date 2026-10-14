@@ -422,3 +422,30 @@ invariants and future consumer duties. Independent task review is pending. Final
 Python 3.13/application/database/offline/whole-branch/hosted gates remain Task 10;
 no runtime persistence, authority, provider execution or production qualification
 is implemented or claimed.
+
+## Task 6 correction round 1 evidence
+
+Independent review of `f6142cd9c78fa16c283d1e9f62b72aa46bc9490a` found two
+Important defects: positive receipt evidence could be ignored by no-dispatch
+retry/redispatch/zero-effect completion paths, and state/report admission allowed
+completed accepted/observed actions with unknown outcomes. Both were reproduced
+before correction: **48 failures, 8 passes** in the new review-focused cases.
+
+Fresh progression now checks any supplied relevant receipt against the expected
+full intent/context and exact action/attempt/target operation. Positive observed
+effect contradicting not_dispatched refuses without state changes, sequence
+advancement or retry. The guard follows scope/replay/sequence and stop semantics;
+historical duplicates, ordinary no-intent activity retries and qualified absence
+of an acknowledged request remain covered. Completed accepted/observed states
+now require verified outcomes at public state/report admission and serialization,
+including raw, mutated and constructed input. Zero-effect and verified aggregate
+completion remain valid.
+
+Correction verification on Python 3.14.5: **56 review-focused cases passed**;
+required transition/action/wire/compiler suites: **348 passed**; Ruff and
+whitespace pass. No full SDK artifact repeat was requested or run. The previous
+991-test full SDK result belongs to the pre-correction source; it is not an
+exact-head full-suite claim for this correction. Failed and passing correction
+logs and exact tested source hashes are retained in the Task 6 evidence directory,
+and the implementer report documents the updated receipt/state obligations.
+Scoped independent re-review remains pending.

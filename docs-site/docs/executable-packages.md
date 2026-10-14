@@ -716,8 +716,12 @@ malformed nested wire records retain `invalid_wire` and bounded-input errors
 retain their specific codes.
 
 `new` requires `not_dispatched` and `unknown`. A completed state cannot contain
-`dispatching`, `unknown` action state, or a `not_verified` outcome. A verified
-outcome cannot coexist with `dispatching` or `unknown` action state. Other
+`dispatching`, `unknown` action state, or a `not_verified` outcome. Completed
+`accepted` or `observed` actions require a `verified` outcome, including at public
+state/report admission and serialization after mutation or construction. A
+completed `not_dispatched` state may retain `unknown` for zero-effect computation
+or `verified` for aggregate completion. A verified outcome cannot coexist with
+`dispatching` or `unknown` action state. Other
 combinations remain supplied facts; conservative checks prevent contradictory
 facts from resetting known outcomes or enabling dispatch. The state summarizes
 the relevant action and, at completion, the aggregate execution outcome; it is
@@ -736,8 +740,28 @@ All three arguments are admitted first. Then the evaluator checks:
 3. The exact next source sequence. A gap returns `sequence_gap` with reconciliation
    required; an unseen sequence at or below the prior sequence refuses with
    `stale_sequence`. Gap handling preserves effects and terminal phases.
-4. Current step/action/attempt bindings and `active_step`, terminal phase, then
+4. Current step/action/attempt bindings and `active_step`, terminal phase and
+   cancellation/failure stops; then supplied receipt consistency before
    event-specific phase, binding, time, evidence and completion checks.
+
+Every supplied receipt describes the relevant current action/attempt. Fresh
+progression requires its full expected intent/BindingContext and exact
+intent/action/attempt/opaque target-operation match, even for a step failure or
+completion event. Missing or incompatible facts return `binding_refused`;
+incompatible receipt identity returns binding code `intent_mismatch`. A matching
+`observed_effect` receipt contradicting `not_dispatched` returns
+`illegal_transition`. Both refuse without sequence advancement or retry, leaving
+the supplied state and receipt evidence intact. The guard cannot be bypassed by
+a no-dispatch timeout declaration, ordinary failure code, another dispatch or a
+zero-effect completion summary. A retained `accepted` receipt is acknowledgement,
+so it does not trigger the positive-effect contradiction after qualified absence.
+Historical duplicates and sequence fences retain their earlier precedence;
+terminal-state refusal and cancellation/failure stops remain unchanged.
+
+A future store must retain historical receipts separately and supply the receipt
+relevant to the current attempt in this bounded singleton, together with the
+logical action state that preserves every known effect. Omitting a historical
+receipt from a new attempt's snapshot must never erase an observed logical effect.
 
 Only `applied` advances the accepted sequence to the event sequence. Every other
 disposition retains the prior sequence. Every refusal and duplicate preserves

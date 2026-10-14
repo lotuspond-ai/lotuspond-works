@@ -1064,3 +1064,202 @@ def test_decision_preserves_public_binding_scope_before_expiry(context):
     e = event(context, "decision_recorded", {"decision": decision}, group="A")
     report = check(state(), e, context)
     assert (report.code, report.binding_code) == ("binding_refused", "context_mismatch")
+
+
+@pytest.fixture
+def reviewed_fresh_paths(context, runtime_command):
+    """Literal I1 repro paths; no expected result is derived from the reducer."""
+    context["completion"] = {
+        "required_effects": 0,
+        "verified_effects": 0,
+        "not_verified_effects": 0,
+        "unknown_effects": 0,
+        "unfinished_steps": 0,
+    }
+    return {
+        "dispatch_timeout": event(
+            context,
+            "dispatch_timeout",
+            {
+                "intent_sha256": context["intent"]["sha256"],
+                "may_have_dispatched": False,
+            },
+            group="A",
+        ),
+        "step_failed": event(context, "step_failed", {"code": "unavailable"}, group="S"),
+        "action_dispatched": event(
+            context, "action_dispatched", {"command": runtime_command}, group="A"
+        ),
+        "execution_completed": event(context, "execution_completed", {"output_sha256": "8" * 64}),
+    }
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "dispatch_timeout",
+        "step_failed",
+        "action_dispatched",
+        "execution_completed",
+    ],
+)
+def test_review_positive_receipt_blocks_no_dispatch_claims(
+    context,
+    receipt,
+    evidence_ref,
+    reviewed_fresh_paths,
+    kind,
+):
+    context["receipt"] = {**receipt, "status": "observed_effect", "evidence_refs": [evidence_ref]}
+    report = check(state(), reviewed_fresh_paths[kind], context)
+    assert (report.disposition, report.code, report.structurally_retryable) == (
+        "refused",
+        "illegal_transition",
+        False,
+    )
+    assert report.accepted_source_sequence == 0
+    assert report.state.model_dump() == state()
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "dispatch_timeout",
+        "step_failed",
+        "action_dispatched",
+        "execution_completed",
+    ],
+)
+@pytest.mark.parametrize("status", ["observed_effect", "accepted"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("intent_sha256", "f" * 64),
+        ("action_id", "other"),
+        ("attempt", 1),
+        ("target_operation_ref", "other"),
+    ],
+)
+def test_review_incompatible_receipt_cannot_be_ignored(
+    context,
+    receipt,
+    evidence_ref,
+    reviewed_fresh_paths,
+    kind,
+    status,
+    field,
+    value,
+):
+    context["receipt"] = {
+        **receipt,
+        "status": status,
+        "evidence_refs": [evidence_ref],
+        field: value,
+    }
+    report = check(state(), reviewed_fresh_paths[kind], context)
+    assert (report.disposition, report.code, report.binding_code) == (
+        "refused",
+        "binding_refused",
+        "intent_mismatch",
+    )
+    assert report.structurally_retryable is False
+    assert report.accepted_source_sequence == 0
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "dispatch_timeout",
+        "step_failed",
+        "action_dispatched",
+        "execution_completed",
+    ],
+)
+def test_review_receipt_guard_follows_fences_replay_and_sequence(
+    context,
+    receipt,
+    evidence_ref,
+    reviewed_fresh_paths,
+    kind,
+):
+    e = reviewed_fresh_paths[kind]
+    context["receipt"] = {
+        **receipt,
+        "status": "observed_effect",
+        "evidence_refs": [evidence_ref],
+        "target_operation_ref": "other",
+    }
+    context["known_event"] = {"event_id": e["event_id"], "sha256": api().event_digest(e)}
+    assert check(state(), e, context).code == "duplicate"
+    context["source_generation"] = 4
+    assert check(state(), e, context).code == "context_mismatch"
+    context["source_generation"] = 3
+    context["known_event"] = None
+    assert check(state(), {**e, "source_sequence": 2}, context).code == "sequence_gap"
+    assert check(state(), {**e, "source_sequence": 0}, context).code == "stale_sequence"
+
+
+@pytest.mark.parametrize("action", ["accepted", "observed"])
+@pytest.mark.parametrize("representation", ["raw", "mutated", "constructed"])
+def test_review_completed_action_requires_verified_state_admission(action, representation):
+    t = api()
+    raw = state("completed", action, "unknown")
+    if representation == "mutated":
+        raw = t.validate_contract_state(state("completed", action, "verified"))
+        raw.outcome = "unknown"
+    elif representation == "constructed":
+        raw = t.ContractState.model_construct(**raw)
+    with pytest.raises(ExecutableError) as error:
+        t.validate_contract_state(raw)
+    assert error.value.code == "invalid_context"
+
+
+@pytest.mark.parametrize("action", ["accepted", "observed"])
+@pytest.mark.parametrize("representation", ["raw", "mutated", "constructed"])
+def test_review_completed_action_requires_verified_report_admission(action, representation):
+    t = api()
+    raw = {
+        "disposition": "applied",
+        "code": "applied",
+        "state": state("completed", action, "unknown"),
+        "accepted_source_sequence": 1,
+        "structurally_retryable": False,
+    }
+    if representation == "mutated":
+        raw = t.validate_transition_report({**raw, "state": state("completed", action, "verified")})
+        raw.state.outcome = "unknown"
+    elif representation == "constructed":
+        raw = t.TransitionReport.model_construct(
+            **{
+                **raw,
+                "state": t.ContractState.model_construct(**raw["state"]),
+            }
+        )
+    for validate in (t.validate_transition_report, t.transition_report_json):
+        with pytest.raises(ExecutableError) as error:
+            validate(raw)
+        assert error.value.code == "invalid_context"
+
+
+@pytest.mark.parametrize(
+    "action,outcome",
+    [
+        ("not_dispatched", "unknown"),
+        ("not_dispatched", "verified"),
+        ("accepted", "verified"),
+        ("observed", "verified"),
+    ],
+)
+def test_review_legitimate_completed_states_and_reports_remain_admitted(action, outcome):
+    t = api()
+    s = state("completed", action, outcome)
+    assert t.validate_contract_state(s).model_dump() == s
+    raw = {
+        "disposition": "applied",
+        "code": "applied",
+        "state": s,
+        "accepted_source_sequence": 1,
+        "structurally_retryable": False,
+    }
+    assert t.validate_transition_report(raw).state.model_dump() == s
+    assert json.loads(t.transition_report_json(raw))["state"] == s
