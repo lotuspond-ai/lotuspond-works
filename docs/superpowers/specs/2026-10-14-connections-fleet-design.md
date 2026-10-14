@@ -1,6 +1,6 @@
 # Connections and runtime identity foundation (E03)
 
-Date: 14 October 2026 (Asia/Kolkata). Status: proposed written specification for owner review under the approved product completion sequence. Implementation planning and implementation have not been approved for this specification. The existing choice of subagent execution with independent review remains recorded; it does not bypass written-spec or plan review.
+Date: 14 October 2026 (Asia/Kolkata). Status: owner-approved written specification for detailed implementation planning on 14 October 2026, under the approved product completion sequence. The owner's “approved” response satisfies the written-spec gate. Implementation awaits review of the detailed plan; the existing choice of subagent execution with independent review remains recorded.
 
 ## Intent and preserved scope
 
@@ -146,7 +146,7 @@ The connected isolated Linux topology and initial owner/admin management follow 
 
 Before external qualification, the owner/customer must identify the first workflow and supported systems, permitted actions and autonomy/review roles, builder experience, installation/data/model placement, actual secret store/workload issuer, recovery/key/backup custodians, infrastructure scope, capacity/license/grace terms and support ownership. If a first buyer mandates mTLS, offline operation or a specific secret store, its qualification moves onto the critical path. Those questions do not block this written foundation design or justify silently changing the product scope.
 
-Written-spec approval is the next gate. After approval, produce a detailed implementation plan with the already selected subagent execution/review method; obtain plan review before implementation. No production access, outbound communication to customers, cloud change or additional PR merge is authorized by approving this design.
+Written-spec approval was received on 14 October 2026. The [detailed implementation plan](../plans/2026-10-14-connections-fleet.md) is the next review gate, using the already selected subagent execution/review method; obtain plan review before implementation. No production access, outbound communication to customers, cloud change or additional PR merge is authorized by approving this design.
 
 ## Independent design review
 
