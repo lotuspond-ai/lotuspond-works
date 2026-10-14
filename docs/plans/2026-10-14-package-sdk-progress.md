@@ -220,3 +220,15 @@ explicit inputs, exact matching, bounded sanitized reasons and assurance limits.
 No application/database/artifact checks, pushes, deployment or external package
 publication were performed. Independent task review and final integration remain
 controller-owned.
+
+### Task 4 independent review closure
+
+Review of `5c53335..0ec070d` passed specification and quality with no findings.
+All declared connectors/operations/models are checked, exact platform requirements
+are explicit, and truncated refusal reports cannot become compatible. Capability
+natural keys include exact versions/revisions, allowing explicitly listed support
+for several versions while refusing duplicate pairs and conflicting platform
+entries. This clarification preserves exact matching; restricting future profiles
+to one version per name would require a separate policy change. The SDK remains
+synthetic and non-authoritative. Final CLI, capability/changelog integration,
+application/database/artifact checks and hosted CI are still pending.
