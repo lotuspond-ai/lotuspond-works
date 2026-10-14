@@ -895,3 +895,96 @@ backoff and budgets, authenticate waits and qualified read-back, and issue fresh
 permission for any retry under the same logical intent/idempotency identity.
 Neither a synthetic snapshot nor `structurally_retryable=true` establishes those
 facts, exactly-once execution, signed trust, provenance or actual target effects.
+
+## Detached package and command signatures
+
+The pure local signing APIs capture complete admitted JCS content and sign it
+with an explicitly supplied `Ed25519PrivateKey`. They perform no file I/O, key
+or trust discovery, environment lookup, compilation, clock access or transport.
+
+| API | Content and result |
+| --- | --- |
+| `sign_executable_package(raw, private_key)` | Fully validate package structure/references and return `ExecutableSignatureEnvelope`; no dependency resolution or compilation. |
+| `verify_executable_package(raw, envelope, trust_set)` | Validate complete package and package envelope, then check explicit trust and integrity; return `ExecutableVerificationReport`. |
+| `sign_runtime_command(raw, private_key)` | Fully admit a `RuntimeCommand`, then sign every normalized command field; return `CommandSignatureEnvelope`. Other wire record types are refused. |
+| `verify_runtime_command(raw, envelope, trust_set)` | Admit the complete command and command envelope, then check explicit trust and integrity; return `ExecutableVerificationReport`. Actual identity, current authority and context binding remain unchecked. |
+
+Every envelope field is required. Public-key bytes stay outside envelopes.
+`key_id` is SHA-256 of the raw public key (64 lowercase hex characters),
+`sha256` is SHA-256 of the captured canonical content (64 lowercase hex), and
+`signature` is the Ed25519 signature (128 lowercase hex).
+
+| Header field | Package envelope | Command envelope |
+| --- | --- | --- |
+| `format_version` | Exact integer `2` | Exact integer `1` |
+| `algorithm` | `ed25519` | `ed25519` |
+| `context` | `lotuspond-workflow-package-signature-v2` | `lotuspond-runtime-command-v1` |
+| `schema_version` | `lotuspond.workflow-package.v2` | `lotuspond.runtime-command.v1` |
+| `canonicalization` | `lotuspond.workflow-package.jcs.v2` | `lotuspond.runtime-wire.jcs.v1` |
+
+Let `H` be sorted-key compact ASCII JSON containing every envelope field except
+`signature`, and `C` the exact captured package/command JCS bytes. The signed
+frame is `context ASCII || NUL || uint64be(len(H)) || H || uint64be(len(C)) || C`.
+The public canonical entry is called once per operation; its returned bytes are
+used for both digest and frame. Reviewed canonical admission still includes its
+own normalized byte-bound checks. Complete command content includes command/replay
+IDs, recipient/scope, worker, generation, recovery epoch, issue/expiry times,
+intent digest and the optional decision digest (normalized to null). Signing an
+intent digest alone does not sign a command.
+
+`validate_executable_signature_envelope(raw)` and
+`validate_command_signature_envelope(raw)` admit only their respective contexts.
+Malformed headers, unknown fields, wrong versions and cross-context envelopes
+raise sanitized `ExecutableError(code="invalid_envelope")`; there is no fallback
+to a v1, evidence or other-context verifier. Projection-bound errors retain their
+fixed codes. Signers reject wrong-algorithm keys with the existing
+`SdkError(code="invalid_signing_key")`.
+
+Both verifiers reuse the reviewed root `TrustSet`/`TrustedKey` admission directly,
+including constructed/mutated nested records. Trust contains exact integer
+`format_version=1` and at most 64 independently provisioned allowed/revoked keys.
+Duplicate identifiers/public bytes, mismatched fingerprints, known small-order
+encodings (both sign bits) and noncanonical y encodings are refused. The encoding
+guard is not full subgroup verification. Invalid trust retains the existing
+`SdkError(code="invalid_trust_set")`. Unknown keys produce `untrusted_key`;
+revoked keys produce `revoked_key`. These checks precede `digest_mismatch`, then
+cryptographic `invalid_signature` or `verified`.
+
+`ExecutableVerificationReport` has `valid`, `code`, `content_kind`
+(`package_v2`/`runtime_command_v1`), the current content `sha256`, the envelope
+`key_id`, fixed `contract_valid=true`, `compatibility_status="not_checked"`,
+`binding_status="not_checked"` and `authority_granted=false`. `valid` is true
+exactly when `code="verified"`. Fixed integer/boolean lookalikes are refused,
+including mutated or constructed models. `validate_executable_verification_report`
+is the explicit report admission boundary; constructors and `.model_dump()`
+are not complete public admission/serialization boundaries.
+
+`executable_signature_envelope_json(raw)`,
+`command_signature_envelope_json(raw)` and
+`executable_verification_report_json(raw)` revalidate exact known models without
+arbitrary serializer hooks and return complete ASCII JSON plus newline, capped
+at 8,388,608 bytes. Any later CLI wrapper must count its entire output with
+`report_bytes`, including wrapper and newline. Package and wire admission retain
+their respective 1,048,576- and 65,536-byte caps, depth 32 and 10,000 items.
+
+```python
+from lotuspond_sdk.executable import (
+    check_command_binding, sign_runtime_command, verify_runtime_command,
+)
+
+envelope = sign_runtime_command(command, private_key)
+signature_result = verify_runtime_command(command, envelope, independent_trust)
+binding_result = check_command_binding(command, intent, decision, supplied_context)
+# These are separate local checks. Both reports retain authority_granted=False.
+```
+
+A correctly signed wrong-recipient, expired, wrong-policy or wrong-epoch command
+can pass cryptographic verification and fail binding. A signature establishes
+integrity under the supplied allowed key; it authenticates no tenant record,
+human role, evidence provenance or current execution authority. Root v1 signing
+and safe file/key helpers retain their existing behavior. Callers composing file
+output must use `load_signing_key`/`write_new`; existing outputs are refused and
+failed partial output is retained. Native CLI composition belongs to the later
+CLI task. Independent RFC 8032 key attribution, literal frames and Node/OpenSSL
+oracles are preserved in the SDK test fixtures; neither oracle is a runtime
+dependency.

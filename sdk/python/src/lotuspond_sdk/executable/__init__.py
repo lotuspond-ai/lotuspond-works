@@ -48,6 +48,21 @@ from .metadata import (
 )
 from .package import ArtifactRef, Body, ExecutablePackage, Step
 from .plan import CompiledPlan, canonical_plan_json, compiled_plan_digest
+from .signing import (
+    CommandSignatureEnvelope,
+    ExecutableSignatureEnvelope,
+    ExecutableVerificationReport,
+    command_signature_envelope_json,
+    executable_signature_envelope_json,
+    executable_verification_report_json,
+    sign_executable_package,
+    sign_runtime_command,
+    validate_command_signature_envelope,
+    validate_executable_signature_envelope,
+    validate_executable_verification_report,
+    verify_executable_package,
+    verify_runtime_command,
+)
 from .transitions import (
     CompletionSummary,
     ContractState,
@@ -101,6 +116,20 @@ from .wire import (
 )
 
 __all__ = [
+    "CommandSignatureEnvelope",
+    "ExecutableSignatureEnvelope",
+    "ExecutableVerificationReport",
+    "command_signature_envelope_json",
+    "executable_signature_envelope_json",
+    "executable_verification_report_json",
+    "sign_executable_package",
+    "sign_runtime_command",
+    "validate_command_signature_envelope",
+    "validate_executable_signature_envelope",
+    "validate_executable_verification_report",
+    "verify_executable_package",
+    "verify_runtime_command",
+
     "ExecutableChange",
     "ExecutableDiff",
     "diff_executable_packages",

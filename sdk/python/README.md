@@ -538,3 +538,31 @@ boolean `True` enables local `before`/`after` detail. All reports retain
 CLI consumers must count their complete wrapper in that same budget. See the
 [complete authored-source diff contract](../../docs-site/docs/executable-packages.md#private-authored-source-differences)
 for categories, identity/path/order rules and serialization obligations.
+
+### Sign v2 packages and complete runtime commands locally
+
+`lotuspond_sdk.executable` exports `ExecutableSignatureEnvelope`,
+`CommandSignatureEnvelope`, `ExecutableVerificationReport`,
+`sign_executable_package`, `verify_executable_package`, `sign_runtime_command`
+and `verify_runtime_command`. Supply an Ed25519 private key and an independent
+root `TrustSet` explicitly. Package-v2 and runtime-command-v1 signatures use
+distinct contexts and bind every required header plus the complete admitted JCS
+content; v1 and evidence signatures are refused.
+
+Use `validate_executable_signature_envelope`,
+`validate_command_signature_envelope` and
+`validate_executable_verification_report` for public admission of raw,
+constructed or mutated records. The corresponding complete ASCII-plus-newline
+serializers are `executable_signature_envelope_json`,
+`command_signature_envelope_json` and `executable_verification_report_json`.
+They revalidate without calling arbitrary serializers and enforce the 8 MiB
+complete output cap. Malformed envelopes raise fixed `invalid_envelope`;
+invalid trust retains the root SDK's `invalid_trust_set` behavior.
+
+Verification reports leave both compatibility and binding `not_checked` and
+always have `authority_granted=false`. Compose `check_command_binding` separately
+with the full intent, decision and supplied current context: a correctly signed
+wrong-recipient or expired command still fails binding. These APIs are pure local
+checks; file/key output uses the existing safe helpers, with exclusive writes
+and retained partial failures. The [executable guide](../../docs-site/docs/executable-packages.md#detached-package-and-command-signatures)
+contains exact fields, framing, refusal precedence, bounds and caller obligations.

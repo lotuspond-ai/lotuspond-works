@@ -19,3 +19,42 @@ The inspected PyPI `rfc8785-0.1.4.tar.gz` SHA-256 is
 The Trail of Bits implementation has no runtime dependencies and is distributed
 under Apache-2.0, including its attributed reference float/string serializer.
 Lotuspond calls the library; it does not copy its implementation.
+
+## Detached signing literals
+
+`signing-v2.json` retains synthetic package and complete runtime-command raw
+content, literal canonical bytes, sorted ASCII header, full length-prefixed
+frame and OpenSSL-generated Ed25519 signatures. `signing_oracles.py` reproduces
+these fixtures without importing SDK, cryptography or Python JCS code: the
+independent Node oracle emits canonical content; Python's standard JSON writer
+emits the ASCII-only header; OpenSSL signs the explicitly assembled bytes.
+The minimal package source already contains every default, and the command
+fixture explicitly includes null `decision_sha256`.
+
+The public seed/public key are RFC 8032 section 7.1 TEST 1 (Simon Josefsson and
+Ilari Liusvaara, January 2017),
+https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1 . DER wrappers follow RFC
+8410 sections 10.1/10.3,
+https://www.rfc-editor.org/rfc/rfc8410.html#section-10.3 . This is public test key
+material, never a production credential. Generation used Python 3.14.5,
+Node v24.21.0 and OpenSSL 3.5.7 on 14 October 2026. Tests verify the literal RFC
+empty-message signature, compare the full frame bytes, verify OpenSSL signatures
+through the SDK and verify SDK signatures with OpenSSL, on Python 3.13 and 3.14.
+Missing Node/OpenSSL prerequisites fail; the tests do not silently skip them.
+The root v1 signing fixtures remain untouched. Known disallowed Ed25519 point
+encoding literals retain the root fixture README's libsodium 1.0.18 attribution;
+they cover the reviewed encoding guard, not full subgroup validation.
+
+Task 8 retained verification evidence (14 October 2026): the exact focused
+`uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_signing.py -q`
+command failed initially on missing signing APIs, then passed 146 tests. Grouped
+signing/JCS/input/actions/wire regressions passed 377 tests on each of Python
+3.13.13 and 3.14.5; unchanged root v1 signing/trust passed 103 tests on each.
+Normal full SDK discovery passed 1,230 tests plus 68 subtests on each interpreter,
+including existing standalone wheel/rebuilt-sdist regressions; neither run skipped
+any test. Ruff passed in both environments. Full discovery was run with authorized
+package-index access and intact TLS for isolated artifact builds. These are local
+synthetic checks; new installed v2 CLI journeys and application/hosted qualification
+belong to later task gates. Full retained logs and implementation report are in
+`.superpowers/sdd/2026-10-14-executable-package-v2/task-8-evidence/` and
+`task-8-report.md` in that SDD directory.
