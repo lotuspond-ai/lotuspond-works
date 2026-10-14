@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–9 are complete after independent review and correction. Task 10 implementation, task review, whole-branch review with corrections, and local application/database/actual-artifact gates pass; draft publication and exact-head CI remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+All ten tasks are complete after independent task reviews, whole-branch corrections, local application/database/artifact verification and draft publication. All twelve hosted jobs passed on published head `5b43e64acbd9e818e979d1cd034479ef9a48d66d`; the PR records checks for subsequent evidence-only commits. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -768,3 +768,31 @@ Final artifacts are retained at `/tmp/lotuspond-v2-final.zwU1UW`; older
 `/tmp/lotuspond-v2-final.5WdOFT` evidence remains unchanged. Cloud-only serial
 Node/subreaper and build-only CA handling remain distinct from ordinary hosted
 CI. All product/runtime/customer qualification boundaries above remain open.
+
+
+## Draft publication and hosted completion
+
+[Draft PR #6](https://github.com/lotuspond-ai/lotuspond/pull/6) targets the reviewed
+`codex/executable-v2-design` base `468550703a45c702995391c5d93ac201283d4a50`.
+The normally pushed publication head is `5b43e64acbd9e818e979d1cd034479ef9a48d66d`;
+its only changes after corrected product source `2b4b3ee` are plan/evidence
+Markdown. The fetched GitHub pull-request head matches exactly. The complete
+106-file diff is retained and checked from Git; the GitHub API omits some large
+patches, so its preview was not treated as the complete review surface.
+
+All twelve jobs in [validation run 38573333807](https://github.com/lotuspond-ai/lotuspond/actions/runs/38573333807)
+passed for that head: validate, SDK 3.13, SDK 3.14, collector, evidence, protocols,
+voice, docs, execution image, offline installation, restore and monitoring rules.
+These are ordinary hosted checks, distinct from the recorded cloud-workspace
+adaptations. Subsequent documentation-only completion commits must retain green
+checks at their own published head; current results belong in the PR rather than
+being inferred from this historical run.
+
+The plan and task reviews are complete with no waived or parked findings. The
+worktree and all sibling branches/worktrees/data remain preserved. Full review
+reports, failure/success logs, all 26 chronological SDK/v2 implementation rulings
+with their costs, artifact identities and publication receipts are retained at
+`/tmp/lotuspond-v2-final.zwU1UW`. This completes the approved executable-v2
+subsystem, not the complete product: durable execution, authenticated action
+services, first-customer workflow acceptance, Studio/operations UX, licensing,
+enterprise breadth and production qualification remain in the master scope.
