@@ -12,7 +12,9 @@ Foundation PR #1 merged at `18eb85420d1e90e47fb5fb23a060a125180f08ed` after inde
 
 Independent read-only audits pinned to `9c50d09` mapped product features and operational evidence. The substantial assurance implementation does not provide the missing E03–E08/E10/E11 production subsystems. E02 remains partial. Release signing/provenance, exact-artifact qualification, live providers/customer workflows, identity delivery, SLO/recovery observations, supported topology and staffing also remain open.
 
-The [written completion design](../superpowers/specs/2026-10-14-product-completion-design.md) retains every stated roadmap workstream, the inherited assurance gaps, dependencies and closure evidence. It proposes the standalone SDK/diff/detached-signature subsystem next, followed by versioned executable contracts and the complete runtime/action/outcome journey. It is committed for the owner's required Superpowers design review, not silently treated as approved implementation. GOAL now correctly records the implemented registry and schema 12.
+The [written completion design](../superpowers/specs/2026-10-14-product-completion-design.md) retains every stated roadmap workstream, the inherited assurance gaps, dependencies and closure evidence. It sequences the standalone SDK/diff/detached-signature subsystem next, followed by versioned executable contracts and the complete runtime/action/outcome journey. On 14 October 2026 the owner explicitly approved the written design and sequence for detailed implementation planning. The resulting [five-task SDK implementation plan](../superpowers/plans/2026-10-14-package-sdk.md) has been self-reviewed against that scope; its owner review and execution-method selection remain pending. GOAL now correctly records the implemented registry and schema 12.
+
+The plan includes unchanged v1 golden bytes, standalone wheel/sdist checks, noneditable API-container installation and SDK content proof, deterministic/private diffs, external trust/revocation, OpenSSL cross-verification, safe key files, strict synthetic capability assessments and installed CLI journeys. It does not count planning as delivered product functionality.
 
 ## Repaired deployment configuration
 
@@ -34,3 +36,9 @@ Both variants now forward the installation policy only to the API, and the conve
 One existing Starlette/AnyIO deprecation warning remains. Initial ordinary sandbox checks could not use required loopback facilities; a default parallel Node run also exposed the documented non-reaping container PID 1 behavior. The saved serial wrapper/subreaper and local-network permission produced the reported full passes without weakening assertions or application code. An initial Compose test helper passed JSON environment strings as Python constructor values; it was corrected to exercise the actual environment loader before recording the four genuine pre-fix failures. These local adaptations do not establish default hosted CI behavior.
 
 No production database, customer system, cloud resource, DNS, hosted deployment or Microsoft work-context source was accessed. Real production acceptance and the proposed service-observation period remain separate work.
+
+## Git publication and remote evidence
+
+[Draft PR #3](https://github.com/lotuspond-ai/lotuspond/pull/3) preserves the deployment repair and completion design. Its head `edb33980fce5066c2abfbeeb07006dc880edc7c2` passed all ten GitHub jobs in [run 38475361282](https://github.com/lotuspond-ai/lotuspond/actions/runs/38475361282), including default validation, database tests, restore, execution-image and offline installation/recovery checks. The subsequent design-approval record and implementation-plan addition are documentation-only; their exact-head CI status must be checked separately.
+
+Planning-document verification passed: strict MkDocs build, relative-link checks, Python test-example syntax, whitespace checks and confirmation of the historical example digest from the current implementation. Full application suites were not repeated for these documentation-only additions; the earlier implementation and remote evidence remain pinned above.
