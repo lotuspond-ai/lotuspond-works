@@ -4,7 +4,7 @@ The owner approved the specification and ten-task plan on 14 October 2026 and se
 
 The new worktree passed the inherited SDK contract/input baseline: 38 tests and 68 subtests on Python 3.14.5. The prior SDK has its own complete review, application/database, installed-artifact, offline-recovery and hosted-CI evidence. These baseline results do not establish any v2 implementation or runtime qualification.
 
-Tasks 1–6 are complete after independent review and correction; Tasks 7–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
+Tasks 1–7 are complete after independent review and correction; Tasks 8–10 and final integration/publication gates remain pending. The complete approved product requirement register remains open; this subsystem delivers executable definitions/compiler and runtime-facing contracts, with later engine/runtime/Studio/commercial/operational goals retained.
 
 ## Task 1 initial implementation evidence
 
@@ -538,3 +538,17 @@ original failed evidence remains and no harness rewrite or weakened assertions
 entered this correction. Scoped independent re-review is pending; no finding
 was waived or deferred. Final dual-Python/application/database/offline/whole-
 branch/hosted gates remain Task 10.
+
+## Task 7 review closure
+
+Task 7 is complete through `4e1e98cf8cc3b4758d610024f66bff87c96410f7`. Independent review found one Important defect: a branch or owner ID replacement can move a retained child to a different logical region while its positional pointer stays the same. The correction removes the extra pointer-inequality restriction; traversal continues to determine movement from stable region identity. Fresh scoped review passed specification and quality with one addressed, zero open and zero new findings.
+
+The corrected source is covered by nine focused review cases (four reproduced failures before correction), 170 grouped v2 tests and 66 v1 tests plus 68 subtests, with Ruff/whitespace clean. The reviewer verified all three source hashes and literal private/detail branch/owner expectations. The earlier full SDK result of 1,075 tests plus 68 subtests remains tied to its pre-correction commit. No broad artifact rerun was represented as corrected-head evidence.
+
+Independent narrow probes reproduced the mixed explicit v2/root/v2 pytest fixture-order failure on immutable pre-task BASE with unchanged fixture/config/test files. It is a pre-existing harness limitation; normal full discovery and separately grouped required suites pass. Failed outputs and exact probe commands are retained. No task defect was waived or deferred. Final CLI/artifact/dual-Python/application/database/offline/whole-branch/hosted gates remain Task 10.
+
+Controller rulings for the reviewed report contract:
+
+Ruling: Expose validate_executable_diff and executable_diff_json with explicit before/after hashes, exact include_values, fixed behavioral_compatibility=not_assessed and false authority; identify authored steps, stable scoped regions and declaration aliases separately, using source pointers that never interpolate private data-member names — Task 10 needs a revalidating report boundary and a structural diff must not imply behavior or leak authored payloads — cost if wrong: refine pre-stable report field/identity spelling and caller fixtures; no v1 byte or behavior change.
+
+Ruling: Represent unavailable private diff detail as values=null in normalized default reports, and require a non-null before/after detail object only for explicit include_values=true — the approved specification excludes free-text/literal values while global normalization includes optional defaults; a null marker discloses no payload and keeps one complete serialization boundary — cost if wrong: change pre-stable report field presence and literal output fixtures, with no private-data or v1 behavior change.

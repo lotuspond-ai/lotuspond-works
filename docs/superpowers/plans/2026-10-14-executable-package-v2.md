@@ -305,11 +305,11 @@ def test_replay_gap_and_unknown_write_do_not_complete(states, events, contexts):
 
 **Files:** executable/diff.py, test_diff.py and guide/exports. Do not modify v1 diff semantics.
 
-**Interfaces:** ExecutableChange, ExecutableDiff; diff_executable_packages(before: object, after: object, *, include_values: bool=False) -> ExecutableDiff. Inputs use structural v2 validation/canonical identity; the report does not require local dependencies or claim behavioral compatibility.
+**Interfaces:** ExecutableChange, ExecutableDiff; diff_executable_packages(before: object, after: object, *, include_values: bool=False) -> ExecutableDiff; validate_executable_diff(raw: object) -> ExecutableDiff; executable_diff_json(raw: object) -> bytes. Reports include before_sha256/after_sha256, exact include_values, behavioral_compatibility=not_assessed and authority_granted=false. Inputs use structural v2 validation/canonical identity; the report does not require local dependencies or claim behavioral compatibility.
 
-Changes match globally unique authored step IDs, region/branch IDs and exact declaration identities. Categories are metadata, data_mapping, control_flow, model_tools, connector_action, approval_policy, outcome and limits. Operations are added, removed, changed, moved and reordered. Record before/after source pointers and IDs; sort by category/identity/before/after/operation. Moving a step to another region and editing it produces both move and change; common-item relative-order changes are independent. Parent region comparison excludes child step contents already independently compared, while region exports/guards/join settings remain significant. Public schemas, package result mappings, all declarations and dependency pins are covered.
+Changes match globally unique authored step IDs, region/branch IDs and exact declaration identities. Categories are metadata, data_mapping, control_flow, model_tools, connector_action, approval_policy, outcome and limits. Operations are added, removed, changed, moved and reordered. Record before/after source pointers and IDs; logical region movement can retain identical positional pointers. Default private detail normalizes to values=null, with no authored payload; only exact include_values=true admits the before/after detail object; sort by category/identity/before/after/operation. Moving a step to another region and editing it produces both move and change; common-item relative-order changes are independent. Parent region comparison excludes child step contents already independently compared, while region exports/guards/join settings remain significant. Public schemas, package result mappings, all declarations and dependency pins are covered.
 
-- [ ] **Step 1: Write literal change-list tests.** Test no-op normalized input; add/remove; reorder+edit; move+edit across branches; changed mapping/approval/reconciliation/outcome/budget; kind replacement; Unicode pointers and private instruction/literal sentinels. Freeze category/order/path expectations independently of the algorithm.
+- [x] **Step 1: Write literal change-list tests.** Test no-op normalized input; add/remove; reorder+edit; move+edit across branches; changed mapping/approval/reconciliation/outcome/budget; kind replacement; Unicode pointers and private instruction/literal sentinels. Freeze category/order/path expectations independently of the algorithm.
 
 ```python
 def test_move_and_edit_remain_private(case, expected_move_and_edit):
@@ -319,10 +319,10 @@ def test_move_and_edit_remain_private(case, expected_move_and_edit):
     assert report.authority_granted is False
 ```
 
-- [ ] **Step 2: Run uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_diff.py -q; expect absent v2 diff interface.** This task introduces the two named fixtures and literal expected_move_and_edit fixture.
-- [ ] **Step 3: Implement identity-aware structural comparison and bounded reports.** Preserve all meaningful changes; default output omits values. A real bool opt-in includes local details. Revalidate report mutations and actual formatted ASCII output; over 8 MiB refuses without truncating changes into an incomplete success.
-- [ ] **Step 4: Verify v2/v1 diff suites, package/canonical tests and Ruff.** Assert deterministic reports under raw object-member reordering and unchanged input objects; significant arrays still differ.
-- [ ] **Step 5: Commit feat: compare executable workflows with private deterministic diffs.** Independent review checks missing/duplicated nested changes and separation from authorization/behavioral compatibility.
+- [x] **Step 2: Run uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_diff.py -q; expect absent v2 diff interface.** This task introduces the two named fixtures and literal expected_move_and_edit fixture.
+- [x] **Step 3: Implement identity-aware structural comparison and bounded reports.** Preserve all meaningful changes; default output omits values. A real bool opt-in includes local details. Revalidate report mutations and actual formatted ASCII output; over 8 MiB refuses without truncating changes into an incomplete success.
+- [x] **Step 4: Verify v2/v1 diff suites, package/canonical tests and Ruff.** Assert deterministic reports under raw object-member reordering and unchanged input objects; significant arrays still differ.
+- [x] **Step 5: Commit feat: compare executable workflows with private deterministic diffs.** Independent review checks missing/duplicated nested changes and separation from authorization/behavioral compatibility.
 
 ## Task 8: Sign v2 packages and runtime commands in distinct contexts
 
