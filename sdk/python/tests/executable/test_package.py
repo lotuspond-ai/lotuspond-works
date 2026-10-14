@@ -199,6 +199,7 @@ def test_every_step_and_declaration_family(case, catalog_case):
             "id": "think",
             "model_ref": "model",
             "instructions": "Synthetic",
+            "input": value,
             "output_schema": {"kind": "null"},
             "read_tools": [{"connector_ref": "store", "operation": "read", "retry": retry}],
             "knowledge_refs": ["facts"],

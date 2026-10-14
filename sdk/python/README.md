@@ -438,11 +438,43 @@ model constructors alone. V1 root APIs, registry format and bytes stay fixed.
 `canonical_catalog_document` and `catalog_document_digest` bind the complete
 normalized catalog definition document, excluding the separate `ArtifactRef`
 wrapper. Identical normalized catalog documents are retained and every occurrence
-counts toward the family and complete bundle limits; the later compiler
+counts toward the family and complete bundle limits; the compiler
 deduplicates resolved definitions. Conflicting normalized content for one
 identity/version is refused. External binary/content checksums remain unverified claims. All
 examples in `contracts/examples/executable-v2/` are synthetic and include actual
 local definition pins; they do not establish provider support or authority.
-Secrets and customer documents belong outside packages. The compiler, full
-closure/type checks, runtime-facing records, v2 CLI and execution remain later
-work. See [the complete structural contracts and compiler obligations](../../docs-site/docs/executable-packages.md#structured-packages-and-exact-catalogs).
+Secrets and customer documents belong outside packages. Runtime-facing records,
+v2 CLI and execution remain later work. See [the complete structural contracts and compiler obligations](../../docs-site/docs/executable-packages.md#structured-packages-and-exact-catalogs).
+
+
+### Compile a pinned v2 package locally
+
+```python
+from lotuspond_sdk.executable import (
+    resolve_dependencies, compile_package, canonical_plan_json, compiled_plan_digest,
+)
+
+closure = resolve_dependencies(raw_package, [], {"documents": []})
+plan = compile_package(raw_package, dependencies=[], catalog={"documents": []})
+plan_bytes = canonical_plan_json(plan)
+plan_digest = compiled_plan_digest(plan)
+```
+
+Supply the complete exact reachable local closure, including every declared pin
+and catalog-internal pin; unrelated extra documents refuse. Complete admission
+precedes deduplication. Root counts in the 64-package/eight-level closure limits;
+raw additional package sources are limited to 63. The compiler preserves lexical
+availability, complete handle/array provenance and target aliases, checks pinned
+operation/model/tool schemas and inherited envelopes, and requires verification
+of every dispatched action on every normal completion path. Agent steps require
+an explicit typed `input` mapping. Conservative attempts include region overhead,
+retries, agents, nested calls/iterations and compensation, and cannot exceed the
+package limit or 10,000. Canonical plans are independently bounded to 8 MiB.
+
+Plans contain source pointers/digests and typed metadata, without copying authored
+instructions or literal payloads. `authority_granted` is always false and
+`artifact_availability` is `not_checked`. Runtime consumers must reload pinned
+source definitions, bind authenticated records and call instances, and enforce
+dynamic quotas and real outcome evidence. These APIs perform no I/O or execution.
+See [the compiler contract](../../docs-site/docs/executable-packages.md#pinned-local-compilation)
+for plan fields, catalog rule contexts, provenance identities and proof limits.

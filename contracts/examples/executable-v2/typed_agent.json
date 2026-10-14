@@ -1,0 +1,104 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "synthetic-typed-agent",
+  "version": "1.0.0",
+  "name": "Synthetic only",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "agent",
+        "id": "think",
+        "model_ref": "model",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "instructions": "Synthetic typed input only",
+        "output_schema": {
+          "kind": "null"
+        },
+        "limits": {
+          "max_steps": 10,
+          "timeout_seconds": 30,
+          "max_input_tokens": 1000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 100,
+    "active_seconds": 100,
+    "elapsed_seconds": 1000,
+    "retained_waits": 10,
+    "max_input_tokens": 1000,
+    "max_output_tokens": 1000,
+    "max_cost_microusd": 100000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [
+    {
+      "id": "model",
+      "ref": {
+        "kind": "model",
+        "name": "model-fixture",
+        "version": "1.0.0",
+        "sha256": "347a2b1dd0f77511ca12f65b30b798b1f951dde5a7a150ba856a12794a098765"
+      }
+    }
+  ],
+  "connectors": [],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [],
+  "knowledge": [],
+  "artifacts": []
+}

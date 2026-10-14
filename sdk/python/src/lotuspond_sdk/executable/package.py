@@ -195,6 +195,7 @@ class ConnectorReadStep(StrictModel):
 class AgentStep(StrictModel):
     id: Identifier
     kind: Literal["agent"]
+    input: Mapping
     model_ref: Identifier | None = None
     agent_ref: Identifier | None = None
     instructions: str = Field(min_length=1, max_length=16384)

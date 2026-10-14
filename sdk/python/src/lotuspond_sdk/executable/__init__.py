@@ -7,6 +7,8 @@ from .catalog import (
     catalog_document_digest,
     validate_catalog,
 )
+from .compiler import compile_package
+from .dependencies import DependencyClosure, resolve_dependencies
 from .errors import ExecutableError, ExecutableIssue
 from .expressions import Mapping, TypeEnvironment, infer_mapping, parse_mapping, presence_guard
 from .input import decode_executable_bytes
@@ -18,6 +20,7 @@ from .metadata import (
     VALIDATOR_REVISION,
 )
 from .package import ArtifactRef, Body, ExecutablePackage, Step
+from .plan import CompiledPlan, canonical_plan_json, compiled_plan_digest
 from .types import (
     DataSchema,
     DataType,
@@ -40,6 +43,12 @@ from .types import (
 from .validation import canonical_executable_json, executable_digest, validate_executable_package
 
 __all__ = [
+    "DependencyClosure",
+    "resolve_dependencies",
+    "CompiledPlan",
+    "compile_package",
+    "canonical_plan_json",
+    "compiled_plan_digest",
     "ArtifactRef",
     "Body",
     "ExecutablePackage",

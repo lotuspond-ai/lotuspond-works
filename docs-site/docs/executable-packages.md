@@ -287,7 +287,7 @@ are accepted. Array order affects the digest. Every step has `id` and `kind`:
 | `parallel` | `branches` (1..64 `{id, body}` with unique IDs), `join="all"` |
 | `iteration` | `input`, `max_items` (1..1,000), `concurrency` (1..64 and no greater than `max_items`), `body` |
 | `connector_read` | `connector_ref`, `operation`, `target`, `input`, `retry` |
-| `agent` | Exactly one `model_ref`/`agent_ref`, `instructions` (1..16,384), data `output_schema`, `read_tools` (default empty, at most 32), `knowledge_refs` (default empty, at most 64), `limits`, `retry` |
+| `agent` | Required `input` mapping, exactly one `model_ref`/`agent_ref`, `instructions` (1..16,384), data `output_schema`, `read_tools` (default empty, at most 32), `knowledge_refs` (default empty, at most 64), `limits`, `retry` |
 | `action_intent` | `connector_ref`, `operation`, `target`, `input`, `policy_ref`, `approval` (`none`/`human`), exact boolean `independent_review`, `expiry_seconds` (1..2,592,000) |
 | `human_task` | `assignment_policy_ref`, `timeout_seconds` (1..31,536,000), optional `escalation_policy_ref`; `mode="form"` requires only data `form_schema`, `mode="review"` requires only `intent: RefMapping` |
 | `action_dispatch` | `intent: RefMapping`, optional `decision: RefMapping`, `retry`, optional `compensation` |
@@ -341,7 +341,7 @@ A global target uses `{"kind":"null"}`. Reconciliation has `mode="none"` with
 null `read_operation`, `absence_rules`, and `effect_rules`, or `mode="read_back"`
 with all three required. The read operation must name a local operation whose
 effect is `read`; absence/effect rule lists are nonempty. Write compilation
-will require read-back; structural catalog admission alone does not do so.
+requires read-back; structural catalog admission alone does not do so.
 
 `canonical_catalog_document(raw) -> bytes` validates and canonicalizes the
 complete normalized document including `format_version`, identity, definitions,
@@ -364,13 +364,113 @@ models, projects every default, and measures complete JCS bytes. No serializer
 hooks or untrusted exception text are used. Catalog definitions use their own
 schema scope, never the caller package's definitions.
 
-The later compiler must verify the complete supplied dependency closure and
-all pins, enforce lexical ordering/branch availability and every mapping type,
-check operation effects and read-only tools, validate rules against readback
-schemas, maintain exact handle provenance, and bind human decisions, dispatch,
-compensation and verification to the same immutable intent/target. It must
-also enforce conservative retries/iteration/call expansion and verification
+The compiler verifies the complete supplied dependency closure and
+all pins, enforces lexical ordering/branch availability and every mapping type,
+checks operation effects and read-only tools, validates rules against readback
+schemas, maintains exact handle provenance, and binds human decisions, dispatch,
+compensation and verification to the same immutable intent/target. It
+also enforces conservative retries/iteration/call expansion and verification
 coverage on every effect-producing normal completion path. A structural
 reference to an existing but unavailable step is not evidence of lexical
 availability. Declared agent/review/write capabilities confer no authority;
 artifact availability remains `not_checked` until later admission duties.
+
+## Pinned local compilation
+
+`resolve_dependencies(raw, dependencies, catalog)` and
+`compile_package(raw, *, dependencies, catalog)` require explicit local inputs,
+including `[]` and `{"documents": []}` for empty sets. They perform complete
+package/catalog admission again, including constructed or mutated known models.
+The resolver admits every occurrence before deduplication. At most 63 raw
+additional package sources are accepted, each under the package byte limit;
+including root this bounds package-source input to 64 MiB. Root counts as depth
+one and as one of the maximum 64 packages; maximum dependency depth is eight.
+Every declared pin is required even if no step uses it. Catalog-internal agent
+and tool pins are required recursively. Identical content shares one definition;
+conflicts, missing/mismatched pins, cycles and unrelated supplied packages or
+catalog entries refuse. Select the needed catalog closure before calling.
+
+`DependencyClosure` contains the validated `root`, read-only `packages` and
+`package_digests` maps keyed by `(package_id, version)`, and `catalog` and
+`catalog_digests` maps keyed by `(kind, name, version)`. Values are fresh validated
+model snapshots; these maps are not authenticated runtime records.
+
+```python
+from lotuspond_sdk.executable import (
+    compile_package, canonical_plan_json, compiled_plan_digest,
+)
+
+plan = compile_package(raw_package, dependencies=[], catalog={"documents": []})
+plan_bytes = canonical_plan_json(plan)
+plan_sha256 = compiled_plan_digest(plan)
+```
+
+`CompiledPlan` has fixed schema/compiler revisions, root `package_sha256`,
+`dependency_digests`, `catalog_digests`, `steps`, `regions`, `edges`, `requirements`,
+root `limits`, `maximum_step_attempts` and `outcome_obligations`. Its fixed flags
+are `artifact_availability="not_checked"` and `authority_granted=false`.
+Canonical plan JCS is limited to 8 MiB, depth 32 and 262,144 JSON items. Plan
+serialization revalidates known records, strict flags, complete flow provenance
+and output-type digests. A supplied plan still cannot prove that source compilation
+occurred; a runtime must reload pinned definitions and validate/recompile them.
+
+Each plan step records package digest, authored step ID, region/source pointers,
+kind, normalized source digest, input-mapping digest, complete output flow and
+its digest, definition pins, operation where singular, and conservative attempts.
+Instructions, literal values and resolved payloads are not copied. A dispatch
+with multiple possible operations retains its exact intent-origin choice tree;
+consumers must follow those originating intent steps, rather than interpret a
+null singular operation as an unrestricted operation. Regions record ordered
+step IDs, stable `region_id`, result-mapping digest, full export flow and attempts.
+Region IDs are `body`, `decision:<step_id>:then`/`else`,
+`parallel:<step_id>:<branch_id>`, or `iteration:<step_id>:body`; moving the owning
+step changes source pointers but preserves this authored region identity. Edges distinguish
+sequence, then/else, parallel branch, iteration and callee-template links.
+Packages/catalog identities are sorted; authored step/branch order and every
+origin option, binding, array alternative and empty position remain ordered.
+
+Each sequence body costs one plus its steps. A regular step costs one, activity
+retries cost `max_attempts`, and an agent costs
+`AgentLimits.max_steps * retry.max_attempts`; agent limits already include its
+model/tool attempts. A decision costs one plus its maximum branch body; parallel
+costs one plus every branch body; iteration costs one plus its declared
+`max_items * body`; a call costs one plus the callee body. Compensation adds one
+intent, a review when required, its bounded dispatch attempts, and one verification.
+Counts exceeding package `max_steps` or 10,000 refuse. Child environment classes,
+platforms, credentials and all limits cannot expand the parent's envelope.
+These checks do not reserve funds or enforce dynamic time/token/spend usage.
+
+An agent step now requires an explicit `input: Mapping`, checked against the
+selected model or reusable agent input schema. This draft-v2 correction avoids
+implicit access to package input. Read tools must be read-only exact operations
+allowed by the pinned definition; reusable agent/model input/output and limits
+must agree. Catalog reconciliation rules resolve `expected` mappings with the
+write operation's input schema as `package_input`, and `readback_pointer` with
+the referenced read operation's output schema. Each named evaluation rule uses
+its evaluation input schema for both contexts. Neither catalog context contains
+workflow steps or iteration values. Authored verification rules use the workflow
+lexical mapping scope. Presence checks refine comparisons in conjunctions, never
+across alternatives.
+
+Verification must cover every dispatched receipt on every normal structured
+path, including receipts exported through decisions, parallel joins and repeated
+operations. An empty or possibly empty unrelated loop does not prove verification
+of an earlier action. Private compiler value identities preserve direct aliases,
+object/array projections, branch selections, iteration bindings and exact
+expression descriptors. Verification checks the same target identity, exact
+connector pin, and that intent's declared reconciliation read operation. Its
+read-back input is separately typed and may differ from write input. Equivalent
+expressions that require algebraic reasoning or runtime values are not assumed
+equal; there is no evaluator or constant folding. Shared descriptors are handled
+as bounded DAGs, with context-specific transforms and deterministic fingerprints.
+
+Source occurrences begin with the package digest. Each iteration owner is
+`"l" + sha256(JCS([package_digest, source_pointer]))[:63]`; owned slots are
+`$item:<owner>`. Complete owner bindings remain in flow metadata and digests.
+Decision selection paths contain the package digest and source pointer. Callees
+are emitted once as package-scoped templates; distinct authored call edges
+identify each invocation, and public callee outputs are data-only. Runtime call
+frames must retain the call-site identity when instantiating those templates.
+All immutable intent/review/receipt symbols are compiler metadata, not authority.
+External artifacts, provider behavior, actual effects and dynamic enforcement
+remain unchecked.

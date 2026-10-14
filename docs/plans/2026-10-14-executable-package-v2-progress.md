@@ -236,3 +236,48 @@ Ruling: run coded domain/reference checks at the Task 3 public boundary outside 
 Ruling: retain every validated identical normalized catalog document occurrence and count each toward family/raw/normalized bundle limits; reject differing content under one identity/version — the compiler must be able to deduplicate identical supplied definitions after admission — cost if wrong: refine the not-yet-stable bundle/caller contract; no limit is relaxed and no runtime authority changes.
 
 Task 4 receives the actual package/catalog APIs, normalized definition hashing, duplicate-retention contract, fresh fixture helpers and the complete reviewed Task 2 provenance contract. Compiler closure, lexical/type analysis, work expansion and per-effect verification coverage are still unimplemented requirements. Actual artifact custody, provider support and runtime authority remain later qualification boundaries.
+
+## Task 4 — pinned compiler implementation (independent review pending)
+
+Implemented complete local closure admission and deterministic typed compilation
+in `dependencies.py`, `compiler.py` and `plan.py`. All supplied occurrences count
+before deduplication; every declared and catalog-internal pin is required, and
+unrelated supplied definitions refuse. Closure depth/count, lexical availability,
+full handle/array provenance, target identity, read-only tools, inherited envelopes,
+conservative attempts and per-action normal-path verification are checked without
+I/O or execution. Plans carry separate stable authored region IDs and movable
+source pointers; callee templates retain distinct call-site edges.
+
+Controller rulings applied: agent steps require explicit typed `input`; catalog
+reconciliation rules use write input/read operation output contexts, and named
+evaluation rules use their declared input context. Target equality preserves
+aliases and correlated choices/occurrences using private bounded symbolic DAGs;
+no evaluator or authority was introduced. Complete-array receipt verification
+retains producer cardinality through branch-specific array alternatives, while
+subset/empty unrelated-loop paths cannot erase pending obligations.
+
+The initial exact focused command failed 21 tests because the resolver/compiler
+interfaces were absent. Final focused command:
+
+```sh
+uv run --frozen --project sdk/python pytest sdk/python/tests/executable/test_dependencies.py sdk/python/tests/executable/test_compiler.py -q
+```
+
+Result: **67 passed** on Python 3.14.5. The preceding input/canonical/types/
+expressions/package/catalog files passed **344 tests**. `uv run --frozen --project
+sdk/python ruff check sdk/python` passed. Hand-authored minimal/timer plans are
+checked against independent standard-library sorted JSON identities and committed
+JCS fixtures; SHA-256 values are recorded in `plan-hashes.txt`. Named synthetic
+examples include 10,000/10,001 attempts, a forbidden private branch reference and
+an explicit agent input.
+
+The standalone SDK suite ran once with authorized artifact-dependency network
+access and TLS intact: **746 passed, 68 subtests passed**. This broader run
+preceded the final complete-array cardinality correction, stable region metadata
+and empty data-array constructor correction. Final scoped checks cover those
+changes; the earlier full-suite snapshot is not relabeled as final-head evidence.
+No application/database/offline matrix was run; Task 10 owns integration gates.
+All red outputs, intermediate mistakes, final scoped results and full-suite
+source hashes are retained in the local Task 4 evidence/report directory. The
+independent Task 4 review remains pending; provider behavior, artifact contents,
+spend enforcement and production runtime qualification remain unchecked.
