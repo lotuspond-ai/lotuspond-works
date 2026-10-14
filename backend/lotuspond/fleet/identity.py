@@ -270,13 +270,7 @@ def acquire_session(
     db: Session, principal: RuntimePrincipal, dependencies: FleetDependencies
 ) -> AcquiredSession:
     dependencies.limit("session:" + principal.identity.instance_id, 10)
-    instance, credential, _, sessions, now = locked_identity(db, principal, dependencies)
-    if any(row.status == "active" and now < row.expires_at_ms for row in sessions):
-        raise FleetError("conflict")
-    if instance.generation >= 9007199254740991:
-        raise FleetError("conflict")
-    for row in sessions:
-        row.status = "revoked"
+    instance, credential, _, sessions, _ = locked_identity(db, principal, dependencies)
     pending = list(
         db.scalars(
             machine_query(RuntimeCredential, instance)
@@ -287,6 +281,21 @@ def acquire_session(
             .execution_options(populate_existing=True)
         )
     )
+    # The pending-row lock may have waited after locked_identity sampled time.
+    # Recheck authority and expiry after every selected lock, before dirtying
+    # any session/credential/instance row; no refresh can discard mutations.
+    dependencies.current(instance.installation_id, instance.recovery_epoch)
+    now = dependencies.now(
+        db, scope=row_scope(instance), actor_id=instance.id, resource_id=instance.id
+    )
+    if credential.status != "active" or now >= credential.expires_at_ms:
+        raise FleetError("unauthenticated")
+    if any(row.status == "active" and now < row.expires_at_ms for row in sessions):
+        raise FleetError("conflict")
+    if instance.generation >= 9007199254740991:
+        raise FleetError("conflict")
+    for row in sessions:
+        row.status = "revoked"
     for row in pending:
         row.status = "revoked"
     db.flush()  # Release partial unique indexes before creating the successor.

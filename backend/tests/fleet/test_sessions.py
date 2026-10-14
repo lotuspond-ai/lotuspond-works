@@ -339,3 +339,98 @@ def test_runtime_boundary_locks_sessions_before_credentials(identity_env, engine
         < ordered.index("runtime_sessions")
         < ordered.index("runtime_credentials")
     )
+
+
+@pytest.mark.parametrize("after_wait", ["expired", "valid", "epoch_changed"])
+def test_takeover_rechecks_authority_after_pending_credential_wait(
+    identity_env, engine, after_wait
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import event
+
+    from lotuspond.fleet.authentication import machine_fields, new_token, token_digest
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PostgreSQL pending-credential wait qualification required")
+    env = identity_env
+    credential = enrolled(env)
+    original = acquire(env, credential).json()
+    with env.db.begin() as db:
+        active = db.scalar(select(models.RuntimeCredential))
+        process = db.scalar(select(models.RuntimeSession))
+        pending = models.RuntimeCredential(
+            **machine_fields(active),
+            instance_id=active.instance_id,
+            version=2,
+            token_digest=token_digest(new_token("lpr_"), "lpr_"),
+            status="pending",
+            expires_at_ms=env.clock.now + 900000,
+            predecessor_id=active.id,
+            session_id=process.id,
+            generation=process.generation,
+            prepared_policy_version=1,
+            activation_deadline_ms=env.clock.now + 60000,
+        )
+        db.add(pending)
+        db.flush()
+        pending_id, process_id = pending.id, process.id
+        instance_id, active_id = active.instance_id, active.id
+        initial_seen = db.get(models.RuntimeInstance, instance_id).last_seen_at_ms
+    env.clock.now = original["expires_at_ms"]
+    reached = Event()
+
+    def before_cursor(connection, cursor, statement, parameters, context, many):
+        if (
+            "FROM runtime_credentials" in statement
+            and "FOR UPDATE" in statement
+            and isinstance(parameters, dict)
+            and "pending" in parameters.values()
+        ):
+            reached.set()
+
+    def request():
+        return TestClient(env.app).post(
+            "/api/v1/runtime/session", json={}, headers=auth(credential)
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with env.db.begin() as holder:
+            holder.scalar(
+                select(models.RuntimeCredential)
+                .where(models.RuntimeCredential.id == pending_id)
+                .with_for_update()
+            )
+            event.listen(engine, "before_cursor_execute", before_cursor)
+            try:
+                future = workers.submit(request)
+                assert reached.wait(5), "Takeover never reached its final credential lock"
+                if after_wait == "expired":
+                    env.clock.now = credential["state"]["credential_expires_at_ms"]
+                else:
+                    env.clock.now += 5000
+                    if after_wait == "epoch_changed":
+                        env.store["epoch"] = 8
+            finally:
+                event.remove(engine, "before_cursor_execute", before_cursor)
+        response = future.result(timeout=10)
+    assert response.status_code == {"expired": 401, "valid": 201, "epoch_changed": 503}[after_wait]
+    with env.db() as db:
+        instance = db.get(models.RuntimeInstance, instance_id)
+        assert db.get(models.RuntimeCredential, active_id).status == "active"
+        if after_wait == "valid":
+            state = response.json()
+            assert state["server_time_ms"] == env.clock.now
+            assert state["expires_at_ms"] == env.clock.now + 60000
+            assert instance.generation == original["identity"]["generation"] + 1
+            assert db.get(models.RuntimeSession, process_id).status == "revoked"
+            assert db.get(models.RuntimeCredential, pending_id).status == "revoked"
+            assert len(list(db.scalars(select(models.RuntimeSession)))) == 2
+        else:
+            assert instance.generation == original["identity"]["generation"]
+            assert instance.last_seen_at_ms == initial_seen
+            assert db.get(models.RuntimeSession, process_id).status == "active"
+            assert db.get(models.RuntimeCredential, pending_id).status == "pending"
+            assert len(list(db.scalars(select(models.RuntimeSession)))) == 1

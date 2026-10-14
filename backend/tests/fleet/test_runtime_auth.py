@@ -188,3 +188,92 @@ def test_pending_and_revoked_credentials_never_authenticate(identity_env):
             select(models.RuntimeCredential).where(models.RuntimeCredential.status == "active")
         ).status = "revoked"
     assert env.client.get("/api/v1/runtime/self", headers=auth(credential)).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_bucket", ["peer", "token"])
+async def test_exchange_quota_wait_preserves_event_loop_progress(blocked_bucket):
+    import asyncio
+    from threading import Event, Timer
+    from types import SimpleNamespace
+
+    import redis
+    from fastapi.responses import JSONResponse
+
+    from lotuspond.fleet.authentication import new_token
+    from lotuspond.fleet.authority import FleetDependencies, UnavailableRecoveryAuthority
+    from lotuspond.fleet.catalog import InstalledCatalog
+    from lotuspond.fleet.management_routes import FleetRequestBoundary
+    from lotuspond.security import RateLimiter
+
+    loop = asyncio.get_running_loop()
+    entered, release = asyncio.Event(), Event()
+    calls, messages, human_messages = [], [], []
+    blocking_call = 1 if blocked_bucket == "peer" else 2
+
+    class RecordedLimiter(RateLimiter):
+        def check(self, key, limit, seconds=60):
+            calls.append((key, limit))
+            return super().check(key, limit, seconds)
+
+    class BlockingRedis:
+        def eval(self, *args):
+            if len(calls) == blocking_call:
+                loop.call_soon_threadsafe(entered.set)
+                assert release.wait(3), "Synthetic quota wait was not released"
+                raise redis.exceptions.TimeoutError("synthetic private store failure")
+            return 1
+
+    limiter = RecordedLimiter(SimpleNamespace(redis_url=None, env="production"))
+    limiter.client = BlockingRedis()
+    deps = FleetDependencies(UnavailableRecoveryAuthority(), InstalledCatalog(), limiter=limiter)
+
+    async def inner(scope, receive, send):
+        assert scope["path"] == "/api/v1/health", (
+            "Unavailable quota store reached enrollment handler"
+        )
+        await JSONResponse({"status": "ok"})(scope, receive, send)
+
+    async def receive():
+        raise AssertionError("Failed quota lookup consumed a request body")
+
+    async def send(message):
+        messages.append(message)
+
+    async def send_human(message):
+        human_messages.append(message)
+
+    scope = {
+        "type": "http",
+        "path": "/api/v1/runtime/enroll",
+        "method": "POST",
+        "headers": [(b"authorization", ("Bearer " + new_token("lpe_")).encode("ascii"))],
+        "client": ("127.0.0.1", 12345),
+        "app": SimpleNamespace(state=SimpleNamespace(fleet_dependencies=deps)),
+    }
+    boundary = FleetRequestBoundary(inner, SimpleNamespace(fleet_enabled=True))
+    # Independent cleanup releases even the old synchronously blocked loop.
+    # Assertions never strand a worker or wait for an unreleased Redis stub.
+    watchdog = Timer(1, release.set)
+    watchdog.start()
+    enrollment_task = asyncio.create_task(boundary(scope, receive, send))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        assert not release.is_set(), "Quota I/O blocked this event loop until watchdog release"
+        await asyncio.wait_for(
+            boundary(dict(scope, path="/api/v1/health"), receive, send_human), timeout=0.5
+        )
+        assert not release.is_set(), "Unrelated request could not finish while quota storage waited"
+        assert human_messages[0]["status"] == 200
+    finally:
+        release.set()
+        watchdog.cancel()
+        watchdog.join(timeout=2)
+        await asyncio.wait_for(enrollment_task, timeout=3)
+        deps.close()
+    assert messages[0]["status"] == 503
+    assert b"synthetic private" not in b"".join(item.get("body", b"") for item in messages)
+    assert [limit for _, limit in calls] == ([20] if blocked_bucket == "peer" else [20, 5])
+    assert calls[0][0].startswith("fleet:exchange:peer:")
+    if blocked_bucket == "token":
+        assert calls[1][0].startswith("fleet:exchange:token:")

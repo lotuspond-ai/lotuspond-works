@@ -25,6 +25,7 @@ from lotuspond_runtime.protocol import (
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from ..deps import DB, require
 from ..models import (
@@ -94,7 +95,9 @@ class FleetRequestBoundary:
             dependencies = scope["app"].state.fleet_dependencies
             try:
                 peer = scope.get("client")
-                dependencies.limit("exchange:peer:" + (peer[0] if peer else "unknown"), 20)
+                await run_in_threadpool(
+                    dependencies.limit, "exchange:peer:" + (peer[0] if peer else "unknown"), 20
+                )
                 # Charge recognizable proof before decoding or rejecting bodies.
                 auth_headers = [v for k, v in scope["headers"] if k.lower() == b"authorization"]
                 if len(auth_headers) == 1 and len(auth_headers[0]) == 54:
@@ -106,7 +109,7 @@ class FleetRequestBoundary:
                     except (UnicodeError, FleetError):
                         pass
                     else:
-                        dependencies.limit("exchange:token:" + digest, 5)
+                        await run_in_threadpool(dependencies.limit, "exchange:token:" + digest, 5)
             except FleetError as failure:
                 await error(failure.code)
                 return
