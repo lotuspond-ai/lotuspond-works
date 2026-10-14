@@ -975,3 +975,161 @@ def test_zero_length_constructor_iteration_preserves_declared_data_type(case):
         "item_schema": {"kind": "data", "schema": {"kind": "integer"}},
     }
     assert compile_case(root).maximum_step_attempts == 3
+
+
+@pytest.mark.parametrize("nesting", ["none", "loop", "branch", "loop_branch"])
+@pytest.mark.parametrize("same_item", [True, False])
+def test_decision_selector_tracks_producing_occurrence(case, catalog_case, nesting, same_item):
+    root = case("selector_occurrence")
+    _, catalog = target_case(case, catalog_case)
+    if same_item:
+        root["body"]["steps"][1]["then_body"]["steps"][0]["body"]["steps"][0]["target"] = {
+            "kind": "ref",
+            "source": {"kind": "iteration_item"},
+            "pointer": "/target",
+        }
+    if "branch" in nesting:
+        root["body"] = {
+            **null_body(),
+            "steps": [
+                {
+                    "id": "outer-choice",
+                    "kind": "decision",
+                    "condition": {"kind": "literal", "schema": {"kind": "boolean"}, "value": True},
+                    "then_body": root["body"],
+                    "else_body": null_body(),
+                }
+            ],
+        }
+    if "loop" in nesting:
+        root["body"] = {
+            **null_body(),
+            "steps": [
+                {
+                    "id": "outer-loop",
+                    "kind": "iteration",
+                    "input": {
+                        "kind": "literal",
+                        "schema": {"kind": "array", "items": {"kind": "null"}, "max_items": 1},
+                        "value": [None],
+                    },
+                    "max_items": 1,
+                    "concurrency": 1,
+                    "body": root["body"],
+                }
+            ],
+        }
+    if same_item:
+        plan = compile_case(root, catalog=catalog)
+        assert len(plan.outcome_obligations) == 2
+        consumer = next(step for step in plan.steps if step.step_id == "verify")
+        choice = consumer.output_type.intent_source
+
+        def owner(path):
+            canonical = json.dumps([plan.package_sha256, path], separators=(",", ":")).encode()
+            return "l" + sha256(canonical).hexdigest()[:63]
+
+        body_path = "/body"
+        outer_slots = []
+        if "loop" in nesting:
+            outer_slots.append("$item:" + owner("/body/steps/0"))
+            body_path += "/steps/0/body"
+        if "branch" in nesting:
+            body_path += "/steps/0/then_body"
+        producing_owner = owner(body_path + "/steps/0")
+        consuming_slot = "$item:" + owner(body_path + "/steps/1/then_body/steps/0")
+        assert choice.selection_path == [
+            plan.package_sha256,
+            body_path + "/steps/0/body/steps/0",
+            *outer_slots,
+            consuming_slot,
+        ]
+        assert [(binding.owner, binding.path) for binding in choice.selection_bindings] == [
+            (producing_owner, [consuming_slot])
+        ]
+        assert [option.step_id for option in choice.options] == ["aintent", "bintent"]
+        for option in choice.options:
+            assert option.occurrence_path == [plan.package_sha256, *outer_slots, consuming_slot]
+            assert option.occurrence_bindings == choice.selection_bindings
+    else:
+        with pytest.raises(ExecutableError) as error:
+            compile_case(root, catalog=catalog)
+        assert error.value.code == "intent_mismatch"
+
+
+@pytest.mark.parametrize("operation", ["select", "item", "public_select"])
+def test_shared_choice_distribution_has_bounded_work(operation):
+    import subprocess
+    import sys
+
+    probe = Path(__file__).parents[1] / "fixtures/executable-v2/shared_choice_probe.py"
+    result = subprocess.run(
+        [sys.executable, str(probe), operation, str(Path(__file__).parents[4])],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=True,
+    )
+    assert result.stdout.strip() == "PASS"
+
+
+@pytest.mark.parametrize(
+    "name", ["decision", "parallel", "iteration", "subworkflow", "receipt_decision"]
+)
+def test_complete_structured_literal_plan(case, catalog_case, name):
+    import runpy
+
+    fixtures = Path(__file__).parents[1] / "fixtures/executable-v2"
+    golden = fixtures / f"plan_{name}.jcs"
+    assert golden.is_file(), f"mandatory complete {name} literal plan is missing"
+    oracle = runpy.run_path(str(fixtures / "structured_plan_oracles.py"))
+    root, dependencies, expected = oracle["oracle"](name)
+    expected_bytes = oracle["canonical"](expected)
+    assert expected_bytes == golden.read_bytes()
+    hashes = {
+        name: value
+        for value, name in (
+            line.split() for line in (fixtures / "plan-hashes.txt").read_text().splitlines()
+        )
+    }
+    assert sha256(expected_bytes).hexdigest() == hashes[golden.name]
+    plan = compile_case(root, dependencies, catalog_case())
+    assert json.loads(api.canonical_plan_json(plan)) == expected
+    assert api.canonical_plan_json(plan) == expected_bytes
+    assert api.compiled_plan_digest(plan) == hashes[golden.name]
+
+
+def test_choice_distribution_enforces_whole_operation_budget():
+    from lotuspond_sdk.executable.compiler import _distribute, _SymbolWork
+
+    values = [("object", (("x", ("literal", str(i))),)) for i in range(2)]
+    for index in range(2, 32):
+        values.append(("choice", ("selector", (str(index),), ()), (values[-1], values[-2])))
+    with pytest.raises(ExecutableError) as error:
+        _distribute(values[-1], "x", item=False, work=_SymbolWork(remaining=100))
+    assert error.value.code == "expansion_exceeded"
+    work = _SymbolWork(remaining=10000)
+    result = _distribute(values[-1], "x", item=False, work=work)
+    assert result[2][1] is result[2][0][2][0]  # shared v29 survives both incoming edges
+    assert 0 < work.remaining < 10000
+
+
+def test_projection_context_includes_token_slot_and_ordered_bindings():
+    from lotuspond_sdk.executable.compiler import _item, _select, _symbol_fingerprint
+
+    decision = (
+        "choice",
+        ("selector", ("package", "/body/steps/0", "$item:producer"), ()),
+        (("literal", "first"), ("literal", "second")),
+    )
+    values = ("repeat", "producer", decision)
+    first, second = _select(values, "0"), _select(values, "1")
+    assert first[1] == ("selector", ("package", "/body/steps/0", "0"), (("producer", ("0",)),))
+    assert second[1] == ("selector", ("package", "/body/steps/0", "1"), (("producer", ("1",)),))
+    assert _symbol_fingerprint(first) != _symbol_fingerprint(second)
+    current = _item(values, "$item:consumer")
+    other = _item(values, "$item:other")
+    assert _symbol_fingerprint(current) != _symbol_fingerprint(other)
+    # Selecting the same owner-bound alias twice does not append a new binding.
+    assert _item(values, "$item:consumer") == current
+    assert current[1][2] == (("producer", ("$item:consumer",)),)

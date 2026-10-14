@@ -463,12 +463,38 @@ read-back input is separately typed and may differ from write input. Equivalent
 expressions that require algebraic reasoning or runtime values are not assumed
 equal; there is no evaluator or constant folding. Shared descriptors are handled
 as bounded DAGs, with context-specific transforms and deterministic fingerprints.
+Pointer projection and iteration-item selection memoize each shared node for the
+complete selected token/slot context. Each operation shares a 262,144-unit work
+budget across traversal, owner binding and fingerprinting; exceeding it refuses
+with `expansion_exceeded`. Fingerprint cache entries retain their nodes, so object
+ID reuse cannot confuse identities. Python object IDs never enter a plan or digest.
 
 Source occurrences begin with the package digest. Each iteration owner is
 `"l" + sha256(JCS([package_digest, source_pointer]))[:63]`; owned slots are
 `$item:<owner>`. Complete owner bindings remain in flow metadata and digests.
-Decision selection paths contain the package digest and source pointer. Callees
-are emitted once as package-scoped templates; distinct authored call edges
+Decision selection paths are ordered
+`[package_digest, decision_source_pointer, ...enclosing_iteration_slots]`.
+`OriginChoice.selection_bindings` records each specialization as an ordered
+`{owner, path}` pair, even after a slot becomes a numeric index or another current
+iteration slot. A private symbolic selector carries both that complete path and
+all ordered bindings. This distinguishes `produce[0]` from the current consuming
+item while retaining direct aliases of that item.
+
+Decision merges install the same selector in public flow and private target
+identity. Reference inference and `iteration_item_flow` specialize public owners
+using the safe selection helpers; private owner binding mirrors their path and
+binding semantics. Target restriction compares the complete selector, including
+bindings, for every possible originating intent. Coverage may rebase a selected
+decision to its producer guard only after its complete selector equals that
+producer template specialized by the selected receipt's ordered bindings. It
+cannot rebase a different index or unrelated selection. Existing complete-array
+coverage still requires all producer occurrences; a subset or unrelated empty
+loop cannot discharge them.
+
+Plan projection and output-type digests retain every selection path, ordered
+binding, option and array alternative. Diff, compatibility and runtime consumers
+must not flatten them to the authored decision ID, pointer or representative
+item. Callees are emitted once as package-scoped templates; distinct authored call edges
 identify each invocation, and public callee outputs are data-only. Runtime call
 frames must retain the call-site identity when instantiating those templates.
 All immutable intent/review/receipt symbols are compiler metadata, not authority.

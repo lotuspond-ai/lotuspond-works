@@ -281,3 +281,38 @@ All red outputs, intermediate mistakes, final scoped results and full-suite
 source hashes are retained in the local Task 4 evidence/report directory. The
 independent Task 4 review remains pending; provider behavior, artifact contents,
 spend enforcement and production runtime qualification remain unchecked.
+
+
+### Task 4 correction round 1 — scoped re-review pending
+
+The first independent Task 4 review requested three Important corrections:
+decision selectors omitted producing iteration occurrences; shared-choice
+projection/item traversal could expand exponentially; and the required complete
+structured plan oracles were absent. The retained initial correction regression
+run reproduced **11 failures** (eight occurrence assertions/refusals and three
+five-second bounded-process timeouts). Missing structured oracles separately
+produced **5 failures**.
+
+Selectors now retain full occurrence paths and ordered bindings in public flow
+and private identity. Coverage rebases only the exact receipt-bound producer
+selector. Same-item positives and cross-index refusals include nested loops and
+branches. Projection/item selection preserve DAG sharing, with a common bounded
+work budget for traversal, binding and fingerprints. Context separation, retained
+sharing and controlled budget exhaustion have focused assertions.
+
+Five complete hand-authored plans cover decisions, parallel joins, ordered
+iteration, pinned subworkflows and a receipt-bearing decision. Every step,
+region, edge, source/mapping/type identity, pin, choice and obligation is compared;
+canonical bytes and literal hashes are independently calculated without the SDK
+in `structured_plan_oracles.py` and frozen in committed JCS artifacts. One initial
+receipt-oracle mismatch exposed an omitted explicit null credential default in
+the hand-authored source; that oracle error was corrected and retained in evidence.
+
+Correction covering checks: **85 passed** in dependency/compiler files and
+**344 passed** in earlier input/canonical/type/expression/package/catalog files.
+Ruff and whitespace checks pass, and all seven committed plan hashes verify.
+These are scoped Python 3.14 results. The earlier standalone SDK/artifact snapshot
+is unchanged; no broad artifact suite was repeated. The local Task 4 report holds
+exact commands, retained failures and final source hashes. This correction remains
+subject to independent review; runtime authority and provider/artifact behavior
+remain unchecked.

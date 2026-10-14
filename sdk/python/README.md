@@ -470,6 +470,11 @@ of every dispatched action on every normal completion path. Agent steps require
 an explicit typed `input` mapping. Conservative attempts include region overhead,
 retries, agents, nested calls/iterations and compensation, and cannot exceed the
 package limit or 10,000. Canonical plans are independently bounded to 8 MiB.
+Decision selectors retain the package/source path, enclosing iteration slots and
+ordered owner bindings. Consumers must preserve that complete correlation in
+origin choices and array alternatives. Shared-choice projection and item
+selection use context-specific DAG memoization with one bounded work budget;
+selection of a different item's target cannot prove receipt verification.
 
 Plans contain source pointers/digests and typed metadata, without copying authored
 instructions or literal payloads. `authority_granted` is always false and

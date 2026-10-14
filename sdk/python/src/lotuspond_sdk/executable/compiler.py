@@ -63,34 +63,67 @@ class _Scope:
         )
 
 
-def _choice(selector, options):
-    first = _symbol_fingerprint(options[0])
+def _selector(path, bindings=()):
+    """A selection identity includes its ordered owner bindings, not only its path."""
+    return ("selector", path, bindings)
+
+
+def _bind_selector(selector, owner, binding):
+    _, path, bindings = selector
+    slot = f"$item:{owner}"
+    if slot not in path:
+        return selector
+    index = path.index(slot)
+    return _selector((*path[:index], *binding, *path[index + 1 :]), (*bindings, (owner, binding)))
+
+
+@dataclass
+class _SymbolWork:
+    """One bounded symbolic operation; retained nodes prevent ephemeral ID reuse."""
+
+    remaining: int = 262144
+    fingerprints: dict = field(default_factory=dict)
+
+    def spend(self, count=1):
+        self.remaining -= count
+        if self.remaining < 0:
+            raise ExecutableError("expansion_exceeded")
+
+
+def _choice(selector, options, work=None):
+    work = _SymbolWork() if work is None else work
+    work.spend(len(options))
+    first = _symbol_fingerprint(options[0], work)
     return (
         options[0]
-        if all(_symbol_fingerprint(x) == first for x in options)
+        if all(_symbol_fingerprint(x, work) == first for x in options)
         else ("choice", selector, options)
     )
 
 
-def _transform_symbol(value, *, owner=None, binding=(), selections=None):
+def _transform_symbol(value, *, owner=None, binding=(), selections=None, work=None):
     """Transform a shared DAG once per node and full caller-selected context.
 
     Object IDs are only ephemeral memo keys; no IDs enter semantic fingerprints.
     Each invocation has its own owner/binding or restriction context and memo.
     """
+    work = _SymbolWork() if work is None else work
     memo = {}
     stack = [(value, False)]
     while stack:
         node, ready = stack.pop()
         if type(node) is not tuple or id(node) in memo:
             continue
-        if len(memo) + len(stack) > 262144:
-            raise ExecutableError("expansion_exceeded")
+        work.spend()
+        if owner is not None and node and node[0] == "selector":
+            memo[id(node)] = _bind_selector(node, owner, binding)
+            continue
         replacement = node
         if selections is not None and node and node[0] == "choice" and node[1] in selections:
             replacement = node[2][selections[node[1]]]
         children = (replacement,) if replacement is not node else node
         if not ready:
+            work.spend(len(children))
             stack.append((node, True))
             stack.extend(
                 (child, False)
@@ -114,19 +147,19 @@ def _transform_symbol(value, *, owner=None, binding=(), selections=None):
     return memo[id(value)]
 
 
-def _bind(value, owner, path):
-    return _transform_symbol(value, owner=owner, binding=path)
+def _bind(value, owner, path, work=None):
+    return _transform_symbol(value, owner=owner, binding=path, work=work)
 
 
-def _symbol_fingerprint(value):
+def _symbol_fingerprint(value, work=None):
     """Stable domain-tagged content identity without expanding shared references."""
-    memo, stack = {}, [(value, False)]
+    work = _SymbolWork() if work is None else work
+    memo, stack = work.fingerprints, [(value, False)]
     while stack:
         node, ready = stack.pop()
         if type(node) is not tuple or id(node) in memo:
             continue
-        if len(memo) + len(stack) > 262144:
-            raise ExecutableError("expansion_exceeded")
+        work.spend()
         if not ready:
             stack.append((node, True))
             stack.extend(
@@ -135,38 +168,67 @@ def _symbol_fingerprint(value):
                 if type(child) is tuple and id(child) not in memo
             )
             continue
-        memo[id(node)] = _digest(
+        work.spend(len(node))
+        fingerprint = _digest(
             [
                 "tuple",
                 *[
-                    memo[id(child)] if type(child) is tuple else _digest(["atom", child])
+                    memo[id(child)][1] if type(child) is tuple else _digest(["atom", child])
                     for child in node
                 ],
             ]
         )
+        memo[id(node)] = (node, fingerprint)
+    return memo[id(value)][1]
+
+
+def _distribute(value, selection, *, item, work=None):
+    """Project a choice DAG once per node in this fixed token/slot context.
+
+    The context-local memo retains sharing. Fingerprinting and owner binding use
+    the same work budget, including intermediates, for the entire operation.
+    """
+    work = _SymbolWork() if work is None else work
+    memo, stack = {}, [(value, False)]
+    while stack:
+        node, ready = stack.pop()
+        if id(node) in memo:
+            continue
+        work.spend()
+        kind = node[0]
+        if kind == "choice" and not ready:
+            work.spend(len(node[2]))
+            stack.append((node, True))
+            stack.extend((option, False) for option in reversed(node[2]))
+            continue
+        if kind == "choice":
+            result = _choice(node[1], tuple(memo[id(x)] for x in node[2]), work)
+        elif kind == "repeat":
+            result = _bind(node[2], node[1], (selection,), work)
+        elif item:
+            result = (
+                _choice(_selector((selection,)), node[1], work)
+                if kind == "array" and node[1]
+                else ("item", node, (selection,))
+            )
+        elif kind == "object":
+            work.spend(len(node[1]))
+            result = dict(node[1]).get(selection, ("absent",))
+        elif kind == "array":
+            index = int(selection)
+            result = node[1][index] if index < len(node[1]) else ("absent",)
+        else:
+            result = ("pointer", node, selection)
+        memo[id(node)] = result
     return memo[id(value)]
 
 
 def _select(value, token):
-    if value[0] == "object":
-        return dict(value[1]).get(token, ("absent",))
-    if value[0] == "array":
-        return value[1][int(token)] if int(token) < len(value[1]) else ("absent",)
-    if value[0] == "choice":
-        return _choice(value[1], tuple(_select(x, token) for x in value[2]))
-    if value[0] == "repeat":
-        return _bind(value[2], value[1], (token,))
-    return ("pointer", value, token)
+    return _distribute(value, token, item=False)
 
 
 def _item(value, slot):
-    if value[0] == "repeat":
-        return _bind(value[2], value[1], (slot,))
-    if value[0] == "array" and value[1]:
-        return _choice((slot,), value[1])
-    if value[0] == "choice":
-        return _choice(value[1], tuple(_item(x, slot) for x in value[2]))
-    return ("item", value, (slot,))
+    return _distribute(value, slot, item=True)
 
 
 def _restrict(value, selections):
@@ -180,7 +242,9 @@ def _origin_options(origin, selections=()):
         (leaf, context)
         for i, option in enumerate(origin.options)
         if option is not None
-        for leaf, context in _origin_options(option, (*selections, (origin.selection_path, i)))
+        for leaf, context in _origin_options(
+            option, (*selections, (_selector(origin.selection_path, origin.selection_bindings), i))
+        )
     ]
 
 
@@ -193,6 +257,7 @@ class _Compiler:
         self.targets = {}
         self.values = {}
         self.loop_guards = {}
+        self.selector_templates = {}
 
     def value(self, mapping, env):
         kind = mapping.kind
@@ -553,7 +618,9 @@ class _Compiler:
             value = self.value(step.mapping, env)
         elif kind == "decision":
             self.assign(step.condition, {"kind": "boolean"}, env)
-            selector = (digest, path)
+            selector_path = (digest, path, *occurrence[1:])
+            selector = _selector(selector_path)
+            self.selector_templates[(digest, path)] = selector
             left, a = nested(
                 step.then_body,
                 "/then_body",
@@ -565,7 +632,9 @@ class _Compiler:
                 step.else_body, "/else_body", conditions=(*guards, (selector, 1)), edge="else"
             )
             output = merge_flow_elements(
-                (left, right), parse_export(step.then_body.result_schema, package.schemas), selector
+                (left, right),
+                parse_export(step.then_body.result_schema, package.schemas),
+                selector_path,
             )
             count = 1 + max(a, b)
             value = _choice(
@@ -775,8 +844,21 @@ class _Compiler:
                                 if bound.startswith("$item:"):
                                     implied.update(self.loop_guards.get(bound[6:], ()))
                         coverage = tuple(guard for guard in guards if guard not in implied)
+                        correlated = []
+                        for selector, option in (*coverage, *selection_guards):
+                            # Rebase only the exact specialization of this producing
+                            # decision. A different item/owner cannot become its guard.
+                            if selector and selector[0] == "selector":
+                                template = self.selector_templates.get(selector[1][:2])
+                                specialized = template
+                                if template is not None:
+                                    for owner, binding in leaf.occurrence_bindings:
+                                        specialized = _bind_selector(specialized, owner, binding)
+                                    if selector == specialized:
+                                        selector = template
+                            correlated.append((selector, option))
                         self.verified.setdefault(pending, []).append(
-                            ((*coverage, *selection_guards), verification)
+                            (tuple(correlated), verification)
                         )
         elif kind == "agent":
             family, local = (
@@ -869,10 +951,10 @@ def _selected_leaves(origin, guards=()):
     selected = []
     for index, option in enumerate(origin.options):
         if option is not None:
-            # Compiler decision selectors are (package digest, source pointer).
+            # Decision selectors retain occurrence slots and all ordered selection bindings.
             extra = (
-                ((origin.selection_path, index),)
-                if len(origin.selection_path) == 2 and origin.selection_path[1].startswith("/body")
+                ((_selector(origin.selection_path, origin.selection_bindings), index),)
+                if len(origin.selection_path) >= 2 and origin.selection_path[1].startswith("/body")
                 else ()
             )
             selected.extend(_selected_leaves(option, (*guards, *extra)))
