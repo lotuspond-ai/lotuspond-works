@@ -672,3 +672,135 @@ reconciliation before any unknown dispatch is retried. Signature consumers must
 use full canonical command bytes with the runtime-command context. Schema
 consumers must retain the outer-kind/payload/reference correlation and domain
 checks above; a raw Pydantic union schema alone does not encode all these rules.
+
+## Pure event transition checks
+
+`check_event_transition(state, event, context)` evaluates one fully admitted
+`RuntimeEvent` against a bounded supplied snapshot. It does not persist events,
+read a clock, authenticate records, execute steps, resolve evidence or grant
+permission. `event_digest(event)` uses full event admission and `wire_digest`:
+its SHA-256 covers all normalized fields, including ID, tenant, source, generation,
+epoch, sequence and observation time. It is distinct from `payload_sha256`, the
+intent binding digest and a decision's full-record digest.
+
+The public models and admission helpers are `ContractState` /
+`validate_contract_state`, `EventContext` / `validate_event_context`, `KnownEvent` /
+`validate_known_event`, `CompletionSummary` / `validate_completion_summary`, and
+`TransitionReport` / `validate_transition_report`. Constructors alone are not
+complete admission. Every helper reprojects only explicitly supported classes,
+revalidates mutable/constructed objects and checks normalized bounds. Local
+snapshots and reports are limited to 65,536 JCS bytes, depth 32 and 10,000 items.
+`transition_report_json(report)` emits revalidated, deterministic ASCII JSON plus
+newline under the common 8 MiB report cap; it never invokes supplied serializers.
+
+| Model | Exact fields |
+| --- | --- |
+| `ContractState` | Required `phase`: `new`, `running`, `waiting`, `reconciliation_required`, `cancelled`, `failed`, `completed`; required `action_state`: `not_dispatched`, `dispatching`, `accepted`, `observed`, `unknown`; required `outcome`: `unknown`, `not_verified`, `verified`. |
+| `KnownEvent` | Required `event_id` (OpaqueId), `sha256` (full normalized event digest). Only one matching known event may be supplied. |
+| `CompletionSummary` | Required exact integer counts `required_effects`, `verified_effects`, `not_verified_effects`, `unknown_effects`, `unfinished_steps`, each 0..10,000. The three outcome counts must sum exactly to `required_effects`. |
+| `EventContext` required | `installation_id`, `workspace_id`, `project_id`, `environment_id`, `execution_id`, `source_id` (OpaqueId); `recovery_epoch`, `source_generation`, `now_ms`, `prior_source_sequence` (nonnegative safe integers); `package_sha256`, `configuration_sha256`, `plan_sha256` (Digest); `active_step` (exact bool). |
+| `EventContext` optional, default null | `step_id` (Identifier), `action_id` (OpaqueId), `attempt` (nonnegative safe integer), `known_event` (KnownEvent), `binding_context` (BindingContext), `intent` (ActionIntent), `decision` (HumanDecision), `receipt` (ActionReceipt), `wait` (WaitStartedPayload), `retry_policy` (RetryPolicy), `completion` (CompletionSummary), `target_operation_ref` (ReferenceRevision), `reconciliation_rule_id` and `verification_rule_id` (Identifier), `reconciliation_rule_version` and `verification_rule_version` (ReferenceRevision). Each rule ID/version pair is both supplied or both null. |
+| `TransitionReport` | Required `disposition`: `applied`, `duplicate`, `refused`, `reconciliation_required`; required fixed `code`, `state` (ContractState), `accepted_source_sequence` (nonnegative safe integer), `structurally_retryable` (exact bool). Optional `binding_code` defaults null and may carry only a refusing BindingReport code when code is `binding_refused`. Fixed defaults: `assurance="synthetic-contract-evaluation"`, `authority_granted=false`. |
+
+OpaqueId, Identifier, ReferenceRevision and Digest retain the wire definitions
+above. There are no implicit current-time or sequence defaults: initialize the
+prior source sequence to 0, making the first new event sequence 1. Attempts are
+zero-based: `max_attempts=1` permits index 0 only. Supplied retry codes must be
+unique. Nested wire records undergo their full public admission, including
+lifetimes and hashes, even when unused by the selected event. If a BindingContext
+is supplied, its scope, epoch, three admission hashes, step/action and `now_ms`
+must equal the outer EventContext. Its worker/generation remain command-recipient
+facts; they are not inferred from the transport source identity. Contradictory
+nested contexts or malformed local models raise sanitized `invalid_context`;
+malformed nested wire records retain `invalid_wire` and bounded-input errors
+retain their specific codes.
+
+`new` requires `not_dispatched` and `unknown`. A completed state cannot contain
+`dispatching`, `unknown` action state, or a `not_verified` outcome. A verified
+outcome cannot coexist with `dispatching` or `unknown` action state. Other
+combinations remain supplied facts; conservative checks prevent contradictory
+facts from resetting known outcomes or enabling dispatch. The state summarizes
+the relevant action and, at completion, the aggregate execution outcome; it is
+not a ledger of all effects. The caller must retain every action and its evidence.
+
+### Evaluation order and context requirements
+
+All three arguments are admitted first. Then the evaluator checks:
+
+1. Outer installation/tenant/execution, source identity/generation and recovery
+   epoch. A mismatch returns `context_mismatch` before replay handling.
+2. A supplied KnownEvent must name the incoming ID. Matching full digest returns
+   `duplicate`; changed normalized record returns `replay_conflict`; a different
+   known ID returns `context_mismatch`. Historical identical events can be
+   duplicates despite current phase, attempt, wait or lifetime changes.
+3. The exact next source sequence. A gap returns `sequence_gap` with reconciliation
+   required; an unseen sequence at or below the prior sequence refuses with
+   `stale_sequence`. Gap handling preserves effects and terminal phases.
+4. Current step/action/attempt bindings and `active_step`, terminal phase, then
+   event-specific phase, binding, time, evidence and completion checks.
+
+Only `applied` advances the accepted sequence to the event sequence. Every other
+disposition retains the prior sequence. Every refusal and duplicate preserves
+the supplied state; reconciliation can change a nonterminal phase and represent
+uncertainty while preserving known effects. Terminal states refuse all fresh
+in-order events, including late evidence; a future store may retain late evidence
+separately but must not resurrect authority. Identical known replay still returns
+a duplicate after the scope fences.
+
+All events require the outer context fields. Optional facts become required as
+shown below; unrelated optional facts may be null. An absent required fact never
+implies success. E/S/A event references retain the wire matrix above. Every S/A
+event additionally needs matching `step_id`/`attempt` and `active_step=true`; A
+also needs matching `action_id`.
+
+| Event | Additional supplied facts and legal behavior |
+| --- | --- |
+| `admission` | Independent context package/configuration/plan hashes must match. Only `new -> running`. No fabricated action/BindingContext is needed. |
+| `step_started` | Running phase, effective retry policy and attempt below its ceiling. `active_step` identifies the currently expected step, not an authenticated identity or persisted start record. |
+| `step_result`, `step_failed` | Running phase and matching active step/attempt. Results never complete an execution or verify an effect. Failure retry suggestions require policy/code/attempt eligibility and no possible action dispatch. |
+| `wait_started` | Running phase and complete `wait` matching every payload field; unexpired wait. Moves to waiting. A future `not_before_ms` is allowed at creation. |
+| `signal_received`, `timer_elapsed` | Waiting phase and matching `wait_id`; signals also require matching correlation digest and human/external wait; timers require timer kind. Resume only when `not_before_ms <= now_ms < expires_at_ms`. No assignment or escalation authenticates a signal sender. |
+| `intent_created` | Running, not_dispatched, unknown outcome; expected full intent and BindingContext. Incoming intent binding digest must match exactly and lifetime must include now. |
+| `decision_recorded` | Same state and facts, plus incoming decision checked by `check_decision`. If context decision is nonnull its full digest is immutable; if null this is the first decision declaration. Denied/expired/mismatched decisions refuse. |
+| `action_dispatched` | Same state and facts, effective retry policy, and context decision for human approval (null for none mode). Uses `check_command_binding` for exact approval, command recipient/fencing, hashes and lifetimes. Moves to dispatching, never verified. |
+| `action_receipt` | Running/reconciliation phase and an already possibly dispatched action; full expected intent/BindingContext and exact `target_operation_ref`. Receipt action/attempt/intent/operation must match. If a context receipt is supplied, its full digest must match too. Accepted remains unverified; observed_effect needs evidence and marks observed only. Unknown requires reconciliation. |
+| `dispatch_timeout` | Running/reconciliation phase, expected intent/BindingContext and exact payload intent digest. Any possible dispatch requires reconciliation; dispatching cannot be cleared by a payload merely claiming no dispatch. Proven not_dispatched can suggest retry only in running phase. |
+| `reconciliation_observed` | Running/reconciliation phase, expected intent/BindingContext, exact target-operation reference and reconciliation rule ID/version. Any supplied receipt must match intent/action/attempt/operation; accepted state requires that receipt. Effect presence requires evidence and marks observed, not verified. Unknown/unqualified absence retains uncertainty. Qualified absence may clear dispatching/unknown/acknowledged state; it cannot clear observed/verified state or a receipt claiming observed_effect. |
+| `outcome_recorded` | Running/reconciliation phase and possibly dispatched action, expected intent/BindingContext, exact receipt/target-operation and verification rule ID/version. Outcome receipt/intent/rule must match, observation cannot exceed now. Verified requires the admitted nonempty deterministic-rule evidence declaration and sets observed/verified; receipt acceptance alone never does. Unknown requires reconciliation. Contradictory outcomes cannot overwrite verified effects. |
+| `execution_completed` | Running phase, CompletionSummary, no unfinished steps, all required effects verified, no unknown/dispatching action or known not_verified outcome. A current accepted/observed action also needs its own verified outcome and a nonzero effect count. Zero-effect completion retains unknown outcome; it cannot erase prior verification. |
+| `cancellation_requested`, `execution_failed` | Any nonterminal phase; change only phase to cancelled/failed. All known/unknown action and outcome facts remain. Compensation is a separately bound action; its failure cannot erase an original effect. |
+
+Evidence events may report facts after an intent's lifetime has expired; they do
+not renew permission. New intent/decision/dispatch checks and retry suggestions
+require the current intent lifetime. Any suggestion remains false after
+cancellation, without a current epoch, or without remaining attempts.
+For ordinary read/computation `step_failed` events, a suggestion requires running
+phase, matching active step/attempt, not_dispatched action, unknown outcome, the
+actual failure code in the effective retry policy and `attempt + 1 < max_attempts`.
+No intent is required for an ordinary activity; if one is supplied its binding
+and current lifetime must match. A proven no-dispatch timeout uses the actual
+`timeout_before_dispatch` retry code. Qualified absence is a separate structural
+recovery basis with no failure code, so it requires remaining attempts and the
+current bound intent but does not invent or match a retry code. It never
+schedules a retry or bypasses fresh authority. Expiry or exhaustion suppresses a
+retry suggestion without discarding an otherwise valid absence observation.
+
+Acknowledgement is distinct from observed effect: qualified absence can resolve
+an accepted request, but its original receipt/evidence must remain in the future
+store and supplied context. The evaluator does not delete those facts.
+
+The fixed transition codes are `applied`, `duplicate`, `replay_conflict`,
+`sequence_gap`, `stale_sequence`, `context_mismatch`, `illegal_transition`,
+`wait_mismatch`, `wait_not_ready`, `wait_expired`, `binding_refused`,
+`reconciliation_required`, `evidence_missing`, `verification_missing`,
+`completion_incomplete`, `terminal_state`, `retry_exhausted`. Code/disposition and
+retry/state consistency are revalidated in report admission. Reports contain no
+source records, supplied free text or evidence bodies.
+
+The future runtime must atomically load authenticated tenant-bound state and
+source sequences, compare immutable full records, retain every receipt and
+contradictory evidence item, persist accepted events, enforce step scheduling,
+backoff and budgets, authenticate waits and qualified read-back, and issue fresh
+permission for any retry under the same logical intent/idempotency identity.
+Neither a synthetic snapshot nor `structurally_retryable=true` establishes those
+facts, exactly-once execution, signed trust, provenance or actual target effects.

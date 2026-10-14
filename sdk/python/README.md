@@ -505,3 +505,17 @@ rule identity and evidence references. These checks authenticate neither people
 nor artifacts and perform no dispatch or transition execution. See the
 [complete wire contract](../../docs-site/docs/executable-packages.md#action-bindings-and-runtime-wire-declarations)
 for exact fields, error precedence, event variants and downstream obligations.
+
+Pure event checks are available through `ContractState`, `EventContext`,
+`KnownEvent`, `CompletionSummary`, `TransitionReport`, `check_event_transition`
+and their `validate_*` helpers. `event_digest` hashes the complete admitted event,
+including source/sequence/time, rather than its payload alone.
+`transition_report_json` emits a bounded ASCII report. Scope/epoch fences precede
+known replay, then sequence and current-state guards. Only applied events advance
+the supplied sequence. Gaps and possible writes require reconciliation;
+acknowledgements do not verify effects, cancellation preserves effects, and
+completion requires the supplied complete verification summary. Attempts are
+zero-based. All context, time and durable-state claims are supplied and remain
+unauthenticated; reports grant no authority, persistence, dispatch or retry
+permission. See the [exact transition contract](../../docs-site/docs/executable-packages.md#pure-event-transition-checks)
+for required context facts, phases, retry qualifications and consumer obligations.

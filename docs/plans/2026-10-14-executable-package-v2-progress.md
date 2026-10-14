@@ -383,3 +383,42 @@ Final Python 3.14 evidence is 116 focused tests, 429 preceding tests, and the fu
 Task 6 receives complete record admission and full-event digest helpers, the exact event/reference matrix, binding refusal order and explicit context requirements. Full-event replay identity must include headers, sequence and time; an intent's binding digest differs from its full wire-record digest. Signing must cover the full admitted command. Constructor validation alone is not complete admission, and exported schema must preserve event kind/payload/reference correlations.
 
 Actual authentication, durable state, provider read-back, authority and production qualification remain unimplemented consumers. Final Python 3.13, complete application/database, actual offline-image recovery, whole-branch review and exact-head hosted CI gates remain Task 10. No earlier task finding is parked or open.
+
+## Task 6 implementation evidence
+
+Added bounded, deterministic `ContractState`, `EventContext`, `KnownEvent`,
+`CompletionSummary` and `TransitionReport` contracts, full-event replay digest,
+public admission helpers and ASCII report serialization. Scope/source/epoch
+fences precede known replay, then exact sequence and current-state guards.
+Only applied events advance the supplied sequence. Refusals preserve state;
+cancellation/failure and uncertain writes preserve known effects. Completion
+requires the full supplied verification summary and cannot promote acceptance
+into verified success.
+
+Context includes independent admission hashes, explicit active step/attempt,
+exact opaque target-operation and reconciliation/verification rule bindings.
+Ordinary activity retries need the actual failure code/policy and no action
+intent; possible writes require qualified absence under the same intent.
+Qualified absence is a separate structural recovery basis without an invented
+failure code. It may resolve acknowledgement, but never clear observed/verified
+facts or contradictory positive evidence. All results remain synthetic and grant
+no authority; the future store must retain receipts and evidence independently.
+
+Initial exact focused red command produced 54 missing-interface failures before
+implementation. Later red cases covered unsafe retry/state reset, missing ordinary
+activity retries, controller-qualified absence refinements and Task 5 binding
+precedence; all failed runs and corrections remain in the task evidence/report.
+Final Python 3.14.5 focused run: **107 passed**. Required transition/action/wire/
+compiler coverage: **292 passed**. Full standalone SDK: **991 passed and 68
+subtests passed**, including installed artifact journeys, no skips or warnings.
+The full run used already-authorized network access for Hatchling from the outset,
+with TLS settings unchanged. Ruff and whitespace checks pass. Exact tested source
+hashes, commands, intermediate failures and final outputs are retained under the
+local Task 6 SDD evidence directory.
+
+The tracked executable guide records exact model fields, required/null context
+facts per event, admission and replay order, zero-based attempts, retry/completion
+invariants and future consumer duties. Independent task review is pending. Final
+Python 3.13/application/database/offline/whole-branch/hosted gates remain Task 10;
+no runtime persistence, authority, provider execution or production qualification
+is implemented or claimed.

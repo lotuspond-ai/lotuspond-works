@@ -41,6 +41,21 @@ from .metadata import (
 )
 from .package import ArtifactRef, Body, ExecutablePackage, Step
 from .plan import CompiledPlan, canonical_plan_json, compiled_plan_digest
+from .transitions import (
+    CompletionSummary,
+    ContractState,
+    EventContext,
+    KnownEvent,
+    TransitionReport,
+    check_event_transition,
+    event_digest,
+    transition_report_json,
+    validate_completion_summary,
+    validate_contract_state,
+    validate_event_context,
+    validate_known_event,
+    validate_transition_report,
+)
 from .types import (
     DataSchema,
     DataType,
@@ -79,6 +94,20 @@ from .wire import (
 )
 
 __all__ = [
+    "ContractState",
+    "EventContext",
+    "KnownEvent",
+    "CompletionSummary",
+    "TransitionReport",
+    "event_digest",
+    "check_event_transition",
+    "validate_contract_state",
+    "validate_event_context",
+    "validate_known_event",
+    "validate_completion_summary",
+    "validate_transition_report",
+    "transition_report_json",
+
     "ActionBinding",
     "ActionIntent",
     "HumanDecision",
