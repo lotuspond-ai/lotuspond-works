@@ -92,3 +92,59 @@ Independent Task 2 review, whole-application checks and hosted CI remain
 controller-owned; no database access, publication or runtime authority was added.
 
 Task 2 independent specification review passed; quality approved with zero critical/important findings. One documentation nit remains for the final documentation pass: identify the reviewed-action fixture before an example indexes its specific topology. No runtime findings remain open for this task.
+
+## Task 3 — detached signatures and independent trust
+
+The SDK exposes `sign_package`, `verify_package`, `SignatureEnvelope`,
+`VerificationReport`, `TrustedKey`, `TrustSet`, `generate_keypair`,
+`load_signing_key` and `write_new`. Detached Ed25519 signatures bind the fixed
+package context, strict metadata, sorted ASCII header and exact canonical UTF-8
+content through uint64 big-endian length framing. Trust is externally provisioned,
+capped at 64 records and rejects extras, duplicate IDs/public keys, mismatched
+fingerprints and noninteger format versions. Unknown and revoked keys cannot
+verify. Reports preserve `contract_valid=True`, `compatibility_status=not_checked`
+and exact `authority_granted=False`; verification grants no execution authority.
+Mutable typed records and serialization are revalidated.
+
+The initial focused tests failed on three missing interfaces. The package fixture
+was independently signed with OpenSSL 3.5.7 using the public RFC 8032 vector-1
+test key: 40 context/NUL bytes, 361 header bytes, 1,166 canonical bytes and 16
+length bytes produce a 1,583-byte frame. RFC known-message bytes, committed literal
+signature expectations and mandatory OpenSSL checks in both directions pass.
+All key material is synthetic. Provenance and source links are in the fixture
+README; missing OpenSSL fails rather than skipping Linux CI cross-verification.
+
+Local cryptography 50.0.2 accepted an identity-key forgery. The controller approved
+a bounded trust-encoding guard using all seven libsodium 1.0.18 published
+small-order y encodings under both sign bits and the canonical y < 2^255-19 bound.
+The 14 blacklist variants, 38 noncanonical variants and identity-forgery case
+were red before the guard, then green. No curve arithmetic or new crypto
+dependency was introduced; this is not a full subgroup validation or an assertion
+of equivalence to Rust `verify_strict`.
+
+The controller also superseded the original pathname-cleanup instruction:
+publication failures now preserve created outputs and concurrent replacements,
+raising fixed `output_incomplete` for standalone writes or `keypair_incomplete`
+for key generation. No failure path unlinks files. Nine revised file cases failed
+against cleanup behavior before this correction. New outputs are exclusive,
+complete-write/fsynced on success; private PEM is owner-only 0600, current-user
+owned, no-follow and bounded at 4096 bytes. FIFO/symlink/replacement, wrong-owner,
+permissions, malformed/encrypted/wrong-algorithm, short/zero/partial writes,
+second-file collisions and fsync/close failures have explicit coverage. Separate
+red/green checks corrected unsanitized close errors and nonboolean private flags.
+Two-file publication is not crash-atomic; retained partial outputs require
+operator inspection in an operator-controlled directory.
+
+Final focused verification passed **125 tests**, with no skips. Complete SDK
+verification passed **208 tests and 68 subtests** on Python 3.14.5 and isolated
+Python 3.13.13, including wheel/sdist installation and independent OpenSSL checks.
+Frozen dependency sync, Ruff, whitespace checks and strict documentation build
+passed. The first documentation-tool attempt hit a read-only global tool directory;
+`uv run --no-project --with mkdocs==1.6.1` built successfully to `/tmp`. The isolated
+Python 3.13 install used uv's normal full-copy fallback across filesystems.
+
+The Task 2 README topology nit is resolved by loading the reviewed-action example
+explicitly before indexing its agent node. Independent Task 3 specification/crypto
+and quality review, application/database/image integration and hosted CI remain
+controller-owned. No push, merge, package-index publication, production/customer
+access or broader integration check was performed by this implementer.

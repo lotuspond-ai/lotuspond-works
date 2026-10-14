@@ -1,4 +1,4 @@
-"""Local v1 workflow-package validation and content identity."""
+"""Local v1 workflow-package validation, differences and detached trust tooling."""
 
 from .contract import (
     MAX_JSON_DEPTH as MAX_JSON_DEPTH,
@@ -28,8 +28,11 @@ from .diff import PackageChange as PackageChange
 from .diff import PackageDiff as PackageDiff
 from .diff import diff_packages as diff_packages
 from .errors import SdkError as SdkError
+from .files import generate_keypair as generate_keypair
 from .files import load_package as load_package
+from .files import load_signing_key as load_signing_key
 from .files import read_regular as read_regular
+from .files import write_new as write_new
 from .input import (
     PackageReadError as PackageReadError,
 )
@@ -45,3 +48,9 @@ from .metadata import (
 from .metadata import (
     VALIDATOR_REVISION as VALIDATOR_REVISION,
 )
+from .signing import SignatureEnvelope as SignatureEnvelope
+from .signing import VerificationReport as VerificationReport
+from .signing import sign_package as sign_package
+from .signing import verify_package as verify_package
+from .trust import TrustedKey as TrustedKey
+from .trust import TrustSet as TrustSet

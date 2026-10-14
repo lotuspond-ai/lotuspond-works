@@ -38,12 +38,13 @@ content uses sorted keys, UTF-8, explicit normalized defaults and significant
 array order. Canonicalization and validator revision identifiers are exported
 from `lotuspond_sdk`; the backend uses this same implementation.
 
-Compare two validated packages locally:
+Compare two validated packages locally using the repository’s reviewed-action example:
 
 ```python
 from copy import deepcopy
 from lotuspond_sdk import diff_packages
 
+package = load_package(Path("contracts/examples/reviewed-action.v1.json"))
 after = deepcopy(package)
 after.nodes[2].instructions = "Propose a different update."
 after.nodes.reverse()
@@ -77,9 +78,108 @@ instances and serialization. JSON is ASCII-safe and capped at 8 MiB; oversized
 reports raise `SdkError` with `code="report_too_large"` without dropping changes.
 
 Validation and content digests check declarations and integrity only. They do
-not install, execute, sign, authorize, resolve secrets or establish publisher
+not install, execute, authorize, resolve secrets or establish publisher
 trust or runtime compatibility. A diff provides no behavioral compatibility,
 safety, trust or authority assessment. Only workflow-package v1 is supported.
+
+## Detached signatures and independent trust
+
+```python
+from lotuspond_sdk import generate_keypair, load_signing_key, sign_package, write_new
+
+# Use new paths in an operator-controlled directory, with synthetic local data.
+key_id = generate_keypair(Path("publisher.private.pem"), Path("publisher.public.pem"))
+envelope = sign_package(package, load_signing_key(Path("publisher.private.pem")))
+write_new(Path("workflow.signature.json"), (envelope.model_dump_json() + "\n").encode("ascii"))
+```
+
+Private PEM is unencrypted PKCS8; public PEM is SubjectPublicKeyInfo (SPKI).
+Private files are created with mode 0600, require current-user ownership and no
+group/other access, and are read without following the final symlink. Key reads
+are nonblocking, require a regular file and are limited to 4096 bytes. Encrypted,
+malformed and non-Ed25519 private keys are rejected. Unsupported private-key
+platforms fail closed with `unsupported_key_platform`; permissions are not
+silently weakened. Use protected custody and access-controlled offline backups:
+the SDK supplies neither a keystore nor secret recovery, and Python does not
+promise zeroization of in-memory private-key objects.
+
+All new outputs use exclusive creation and refuse existing files, directories,
+symlinks and named pipes. `write_new(path, data, private=False)` requires bytes and
+an actual boolean, completes short writes and fsyncs the file. Public output mode
+is 0644 masked by the caller’s umask. Once a destination has been created, a
+publication failure preserves it, including any concurrent replacement. Failed
+standalone publication returns `output_incomplete`; failed keypair publication
+returns `keypair_incomplete`. Both require operator inspection: a complete private
+key, a partial key file or partial signature output can remain. Do not blindly
+retry into the same paths. Pre-existing outputs are refused without mutation.
+No failure path unlinks a destination; POSIX cannot atomically compare an inode
+and unlink against hostile concurrent directory writers. Keep parent directories
+operator-controlled. Two-file publication is **not crash-atomic** and does not
+promise durable parent directory entries after power loss. No key bytes or
+supplied paths appear in SDK error messages.
+
+The verifier obtains and authenticates the publisher’s public key **out of band**.
+A key ID is SHA-256 of raw 32-byte public key bytes; an envelope never embeds a
+public key. Provision a separate JSON trust set with exactly these fields:
+
+```json
+{"format_version":1,"keys":[{"key_id":"<lowercase hex64 fingerprint>","public_key":"<lowercase hex64 raw Ed25519 public key>","state":"allowed"}]}
+```
+
+The placeholders must be replaced with independently authenticated real values.
+The trust set allows at most 64 keys, forbids extras and duplicates, and checks
+every fingerprint. It rejects the established small-order compressed public-key
+encodings (both sign bits) and noncanonical y encodings (y >= 2^255 - 19), so
+an allowed identity-point key cannot authorize a forged signature. These are
+encoding checks based on libsodium’s published constants, with cryptography
+performing signature verification; they are not a full subgroup validation or a
+claim of equivalence to Rust’s `verify_strict`. An empty set grants no trust. To rotate, independently
+provision the new public key, allow both keys during a deliberate overlap, and
+change the old entry to `revoked` when old signatures must no longer be accepted.
+Revocation rejects even a mathematically valid signature immediately when that
+updated trust set is supplied; the SDK does not retrieve remote revocation state.
+
+```python
+import hashlib
+from cryptography.hazmat.primitives import serialization
+from lotuspond_sdk import read_regular, verify_package
+
+# This PEM must already be authenticated through an independent trusted channel.
+public = serialization.load_pem_public_key(
+    read_regular(Path("authenticated.publisher.public.pem"), max_bytes=4096)
+).public_bytes_raw()
+trust_set = {"format_version": 1, "keys": [{
+    "key_id": hashlib.sha256(public).hexdigest(),
+    "public_key": public.hex(), "state": "allowed",
+}]}
+report = verify_package(package, envelope, trust_set)
+print(report.model_dump_json())
+```
+
+`sign_package(raw, private_key)` and `verify_package(raw, envelope, trust_set)`
+revalidate canonical package content and all mutable typed records. Envelope and
+trust format versions require integer 1; booleans and floats are rejected.
+`SignatureEnvelope` fixes Ed25519, context
+`lotuspond-workflow-package-signature-v1`, current schema/canonicalization IDs,
+lowercase hex64 digest/key ID and lowercase hex128 signature. Signing uses
+`context || NUL || uint64be(len(H)) || H || uint64be(len(C)) || C`, where `H` is
+sorted-key compact ASCII JSON of all envelope fields except `signature`, and `C`
+is exact canonical UTF-8 package content. This frame is distinct from evidence
+manifest signatures and binds both metadata and normalized content.
+
+Malformed envelopes/trust sets raise fixed `invalid_signature_envelope` or
+`invalid_trust_set` errors. Well-formed outcomes return `VerificationReport`:
+`verified`, `untrusted_key`, `revoked_key`, `digest_mismatch` or `invalid_signature`.
+Unknown/revoked trust takes precedence over digest/signature checks. The report
+contains the recomputed content digest, named key ID, `contract_valid=True`,
+`compatibility_status="not_checked"` and `authority_granted=False`; only
+`verified` has `valid=True`. All report/envelope/trust serialization revalidates
+models, is ASCII-safe and is bounded at 8 MiB.
+
+A valid detached signature establishes integrity under the supplied allowed key.
+It grants no tenant authority, registry admission, release approval, deployment
+admission, runtime compatibility or permission to execute. No hosted issuer or
+trust registry is introduced. CLI signature/key commands are a separate increment.
 
 For development, run `uv sync --frozen --project sdk/python`, then `npm run
 check:sdk`. Distribution tests build wheel and sdist and install each into a
