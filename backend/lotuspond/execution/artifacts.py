@@ -173,7 +173,27 @@ class ArtifactStore:
     def put(
         self, db, actor: ExecutionActor, content: bytes, policy: ArtifactPolicy
     ) -> ArtifactHandle:
-        actor = reauthorize(db, actor, "execute")
+        return self._put(db, actor, content, policy, operation="execute")
+
+    @execution_service
+    def _put_signal(self, db, actor, content, policy, *, check_current):
+        """Internal inbox-only route; the callback is trusted service code, never input.
+
+        It must recheck exact persisted wait/source/assignment/type and deadline.
+        Only source-null workspace-policy response artifacts are supported here:
+        no new source parent may be acquired after the inbox locks its wait.
+        """
+        policy = ArtifactPolicy.model_validate(policy)
+        if policy.source_id is not None or not callable(check_current):
+            raise ExecutionError("forbidden")
+        return self._put(
+            db, actor, content, policy, operation="signal", check_current=check_current
+        )
+
+    def _put(self, db, actor, content, policy, *, operation, check_current=None):
+        actor = reauthorize(db, actor, operation)
+        if check_current is not None:
+            check_current()
         policy = ArtifactPolicy.model_validate(policy)
         _json(content)
         source = self._source(db, actor, policy.source_id, policy.source_version)
@@ -189,11 +209,15 @@ class ArtifactStore:
         key = self._key(actor.scope, policy.key_id)
         self._current(db, actor, policy, source)
         # An external key/source lookup is not authority to outlive current account expiry.
-        reauthorize(db, actor, "execute")
+        reauthorize(db, actor, operation)
+        if check_current is not None:
+            check_current()
         row.ciphertext = AESGCM(key).encrypt(row.nonce, content, _aad(actor.scope, row))
         db.add(row)
         db.flush()
         self._current_time(db, policy, source)
+        if check_current is not None:
+            check_current()
         return ArtifactHandle(id=row.id, version=row.version, sha256=row.sha256)
 
     @execution_service
