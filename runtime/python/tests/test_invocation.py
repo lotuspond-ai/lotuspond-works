@@ -583,7 +583,8 @@ def test_real_child_and_dns_descendant_cleanup(tmp_path, monkeypatch, failure):
         while True:
             try:
                 fields = state.read_text().rsplit(")", 1)[1].split()
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
+                # The helper can disappear before open (ENOENT) or during read (ESRCH).
                 break
             assert int(fields[19]) == helper_start, "helper PID was reused"
             assert int(fields[2]) == helper_group
