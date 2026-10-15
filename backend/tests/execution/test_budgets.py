@@ -833,3 +833,24 @@ def test_duplicate_node_ids_across_subworkflows_refuse_guessed_source(budget_har
             h.budgets.reserve_attempt(db, h.actor, attempt, demand(1))
         assert db.scalar(select(ExecutionUsageReservation)) is None
         assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+
+
+def test_reservation_active_start_uses_database_clock_not_application_default(
+    budget_harness, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        attempt, _ = h.add(db)
+        # An application clock far in the future must not erase running time.
+        monkeypatch.setattr(
+            ExecutionUsageReservation.__table__.c.created_at.default,
+            "arg",
+            lambda context: datetime(2100, 1, 1, tzinfo=UTC),
+        )
+        before = database_now_ms(db)
+        h.budgets.reserve_attempt(db, h.actor, attempt, demand(1))
+        row = db.scalar(select(ExecutionUsageReservation))
+        after = database_now_ms(db)
+        assert before <= int(row.created_at.timestamp() * 1000) <= after

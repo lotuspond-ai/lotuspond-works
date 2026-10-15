@@ -8,7 +8,7 @@ at the same parent order, and roll back the entire operation on refusal.
 
 import json
 import math
-from datetime import UTC
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Protocol
 
@@ -427,6 +427,7 @@ class BudgetService:
         ):
             raise ExecutionError("capacity_unavailable")
         row = ExecutionUsageReservation(
+            created_at=datetime.fromtimestamp(database_now_ms(db) / 1000, UTC),
             **actor.scope.model_dump(),
             execution_id=execution.id,
             step_instance_id=step.id,
