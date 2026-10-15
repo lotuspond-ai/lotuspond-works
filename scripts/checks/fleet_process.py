@@ -56,6 +56,12 @@ def _absent(pid):
     return False
 
 
+def _wait_absent(pid, deadline):
+    while not _absent(pid) and time.monotonic() < deadline:
+        time.sleep(min(0.02, max(0, deadline - time.monotonic())))
+    return _absent(pid)
+
+
 def wait_owned(process, *, timeout, grace=30, receipt: Path | None = None):
     """Wait only for a Popen created with start_new_session=True by this caller.
 
@@ -76,19 +82,27 @@ def wait_owned(process, *, timeout, grace=30, receipt: Path | None = None):
             or process.poll() is None
             or not _absent(process.pid)
         ):
+            deadline = time.monotonic() + grace
             _signal_group(process.pid, signal.SIGTERM)
             try:
-                stdout, stderr = process.communicate(timeout=grace)
-            except subprocess.TimeoutExpired:
+                stdout, stderr = process.communicate(
+                    timeout=max(0, deadline - time.monotonic())
+                )
+            except subprocess.TimeoutExpired as error:
+                stdout, stderr = error.output or b"", error.stderr or b""
+            # Leader exit and pipe EOF do not establish descendant cleanup. Both
+            # collection and exact-group disappearance share one grace deadline.
+            if not _wait_absent(process.pid, deadline) or process.poll() is None:
                 escalated = True
+                deadline = time.monotonic() + 5
                 _signal_group(process.pid, signal.SIGKILL)
                 try:
-                    stdout, stderr = process.communicate(timeout=5)
+                    stdout, stderr = process.communicate(
+                        timeout=max(0, deadline - time.monotonic())
+                    )
                 except subprocess.TimeoutExpired as error:
                     stdout, stderr = error.output or b"", error.stderr or b""
-        deadline = time.monotonic() + 2
-        while not _absent(process.pid) and time.monotonic() < deadline:
-            time.sleep(0.02)
+                _wait_absent(process.pid, deadline)
         confirmed = process.poll() is not None and _absent(process.pid)
         if receipt is not None:
             receipt.write_text(

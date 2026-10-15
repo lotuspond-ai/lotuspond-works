@@ -213,6 +213,93 @@ time.sleep(60)
                 pass
 
 
+@pytest.mark.parametrize("trigger", ["timeout", "cancel", "leader-exit"])
+def test_owned_group_escalates_after_leader_closes_pipes(tmp_path, trigger):
+    """An isolated subreaper owns the exact TERM-resistant probe descendant."""
+    program = r'''
+import ctypes,json,os,signal,subprocess,sys,threading,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+from fleet_process import Cancelled,cancellation_signals,wait_owned
+root=Path(sys.argv[2]); trigger=sys.argv[3]
+assert ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0)==0
+child_program="""
+import os,signal,sys,time
+from pathlib import Path
+signal.signal(signal.SIGTERM,signal.SIG_IGN)
+Path(sys.argv[1]).write_text(str(os.getpid()))
+time.sleep(60)
+"""
+leader_program="""
+import subprocess,sys,time
+from pathlib import Path
+subprocess.Popen([sys.executable,'-c',sys.argv[2],sys.argv[1]+'/child'],
+                 stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+print('leader stdout',flush=True)
+print('leader stderr',file=sys.stderr,flush=True)
+while not Path(sys.argv[1]+'/exit').exists(): time.sleep(.01)
+"""
+leader=subprocess.Popen([sys.executable,'-c',leader_program,str(root),child_program],
+    stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+child=None; reaped=threading.Event(); timer=None; observation={}
+def absent():
+    try: os.killpg(leader.pid,0)
+    except ProcessLookupError: return True
+    return False
+def reap_child():
+    deadline=time.monotonic()+10
+    while time.monotonic()<deadline:
+        try:
+            if os.waitpid(child,os.WNOHANG)[0]==child:
+                reaped.set(); return
+        except ChildProcessError: pass  # Wait for this exact child to be adopted.
+        time.sleep(.01)
+try:
+    deadline=time.monotonic()+3
+    while not (root/'child').exists() and time.monotonic()<deadline: time.sleep(.01)
+    child=int((root/'child').read_text())
+    assert os.getpgid(child)==leader.pid
+    reaper=threading.Thread(target=reap_child); reaper.start()
+    if trigger=='leader-exit': (root/'exit').touch()
+    started=time.monotonic()
+    with cancellation_signals():
+        if trigger=='cancel':
+            timer=threading.Timer(.1,lambda: os.kill(os.getpid(),signal.SIGTERM))
+            timer.start()
+        try:
+            wait_owned(leader,timeout=.1 if trigger=='timeout' else 3,grace=.2,
+                       receipt=root/'runner.json')
+            assert trigger!='cancel'
+        except Cancelled:
+            assert trigger=='cancel'
+    observation={'group':leader.pid,'child':child,'group_absent':absent(),
+                 'child_reaped':reaped.is_set(),'elapsed':time.monotonic()-started}
+    (root/'before-test-cleanup.json').write_text(json.dumps(observation,indent=2)+'\n')
+finally:
+    if timer is not None: timer.cancel(); timer.join()
+    if not absent(): os.killpg(leader.pid,signal.SIGKILL)
+    leader.communicate(timeout=2)
+    if child is not None: reaper.join(timeout=3)
+    (root/'test-cleanup.json').write_text(json.dumps(
+        {'group_absent':absent(),'child_reaped':reaped.is_set()},indent=2)+'\n')
+receipt=json.loads((root/'runner.json').read_text())
+assert observation['group_absent'] and observation['child_reaped'],observation
+assert receipt['cleanup_confirmed'] and receipt['escalated'],receipt
+assert receipt['timed_out']==(trigger=='timeout'),receipt
+assert receipt['cancelled']==(trigger!='leader-exit'),receipt
+assert receipt['exit']==(0 if trigger=='leader-exit' else -signal.SIGTERM),receipt
+assert (root/'runner.stdout').read_bytes()==b'leader stdout\n'
+assert (root/'runner.stderr').read_bytes()==b'leader stderr\n'
+assert observation['elapsed']<2,observation
+'''
+    probe = subprocess.run(
+        [sys.executable, "-c", program, str(CHECKS), str(tmp_path), trigger],
+        capture_output=True,
+        timeout=15,
+    )
+    assert probe.returncode == 0, (probe.stdout + probe.stderr).decode()
+
+
 def test_installed_restore_consumer_measures_live_sink(tmp_path):
     database = os.environ.get("LOTUSPOND_PLATFORM_TEST_DATABASE_URL")
     if not database:
