@@ -46,19 +46,59 @@ proof was extended to include the new runtime distribution. The Node evaluation
 image/offline contents are preserved. API build CA mounts are optional and
 portable; no session CA is copied into image layers or TLS verification disabled.
 
-## Final gates
+## Final local gates (2026-10-15 UTC)
 
-Final commands, counts/skips, failures and exact source/artifact/image mapping are
-retained in the controller's Task9 report. This file will receive the completed
-final-source results after execution. No prior-task artifacts or synthetic totals
-substitute for actual Task9 evidence. Overlapping root/backend/runtime/SDK checks
-are attributed to one receipt rather than repeated under equivalent labels.
+Tested source is clean commit
+`c74f864074a577110c31d57cb7d465aa2417f698`; later CI full-app-import wiring and
+this evidence update change no shipped API/SDK/runtime/package bytes. One final
+PostgreSQL-enabled `npm run check` under the documented normal-host reaper passed,
+including installed smoke, backend and both Python3.14 package suites. Counts
+overlap with focused runs and are not added together.
 
-Release gates: verified PostgreSQL root `npm run check` with zero required DB
-skips; schema export; complete runtime/SDK suites including direct/sdist artifact
-consumers under Python 3.13 and 3.14; installed fleet smoke; strict MkDocs build;
-relevant deployment checks; backend/runtime artifact `uv pip check`; exact-source
-API image noneditable SDK/runtime metadata/import/dependency verification.
+| Gate | Actual outcome |
+| --- | --- |
+| Root Node suite | 105 passed, zero skips |
+| Complete backend / verified PostgreSQL | 710 passed +97 subtests, zero skips, 625.45s; one existing Starlette/AnyIO deprecation warning |
+| SDK Python3.14.5 | 1472 passed +68 subtests, zero skips, 94.16s |
+| Runtime Python3.14.5 | 623 passed, zero skips, 29.18s |
+| SDK Python3.13.13, separate environment | 1472 passed +68 subtests, zero skips, 93.32s |
+| Runtime Python3.13.13, separate environment | 623 passed, zero skips, 30.83s |
+| Installed API/CLI/library smoke | Direct wheel and independently rebuilt sdist-wheel: all eight fixed subjourneys each passed, required PostgreSQL skips0, restored new effects0, owned cleanup confirmed |
+| Schema export, lint, v1/v2 contract/schema checks, frontend build | Passed |
+| Deployment checks | 38 passed +13 subtests |
+| Strict MkDocs1.6.1 build | Passed with no strict warnings |
+| Backend dependency check | 75 compatible packages |
+| SDK/runtime artifact dependency checks | All eight distinct direct/sdist environments across Python3.13/3.14 compatible |
+| Exact API image | Built; offline full FastAPI app/runtime-route import, noneditable metadata, dependency consistency and exact source-tree hashes passed |
+
+Local tools: uv0.11.16, Node24.21.0, npm11.9.0, PostgreSQL17.11. The existing
+independently verified localhost test server was retained. API image Python3.14.7
+contains44 compatible packages, SDK0.2.0 and runtime0.1.0; image identity is
+`sha256:450978edb99c90bc905af6ea4796edc9e431eb73d26e60b219edd589f3058830`.
+All ten exact diagnostic/probe container IDs were confirmed absent; image retained.
+The external uv probe initially tried the nonroot image user's unavailable cache;
+`--no-cache` qualified it without changing image permissions. A full-app probe's
+first route inspection assumed flattened FastAPI routes; public URL lookup
+qualified the current lazy router representation. Both failed helper receipts
+remain alongside successful outputs; neither required a product change.
+
+Actual final installed-smoke SHA256 identities:
+
+| Distribution | SHA256 |
+| --- | --- |
+| SDK0.2.0 wheel | `ed5aeaa0fd4cc417eaa4a9ba69627e5dccb7c9e000e4716397a4d2ea5e216118` |
+| Runtime0.1.0 direct wheel | `198431053d72d4e77540936c6dc9b45a30e608165901884dc255a50df737dd0e` |
+| Runtime0.1.0 sdist | `1571725270b9b9d44cbab4caf004bd2d378c3e5cf113ce048ddb473a8572fae5` |
+| Runtime0.1.0 independently rebuilt wheel | `198431053d72d4e77540936c6dc9b45a30e608165901884dc255a50df737dd0e` |
+| API0.2.0 wheel | `09fa657f1d467ac5ae2d680053ad254bc55f70feb0591bbd604d411fc2891792` |
+
+Equal wheel digests retain their distinct independent build origins. Frozen-source
+and per-artifact manifests, installed-origin/namespace/process receipts and actual
+safe tested outputs are retained in the controller's Task9 report/evidence set.
+The source suite's natural lease wait is real; forced startup recovery does not
+claim natural ten-minute renewal. Root owns fresh task/whole-branch reviews and
+exact-head hosted CI/publication. No merge, deployment or public package release
+was performed by this qualification task.
 
 ## Remaining customer and production work
 
