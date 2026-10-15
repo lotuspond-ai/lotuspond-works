@@ -21,7 +21,8 @@ import {
 } from './packageContract.js';
 
 const examplePath = new URL('../../../contracts/examples/reviewed-action.v1.json', import.meta.url);
-const sourcePath = new URL('../../../backend/lotuspond/package_contract.py', import.meta.url);
+// The shared v1 validator lives in the standalone SDK; the backend module re-exports it.
+const sourcePath = new URL('../../../sdk/python/src/lotuspond_sdk/contract.py', import.meta.url);
 // Recorded with `npm run package:validate -- contracts/examples/reviewed-action.v1.json`.
 const EXAMPLE_DIGEST = '305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3';
 

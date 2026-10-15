@@ -185,3 +185,18 @@ class FailureDetailTests(unittest.TestCase):
         self.assertIn("boom", message)
         self.assertIn("[redacted]", message)
         self.assertNotIn(secret, message)
+
+
+class InstalledSdkProbeTests(unittest.TestCase):
+    def test_image_probe_retains_v1_and_literal_v2_oracles(self):
+        # This exact script runs in the immutable installed API image during the drill.
+        # Here the literal compile portion runs locally; installed image identity is a separate drill gate.
+        import subprocess
+        import sys
+        source = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            [sys.executable, "-c", smoke.V2_SDK_PROBE],
+            input=(source / "contracts/examples/reviewed-action.v1.json").read_bytes(),
+            capture_output=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr.decode())

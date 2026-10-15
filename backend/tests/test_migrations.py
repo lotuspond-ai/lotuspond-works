@@ -41,9 +41,22 @@ def rewind_identity_v5(connection):
     connection.execute(text("ALTER TABLE api_keys DROP COLUMN created_by_user_id"))
 
 
+def rewind_fleet_v13(connection):
+    from lotuspond.fleet.migration import FLEET_TABLES
+    from lotuspond.models import EXECUTION_TABLES, Base
+
+    Base.metadata.drop_all(connection, tables=[Base.metadata.tables[name] for name in EXECUTION_TABLES])
+    connection.execute(text("ALTER TABLE api_keys DROP CONSTRAINT api_keys_execution_scope_unique"))
+    connection.execute(text("ALTER TABLE runs DROP CONSTRAINT runs_execution_scope_unique"))
+    connection.execute(text("ALTER TABLE releases DROP CONSTRAINT releases_execution_candidate_unique"))
+    Base.metadata.drop_all(connection, tables=[Base.metadata.tables[name] for name in FLEET_TABLES])
+    connection.execute(text("ALTER TABLE environments DROP CONSTRAINT environments_fleet_scope_unique"))
+
+
 def rewind_registry_v12(connection):
     from lotuspond.models import PackagePublicationRequest, WorkflowPackageVersion
 
+    rewind_fleet_v13(connection)
     PackagePublicationRequest.__table__.drop(connection)
     WorkflowPackageVersion.__table__.drop(connection)
 
@@ -116,6 +129,13 @@ def rewind_monitoring_v6(connection):
     AlertDelivery.__table__.drop(connection)
     IncidentEvent.__table__.drop(connection)
     connection.execute(text("ALTER TABLE incidents DROP CONSTRAINT incidents_severity_check"))
+    # v5→v6 adds the resolution predicate; it does not belong in the v5 fixture.
+    # Rewinding a current ORM schema must remove its anonymously named copy too.
+    resolution = next(
+        item["name"] for item in migration.inspect(connection).get_check_constraints("incidents")
+        if "resolved_at" in item["sqltext"]
+    )
+    connection.execute(text(f'ALTER TABLE incidents DROP CONSTRAINT "{resolution}"'))
     for column in (
         "project_id",
         "voice_session_id",
@@ -731,13 +751,12 @@ def test_registry_v12_additive_preserves_rows_and_refuses_repeat(
     settings = Settings(env="test", database_url=os.environ["LOTUSPOND_PLATFORM_TEST_DATABASE_URL"])
     with engine.begin() as connection:
         before = list(connection.execute(select(User.id, User.email)).all())
-        models.PackagePublicationRequest.__table__.drop(connection)
-        models.WorkflowPackageVersion.__table__.drop(connection)
+        rewind_registry_v12(connection)
         connection.execute(SchemaVersion.__table__.update().values(version=11))
     monkeypatch.setattr(migration, "engine_for", lambda _: engine)
     migration.migrate(settings)
     with engine.connect() as connection:
-        assert connection.scalar(select(SchemaVersion.version)) == 12
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
         assert list(connection.execute(select(User.id, User.email)).all()) == before
         assert (
             connection.scalar(select(func.count()).select_from(models.WorkflowPackageVersion)) == 0
@@ -761,6 +780,7 @@ def test_registry_partial_state_rolls_back_entire_chain(
     assert hasattr(models, "WorkflowPackageVersion"), "Registry model missing"
     settings = Settings(env="test", database_url=os.environ["LOTUSPOND_PLATFORM_TEST_DATABASE_URL"])
     with engine.begin() as connection:
+        rewind_fleet_v13(connection)
         if partial in {"version", "older"}:
             models.PackagePublicationRequest.__table__.drop(connection)
         if partial == "request":
@@ -803,7 +823,7 @@ def test_registry_fresh_empty_initialization(engine, monkeypatch):
     monkeypatch.setattr(migration, "engine_for", lambda _: engine)
     migration.initialize(settings)
     with engine.connect() as connection:
-        assert connection.scalar(select(SchemaVersion.version)) == 12
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
         assert {"workflow_package_versions", "package_publication_requests"}.issubset(
             migration.inspect(connection).get_table_names()
         )

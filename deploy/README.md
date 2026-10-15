@@ -9,6 +9,8 @@ These files provide a portable single-host baseline for the Python API, its stat
 
 The API and collector ports bind to loopback by default. Put a reviewed HTTPS reverse proxy in front of the API, keep PostgreSQL and Redis unexposed, store configuration outside the repository, and restrict its permissions. Run `docker compose ... config --quiet` before startup; it detects missing required variables but does not prove credentials, TLS, migrations, backups, capacity, or external integration compatibility.
 
+Both Compose variants forward `LOTUSPOND_REQUIRE_MFA` to the API and `LOTUSPOND_SMTP_CONVERSATION_SECONDS` to the API and mail worker. Set them in the private installation env file; the defaults are `false` and `45`. Installation-wide MFA requires the separately supplied MFA encryption key and fails startup without it. Production operator MFA remains mandatory regardless of this setting. The whole SMTP bound must be at least the socket timeout and at most 120 seconds. Background workers do not receive the MFA key.
+
 The API image does not initialize or migrate a database. Before first startup, a database administrator must review and execute the version-matched `backend/schema.sql` only against a newly created, independently verified empty database. Applying schema or migration SQL to an existing database requires a separate data-preserving migration review and authorization. Readiness remains unavailable until the expected schema version exists. The worker uses the API image with `python -m lotuspond.worker`; its inherited HTTP healthcheck is disabled because it does not listen on a port.
 
 These artifacts have no cloud side effects. They do not provision DNS, certificates, hosts, databases, registries, backups, or monitoring.

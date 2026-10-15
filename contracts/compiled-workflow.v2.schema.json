@@ -1,0 +1,1755 @@
+{
+  "$comment": "Structural contract only. Use SDK public validators for bounds, semantic references, hashes and correlations. No authentication or authority is established.",
+  "$defs": {
+    "ArrayExport": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayExport",
+              "data": "#/$defs/DataExport",
+              "handle": "#/$defs/HandleExport",
+              "object": "#/$defs/ObjectExport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DataExport"
+            },
+            {
+              "$ref": "#/$defs/HandleExport"
+            },
+            {
+              "$ref": "#/$defs/ObjectExport"
+            },
+            {
+              "$ref": "#/$defs/ArrayExport"
+            }
+          ],
+          "title": "Items"
+        },
+        "kind": {
+          "const": "array",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_items": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Items",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "items",
+        "max_items"
+      ],
+      "title": "ArrayExport",
+      "type": "object"
+    },
+    "ArraySchema": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Items"
+        },
+        "kind": {
+          "const": "array",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_items": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Items",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "items",
+        "max_items"
+      ],
+      "title": "ArraySchema",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "workflow",
+            "connector",
+            "model",
+            "agent",
+            "evaluation",
+            "policy",
+            "knowledge",
+            "artifact"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "version",
+        "sha256"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "Binding": {
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Owner",
+          "type": "string"
+        },
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Path",
+          "type": "array"
+        }
+      },
+      "required": [
+        "owner",
+        "path"
+      ],
+      "title": "Binding",
+      "type": "object"
+    },
+    "BooleanSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "boolean",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "BooleanSchema",
+      "type": "object"
+    },
+    "Choice": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "choice",
+          "title": "Kind",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "choice": "#/$defs/Choice",
+                    "source": "#/$defs/Symbol"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/Symbol"
+                  },
+                  {
+                    "$ref": "#/$defs/Choice"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "selection_bindings": {
+          "items": {
+            "$ref": "#/$defs/Binding"
+          },
+          "title": "Selection Bindings",
+          "type": "array"
+        },
+        "selection_path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selection Path",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "options",
+        "selection_path",
+        "selection_bindings"
+      ],
+      "title": "Choice",
+      "type": "object"
+    },
+    "DataExport": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "data",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "kind",
+        "schema"
+      ],
+      "title": "DataExport",
+      "type": "object"
+    },
+    "DecimalSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "decimal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "precision": {
+          "maximum": 38,
+          "minimum": 1,
+          "title": "Precision",
+          "type": "integer"
+        },
+        "scale": {
+          "maximum": 18,
+          "minimum": 0,
+          "title": "Scale",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "precision",
+        "scale"
+      ],
+      "title": "DecimalSchema",
+      "type": "object"
+    },
+    "DefinitionDigest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "workflow",
+            "connector",
+            "model",
+            "agent",
+            "evaluation",
+            "policy",
+            "knowledge",
+            "artifact"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "version",
+        "sha256"
+      ],
+      "title": "DefinitionDigest",
+      "type": "object"
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "properties": {
+        "destination_classes": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Destination Classes",
+          "type": "array"
+        },
+        "operation_classes": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Operation Classes",
+          "type": "array"
+        },
+        "platforms": {
+          "items": {
+            "$ref": "#/$defs/Platform"
+          },
+          "maxItems": 64,
+          "title": "Platforms",
+          "type": "array"
+        },
+        "required_capabilities": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Required Capabilities",
+          "type": "array"
+        },
+        "runtime_contract": {
+          "const": "lotuspond.runtime-contract.v1",
+          "title": "Runtime Contract",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_contract",
+        "platforms",
+        "required_capabilities",
+        "destination_classes",
+        "operation_classes"
+      ],
+      "title": "Environment",
+      "type": "object"
+    },
+    "ExportField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayExport",
+              "data": "#/$defs/DataExport",
+              "handle": "#/$defs/HandleExport",
+              "object": "#/$defs/ObjectExport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DataExport"
+            },
+            {
+              "$ref": "#/$defs/HandleExport"
+            },
+            {
+              "$ref": "#/$defs/ObjectExport"
+            },
+            {
+              "$ref": "#/$defs/ArrayExport"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "name",
+        "schema",
+        "required"
+      ],
+      "title": "ExportField",
+      "type": "object"
+    },
+    "FieldSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "name",
+        "schema",
+        "required"
+      ],
+      "title": "FieldSpec",
+      "type": "object"
+    },
+    "HandleExport": {
+      "additionalProperties": false,
+      "properties": {
+        "handle_kind": {
+          "enum": [
+            "action_intent",
+            "human_decision",
+            "action_receipt",
+            "verification_evidence"
+          ],
+          "title": "Handle Kind",
+          "type": "string"
+        },
+        "kind": {
+          "const": "handle",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "handle_kind"
+      ],
+      "title": "HandleExport",
+      "type": "object"
+    },
+    "IntegerSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "integer",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "IntegerSchema",
+      "type": "object"
+    },
+    "NullSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "null",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NullSchema",
+      "type": "object"
+    },
+    "NumberSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "number",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NumberSchema",
+      "type": "object"
+    },
+    "ObjectExport": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ExportField"
+          },
+          "maxItems": 64,
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "const": "object",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "ObjectExport",
+      "type": "object"
+    },
+    "ObjectSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldSpec"
+          },
+          "maxItems": 64,
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "const": "object",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "ObjectSchema",
+      "type": "object"
+    },
+    "OutcomeObligation": {
+      "additionalProperties": false,
+      "properties": {
+        "dispatch": {
+          "$ref": "#/$defs/Symbol"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "verified_by": {
+          "items": {
+            "$ref": "#/$defs/Symbol"
+          },
+          "title": "Verified By",
+          "type": "array"
+        }
+      },
+      "required": [
+        "package_sha256",
+        "dispatch",
+        "verified_by"
+      ],
+      "title": "OutcomeObligation",
+      "type": "object"
+    },
+    "PackageLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "active_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Active Seconds",
+          "type": "integer"
+        },
+        "elapsed_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Elapsed Seconds",
+          "type": "integer"
+        },
+        "max_cost_microusd": {
+          "maximum": 1000000000000,
+          "minimum": 0,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_steps": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "retained_waits": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Retained Waits",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_cost_microusd",
+        "max_steps",
+        "active_seconds",
+        "elapsed_seconds",
+        "retained_waits"
+      ],
+      "title": "PackageLimits",
+      "type": "object"
+    },
+    "PlanArray": {
+      "additionalProperties": false,
+      "properties": {
+        "alternatives": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PlanArray"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Alternatives"
+        },
+        "elements": {
+          "anyOf": [
+            {
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "array": "#/$defs/PlanArray",
+                    "data": "#/$defs/PlanData",
+                    "handle": "#/$defs/PlanHandle",
+                    "object": "#/$defs/PlanObject"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/PlanData"
+                  },
+                  {
+                    "$ref": "#/$defs/PlanHandle"
+                  },
+                  {
+                    "$ref": "#/$defs/PlanObject"
+                  },
+                  {
+                    "$ref": "#/$defs/PlanArray"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Elements"
+        },
+        "item_schema": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "array": "#/$defs/ArrayExport",
+                  "data": "#/$defs/DataExport",
+                  "handle": "#/$defs/HandleExport",
+                  "object": "#/$defs/ObjectExport"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/DataExport"
+                },
+                {
+                  "$ref": "#/$defs/HandleExport"
+                },
+                {
+                  "$ref": "#/$defs/ObjectExport"
+                },
+                {
+                  "$ref": "#/$defs/ArrayExport"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Item Schema"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "array": "#/$defs/PlanArray",
+                  "data": "#/$defs/PlanData",
+                  "handle": "#/$defs/PlanHandle",
+                  "object": "#/$defs/PlanObject"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PlanData"
+                },
+                {
+                  "$ref": "#/$defs/PlanHandle"
+                },
+                {
+                  "$ref": "#/$defs/PlanObject"
+                },
+                {
+                  "$ref": "#/$defs/PlanArray"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Items"
+        },
+        "iteration_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Iteration Id"
+        },
+        "kind": {
+          "const": "array",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_items": {
+          "title": "Max Items",
+          "type": "integer"
+        },
+        "may_be_missing": {
+          "title": "May Be Missing",
+          "type": "boolean"
+        },
+        "selection_bindings": {
+          "items": {
+            "$ref": "#/$defs/Binding"
+          },
+          "title": "Selection Bindings",
+          "type": "array"
+        },
+        "selection_path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Selection Path",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "items",
+        "max_items",
+        "may_be_missing",
+        "elements",
+        "item_schema",
+        "iteration_id",
+        "alternatives",
+        "selection_path",
+        "selection_bindings"
+      ],
+      "title": "PlanArray",
+      "type": "object"
+    },
+    "PlanData": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "data",
+          "title": "Kind",
+          "type": "string"
+        },
+        "may_be_missing": {
+          "title": "May Be Missing",
+          "type": "boolean"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "kind",
+        "schema",
+        "may_be_missing"
+      ],
+      "title": "PlanData",
+      "type": "object"
+    },
+    "PlanEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "sequence",
+            "then",
+            "else",
+            "branch",
+            "iteration",
+            "call"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "source_pointer": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Source Pointer",
+          "type": "string"
+        },
+        "target_package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Package Sha256",
+          "type": "string"
+        },
+        "target_pointer": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Target Pointer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_sha256",
+        "source_pointer",
+        "target_pointer",
+        "kind",
+        "target_package_sha256"
+      ],
+      "title": "PlanEdge",
+      "type": "object"
+    },
+    "PlanField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/PlanArray",
+              "data": "#/$defs/PlanData",
+              "handle": "#/$defs/PlanHandle",
+              "object": "#/$defs/PlanObject"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PlanData"
+            },
+            {
+              "$ref": "#/$defs/PlanHandle"
+            },
+            {
+              "$ref": "#/$defs/PlanObject"
+            },
+            {
+              "$ref": "#/$defs/PlanArray"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "PlanField",
+      "type": "object"
+    },
+    "PlanHandle": {
+      "additionalProperties": false,
+      "properties": {
+        "handle_kind": {
+          "enum": [
+            "action_intent",
+            "human_decision",
+            "action_receipt",
+            "verification_evidence"
+          ],
+          "title": "Handle Kind",
+          "type": "string"
+        },
+        "intent_source": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "choice": "#/$defs/Choice",
+                  "source": "#/$defs/Symbol"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "$ref": "#/$defs/Choice"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Intent Source"
+        },
+        "kind": {
+          "const": "handle",
+          "title": "Kind",
+          "type": "string"
+        },
+        "may_be_missing": {
+          "title": "May Be Missing",
+          "type": "boolean"
+        },
+        "source": {
+          "discriminator": {
+            "mapping": {
+              "choice": "#/$defs/Choice",
+              "source": "#/$defs/Symbol"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Symbol"
+            },
+            {
+              "$ref": "#/$defs/Choice"
+            }
+          ],
+          "title": "Source"
+        }
+      },
+      "required": [
+        "kind",
+        "handle_kind",
+        "source",
+        "intent_source",
+        "may_be_missing"
+      ],
+      "title": "PlanHandle",
+      "type": "object"
+    },
+    "PlanObject": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/PlanField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "const": "object",
+          "title": "Kind",
+          "type": "string"
+        },
+        "may_be_missing": {
+          "title": "May Be Missing",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "fields",
+        "may_be_missing"
+      ],
+      "title": "PlanObject",
+      "type": "object"
+    },
+    "PlanRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "sequence",
+          "title": "Kind",
+          "type": "string"
+        },
+        "maximum_step_attempts": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Maximum Step Attempts",
+          "type": "integer"
+        },
+        "output_type": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/PlanArray",
+              "data": "#/$defs/PlanData",
+              "handle": "#/$defs/PlanHandle",
+              "object": "#/$defs/PlanObject"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PlanData"
+            },
+            {
+              "$ref": "#/$defs/PlanHandle"
+            },
+            {
+              "$ref": "#/$defs/PlanObject"
+            },
+            {
+              "$ref": "#/$defs/PlanArray"
+            }
+          ],
+          "title": "Output Type"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "region_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Region Id",
+          "type": "string"
+        },
+        "result_mapping_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Mapping Sha256",
+          "type": "string"
+        },
+        "source_pointer": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Source Pointer",
+          "type": "string"
+        },
+        "step_ids": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "title": "Step Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "package_sha256",
+        "region_id",
+        "source_pointer",
+        "kind",
+        "step_ids",
+        "result_mapping_sha256",
+        "output_type",
+        "maximum_step_attempts"
+      ],
+      "title": "PlanRegion",
+      "type": "object"
+    },
+    "PlanStep": {
+      "additionalProperties": false,
+      "properties": {
+        "input_mapping_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Mapping Sha256",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "transform",
+            "decision",
+            "parallel",
+            "iteration",
+            "connector_read",
+            "agent",
+            "action_intent",
+            "human_task",
+            "action_dispatch",
+            "timer",
+            "external_wait",
+            "subworkflow",
+            "outcome_verification"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "maximum_step_attempts": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Maximum Step Attempts",
+          "type": "integer"
+        },
+        "operation": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Operation"
+        },
+        "output_type": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/PlanArray",
+              "data": "#/$defs/PlanData",
+              "handle": "#/$defs/PlanHandle",
+              "object": "#/$defs/PlanObject"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PlanData"
+            },
+            {
+              "$ref": "#/$defs/PlanHandle"
+            },
+            {
+              "$ref": "#/$defs/PlanObject"
+            },
+            {
+              "$ref": "#/$defs/PlanArray"
+            }
+          ],
+          "title": "Output Type"
+        },
+        "output_type_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Output Type Sha256",
+          "type": "string"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "pins": {
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "title": "Pins",
+          "type": "array"
+        },
+        "region_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Region Id",
+          "type": "string"
+        },
+        "region_pointer": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Region Pointer",
+          "type": "string"
+        },
+        "source_pointer": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Source Pointer",
+          "type": "string"
+        },
+        "source_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Sha256",
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_sha256",
+        "step_id",
+        "region_id",
+        "region_pointer",
+        "source_pointer",
+        "kind",
+        "source_sha256",
+        "input_mapping_sha256",
+        "output_type_sha256",
+        "output_type",
+        "pins",
+        "operation",
+        "maximum_step_attempts"
+      ],
+      "title": "PlanStep",
+      "type": "object"
+    },
+    "Platform": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "os": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Os",
+          "type": "string"
+        }
+      },
+      "required": [
+        "os",
+        "architecture"
+      ],
+      "title": "Platform",
+      "type": "object"
+    },
+    "RefSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ref",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "RefSchema",
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "$ref": "#/$defs/Environment"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "secret_refs": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "title": "Secret Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "package_sha256",
+        "environment",
+        "secret_refs"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "StringSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "string",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_length": {
+          "maximum": 65536,
+          "minimum": 1,
+          "title": "Max Length",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "max_length"
+      ],
+      "title": "StringSchema",
+      "type": "object"
+    },
+    "Symbol": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "source",
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurrence_bindings": {
+          "items": {
+            "$ref": "#/$defs/Binding"
+          },
+          "title": "Occurrence Bindings",
+          "type": "array"
+        },
+        "occurrence_path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Occurrence Path",
+          "type": "array"
+        },
+        "operation": {
+          "enum": [
+            "action_intent",
+            "human_review",
+            "action_dispatch",
+            "verification"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "operation",
+        "step_id",
+        "occurrence_path",
+        "occurrence_bindings"
+      ],
+      "title": "Symbol",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_availability": {
+      "const": "not_checked",
+      "default": "not_checked",
+      "title": "Artifact Availability",
+      "type": "string"
+    },
+    "authority_granted": {
+      "const": false,
+      "default": false,
+      "title": "Authority Granted",
+      "type": "boolean"
+    },
+    "catalog_digests": {
+      "items": {
+        "$ref": "#/$defs/DefinitionDigest"
+      },
+      "title": "Catalog Digests",
+      "type": "array"
+    },
+    "compiler_revision": {
+      "const": "lotuspond.workflow-compiler.v2.1",
+      "default": "lotuspond.workflow-compiler.v2.1",
+      "title": "Compiler Revision",
+      "type": "string"
+    },
+    "dependency_digests": {
+      "items": {
+        "$ref": "#/$defs/DefinitionDigest"
+      },
+      "title": "Dependency Digests",
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/PlanEdge"
+      },
+      "title": "Edges",
+      "type": "array"
+    },
+    "limits": {
+      "$ref": "#/$defs/PackageLimits"
+    },
+    "maximum_step_attempts": {
+      "maximum": 10000,
+      "minimum": 1,
+      "title": "Maximum Step Attempts",
+      "type": "integer"
+    },
+    "outcome_obligations": {
+      "items": {
+        "$ref": "#/$defs/OutcomeObligation"
+      },
+      "title": "Outcome Obligations",
+      "type": "array"
+    },
+    "package_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Package Sha256",
+      "type": "string"
+    },
+    "regions": {
+      "items": {
+        "$ref": "#/$defs/PlanRegion"
+      },
+      "title": "Regions",
+      "type": "array"
+    },
+    "requirements": {
+      "items": {
+        "$ref": "#/$defs/Requirement"
+      },
+      "title": "Requirements",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "lotuspond.compiled-workflow.v2",
+      "default": "lotuspond.compiled-workflow.v2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/PlanStep"
+      },
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "package_sha256",
+    "dependency_digests",
+    "catalog_digests",
+    "steps",
+    "regions",
+    "edges",
+    "requirements",
+    "limits",
+    "maximum_step_attempts",
+    "outcome_obligations"
+  ],
+  "title": "CompiledPlan",
+  "type": "object"
+}

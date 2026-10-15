@@ -1,8 +1,8 @@
 """Prove that a built API image embeds exactly the source trees in this working copy.
 
-The repository has no commit, so provenance here is content-based: the same tree hash
-is computed over the source on disk and over the tree actually present inside the
-image. It answers "is this image built from this source", not "is this source
+This proof establishes content identity only; Git provenance is not established.
+The same tree hash is computed over the source on disk and over the tree actually
+present inside the image. It answers "is this image built from this source", not "is this source
 reviewed", "is this image published", or anything about a hosted deployment.
 """
 
@@ -38,6 +38,13 @@ TREE_ALGORITHM = (
 EMBEDDED_TREE = r"""
 import hashlib, json, os, sys
 root = sys.argv[1]
+if root in {"lotuspond_sdk", "lotuspond_runtime"}:
+    import importlib
+    module = importlib.import_module(root)
+    root = os.path.dirname(module.__file__)
+    if not root.startswith(sys.prefix + os.sep):
+        raise RuntimeError("SDK/runtime must be installed inside the image environment")
+
 excluded = set(json.loads(sys.argv[2]))
 suffixes = tuple(json.loads(sys.argv[3]))
 paths = []
@@ -136,7 +143,9 @@ def build(repo: Path, args) -> dict[str, object]:
         "schema": "lotuspond.local-content-proof.v1",
         "tree_hash_algorithm": TREE_ALGORITHM,
         "git_provenance": None,
-        "git_provenance_note": "Repository has no HEAD; hashes are content-based.",
+        "git_provenance_note": (
+            "This proof establishes content identity only; Git provenance has not been established."
+        ),
         "bundle": file_record(args.bundle),
         "smoke_report": file_record(args.smoke_report),
         "delivery_scope": ["api", "static_ui", "collector", "postgres", "redis"],
@@ -144,6 +153,8 @@ def build(repo: Path, args) -> dict[str, object]:
         "source_trees": {
             "backend": tree_hash(backend),
             "backend_runtime_module": tree_hash(runtime_module),
+            "sdk_runtime_module": tree_hash(repo / "sdk/python/src/lotuspond_sdk"),
+            "fleet_runtime_module": tree_hash(repo / "runtime/python/src/lotuspond_runtime"),
             "web": tree_hash(repo / "web"),
             "scripts_excluded_from_bundle": tree_hash(
                 repo / "scripts",
@@ -157,6 +168,8 @@ def build(repo: Path, args) -> dict[str, object]:
         },
         "embedded_runtime_trees": {
             "/app/backend/lotuspond": embedded_tree(args.api_image, "/app/backend/lotuspond"),
+            "lotuspond_sdk": embedded_tree(args.api_image, "lotuspond_sdk"),
+            "lotuspond_runtime": embedded_tree(args.api_image, "lotuspond_runtime"),
             "/app/dist": embedded_tree(args.api_image, "/app/dist"),
         },
     }
@@ -166,6 +179,14 @@ def build(repo: Path, args) -> dict[str, object]:
     dist_image = proof["embedded_runtime_trees"]["/app/dist"]["sha256"]
     proof["embedded_matches_source"] = {
         "backend_runtime_module": module_source == module_image,
+        "sdk_runtime_module": (
+            proof["source_trees"]["sdk_runtime_module"]
+            == proof["embedded_runtime_trees"]["lotuspond_sdk"]
+        ),
+        "fleet_runtime_module": (
+            proof["source_trees"]["fleet_runtime_module"]
+            == proof["embedded_runtime_trees"]["lotuspond_runtime"]
+        ),
         "static_ui": dist_source == dist_image,
     }
     return proof

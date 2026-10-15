@@ -1,0 +1,100 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "synthetic-iteration",
+  "version": "1.0.0",
+  "name": "Synthetic only",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "iteration",
+        "id": "each",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "array",
+            "items": {
+              "kind": "integer"
+            },
+            "max_items": 1
+          },
+          "value": [
+            1
+          ]
+        },
+        "max_items": 1,
+        "concurrency": 1,
+        "body": {
+          "steps": [],
+          "result": {
+            "kind": "literal",
+            "schema": {
+              "kind": "null"
+            },
+            "value": null
+          },
+          "result_schema": {
+            "kind": "data",
+            "schema": {
+              "kind": "null"
+            }
+          }
+        }
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 100,
+    "active_seconds": 100,
+    "elapsed_seconds": 1000,
+    "retained_waits": 10,
+    "max_input_tokens": 1000,
+    "max_output_tokens": 1000,
+    "max_cost_microusd": 100000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [],
+  "connectors": [],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [],
+  "knowledge": [],
+  "artifacts": []
+}

@@ -1,0 +1,182 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "synthetic-attempt-budget-10001",
+  "version": "1.0.0",
+  "name": "Synthetic only",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "iteration",
+        "id": "each",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "array",
+            "items": {
+              "kind": "integer"
+            },
+            "max_items": 1
+          },
+          "value": [
+            1
+          ]
+        },
+        "max_items": 999,
+        "concurrency": 1,
+        "body": {
+          "steps": [
+            {
+              "id": "read",
+              "kind": "connector_read",
+              "connector_ref": "store",
+              "operation": "read",
+              "target": {
+                "kind": "literal",
+                "schema": {
+                  "kind": "null"
+                },
+                "value": null
+              },
+              "input": {
+                "kind": "literal",
+                "schema": {
+                  "kind": "null"
+                },
+                "value": null
+              },
+              "retry": {
+                "max_attempts": 9,
+                "timeout_seconds": 1,
+                "backoff_seconds": 0,
+                "retry_codes": []
+              }
+            }
+          ],
+          "result": {
+            "kind": "literal",
+            "schema": {
+              "kind": "null"
+            },
+            "value": null
+          },
+          "result_schema": {
+            "kind": "data",
+            "schema": {
+              "kind": "null"
+            }
+          }
+        }
+      },
+      {
+        "kind": "timer",
+        "id": "tail-0",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-1",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-2",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-3",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-4",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-5",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-6",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-7",
+        "delay_seconds": 1
+      },
+      {
+        "kind": "timer",
+        "id": "tail-8",
+        "delay_seconds": 1
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 10000,
+    "active_seconds": 100,
+    "elapsed_seconds": 1000,
+    "retained_waits": 10,
+    "max_input_tokens": 1000,
+    "max_output_tokens": 1000,
+    "max_cost_microusd": 100000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [],
+  "connectors": [
+    {
+      "id": "store",
+      "ref": {
+        "kind": "connector",
+        "name": "connector-fixture",
+        "version": "1.0.0",
+        "sha256": "478fde8e7f65a29046477b92f4110126d77aff896e45e5686213e47f720ce76d"
+      }
+    }
+  ],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [],
+  "knowledge": [],
+  "artifacts": []
+}

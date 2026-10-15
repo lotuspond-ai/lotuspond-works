@@ -1,5 +1,5 @@
-// Local port of backend/lotuspond/package_contract.py for the Studio's admission preview.
-// It checks the declared workflow-package v1 contract and computes the content digest. It
+// Local port of the shared v1 validator (sdk/python/src/lotuspond_sdk/contract.py, re-exported
+// by backend/lotuspond/package_contract.py) for the Studio's admission preview. It checks the declared workflow-package v1 contract and computes the content digest. It
 // does not install, sign, authorize, or run a package, and the server validator decides
 // admission; packageContract.test.ts keeps the codes, messages and digest in step.
 
@@ -85,7 +85,7 @@ export type WorkflowPackage = {
   edges: Edge[];
 };
 
-// Quoted from the server; the test asserts every entry appears in package_contract.py.
+// Quoted from the server; the test asserts every entry appears in the SDK's contract.py.
 export const ERROR_MESSAGES = {
   input_too_large: 'Package input exceeds the byte limit.',
   input_too_deep: 'Package input exceeds the nesting limit.',

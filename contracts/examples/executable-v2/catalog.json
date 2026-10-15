@@ -1,0 +1,185 @@
+{
+  "documents": [
+    {
+      "format_version": 1,
+      "kind": "connector",
+      "name": "connector-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "operations": [
+          {
+            "id": "read",
+            "target_schema": {
+              "kind": "null"
+            },
+            "input_schema": {
+              "kind": "null"
+            },
+            "output_schema": {
+              "kind": "null"
+            },
+            "effect": "read",
+            "idempotency": "none",
+            "reconciliation": {
+              "mode": "none"
+            }
+          },
+          {
+            "id": "write",
+            "target_schema": {
+              "kind": "null"
+            },
+            "input_schema": {
+              "kind": "null"
+            },
+            "output_schema": {
+              "kind": "null"
+            },
+            "effect": "write",
+            "idempotency": "none",
+            "reconciliation": {
+              "mode": "read_back",
+              "read_operation": "read",
+              "absence_rules": [
+                {
+                  "op": "present",
+                  "readback_pointer": ""
+                }
+              ],
+              "effect_rules": [
+                {
+                  "op": "present",
+                  "readback_pointer": ""
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "model",
+      "name": "model-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "profile": "synthetic",
+        "configuration_revision": "1",
+        "configuration_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "input_schema": {
+          "kind": "null"
+        },
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "limits": {
+          "max_steps": 10,
+          "timeout_seconds": 30,
+          "max_input_tokens": 1000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        }
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "agent",
+      "name": "agent-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "model_ref": {
+          "kind": "model",
+          "name": "model-fixture",
+          "version": "1.0.0",
+          "sha256": "347a2b1dd0f77511ca12f65b30b798b1f951dde5a7a150ba856a12794a098765"
+        },
+        "instructions": "Synthetic only",
+        "input_schema": {
+          "kind": "null"
+        },
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "limits": {
+          "max_steps": 10,
+          "timeout_seconds": 30,
+          "max_input_tokens": 1000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        }
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "evaluation",
+      "name": "evaluation-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "input_schema": {
+          "kind": "null"
+        },
+        "rules": [
+          {
+            "rule_id": "observed",
+            "version": "1",
+            "rule": {
+              "op": "present",
+              "readback_pointer": ""
+            }
+          }
+        ]
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "policy",
+      "name": "policy-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "approval": "human",
+        "independent_review": true,
+        "assignment": "reviewers",
+        "escalation": null,
+        "allowed_operation_classes": [],
+        "allowed_capability_classes": []
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "knowledge",
+      "name": "knowledge-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "source_revision": "1",
+        "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "freshness_seconds": 60,
+        "classification": "synthetic",
+        "citation_schema": {
+          "kind": "null"
+        }
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "artifact",
+      "name": "artifact-fixture",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "media_type": "text/plain",
+        "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size_bytes": 0,
+        "classification": "synthetic"
+      }
+    }
+  ]
+}

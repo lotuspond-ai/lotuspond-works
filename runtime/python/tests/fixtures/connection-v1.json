@@ -1,0 +1,1 @@
+{"connector":{"artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"lotuspond-fixture","version":"1.0.0"},"data_handling":{"max_request_bytes":65536,"max_response_bytes":1048576,"retain_payloads":false,"timeout_ms":10000},"destinations":[],"format_version":1,"operations":["inspect"],"secrets":[]}

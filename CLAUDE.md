@@ -8,7 +8,7 @@ Lotuspond is one licensable enterprise agent automation product with separately 
 
 The initial TypeScript API and schema were preserved in the separate recovery archive after Python workflow validation. There is one active API and one authoritative relational model. The current product goal permits selective recovery of useful archived functionality with provenance and Lotuspond naming; never restore credentials, unrelated products, or inherited history. `voice-bridge/` handles live transcription, `protocol-adapters/` contains the HTTP agent and explicit MCP tool runners, and `sandbox/` runs allowlisted software tasks in independently configured containers.
 
-The platform expansion preserves this assurance core. Production business execution will have a separate runtime and contracts; an evaluation `Run` is not a production execution. The first slice is a strict workflow-package v1 JSON contract, local validator, canonical content digest, schema export, and contract tests. The registry increment adds immutable tenant-scoped publication and exact canonical-content retrieval with admission-validator metadata. Studio, package signatures, production orchestration, commercial licensing, and industry packs are later work. The master, architecture, and delivery plans under `docs/plans/2026-10-13-platform-*.md` describe that target, not available runtime features.
+The platform expansion preserves this assurance core. Production business execution will have a separate runtime and contracts; an evaluation `Run` is not a production execution. The first slice is a strict workflow-package v1 JSON contract, local validator, canonical content digest, schema export, and contract tests. The registry increment adds immutable tenant-scoped publication and exact canonical-content retrieval with admission-validator metadata. The standalone SDK adds local content differences, detached Ed25519 signatures against independent trust and exact synthetic capability checks. Studio, hosted publisher trust/admission, production orchestration, commercial licensing, and industry packs are later work. The master, architecture, and delivery plans under `docs/plans/2026-10-13-platform-*.md` describe that target, not available runtime features.
 
 ## Development and validation
 
@@ -16,7 +16,7 @@ Root npm scripts are the entry points. Run `uv sync --frozen --project backend`,
 
 Review signed-in console layouts without an account at `/dev/console.html` on the dev server, a fixture harness that is never built. Run `npm run check` and the isolated PostgreSQL tests for authorization, policy, data access, or schema changes. Go and Rust checks run independently. Record local, remote, deployment, and live-provider evidence separately in `docs/VALIDATION.md`. A configured integration is not a verified connection.
 
-For the local package contract, run `npm run package:validate -- contracts/examples/reviewed-action.v1.json` and `npm run check:contracts`. `backend/lotuspond/package_contract.py` owns validation and `package_cli.py` exposes the local command. `npm run schema:contracts` regenerates `contracts/workflow-package.v1.schema.json`; review and check schema parity after changing the model. These commands do not require a database or execute the declared workflow.
+For the local package contract, run `npm run package:validate -- contracts/examples/reviewed-action.v1.json` and `npm run check:contracts`. `sdk/python/src/lotuspond_sdk/` owns the shared validation, bounded local file/CLI, diff, signing/trust and compatibility implementations. The backend `package_contract.py`, `package_input.py` and `package_cli.py` preserve legacy imports and command behavior. The independently installable `lotuspond-package` and `python -m lotuspond_sdk` expose the complete local command set; see `sdk/python/README.md`. `npm run schema:contracts` regenerates `contracts/workflow-package.v1.schema.json`; review and check schema parity after changing the model. These commands do not require a database or execute the declared workflow.
 
 ## Contracts
 
@@ -37,3 +37,26 @@ Public pages follow the rules in `DESIGN.md` and the structure in `docs/design-s
 ## Delivery
 
 Do not infer hosted readiness from a build. Remote repository creation, cloud resources, hosted databases, DNS, billing, and production cutovers need explicit scope. The local initializer is not a production migration tool. Preserve existing data and prove any additive local migration independently before changing a database.
+
+## Executable-v2 ownership (14 October 2026)
+
+`sdk/python/src/lotuspond_sdk/executable/` owns typed authoring, deterministic
+explicit-source compilation, JCS, private diffs, detached package/command
+signatures, synthetic capability and pure wire/transition contracts. Only a
+leading `v2` token selects its local CLI; root v1 APIs/bytes and registry admission
+remain unchanged. Schemas are structural, and every authenticated runtime must
+reload pinned sources/records and enforce current authority independently.
+Engine, Studio, providers, licensing and production qualification remain open.
+Agent goals/instructions/models/tools/context/evaluation/debugging/oversight
+follow customer needs in `docs/AGENT_PRODUCT_RATIONALE.md`; Automation Anywhere
+is a reference only. This SDK increment adds no UI or runtime behavior.
+
+
+E03 adds the separately installable Linux runtime 0.1.0 and additive schema 13
+connection/runtime identity APIs. SDK stays 0.2.0. CLI observations are empty;
+production recovery, record, dispatch and trust providers deny/unavailable by
+default. Signed command claims never execute business effects. See
+`docs/operations/runtime-recovery.md` and
+`docs/validation/2026-10-14-connections-fleet.md` for installed-artifact qualification
+and its limits. E04/E05 execution/actions/approvals/reconciliation, E08 licensing,
+E09 production/customer qualification, Studio/UI and enterprise goals stay open.
