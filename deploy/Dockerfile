@@ -1,19 +1,28 @@
+# syntax=docker/dockerfile:1
 FROM node:24.21.0-alpine AS web
 WORKDIR /src
 COPY package.json package-lock.json vite.config.ts tsconfig.json ./
 COPY web ./web
-RUN npm ci && npx vite build
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci && npx vite build
 
 FROM python:3.14.7-slim-trixie AS python-build
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app/backend
-RUN pip install --no-cache-dir uv==0.11.16
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
+    pip install --no-cache-dir uv==0.11.16
 COPY sdk/python /app/sdk/python
 COPY runtime/python /app/runtime/python
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-editable --no-install-project
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    uv sync --frozen --no-dev --no-editable --no-install-project
 COPY backend/lotuspond ./lotuspond
-RUN uv sync --frozen --no-dev --no-editable
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    uv sync --frozen --no-dev --no-editable && uv pip check
 
 FROM python:3.14.7-slim-trixie
 ENV PATH=/app/backend/.venv/bin:$PATH \

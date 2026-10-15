@@ -246,3 +246,14 @@ supervisor exposes only waiting, denied or claimed admission status and retains 
 business effect loop. Authoritative deployment records must link the signed intent
 to exact connection versions and secret references: SDK command bytes do not encode
 those direct pins, and E03 supplies no production deployment record source.
+
+
+Operator bootstrap and qualification are documented in
+[`runtime-foundation.md`](../../docs-site/docs/runtime-foundation.md) and the
+[recovery runbook](../../docs/operations/runtime-recovery.md). They cover private
+file/CA provisioning, scoped administration, C/P response-loss recovery, current
+trust, revocation, schema 13 forward repair and independent restore fencing.
+The installed acceptance harness lives only under backend tests: the ordinary CLI
+lifecycle and the separately authorized fixture-library/child journey have distinct
+attribution. A forced valid-but-overdue startup credential qualifies recovery; it
+does not establish natural wall-clock rotation or production business execution.

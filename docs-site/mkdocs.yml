@@ -19,6 +19,7 @@ nav:
   - Executable definitions and contracts: executable-packages.md
   - Projects: projects.md
   - Evaluations: evaluations.md
+  - Runtime identity foundation: runtime-foundation.md
   - Evaluation runners: runners.md
   - Application sandboxes: sandboxes.md
   - Voice evidence: voice.md

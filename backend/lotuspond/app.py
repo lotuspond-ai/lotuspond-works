@@ -141,6 +141,13 @@ class RequestBoundary:
                     ),
                 ]
                 if scope["path"].startswith("/api/"):
+                    # One authoritative private policy; strict machine clients
+                    # reject duplicated headers even when their values agree.
+                    message["headers"] = [
+                        (key, value)
+                        for key, value in message["headers"]
+                        if key.lower() != b"cache-control"
+                    ]
                     message["headers"].append((b"cache-control", b"no-store"))
                 if self.settings.env == "production":
                     message["headers"].append(
@@ -285,6 +292,13 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.2.0",
+                    "id": "fleet-runtime-foundation-qualification",
+                    "date": "2026-10-14",
+                    "title": "Installable Linux runtime identity foundation",
+                    "description": "The separate runtime 0.1.0 supports private enrollment, process leases and two-phase credential recovery. Prepare, activate and cancel share a rotation quota; lost responses do not extend expiry, and an active-successor retry preserves a later pending successor. Installed-artifact API qualification and recovery guidance describe explicit test authorities. Production recovery, dispatch and command trust providers, business execution and UI remain separate work.",
+                },
                 {
                     "version": "0.2.0",
                     "id": "fleet-command-admission",

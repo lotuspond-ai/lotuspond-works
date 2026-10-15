@@ -43,11 +43,8 @@ jobs:
       - run: backend/.venv/bin/python backend/export_schema.py --check
       - run: PYTHONPATH=sandbox/src backend/.venv/bin/python -m pytest sandbox/tests -q
       - run: backend/.venv/bin/python -m pytest deploy/checks -q
-      - run: npm run test:python
-        env:
-          LOTUSPOND_PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
-      - name: Exercise the supervised runner through the real API
-        timeout-minutes: 5
+      - name: Required PostgreSQL suite, installed fleet acceptance and supervised runner
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -98,9 +95,40 @@ jobs:
             exit 1
           fi
           LOTUSPOND_PLATFORM_TEST_DATABASE_URL="postgresql+psycopg://lotuspond@127.0.0.1:$smoke_port/lotuspond_platform_test" \
+          LOTUSPOND_FLEET_TEST_DATA_DIRECTORY=/var/lib/postgresql/18/runner-smoke \
+            npm run test:python -- --basetemp="$RUNNER_TEMP/fleet-required-pytest" -ra
+          LOTUSPOND_PLATFORM_TEST_DATABASE_URL="postgresql+psycopg://lotuspond@127.0.0.1:$smoke_port/lotuspond_platform_test" \
             backend/.venv/bin/python scripts/checks/runner-smoke.py \
               --expected-data-directory /var/lib/postgresql/18/runner-smoke \
               --report "$RUNNER_TEMP/lotuspond-runner-smoke.json"
+      - name: Retain safe fleet qualification reports and actual distributions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-postgres-python-3.14
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/fleet-required-pytest/**/fleet-report.json
+            ${{ runner.temp }}/fleet-required-pytest/**/source-manifest.json
+            ${{ runner.temp }}/fleet-required-pytest/**/sdk/*.whl
+            ${{ runner.temp }}/fleet-required-pytest/**/runtime/*.whl
+            ${{ runner.temp }}/fleet-required-pytest/**/runtime/*.tar.gz
+            ${{ runner.temp }}/fleet-required-pytest/**/rebuilt/*.whl
+            ${{ runner.temp }}/fleet-required-pytest/**/api/*.whl
+      - name: Build API image with noneditable runtime dependency
+        run: docker build -f deploy/Dockerfile -t lotuspond-api:e03-ci .
+      - name: Check image metadata, imports and dependency consistency
+        run: >-
+          docker run --rm --network none --entrypoint python lotuspond-api:e03-ci -c
+          'import importlib.metadata as m, json, pathlib, sys;
+          import lotuspond, lotuspond_sdk, lotuspond_runtime.protocol;
+          assert m.version("lotuspond-sdk") == "0.2.0";
+          assert m.version("lotuspond-runtime") == "0.1.0";
+          assert all(not json.loads(m.distribution(n).read_text("direct_url.json") or "{}").get("dir_info", {}).get("editable", False) for n in ("lotuspond-api", "lotuspond-sdk", "lotuspond-runtime"));
+          assert pathlib.Path(lotuspond_sdk.__file__).is_relative_to(pathlib.Path(sys.prefix));
+          assert pathlib.Path(lotuspond_runtime.__file__).is_relative_to(pathlib.Path(sys.prefix))'
+      - name: Build operator docs strictly
+        run: uv run --with mkdocs==1.6.1 mkdocs build --strict --config-file docs-site/mkdocs.yml --site-dir "$RUNNER_TEMP/lotuspond-docs"
   sdk:
     runs-on: ubuntu-latest
     strategy:
@@ -125,7 +153,18 @@ jobs:
       - run: uv run --frozen --project sdk/python python -m lotuspond_sdk.executable.schema --check
       - run: uv build --project sdk/python
       - name: SDK suite and installed wheel/sdist-wheel CLI journeys
-        run: uv run --frozen --project sdk/python pytest sdk/python/tests -q
+        run: uv run --frozen --project sdk/python pytest sdk/python/tests -q --basetemp="${{ runner.temp }}/sdk-artifacts"
+      - name: Retain SDK artifact manifests and distributions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-artifacts-python-${{ matrix.python-version }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/sdk-artifacts/**/artifact-manifest.json
+            ${{ runner.temp }}/sdk-artifacts/**/artifacts/*.whl
+            ${{ runner.temp }}/sdk-artifacts/**/artifacts/*.tar.gz
+            ${{ runner.temp }}/sdk-artifacts/**/rebuilt/*.whl
   runtime:
     runs-on: ubuntu-latest
     strategy:
@@ -148,7 +187,19 @@ jobs:
       - run: uv sync --frozen --project runtime/python
       - run: uv run --frozen --project runtime/python ruff check runtime/python
       - name: Runtime suite and independent installed wheel/sdist-wheel contracts
-        run: uv run --frozen --project runtime/python pytest runtime/python/tests -q
+        run: uv run --frozen --project runtime/python pytest runtime/python/tests -q --basetemp="${{ runner.temp }}/runtime-artifacts"
+      - name: Retain runtime artifact manifests and distributions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-artifacts-python-${{ matrix.python-version }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/runtime-artifacts/**/artifact-manifest.json
+            ${{ runner.temp }}/runtime-artifacts/**/direct/*.whl
+            ${{ runner.temp }}/runtime-artifacts/**/direct/*.tar.gz
+            ${{ runner.temp }}/runtime-artifacts/**/sdk/*.whl
+            ${{ runner.temp }}/runtime-artifacts/**/rebuilt/*.whl
   collector:
     runs-on: ubuntu-latest
     steps:
