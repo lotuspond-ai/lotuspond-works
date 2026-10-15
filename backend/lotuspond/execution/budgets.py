@@ -34,6 +34,7 @@ from ..models import (
     ExecutionUsageReservation,
     ExecutionWait,
 )
+from .assurance import check_assurance_current
 from .authorization import lock, reauthorize, record, scoped
 from .contracts import Contract, DeploymentConfig, canonical_value
 from .deployments import _body_steps, _configuration, _pool, _stored_configuration, load_deployment
@@ -69,7 +70,10 @@ def steps(source):
 
 
 def active_liability(row, now_ms):
-    started = int(row.created_at.replace(tzinfo=UTC).timestamp() * 1000)
+    created_at = row.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    started = int(created_at.timestamp() * 1000)
     stopped = row.compute_stopped_at_ms if row.compute_stopped_at_ms is not None else now_ms
     return max(row.active_ms, stopped - started, 0)
 
@@ -202,7 +206,9 @@ class BudgetService:
     def _final(self, db, actor, revision, grant, tenant, recovery, execution=None):
         # These exact parents were acquired before execution children. Re-entry
         # reloads mutable keys/source pins and independently current publisher trust.
-        load_deployment(db, actor, revision.id, dependencies=self.deployments)
+        _, _, assurance = load_deployment(
+            db, actor, revision.id, dependencies=self.deployments, include_assurance=True
+        )
         current = self._call("recovery", "current", (self.installation_id,), "recovery_unavailable")
         if current != recovery:
             raise ExecutionError("recovery_unavailable")
@@ -224,6 +230,7 @@ class BudgetService:
         reauthorize(db, actor, "execute")
         current_snapshot(db, snapshot)
         self._expiry(db, grant, tenant)
+        check_assurance_current(db, assurance, package, snapshot, sources)
         if execution and (
             execution.deadline_ms <= database_now_ms(db)
             or execution.requested_state != "running"

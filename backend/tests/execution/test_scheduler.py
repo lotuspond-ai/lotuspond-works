@@ -281,3 +281,184 @@ def test_wait_accounting_rollback_and_conflicting_identity(budget_harness):
         with pytest.raises(ExecutionError, match="conflict"):
             h.budgets.retain_wait(db, h.actor, wait_id)
         assert db.scalar(select(ExecutionCapacity.retained_waits)) == 1
+
+
+def stop_and_replenish(h, db, attempt_id):
+    from lotuspond_runtime.protocol import Scope
+
+    from lotuspond.execution.authorization import authorize_execution
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import Execution, ExecutionAttempt, ExecutionReconciliationObservation
+
+    attempt = db.get(ExecutionAttempt, attempt_id)
+    scope = Scope(
+        workspace_id=attempt.workspace_id,
+        project_id=attempt.project_id,
+        environment_id=attempt.environment_id,
+    )
+    observation = ExecutionReconciliationObservation(
+        **scope.model_dump(),
+        execution_id=attempt.execution_id,
+        attempt_id=attempt.id,
+        source_id="fixture-stop",
+        observation_id=attempt.id,
+        digest="a" * 64,
+        code="compute_stopped",
+        observed_at_ms=database_now_ms(db),
+    )
+    db.add(observation)
+    db.flush()
+    h.budgets.confirm_stopped(db, attempt.id, observation.id)
+    previous = h.scope, h.actor, h.revision_id, h.artifact_id
+    try:
+        h.scope = scope
+        h.actor = authorize_execution(db, h.principal, scope, "execute")
+        h.revision_id = db.get(Execution, attempt.execution_id).deployment_revision_id
+        h.artifact_id = attempt.input_artifact_id
+        h.add(db)
+    finally:
+        h.scope, h.actor, h.revision_id, h.artifact_id = previous
+    return scope.environment_id
+
+
+def test_single_slot_round_robin_alternates_after_confirmed_stop_and_replenish(budget_harness):
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        h.add(db)
+        clone_environment(h, db)
+        db.scalar(select(ExecutionSchedulerCursor)).active_limit = 1
+        environments = sorted(db.scalars(select(ExecutionCapacity.environment_id)))
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        turns = []
+        for _ in range(6):
+            with Session(h.engine) as db, db.begin():
+                selected = scheduler.schedule_batch(db, "test-installation")
+                assert len(selected) == 1
+                turns.append(stop_and_replenish(h, db, selected[0].attempt_id))
+        assert turns == environments * 3
+    finally:
+        scheduler.close()
+
+
+def test_round_robin_tracks_skipped_environment_and_wraps(budget_harness):
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        h.add(db)
+        clone_environment(h, db)
+        clone_environment(h, db)
+        capacities = list(
+            db.scalars(select(ExecutionCapacity).order_by(ExecutionCapacity.environment_id))
+        )
+        capacities[0].active_limit = 0
+        environments = [row.environment_id for row in capacities[1:]]
+        db.scalar(select(ExecutionSchedulerCursor)).active_limit = 1
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        turns = []
+        for _ in range(4):
+            with Session(h.engine) as db, db.begin():
+                selected = scheduler.schedule_batch(db, "test-installation", limit=1)
+                assert len(selected) == 1
+                turns.append(stop_and_replenish(h, db, selected[0].attempt_id))
+        assert turns == environments * 2
+    finally:
+        scheduler.close()
+
+
+def test_wait_accounting_concurrent_replay_changes_counter_once(budget_harness):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from lotuspond.models import (
+        Execution,
+        ExecutionRequest,
+        ExecutionStepInstance,
+        ExecutionWait,
+        new_id,
+    )
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        _, execution_id = h.add(db)
+        execution = db.get(Execution, execution_id)
+        step = db.scalar(select(ExecutionStepInstance))
+        wait = ExecutionWait(
+            **h.scope.model_dump(),
+            execution_id=execution_id,
+            step_instance_id=step.id,
+            wait_key=new_id(),
+            deadline_ms=execution.deadline_ms,
+        )
+        db.add(wait)
+        db.flush()
+        wait_id = wait.id
+    barrier = Barrier(2)
+
+    def retain(_):
+        barrier.wait(timeout=5)
+        with Session(h.engine) as db, db.begin():
+            h.budgets.retain_wait(db, h.actor, wait_id)
+
+    with ThreadPoolExecutor(2) as pool:
+        list(pool.map(retain, range(2)))
+    with Session(h.engine) as db:
+        assert db.scalar(select(ExecutionCapacity.retained_waits)) == 1
+        assert len(list(db.scalars(select(ExecutionRequest)))) == 1
+
+
+def test_wait_accounting_same_key_cannot_refer_to_other_execution(budget_harness):
+    from hashlib import sha256
+
+    import pytest
+
+    from lotuspond.execution.contracts import canonical_value
+    from lotuspond.execution.errors import ExecutionError
+    from lotuspond.models import (
+        Execution,
+        ExecutionRequest,
+        ExecutionStepInstance,
+        ExecutionWait,
+        new_id,
+    )
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        _, first = h.add(db)
+        _, second = h.add(db)
+        execution = db.get(Execution, second)
+        step = db.scalar(
+            select(ExecutionStepInstance).where(ExecutionStepInstance.execution_id == second)
+        )
+        wait = ExecutionWait(
+            **h.scope.model_dump(),
+            execution_id=second,
+            step_instance_id=step.id,
+            wait_key=new_id(),
+            deadline_ms=execution.deadline_ms,
+        )
+        db.add(wait)
+        db.flush()
+        digest = sha256(
+            canonical_value(
+                dict(
+                    wait_id=wait.id,
+                    execution_id=second,
+                    step_instance_id=step.id,
+                    deadline_ms=wait.deadline_ms,
+                )
+            )
+        ).hexdigest()
+        db.add(
+            ExecutionRequest(
+                **h.scope.model_dump(),
+                execution_id=first,
+                request_key="capacity.wait:" + wait.id,
+                digest=digest,
+            )
+        )
+        db.flush()
+        with pytest.raises(ExecutionError, match="conflict"):
+            h.budgets.retain_wait(db, h.actor, wait.id)
+        assert db.scalar(select(ExecutionCapacity.retained_waits)) == 0
+        assert execution.state == "pending"

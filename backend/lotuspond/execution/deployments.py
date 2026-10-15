@@ -31,7 +31,7 @@ from ..models import (
     RuntimePoolPolicy,
     SecretReference,
 )
-from .assurance import release_binding
+from .assurance import release_binding, validated_release_binding
 from .authorization import reauthorize, record, scoped
 from .contracts import (
     DeploymentConfig,
@@ -414,8 +414,13 @@ def load_deployment(
     operation="execute",
     require_enabled=True,
     dependencies=DEFAULT_DEPENDENCIES,
+    include_assurance=False,
 ):
-    """Task 4–6 consumers recheck pins/current authority using the shared lock order."""
+    """Recheck pins/current authority using the shared lock order.
+
+    include_assurance retains fully validated expiring evidence for a final guard
+    in this same transaction; it is not reusable authority. Default stays a pair.
+    """
     actor = reauthorize(db, actor, operation)
     hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
     policy = _pool(db, actor.scope, hint.pool_id)
@@ -440,7 +445,7 @@ def load_deployment(
             DeploymentAssuranceBinding.deployment_revision_id == revision.id
         )
     )
-    result = release_binding(
+    evidence = validated_release_binding(
         db,
         actor,
         publication,
@@ -451,9 +456,12 @@ def load_deployment(
         dependencies,
         sources,
     )
+    result = (evidence.release_id, evidence.candidate_run_id) if evidence else None
     if binding and result != (binding.release_id, binding.candidate_run_id):
         raise ExecutionError("assurance_unavailable")
     current_snapshot(db, snapshot)
+    if include_assurance:
+        return deployment, revision, evidence
     return deployment, revision
 
 

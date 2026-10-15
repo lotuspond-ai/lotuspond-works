@@ -61,7 +61,11 @@ class Scheduler:
         if len(ordered) < min(25, count):
             ordered += list(db.scalars(query.limit(min(25, count) - len(ordered))))
         heads = []
-        for capacity in ordered:
+        positions = {}
+        traversed = 0
+        for offset, capacity in enumerate(ordered):
+            traversed = offset + 1
+            positions[capacity.environment_id] = (start + offset) % count
             if capacity.active >= capacity.active_limit:
                 continue
             scope = Scope(
@@ -171,12 +175,16 @@ class Scheduler:
         for scope, attempt in sorted(attempts, key=lambda item: item[1].id):
             record(db, ExecutionAttempt, scope, attempt.id, locked=True)
         selected = []
+        next_position = start
         for scope, attempt_id, execution in heads:
+            if cursor.active >= cursor.active_limit:
+                break
+            # A turn includes a handled refusal, but never a head merely
+            # collected before another environment filled the last slot.
+            next_position = (positions[scope.environment_id] + 1) % count
             if attempt_id not in actors or scope.environment_id in blocked:
                 execution.reason = "authority_revoked"
                 continue
-            if cursor.active >= cursor.active_limit:
-                break
             try:
                 demand = BudgetDemand.model_validate(
                     self._slot.call(
@@ -200,6 +208,6 @@ class Scheduler:
                     "forbidden": "authority_revoked",
                 }.get(error.code, "provider_unavailable")
                 continue
-        cursor.cursor = (start + max(1, len(heads))) % count
+        cursor.cursor = next_position if heads else (start + traversed) % count
         db.flush()
         return tuple(selected)

@@ -64,7 +64,38 @@ def _run(db, scope, identifier):
     }
 
 
-def release_binding(
+def _release_required(package, snapshot, sources=None):
+    assurances = [
+        package.assurance.model_dump(),
+        *[
+            source["assurance"]
+            for source in (sources or {}).values()
+            if source.get("schema_version") == "lotuspond.workflow-package.v2"
+        ],
+    ]
+    return snapshot.release_required or any(
+        a["evaluation_refs"] or a["outcome_rule_refs"] for a in assurances
+    )
+
+
+def check_assurance_current(
+    db, validated_evidence: AssuranceEvidence | None, package, snapshot, sources=None
+) -> None:
+    """Internal final guard on already validated evidence, never a verifier/grant.
+
+    This performs no provider lookup or parent lock. The caller must have obtained
+    the evidence through validated_release_binding in this same transaction and
+    retained the exact scope/publication/configuration/release identity binding.
+    """
+    if validated_evidence is None:
+        if _release_required(package, snapshot, sources):
+            raise ExecutionError("assurance_unavailable")
+        return
+    if validated_evidence.expires_at_ms <= database_now_ms(db):
+        raise ExecutionError("assurance_unavailable")
+
+
+def validated_release_binding(
     db,
     actor,
     publication,
@@ -74,18 +105,9 @@ def release_binding(
     snapshot,
     dependencies,
     sources=None,
-):
-    assurances = [
-        package.assurance.model_dump(),
-        *[
-            source["assurance"]
-            for source in (sources or {}).values()
-            if source.get("schema_version") == "lotuspond.workflow-package.v2"
-        ],
-    ]
-    required = snapshot.release_required or any(
-        a["evaluation_refs"] or a["outcome_rule_refs"] for a in assurances
-    )
+) -> AssuranceEvidence | None:
+    """Validate the existing full release pipeline and retain its expiring evidence."""
+    required = _release_required(package, snapshot, sources)
     if release_id is None and not required:
         return None
     if release_id is None or configuration_sha256 is None:
@@ -175,9 +197,35 @@ def release_binding(
             or evidence.expires_at_ms <= database_now_ms(db)
         ):
             raise ValueError
-        return release.id, release.candidate_run_id
+        return evidence
     except Exception:
         raise ExecutionError("assurance_unavailable") from None
+
+
+def release_binding(
+    db,
+    actor,
+    publication,
+    package,
+    release_id,
+    configuration_sha256,
+    snapshot,
+    dependencies,
+    sources=None,
+):
+    """Preserve the established ID-only return contract for existing consumers."""
+    evidence = validated_release_binding(
+        db,
+        actor,
+        publication,
+        package,
+        release_id,
+        configuration_sha256,
+        snapshot,
+        dependencies,
+        sources,
+    )
+    return (evidence.release_id, evidence.candidate_run_id) if evidence else None
 
 
 @execution_service

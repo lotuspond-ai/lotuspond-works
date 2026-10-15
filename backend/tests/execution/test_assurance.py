@@ -258,3 +258,65 @@ def test_activation_rechecks_policy_after_actual_lock_wait(harness):
             blocker.get(Policy, policy_id).maximum_p95_ms = 0
         assert future.result(timeout=10) == "assurance_unavailable"
     deps.close()
+
+
+@pytest.mark.parametrize("with_assurance", [False, True])
+def test_deployment_assurance_capture_preserves_existing_return_contracts(harness, with_assurance):
+    from lotuspond.execution.assurance import AssuranceEvidence, release_binding
+    from lotuspond.execution.deployments import load_deployment
+    from lotuspond.execution.publication import load_publication
+
+    h = harness
+    with Session(h.engine) as db, db.begin():
+        publication = h.publish(db)
+        actor = authorize_execution(db, h.principal, h.scope, "manage")
+        request = deployment_request(h, publication.id)
+        proof = None
+        if with_assurance:
+            release, _, proof = release_records(db, h, publication, request)
+            request = request.model_copy(update={"release_id": release.id})
+        deps = ExecutionDependencies(
+            authority=h.authority,
+            assurance=FixtureAssurance(proof) if proof else None,
+            test_mode=True,
+        )
+        try:
+            deployed = create_deployment(db, actor, request, "capture", dependencies=deps)
+            set_deployment_status(
+                db,
+                actor,
+                deployed.id,
+                deployed.revision_id,
+                "enabled",
+                "enable-capture",
+                dependencies=deps,
+            )
+            original = load_deployment(db, actor, deployed.revision_id, dependencies=deps)
+            captured = load_deployment(
+                db, actor, deployed.revision_id, dependencies=deps, include_assurance=True
+            )
+            assert len(original) == 2 and len(captured) == 3
+            assert captured[:2] == original
+            if proof:
+                assert type(captured[2]) is AssuranceEvidence
+                assert captured[2].model_dump() == proof
+            else:
+                assert captured[2] is None
+            snapshot = deps.current(db, h.scope)
+            row, package, _, _, sources = load_publication(db, h.scope, publication.id, snapshot)
+            old_binding = release_binding(
+                db,
+                actor,
+                row,
+                package,
+                request.release_id,
+                original[1].configuration_sha256,
+                snapshot,
+                deps,
+                sources,
+            )
+            assert old_binding == (
+                (proof["release_id"], proof["candidate_run_id"]) if proof else None
+            )
+        finally:
+            deps.close()

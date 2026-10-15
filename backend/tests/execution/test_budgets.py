@@ -854,3 +854,46 @@ def test_reservation_active_start_uses_database_clock_not_application_default(
         row = db.scalar(select(ExecutionUsageReservation))
         after = database_now_ms(db)
         assert before <= int(row.created_at.timestamp() * 1000) <= after
+
+
+@pytest.mark.parametrize("offset_minutes", [0, 330, -240])
+@pytest.mark.parametrize("stopped", [False, True])
+def test_active_liability_preserves_equivalent_timezone_instants(offset_minutes, stopped):
+    from datetime import UTC, datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from lotuspond.execution.budgets import active_liability
+
+    start_ms = 1800000000000
+    stop_ms = start_ms + 40000
+    zone = timezone(timedelta(minutes=offset_minutes))
+    row = SimpleNamespace(
+        created_at=datetime.fromtimestamp(start_ms / 1000, UTC).astimezone(zone),
+        active_ms=1,
+        compute_stopped_at_ms=stop_ms if stopped else None,
+    )
+    assert active_liability(row, stop_ms if not stopped else stop_ms + 90000) == 40000
+
+
+@pytest.mark.parametrize("zone", ["Asia/Kolkata", "America/New_York"])
+def test_postgresql_timezone_preserves_running_and_stopped_liability(budget_harness, zone):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import text
+
+    from lotuspond.execution.budgets import active_liability
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        attempt, _ = h.add(db)
+        h.budgets.reserve_attempt(db, h.actor, attempt, demand(1, 1))
+        row = db.scalar(select(ExecutionUsageReservation))
+        row.created_at = datetime.fromtimestamp((database_now_ms(db) - 40000) / 1000, UTC)
+        db.flush()
+        db.execute(text("SELECT set_config('TimeZone',:zone,true)"), {"zone": zone})
+        db.refresh(row)
+        assert row.created_at.utcoffset().total_seconds() != 0
+        assert 40000 <= active_liability(row, database_now_ms(db)) < 41000
+        h.stop(db, attempt, "timezone-stop")
+        assert 40000 <= row.active_ms < 41000
+        assert active_liability(row, database_now_ms(db) + 60000) == row.active_ms
