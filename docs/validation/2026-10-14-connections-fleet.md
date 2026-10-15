@@ -217,13 +217,13 @@ fresh scoped closure and hosted correction-head evidence remain separate.
 
 ## Required PostgreSQL CI allowance
 
-Published-source run38664198824 timed out at the combined step's15-minute bound
-while the full backend suite was still progressing at59%; no test failure was
+Published-source run 38664198824 timed out at the combined step's 15-minute bound
+while the full backend suite was still progressing at 59%; no test failure was
 displayed, and the sequential runner smoke had not been reached. Local full
-PostgreSQL qualification took625.45s; observed hosted throughput suggests roughly
-21–22minutes for the suite, without proving a completion time or diagnosing a hang.
-The combined suite/setup/runner allowance is now bounded at30minutes, with named
-test progress and20 slowest durations. Coverage, inner deadlines, database guards,
+PostgreSQL qualification took 625.45s; observed hosted throughput suggests roughly
+21–22 minutes for the suite, without proving a completion time or diagnosing a hang.
+The combined suite/setup/runner allowance is now bounded at 30 minutes, with named
+test progress and the 20 slowest durations. Coverage, inner deadlines, database guards,
 cleanup and artifact paths are unchanged. Completion/counts/skips/cleanup at the
 published correction head remain pending; the allowance change is not passing
 hosted evidence.
