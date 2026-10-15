@@ -187,3 +187,20 @@ checks confirmed three owned namespaces and37 recorded process groups absent.
 The unchanged full CLI timing evidence remains attributed to07f28ce; shipped
 code, image and distribution hashes remain unchanged. Original failed probes and
 the previously disclosed PID1-owned zombie remain recorded separately.
+
+## Hosted Node lifecycle-test correction
+
+Initial draft-PR validation run38664063896 failed one of105 Node tests: its fixed
+50ms abort could arrive before the cooperative fixture installed its listener.
+A deterministic150ms fixture startup reproduced that missed event and the correct
+five-second production grace. The test now waits boundedly for listener readiness
+before aborting; it retains the1500ms post-abort assertion and2000ms exit deadline,
+checks actual cleanup/classification/group absence, and cleans its exact owned
+groups on startup or completion failure. Runner product code and grace are unchanged.
+
+Clean source `d59201d1e5187b1b81ad70e960aa577cae7145e6` passed the ordinary
+Node suite105/105, zero skips,2.531s, using the disclosed local orphan reaper without
+a concurrency override. The affected runner file separately passed17/17. Both the
+old delayed-abort failure and a deliberate readiness failure confirmed exact test
+group cleanup. This is local correction evidence; fresh review and hosted results
+at the published correction head remain separate gates.
