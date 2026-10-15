@@ -166,3 +166,24 @@ namespace/harness were cleaned. That failed attempt's terminated controller rema
 a non-executing PID1-owned zombie; its PID absence is not claimed. The successful
 correction interruption cases have no remaining process groups or schemas. Fresh
 independent review and hosted exact-head CI remain separate root-owned gates.
+
+## Correction round2 qualification
+
+Fresh review found that leader exit and capture-pipe EOF could bypass escalation
+while a TERM-resistant child remained in the owned group. The test supervisor now
+uses one grace deadline for leader collection and independent group disappearance,
+then sends KILL to a surviving exact group and bounds forced confirmation. Missing
+absence or resource proof still records cleanup as unconfirmed.
+
+Clean source `f409f9a78d08a7878ec225db4d2ea5cfbe837b64` passed the scoped
+acceptance run:14 passed, zero skips, one deliberately deselected full CLI journey,
+28.99s, with the existing Starlette/AnyIO warning. Three isolated subreaper probes
+cover timeout, cancellation and successful leader exit with a TERM-resistant
+descendant on closed capture pipes; each escalated, reaped its exact child and
+confirmed group absence. Both installed restore artifacts retained receiver and
+secret-open counts1→1 across API/API/dispatch denials. The active API/PostgreSQL
+cancellation remained cooperative and confirmed its resource cleanup. Independent
+checks confirmed three owned namespaces and37 recorded process groups absent.
+The unchanged full CLI timing evidence remains attributed to07f28ce; shipped
+code, image and distribution hashes remain unchanged. Original failed probes and
+the previously disclosed PID1-owned zombie remain recorded separately.
