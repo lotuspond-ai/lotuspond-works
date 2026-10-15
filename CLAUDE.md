@@ -50,3 +50,13 @@ Engine, Studio, providers, licensing and production qualification remain open.
 Agent goals/instructions/models/tools/context/evaluation/debugging/oversight
 follow customer needs in `docs/AGENT_PRODUCT_RATIONALE.md`; Automation Anywhere
 is a reference only. This SDK increment adds no UI or runtime behavior.
+
+
+E03 adds the separately installable Linux runtime 0.1.0 and additive schema 13
+connection/runtime identity APIs. SDK stays 0.2.0. CLI observations are empty;
+production recovery, record, dispatch and trust providers deny/unavailable by
+default. Signed command claims never execute business effects. See
+`docs/operations/runtime-recovery.md` and
+`docs/validation/2026-10-14-connections-fleet.md` for installed-artifact qualification
+and its limits. E04/E05 execution/actions/approvals/reconciliation, E08 licensing,
+E09 production/customer qualification, Studio/UI and enterprise goals stay open.

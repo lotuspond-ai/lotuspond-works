@@ -30,13 +30,14 @@
     "db:migrate": "node --env-file-if-exists=.env scripts/python.mjs migrate",
     "offline-identity": "node --env-file-if-exists=.env scripts/python.mjs offline-identity",
     "retention": "node --env-file-if-exists=.env scripts/python.mjs retention",
-    "check": "npm run lint && npm test && npm run lint:python && npm run test:python && npm run check:sdk && npm run check:contracts && npm run check:executable-contracts && npm run build",
+    "check": "npm run lint && npm test && npm run lint:python && npm run test:python && npm run check:sdk && npm run check:runtime && npm run check:contracts && npm run check:executable-contracts && npm run build",
     "cli": "node scripts/cli.mjs",
     "runner": "node scripts/runner.mjs",
     "voice": "node --env-file-if-exists=.env voice-bridge/src/cli.mjs",
     "test:voice": "npm --prefix voice-bridge run check",
     "test:protocol": "npm --prefix protocol-adapters run check",
     "format": "prettier --write . --ignore-unknown",
+    "check:runtime": "uv sync --frozen --project runtime/python && uv run --frozen --project runtime/python ruff check runtime/python && uv run --frozen --project runtime/python pytest runtime/python/tests -q",
     "check:sdk": "uv sync --frozen --project sdk/python && uv run --frozen --project sdk/python ruff check sdk/python && uv run --frozen --project sdk/python pytest sdk/python/tests -q"
   },
   "dependencies": {

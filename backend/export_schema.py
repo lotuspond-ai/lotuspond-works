@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.schema import CreateIndex, CreateTable
+from sqlalchemy.schema import AddConstraint, CreateIndex, CreateTable
 
 from lotuspond.models import Base
 from lotuspond.schema_version import SCHEMA_VERSION
@@ -22,6 +22,19 @@ def render() -> str:
     ]
     for table in Base.metadata.sorted_tables:
         parts.append(str(CreateTable(table).compile(dialect=dialect)).strip() + ";")
+    deferred_constraints = sorted(
+        (
+            constraint
+            for table in Base.metadata.sorted_tables
+            for constraint in table.foreign_key_constraints
+            if constraint.use_alter
+        ),
+        key=lambda constraint: constraint.name,
+    )
+    parts.extend(
+        str(AddConstraint(constraint).compile(dialect=dialect)) + ";"
+        for constraint in deferred_constraints
+    )
     indexes = sorted(
         (index for table in Base.metadata.sorted_tables for index in table.indexes),
         key=lambda index: index.name,

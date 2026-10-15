@@ -77,6 +77,7 @@ class SdkProofTests(unittest.TestCase):
                 "scripts/run.mjs": b"scripts",
                 "dist/index.html": b"ui",
                 "sdk/python/src/lotuspond_sdk/__init__.py": b"sdk",
+                "runtime/python/src/lotuspond_runtime/__init__.py": b"runtime",
                 "sdk/python/src/lotuspond_sdk/py.typed": b"",
                 "sdk/python/src/lotuspond_sdk/executable/compiler.py": b"nested compiler",
                 "bundle": b"bundle", "smoke": b"smoke",
@@ -89,6 +90,7 @@ class SdkProofTests(unittest.TestCase):
                 "/app/backend/lotuspond": proof.tree_hash(repo / "backend/lotuspond"),
                 "/app/dist": proof.tree_hash(repo / "dist"),
                 "lotuspond_sdk": proof.tree_hash(sdk),
+                "lotuspond_runtime": proof.tree_hash(repo / "runtime/python/src/lotuspond_runtime"),
             }
             args = SimpleNamespace(bundle=repo / "bundle", smoke_report=repo / "smoke",
                                    api_image="api", collector_image="collector")
@@ -105,3 +107,29 @@ class SdkProofTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_runtime_distribution_is_part_of_api_image_content_proof(tmp_path):
+    """Changing only the new backend distribution must invalidate image identity."""
+    import argparse
+
+    for relative in ("backend/lotuspond/__init__.py", "web/index.ts", "dist/index.html",
+                     "sdk/python/src/lotuspond_sdk/__init__.py",
+                     "runtime/python/src/lotuspond_runtime/__init__.py", "bundle", "smoke"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original")
+    embedded = {"/app/backend/lotuspond": proof.tree_hash(tmp_path / "backend/lotuspond"),
+                "/app/dist": proof.tree_hash(tmp_path / "dist"),
+                "lotuspond_sdk": proof.tree_hash(tmp_path / "sdk/python/src/lotuspond_sdk"),
+                "lotuspond_runtime": proof.tree_hash(tmp_path / "runtime/python/src/lotuspond_runtime")}
+    args = argparse.Namespace(bundle=tmp_path / "bundle", smoke_report=tmp_path / "smoke",
+                              api_image="api", collector_image="collector")
+    with patch.object(proof, "image_id", return_value="sha256:synthetic"), patch.object(
+            proof, "embedded_tree", side_effect=lambda image, root: embedded[root]):
+        first = proof.build(tmp_path, args)
+        assert first["embedded_matches_source"].get("fleet_runtime_module") is True
+        (tmp_path / "runtime/python/src/lotuspond_runtime/__init__.py").write_text("changed")
+        second = proof.build(tmp_path, args)
+        assert second["embedded_matches_source"]["fleet_runtime_module"] is False
+        assert second["embedded_matches_source"]["sdk_runtime_module"] is True
