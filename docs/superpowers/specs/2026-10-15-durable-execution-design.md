@@ -1,7 +1,7 @@
 # Durable agent execution foundation (E04)
 
 Date: 15 October 2026 (Asia/Calcutta). Status: written specification approved by
-the owner for detailed implementation planning; implementation awaits plan review.
+the owner; the detailed plan and implementation were also approved on 15 October 2026.
 Engine selection authorizes the specified local integration, not production adoption. This specification
 continues the approved product-completion sequence after E03. It is not a
 production-readiness claim or a replacement for the remaining requirements.
@@ -333,8 +333,8 @@ workflow is accepted only after those applicable gates are actually satisfied.
 ## Review handoff
 
 The owner approved this written specification on 15 October 2026. That approval
-permits detailed implementation planning; plan review and the
-already-selected subagent execution method precede product implementation.
+permitted detailed implementation planning. The owner subsequently approved the
+fourteen-task plan and implementation with the already-selected subagent method.
 No additional merge, deployment, production database access, provider/customer
 connection, public distribution or external commitment is requested by it.
 
