@@ -7,6 +7,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 
 class ExecutionCode(StrEnum):
+    CAPACITY_UNAVAILABLE = "capacity_unavailable"
+    ENTITLEMENT_UNAVAILABLE = "entitlement_unavailable"
+    BUDGET_EXCEEDED = "budget_exceeded"
+    PRICE_UNAVAILABLE = "price_unavailable"
+    RECOVERY_UNAVAILABLE = "recovery_unavailable"
     INVALID_REQUEST = "invalid_request"
     FORBIDDEN = "forbidden"
     NOT_FOUND = "not_found"

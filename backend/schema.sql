@@ -592,6 +592,7 @@ CREATE TABLE execution_capacities (
 	active INTEGER NOT NULL,
 	pending INTEGER NOT NULL,
 	retained_waits INTEGER NOT NULL,
+	next_admission_sequence BIGINT NOT NULL,
 	active_limit INTEGER NOT NULL,
 	pending_limit INTEGER NOT NULL,
 	wait_limit INTEGER NOT NULL,
@@ -602,6 +603,7 @@ CREATE TABLE execution_capacities (
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 	PRIMARY KEY (id),
 	UNIQUE (workspace_id, project_id, environment_id),
+	CHECK (next_admission_sequence BETWEEN 1 AND 9007199254740991),
 	CHECK (active_limit BETWEEN 0 AND 5 AND active BETWEEN 0 AND active_limit),
 	CHECK (pending_limit BETWEEN 0 AND 1000 AND pending BETWEEN 0 AND pending_limit),
 	CHECK (wait_limit BETWEEN 0 AND 10000 AND retained_waits BETWEEN 0 AND wait_limit),
@@ -1278,6 +1280,7 @@ CREATE TABLE alert_deliveries (
 );
 
 CREATE TABLE executions (
+	admission_sequence BIGINT NOT NULL,
 	deployment_revision_id VARCHAR(36) NOT NULL,
 	interpreter_id VARCHAR(128) NOT NULL,
 	engine_identity VARCHAR(128) NOT NULL,
@@ -1316,6 +1319,8 @@ CREATE TABLE executions (
 	CHECK (admitted_at_ms BETWEEN 0 AND 9007199254740991),
 	CHECK (deadline_ms BETWEEN 0 AND 9007199254740991),
 	CHECK (length(admission_digest) = 64),
+	CHECK (admission_sequence BETWEEN 1 AND 9007199254740991),
+	UNIQUE (workspace_id, project_id, environment_id, admission_sequence),
 	UNIQUE (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
 	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
@@ -1852,7 +1857,7 @@ CREATE INDEX execution_lease_expiry_idx ON execution_leases (workspace_id, proje
 
 CREATE INDEX execution_outbox_queue_idx ON execution_outbox (workspace_id, project_id, environment_id, status, available_at_ms, id);
 
-CREATE INDEX execution_queue_idx ON executions (workspace_id, project_id, environment_id, state, admitted_at_ms, id);
+CREATE INDEX execution_queue_idx ON executions (workspace_id, project_id, environment_id, state, admission_sequence, id);
 
 CREATE INDEX execution_wait_deadline_idx ON execution_waits (workspace_id, project_id, environment_id, state, deadline_ms, id);
 

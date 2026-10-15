@@ -146,6 +146,7 @@ def execution_rows(n=0):
                 initiating_user_id=values["users"]["id"],
                 initiating_api_key_id=ids["key"],
                 admitted_at_ms=0,
+                admission_sequence=1,
                 deadline_ms=10000,
                 admission_digest="e" * 64,
             ),
@@ -401,7 +402,12 @@ def test_same_environment_different_execution_cannot_link_attempt_wait_or_signal
     values = execution_rows()
     with engine.begin() as connection:
         load(connection, values)
-        execution = dict(values["executions"], id=new_id(), engine_identity="another-engine")
+        execution = dict(
+            values["executions"],
+            id=new_id(),
+            engine_identity="another-engine",
+            admission_sequence=2,
+        )
         connection.execute(models.Execution.__table__.insert().values(**execution))
         for name in (
             "execution_attempts",
@@ -862,3 +868,21 @@ def test_agent_catalog_publication_preserves_real_document_without_plan(engine):
                 )
             )
         )
+
+
+def test_admission_sequence_is_required_scoped_unique_and_safe(engine):
+    values = execution_rows()
+    with engine.begin() as connection:
+        load(connection, values)
+        table = models.Execution.__table__
+        for value in (None, 0, -1, 9007199254740992):
+            with pytest.raises(IntegrityError), connection.begin_nested():
+                connection.execute(table.update().values(admission_sequence=value))
+        duplicate = dict(values["executions"], id=new_id(), engine_identity=new_id())
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(table.insert().values(**duplicate))
+        connection.execute(table.insert().values(**dict(duplicate, admission_sequence=2)))
+        counter = models.ExecutionCapacity.__table__
+        for value in (0, -1, 9007199254740992):
+            with pytest.raises(IntegrityError), connection.begin_nested():
+                connection.execute(counter.update().values(next_admission_sequence=value))

@@ -1520,6 +1520,7 @@ class ExecutionArtifact(FleetScoped, Base):
 
 
 class Execution(FleetScoped, Base):
+    admission_sequence: Mapped[int] = mapped_column(BigInteger)
     __tablename__ = "executions"
     deployment_revision_id: Mapped[str] = mapped_column(String(36))
     interpreter_id: Mapped[str] = mapped_column(String(128))
@@ -1557,7 +1558,9 @@ class Execution(FleetScoped, Base):
         CheckConstraint("next_event_sequence BETWEEN 1 AND 9007199254740991"),
         *execution_safe("admitted_at_ms", "deadline_ms"),
         *execution_hashes("admission_digest"),
-        Index("execution_queue_idx", *FLEET_SCOPE, "state", "admitted_at_ms", "id"),
+        CheckConstraint("admission_sequence BETWEEN 1 AND 9007199254740991"),
+        UniqueConstraint(*FLEET_SCOPE, "admission_sequence"),
+        Index("execution_queue_idx", *FLEET_SCOPE, "state", "admission_sequence", "id"),
         Index("execution_deadline_idx", "state", "deadline_ms", "id"),
     )
 
@@ -1819,11 +1822,13 @@ class ExecutionCapacity(FleetScoped, Base):
     active: Mapped[int] = mapped_column(Integer, default=0)
     pending: Mapped[int] = mapped_column(Integer, default=0)
     retained_waits: Mapped[int] = mapped_column(Integer, default=0)
+    next_admission_sequence: Mapped[int] = mapped_column(BigInteger, default=1)
     active_limit: Mapped[int] = mapped_column(Integer, default=5)
     pending_limit: Mapped[int] = mapped_column(Integer, default=1000)
     wait_limit: Mapped[int] = mapped_column(Integer, default=10000)
     __table_args__ = fleet_scoped(
         UniqueConstraint(*FLEET_SCOPE),
+        CheckConstraint("next_admission_sequence BETWEEN 1 AND 9007199254740991"),
         CheckConstraint("active_limit BETWEEN 0 AND 5 AND active BETWEEN 0 AND active_limit"),
         CheckConstraint("pending_limit BETWEEN 0 AND 1000 AND pending BETWEEN 0 AND pending_limit"),
         CheckConstraint(
