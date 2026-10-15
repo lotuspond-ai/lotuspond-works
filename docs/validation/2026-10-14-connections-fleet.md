@@ -204,3 +204,13 @@ a concurrency override. The affected runner file separately passed17/17. Both th
 old delayed-abort failure and a deliberate readiness failure confirmed exact test
 group cleanup. This is local correction evidence; fresh review and hosted results
 at the published correction head remain separate gates.
+
+Fresh quality review identified an incomplete-read edge in the readiness marker.
+The reader now retries until the complete marker appears within the same startup
+deadline. The actual fixture deliberately creates an empty marker, waits for the
+parent to observe it, then completes publication after a bounded delay. Clean
+source `1036507c2f2111da6c42bfcca647aa64714e0348` passed17/17 affected tests and
+105/105 ordinary Node tests (2.500s, zero skips, no concurrency override). Both
+runs observed six incomplete reads before real cooperative cleanup and confirmed
+owned-group absence. Production grace and post-abort bounds remain unchanged;
+fresh scoped closure and hosted correction-head evidence remain separate.
