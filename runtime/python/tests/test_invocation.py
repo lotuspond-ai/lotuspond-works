@@ -513,7 +513,10 @@ print('installed fixed child -I/-m observed; no source overrides')
 @pytest.mark.parametrize("failure", ["timeout", "crash"])
 def test_real_child_and_dns_descendant_cleanup(tmp_path, monkeypatch, failure):
     import json
+    import os
+    import signal
     import time
+    from pathlib import Path
 
     from tls_fixtures import certificates
 
@@ -526,9 +529,13 @@ def test_real_child_and_dns_descendant_cleanup(tmp_path, monkeypatch, failure):
     )
     marker = tmp_path / "helper-observation.json"
     dns_script = (
-        "import json,os,time;"
-        f'open({str(marker)!r},"w").write(json.dumps([os.getpid(),os.getpgrp()]));'
-        "time.sleep(10)"
+        "import json,os,time\nfrom pathlib import Path\n"
+        f"marker=Path({str(marker)!r})\n"
+        "start=int(Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19])\n"
+        "with marker.with_suffix('.tmp').open('w') as observation:\n"
+        " json.dump([os.getpid(),os.getpgrp(),start],observation)\n"
+        "marker.with_suffix('.tmp').replace(marker)\n"
+        "time.sleep(10)\n"
     )
     bootstrap = (
         "import runpy,threading,time,os\n"
@@ -554,25 +561,46 @@ def test_real_child_and_dns_descendant_cleanup(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(m.subprocess, "Popen", spawn)
     monkeypatch.setattr(m, "_cleanup_failed", False)
     start = time.monotonic()
-    result = m.invoke_fixture(
-        request, authority=Allow(), destination=destination, resolver=resolver
-    )
-    assert result.status == "denied"
-    if m._cleanup_failed:
-        assert (
-            m.invoke_fixture(
-                request, authority=Allow(), destination=destination, resolver=resolver
-            ).status
-            == "denied"
+    deadline = start + 1.5
+    try:
+        result = m.invoke_fixture(
+            request, authority=Allow(), destination=destination, resolver=resolver
         )
-    assert time.monotonic() - start < 1.5
-    helper_pid, helper_group = json.loads(marker.read_text())
-    assert helper_group == children[0].pid
-    assert children[0].poll() is not None
-    state = __import__("pathlib").Path(f"/proc/{helper_pid}/stat")
-    if state.exists():
-        # A kernel zombie is dead; lack of full reap/group acknowledgement fences production.
-        assert state.read_text().split()[2] in ("Z", "X")
+        assert result.status == "denied"
+        if m._cleanup_failed:
+            assert (
+                m.invoke_fixture(
+                    request, authority=Allow(), destination=destination, resolver=resolver
+                ).status
+                == "denied"
+            )
+            assert len(children) == 1
+        assert time.monotonic() < deadline
+        helper_pid, helper_group, helper_start = json.loads(marker.read_text())
+        assert helper_group == children[0].pid
+        assert children[0].poll() is not None
+        state = Path(f"/proc/{helper_pid}/stat")
+        while True:
+            try:
+                fields = state.read_text().rsplit(")", 1)[1].split()
+            except FileNotFoundError:
+                break
+            assert int(fields[19]) == helper_start, "helper PID was reused"
+            assert int(fields[2]) == helper_group
+            if fields[0] in ("Z", "X"):
+                # Termination is observable; this does not claim the orphan was reaped.
+                break
+            # SIGKILL is asynchronous; waiting for the leader does not wait for descendants.
+            assert time.monotonic() < deadline, f"DNS helper still alive: {fields[0]}"
+            time.sleep(min(0.005, max(0, deadline - time.monotonic())))
+        assert time.monotonic() < deadline
+    finally:
+        for child in children:
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.wait(timeout=0.5)
 
 
 def test_versions_and_invocations_never_share_secret_values(tmp_path):
