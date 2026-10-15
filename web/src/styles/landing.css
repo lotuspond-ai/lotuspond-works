@@ -1217,7 +1217,6 @@
 
 /* Field record: the brand vocabulary beyond the pond. Ink glyphs draw themselves,
    outcomes are traces on graph paper, and decisions carry a stamp. */
-.graph-paper,
 .trace-specimen,
 .panel-glyph {
   background-color: var(--paper);

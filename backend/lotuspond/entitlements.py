@@ -38,7 +38,6 @@ PLANS: dict[str, Plan] = {
     "enterprise": Plan("enterprise", trace_retention_days=365, monthly_trace_quota=5_000_000),
 }
 DEFAULT_PLAN = "developer"
-PLAN_NAMES = tuple(PLANS)
 
 
 def plan_for(name: str | None) -> Plan:
