@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     redis_url: SecretStr | None = None
     origin: str = "http://127.0.0.1:8000"
     registration_enabled: bool = False
+    fleet_enabled: bool = False
+    fleet_installation_id: str | None = None
     session_hours: int = Field(default=24, ge=1, le=168)
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
     network_mode: Literal["connected", "airgap"] = "connected"
@@ -117,6 +119,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_requirements(self):
+        if self.fleet_enabled or self.fleet_installation_id is not None:
+            from lotuspond_runtime.protocol import OpaqueId
+            from pydantic import TypeAdapter
+
+            try:
+                TypeAdapter(OpaqueId).validate_python(self.fleet_installation_id, strict=True)
+            except ValueError:
+                raise ValueError("Fleet requires a valid installation ID") from None
         origin = urlsplit(self.origin)
         if (
             origin.scheme not in {"http", "https"}

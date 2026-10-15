@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .database import engine_for
+from .fleet.migration import migrate_fleet_v13
 from .models import AuditEvent, Base, SchemaVersion, User
 from .schema_version import SCHEMA_VERSION
 
@@ -81,7 +82,7 @@ def main():
 
 
 def migrate(settings: Settings):
-    """Apply the reviewed additive v2 through v12 chain; never drop/import records."""
+    """Apply the reviewed additive v2 through v13 chain; never drop/import records."""
     url = make_url(settings.database_url.get_secret_value())
     if (
         settings.env == "production"
@@ -95,10 +96,17 @@ def migrate(settings: Settings):
     try:
         with engine.begin() as connection:
             connection.execute(text("SELECT pg_advisory_xact_lock(736183)"))
+            inspector = inspect(connection)
+            if "schema_version" not in inspector.get_table_names() or {
+                column["name"] for column in inspector.get_columns("schema_version")
+            } != {"version", "installed_at"}:
+                raise ValueError("Unexpected schema state; no changes made")
             versions = list(connection.execute(SchemaVersion.__table__.select()).scalars())
+            if len(versions) != 1 or type(versions[0]) is not int:
+                raise ValueError("Unexpected schema state; no changes made")
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")
-            if len(versions) != 1 or versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+            if versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
                 raise ValueError("Unexpected schema state; no changes made")
             current = versions[0]
             inspector = inspect(connection)
@@ -413,6 +421,13 @@ def migrate(settings: Settings):
                 Base.metadata.tables["workflow_package_versions"].create(connection)
                 Base.metadata.tables["package_publication_requests"].create(connection)
                 current = 12
+            if current == 12:
+                # The earlier chain and fleet preflight share this transaction;
+                # intermediate v12 is never visible outside it. Any refusal
+                # rolls back the entire chain and the original version ledger.
+                connection.execute(SchemaVersion.__table__.update().values(version=12))
+                migrate_fleet_v13(connection)
+                current = 13
             connection.execute(SchemaVersion.__table__.update().values(version=current))
     finally:
         engine.dispose()

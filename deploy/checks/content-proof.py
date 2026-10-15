@@ -38,11 +38,12 @@ TREE_ALGORITHM = (
 EMBEDDED_TREE = r"""
 import hashlib, json, os, sys
 root = sys.argv[1]
-if root == "lotuspond_sdk":
-    import lotuspond_sdk
-    root = os.path.dirname(lotuspond_sdk.__file__)
+if root in {"lotuspond_sdk", "lotuspond_runtime"}:
+    import importlib
+    module = importlib.import_module(root)
+    root = os.path.dirname(module.__file__)
     if not root.startswith(sys.prefix + os.sep):
-        raise RuntimeError("SDK must be installed inside the image environment")
+        raise RuntimeError("SDK/runtime must be installed inside the image environment")
 
 excluded = set(json.loads(sys.argv[2]))
 suffixes = tuple(json.loads(sys.argv[3]))
@@ -153,6 +154,7 @@ def build(repo: Path, args) -> dict[str, object]:
             "backend": tree_hash(backend),
             "backend_runtime_module": tree_hash(runtime_module),
             "sdk_runtime_module": tree_hash(repo / "sdk/python/src/lotuspond_sdk"),
+            "fleet_runtime_module": tree_hash(repo / "runtime/python/src/lotuspond_runtime"),
             "web": tree_hash(repo / "web"),
             "scripts_excluded_from_bundle": tree_hash(
                 repo / "scripts",
@@ -167,6 +169,7 @@ def build(repo: Path, args) -> dict[str, object]:
         "embedded_runtime_trees": {
             "/app/backend/lotuspond": embedded_tree(args.api_image, "/app/backend/lotuspond"),
             "lotuspond_sdk": embedded_tree(args.api_image, "lotuspond_sdk"),
+            "lotuspond_runtime": embedded_tree(args.api_image, "lotuspond_runtime"),
             "/app/dist": embedded_tree(args.api_image, "/app/dist"),
         },
     }
@@ -179,6 +182,10 @@ def build(repo: Path, args) -> dict[str, object]:
         "sdk_runtime_module": (
             proof["source_trees"]["sdk_runtime_module"]
             == proof["embedded_runtime_trees"]["lotuspond_sdk"]
+        ),
+        "fleet_runtime_module": (
+            proof["source_trees"]["fleet_runtime_module"]
+            == proof["embedded_runtime_trees"]["lotuspond_runtime"]
         ),
         "static_ui": dist_source == dist_image,
     }

@@ -647,6 +647,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "httpx2" },
+    { name = "lotuspond-runtime" },
     { name = "lotuspond-sdk" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -673,6 +674,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "httpx2", specifier = ">=2.13,<3" },
+    { name = "lotuspond-runtime", editable = "../runtime/python" },
     { name = "lotuspond-sdk", editable = "../sdk/python" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.12,<3" },
@@ -688,6 +690,29 @@ dev = [
     { name = "pip-audit", specifier = ">=2.9,<3" },
     { name = "pytest", specifier = ">=9,<10" },
     { name = "pytest-asyncio", specifier = ">=1,<2" },
+    { name = "ruff", specifier = ">=0.14,<1" },
+]
+
+[[package]]
+name = "lotuspond-runtime"
+version = "0.1.0"
+source = { editable = "../runtime/python" }
+dependencies = [
+    { name = "lotuspond-sdk" },
+    { name = "pydantic" },
+    { name = "rfc8785" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "lotuspond-sdk", editable = "../sdk/python" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "rfc8785", specifier = "==0.1.4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9,<10" },
     { name = "ruff", specifier = ">=0.14,<1" },
 ]
 
