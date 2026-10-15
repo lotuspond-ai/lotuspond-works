@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "os": "linux",
+  "architecture": "x86_64",
+  "required_capabilities": ["human-review", "secret-references"]
+}

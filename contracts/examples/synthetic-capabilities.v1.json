@@ -1,0 +1,18 @@
+{
+  "format_version": "lotuspond.workflow-capabilities.v1",
+  "assurance": "synthetic-declaration",
+  "schema_versions": ["lotuspond.workflow-package.v1"],
+  "canonicalizations": ["lotuspond.workflow-package.canonical-json.v1"],
+  "node_kinds": ["start", "end", "agent", "connector", "human_review"],
+  "connectors": [{
+    "connector": "synthetic-case-system",
+    "version": "1.0.0",
+    "operations": ["read-case", "write-case"]
+  }],
+  "models": [{"profile": "primary-model", "revision": "2026-10-13"}],
+  "platforms": [{
+    "os": "linux",
+    "architecture": "x86_64",
+    "capabilities": ["human-review", "secret-references"]
+  }]
+}

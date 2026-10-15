@@ -15,6 +15,8 @@ nav:
   - Identity mail: identity-mail.md
   - Offline identity: offline-identity.md
   - API contracts: api.md
+  - Package SDK and local trust: package-sdk.md
+  - Executable definitions and contracts: executable-packages.md
   - Projects: projects.md
   - Evaluations: evaluations.md
   - Evaluation runners: runners.md

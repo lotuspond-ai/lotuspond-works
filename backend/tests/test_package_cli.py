@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -10,14 +11,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from cryptography.hazmat.primitives import serialization
+
 
 class PackageCliTests(unittest.TestCase):
     backend = Path(__file__).resolve().parents[1]
     root = backend.parent
 
     def invoke(self, path: Path) -> subprocess.CompletedProcess:
+        return self.invoke_command("validate", path)
+
+    def invoke_command(self, *args, module="lotuspond.package_cli") -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "lotuspond.package_cli", "validate", str(path)],
+            [sys.executable, "-m", module, *map(str, args)],
             cwd=self.backend,
             capture_output=True,
             text=True,
@@ -122,6 +128,105 @@ class PackageCliTests(unittest.TestCase):
         raw["nodes"][2]["kind"] = marker
         report = self.invalid_file(json.dumps(raw).encode())
         self.assertNotIn(marker, json.dumps(report))
+
+    def test_legacy_and_sdk_commands_have_identical_reports_and_statuses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            example = self.root / "contracts/examples/reviewed-action.v1.json"
+            for args in (
+                ("validate", example),
+                ("digest", example),
+                ("diff", example, example),
+                (
+                    "compatibility",
+                    example,
+                    "--profile",
+                    self.root / "contracts/examples/synthetic-capabilities.v1.json",
+                    "--requirements",
+                    self.root / "contracts/examples/synthetic-requirements.v1.json",
+                ),
+                (
+                    "verify",
+                    example,
+                    "--signature",
+                    root / "private-sentinel",
+                    "--trust",
+                    root / "private-sentinel",
+                ),
+                (
+                    "sign",
+                    example,
+                    "--key",
+                    root / "private-sentinel",
+                    "--output",
+                    root / "signature",
+                ),
+                ("keygen", "--private", root / "same", "--public", root / "same"),
+                ("digest", example, "--private-sentinel"),
+            ):
+                with self.subTest(command=args[0]):
+                    legacy = self.invoke_command(*args)
+                    sdk = self.invoke_command(*args, module="lotuspond_sdk")
+                    self.assertEqual(
+                        (legacy.returncode, legacy.stdout, legacy.stderr),
+                        (sdk.returncode, sdk.stdout, sdk.stderr),
+                    )
+                    self.assertEqual(legacy.stderr, "")
+                    self.assertNotIn("private-sentinel", legacy.stdout)
+            for module, name in (("lotuspond.package_cli", "legacy"), ("lotuspond_sdk", "sdk")):
+                target = root / name
+                result = self.invoke_command(
+                    "canonicalize", example, "--output", target, module=module
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(
+                    json.loads(result.stdout)["result"]["sha256"],
+                    "305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3",
+                )
+            self.assertEqual((root / "legacy").read_bytes(), (root / "sdk").read_bytes())
+            private, public = root / "publisher.private.pem", root / "publisher.public.pem"
+            generated = self.invoke_command("keygen", "--private", private, "--public", public)
+            self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
+            public_bytes = serialization.load_pem_public_key(public.read_bytes()).public_bytes_raw()
+            key_id = hashlib.sha256(public_bytes).hexdigest()
+            self.assertEqual(json.loads(generated.stdout)["result"]["key_id"], key_id)
+            signatures = []
+            for module, name in (("lotuspond.package_cli", "legacy"), ("lotuspond_sdk", "sdk")):
+                signature = root / (name + ".signature.json")
+                result = self.invoke_command(
+                    "sign", example, "--key", private, "--output", signature, module=module
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["result"]["key_id"], key_id)
+                signatures.append(signature)
+            self.assertEqual(signatures[0].read_bytes(), signatures[1].read_bytes())
+            trust = root / "trust.json"
+            for state, status in (("allowed", 0), ("revoked", 3)):
+                trust.write_text(
+                    json.dumps(
+                        {
+                            "format_version": 1,
+                            "keys": [
+                                {
+                                    "key_id": key_id,
+                                    "public_key": public_bytes.hex(),
+                                    "state": state,
+                                }
+                            ],
+                        }
+                    )
+                )
+                args = ("verify", example, "--signature", signatures[0], "--trust", trust)
+                legacy, sdk = (
+                    self.invoke_command(*args),
+                    self.invoke_command(*args, module="lotuspond_sdk"),
+                )
+                self.assertEqual(
+                    (legacy.returncode, legacy.stdout, legacy.stderr),
+                    (sdk.returncode, sdk.stdout, sdk.stderr),
+                )
+                self.assertEqual(legacy.returncode, status)
+                self.assertEqual(legacy.stderr, "")
 
     def test_schema_export_check_runs_without_a_database(self):
         result = subprocess.run(

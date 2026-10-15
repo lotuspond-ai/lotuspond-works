@@ -1,0 +1,10 @@
+{
+  "algorithm": "ed25519",
+  "canonicalization": "lotuspond.workflow-package.canonical-json.v1",
+  "context": "lotuspond-workflow-package-signature-v1",
+  "format_version": 1,
+  "key_id": "21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9",
+  "schema_version": "lotuspond.workflow-package.v1",
+  "sha256": "305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3",
+  "signature": "ae73520a69a27e43160efb5eaca24074ee79619c4f0c8449c0e0f3630be9e1751dbeccd01e9c26a6fc4e8fb6c54f92df55e284855016c79b0c408d784a791e0e"
+}

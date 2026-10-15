@@ -1,0 +1,3565 @@
+{
+  "$comment": "Structural contract only. Use SDK public validators for bounds, semantic references, hashes and correlations. No authentication or authority is established.",
+  "$defs": {
+    "ActionDispatchStep": {
+      "additionalProperties": false,
+      "properties": {
+        "compensation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompensationSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "intent": {
+          "$ref": "#/$defs/RefMapping"
+        },
+        "kind": {
+          "const": "action_dispatch",
+          "title": "Kind",
+          "type": "string"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryPolicy"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "intent",
+        "retry"
+      ],
+      "title": "ActionDispatchStep",
+      "type": "object"
+    },
+    "ActionIntentStep": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "enum": [
+            "none",
+            "human"
+          ],
+          "title": "Approval",
+          "type": "string"
+        },
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "expiry_seconds": {
+          "maximum": 2592000,
+          "minimum": 1,
+          "title": "Expiry Seconds",
+          "type": "integer"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "independent_review": {
+          "title": "Independent Review",
+          "type": "boolean"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "kind": {
+          "const": "action_intent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "policy_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Policy Ref",
+          "type": "string"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "connector_ref",
+        "operation",
+        "target",
+        "input",
+        "policy_ref",
+        "approval",
+        "independent_review",
+        "expiry_seconds"
+      ],
+      "title": "ActionIntentStep",
+      "type": "object"
+    },
+    "AgentLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_cost_microusd": {
+          "maximum": 1000000000000,
+          "minimum": 0,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_steps": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_cost_microusd",
+        "max_steps",
+        "timeout_seconds"
+      ],
+      "title": "AgentLimits",
+      "type": "object"
+    },
+    "AgentStep": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Ref"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "instructions": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "kind": {
+          "const": "agent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "knowledge_refs": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Knowledge Refs",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/AgentLimits"
+        },
+        "model_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Ref"
+        },
+        "output_schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Output Schema"
+        },
+        "read_tools": {
+          "items": {
+            "$ref": "#/$defs/ReadTool"
+          },
+          "maxItems": 32,
+          "title": "Read Tools",
+          "type": "array"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryPolicy"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "input",
+        "instructions",
+        "output_schema",
+        "limits",
+        "retry"
+      ],
+      "title": "AgentStep",
+      "type": "object"
+    },
+    "ArrayExport": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayExport",
+              "data": "#/$defs/DataExport",
+              "handle": "#/$defs/HandleExport",
+              "object": "#/$defs/ObjectExport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DataExport"
+            },
+            {
+              "$ref": "#/$defs/HandleExport"
+            },
+            {
+              "$ref": "#/$defs/ObjectExport"
+            },
+            {
+              "$ref": "#/$defs/ArrayExport"
+            }
+          ],
+          "title": "Items"
+        },
+        "kind": {
+          "const": "array",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_items": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Items",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "items",
+        "max_items"
+      ],
+      "title": "ArrayExport",
+      "type": "object"
+    },
+    "ArrayMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "item_schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayExport",
+              "data": "#/$defs/DataExport",
+              "handle": "#/$defs/HandleExport",
+              "object": "#/$defs/ObjectExport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DataExport"
+            },
+            {
+              "$ref": "#/$defs/HandleExport"
+            },
+            {
+              "$ref": "#/$defs/ObjectExport"
+            },
+            {
+              "$ref": "#/$defs/ArrayExport"
+            }
+          ],
+          "title": "Item Schema"
+        },
+        "items": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "array": "#/$defs/ArrayMapping",
+                "call": "#/$defs/CallMapping",
+                "literal": "#/$defs/LiteralMapping",
+                "object": "#/$defs/ObjectMapping",
+                "ref": "#/$defs/RefMapping"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LiteralMapping"
+              },
+              {
+                "$ref": "#/$defs/RefMapping"
+              },
+              {
+                "$ref": "#/$defs/ObjectMapping"
+              },
+              {
+                "$ref": "#/$defs/ArrayMapping"
+              },
+              {
+                "$ref": "#/$defs/CallMapping"
+              }
+            ]
+          },
+          "maxItems": 1000,
+          "title": "Items",
+          "type": "array"
+        },
+        "kind": {
+          "const": "array",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "items",
+        "item_schema"
+      ],
+      "title": "ArrayMapping",
+      "type": "object"
+    },
+    "ArraySchema": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Items"
+        },
+        "kind": {
+          "const": "array",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_items": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Items",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "items",
+        "max_items"
+      ],
+      "title": "ArraySchema",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "workflow",
+            "connector",
+            "model",
+            "agent",
+            "evaluation",
+            "policy",
+            "knowledge",
+            "artifact"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "version",
+        "sha256"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "Assurance": {
+      "additionalProperties": false,
+      "properties": {
+        "evaluation_refs": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Evaluation Refs",
+          "type": "array"
+        },
+        "outcome_rule_refs": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Outcome Rule Refs",
+          "type": "array"
+        },
+        "required_classification": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Required Classification",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evaluation_refs",
+        "outcome_rule_refs",
+        "required_classification"
+      ],
+      "title": "Assurance",
+      "type": "object"
+    },
+    "Body": {
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Result"
+        },
+        "result_schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayExport",
+              "data": "#/$defs/DataExport",
+              "handle": "#/$defs/HandleExport",
+              "object": "#/$defs/ObjectExport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DataExport"
+            },
+            {
+              "$ref": "#/$defs/HandleExport"
+            },
+            {
+              "$ref": "#/$defs/ObjectExport"
+            },
+            {
+              "$ref": "#/$defs/ArrayExport"
+            }
+          ],
+          "title": "Result Schema"
+        },
+        "steps": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "action_dispatch": "#/$defs/ActionDispatchStep",
+                "action_intent": "#/$defs/ActionIntentStep",
+                "agent": "#/$defs/AgentStep",
+                "connector_read": "#/$defs/ConnectorReadStep",
+                "decision": "#/$defs/DecisionStep",
+                "external_wait": "#/$defs/ExternalWaitStep",
+                "human_task": "#/$defs/HumanTaskStep",
+                "iteration": "#/$defs/IterationStep",
+                "outcome_verification": "#/$defs/OutcomeVerificationStep",
+                "parallel": "#/$defs/ParallelStep",
+                "subworkflow": "#/$defs/SubworkflowStep",
+                "timer": "#/$defs/TimerStep",
+                "transform": "#/$defs/TransformStep"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/TransformStep"
+              },
+              {
+                "$ref": "#/$defs/DecisionStep"
+              },
+              {
+                "$ref": "#/$defs/ParallelStep"
+              },
+              {
+                "$ref": "#/$defs/IterationStep"
+              },
+              {
+                "$ref": "#/$defs/ConnectorReadStep"
+              },
+              {
+                "$ref": "#/$defs/AgentStep"
+              },
+              {
+                "$ref": "#/$defs/ActionIntentStep"
+              },
+              {
+                "$ref": "#/$defs/HumanTaskStep"
+              },
+              {
+                "$ref": "#/$defs/ActionDispatchStep"
+              },
+              {
+                "$ref": "#/$defs/TimerStep"
+              },
+              {
+                "$ref": "#/$defs/ExternalWaitStep"
+              },
+              {
+                "$ref": "#/$defs/SubworkflowStep"
+              },
+              {
+                "$ref": "#/$defs/OutcomeVerificationStep"
+              }
+            ]
+          },
+          "maxItems": 128,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps",
+        "result",
+        "result_schema"
+      ],
+      "title": "Body",
+      "type": "object"
+    },
+    "BooleanSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "boolean",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "BooleanSchema",
+      "type": "object"
+    },
+    "Branch": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Body"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "body"
+      ],
+      "title": "Branch",
+      "type": "object"
+    },
+    "CallMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "array": "#/$defs/ArrayMapping",
+                "call": "#/$defs/CallMapping",
+                "literal": "#/$defs/LiteralMapping",
+                "object": "#/$defs/ObjectMapping",
+                "ref": "#/$defs/RefMapping"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LiteralMapping"
+              },
+              {
+                "$ref": "#/$defs/RefMapping"
+              },
+              {
+                "$ref": "#/$defs/ObjectMapping"
+              },
+              {
+                "$ref": "#/$defs/ArrayMapping"
+              },
+              {
+                "$ref": "#/$defs/CallMapping"
+              }
+            ]
+          },
+          "maxItems": 63,
+          "title": "Args",
+          "type": "array"
+        },
+        "fn": {
+          "enum": [
+            "concat",
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "and",
+            "or",
+            "not",
+            "exists",
+            "coalesce"
+          ],
+          "title": "Fn",
+          "type": "string"
+        },
+        "kind": {
+          "const": "call",
+          "title": "Kind",
+          "type": "string"
+        },
+        "rounding": {
+          "anyOf": [
+            {
+              "enum": [
+                "reject",
+                "half_even",
+                "floor",
+                "ceiling"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounding"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "maximum": 18,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        }
+      },
+      "required": [
+        "kind",
+        "fn",
+        "args"
+      ],
+      "title": "CallMapping",
+      "type": "object"
+    },
+    "ComparisonRule": {
+      "additionalProperties": false,
+      "properties": {
+        "expected": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Expected"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "readback_pointer": {
+          "maxLength": 512,
+          "title": "Readback Pointer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "readback_pointer",
+        "expected"
+      ],
+      "title": "ComparisonRule",
+      "type": "object"
+    },
+    "CompensationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "enum": [
+            "none",
+            "human"
+          ],
+          "title": "Approval",
+          "type": "string"
+        },
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "expiry_seconds": {
+          "maximum": 2592000,
+          "minimum": 1,
+          "title": "Expiry Seconds",
+          "type": "integer"
+        },
+        "independent_review": {
+          "title": "Independent Review",
+          "type": "boolean"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "policy_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Policy Ref",
+          "type": "string"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryPolicy"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Target"
+        },
+        "verification": {
+          "$ref": "#/$defs/VerificationSpec"
+        }
+      },
+      "required": [
+        "connector_ref",
+        "operation",
+        "target",
+        "input",
+        "policy_ref",
+        "approval",
+        "independent_review",
+        "expiry_seconds",
+        "retry",
+        "verification"
+      ],
+      "title": "CompensationSpec",
+      "type": "object"
+    },
+    "ConnectorDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "credential_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credential Ref"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "id",
+        "ref"
+      ],
+      "title": "ConnectorDeclaration",
+      "type": "object"
+    },
+    "ConnectorReadStep": {
+      "additionalProperties": false,
+      "properties": {
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "kind": {
+          "const": "connector_read",
+          "title": "Kind",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryPolicy"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Target"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "connector_ref",
+        "operation",
+        "target",
+        "input",
+        "retry"
+      ],
+      "title": "ConnectorReadStep",
+      "type": "object"
+    },
+    "DataExport": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "data",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "kind",
+        "schema"
+      ],
+      "title": "DataExport",
+      "type": "object"
+    },
+    "DecimalSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "decimal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "precision": {
+          "maximum": 38,
+          "minimum": 1,
+          "title": "Precision",
+          "type": "integer"
+        },
+        "scale": {
+          "maximum": 18,
+          "minimum": 0,
+          "title": "Scale",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "precision",
+        "scale"
+      ],
+      "title": "DecimalSchema",
+      "type": "object"
+    },
+    "DecisionStep": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Condition"
+        },
+        "else_body": {
+          "$ref": "#/$defs/Body"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "decision",
+          "title": "Kind",
+          "type": "string"
+        },
+        "then_body": {
+          "$ref": "#/$defs/Body"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "condition",
+        "then_body",
+        "else_body"
+      ],
+      "title": "DecisionStep",
+      "type": "object"
+    },
+    "Declaration": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        }
+      },
+      "required": [
+        "id",
+        "ref"
+      ],
+      "title": "Declaration",
+      "type": "object"
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "properties": {
+        "destination_classes": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Destination Classes",
+          "type": "array"
+        },
+        "operation_classes": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Operation Classes",
+          "type": "array"
+        },
+        "platforms": {
+          "items": {
+            "$ref": "#/$defs/Platform"
+          },
+          "maxItems": 64,
+          "title": "Platforms",
+          "type": "array"
+        },
+        "required_capabilities": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Required Capabilities",
+          "type": "array"
+        },
+        "runtime_contract": {
+          "const": "lotuspond.runtime-contract.v1",
+          "title": "Runtime Contract",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_contract",
+        "platforms",
+        "required_capabilities",
+        "destination_classes",
+        "operation_classes"
+      ],
+      "title": "Environment",
+      "type": "object"
+    },
+    "ExportField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayExport",
+              "data": "#/$defs/DataExport",
+              "handle": "#/$defs/HandleExport",
+              "object": "#/$defs/ObjectExport"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DataExport"
+            },
+            {
+              "$ref": "#/$defs/HandleExport"
+            },
+            {
+              "$ref": "#/$defs/ObjectExport"
+            },
+            {
+              "$ref": "#/$defs/ArrayExport"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "name",
+        "schema",
+        "required"
+      ],
+      "title": "ExportField",
+      "type": "object"
+    },
+    "ExternalWaitStep": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_policy_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Assignment Policy Ref",
+          "type": "string"
+        },
+        "correlation": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Correlation"
+        },
+        "escalation_policy_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Policy Ref"
+        },
+        "expiry_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Expiry Seconds",
+          "type": "integer"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "external_wait",
+          "title": "Kind",
+          "type": "string"
+        },
+        "signal_schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Signal Schema"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "signal_schema",
+        "correlation",
+        "expiry_seconds",
+        "assignment_policy_ref"
+      ],
+      "title": "ExternalWaitStep",
+      "type": "object"
+    },
+    "FieldSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "name",
+        "schema",
+        "required"
+      ],
+      "title": "FieldSpec",
+      "type": "object"
+    },
+    "HandleExport": {
+      "additionalProperties": false,
+      "properties": {
+        "handle_kind": {
+          "enum": [
+            "action_intent",
+            "human_decision",
+            "action_receipt",
+            "verification_evidence"
+          ],
+          "title": "Handle Kind",
+          "type": "string"
+        },
+        "kind": {
+          "const": "handle",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "handle_kind"
+      ],
+      "title": "HandleExport",
+      "type": "object"
+    },
+    "HumanTaskStep": {
+      "additionalProperties": false,
+      "properties": {
+        "assignment_policy_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Assignment Policy Ref",
+          "type": "string"
+        },
+        "escalation_policy_ref": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Policy Ref"
+        },
+        "form_schema": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "array": "#/$defs/ArraySchema",
+                  "boolean": "#/$defs/BooleanSchema",
+                  "decimal": "#/$defs/DecimalSchema",
+                  "integer": "#/$defs/IntegerSchema",
+                  "null": "#/$defs/NullSchema",
+                  "number": "#/$defs/NumberSchema",
+                  "object": "#/$defs/ObjectSchema",
+                  "ref": "#/$defs/RefSchema",
+                  "string": "#/$defs/StringSchema"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/NullSchema"
+                },
+                {
+                  "$ref": "#/$defs/BooleanSchema"
+                },
+                {
+                  "$ref": "#/$defs/IntegerSchema"
+                },
+                {
+                  "$ref": "#/$defs/NumberSchema"
+                },
+                {
+                  "$ref": "#/$defs/StringSchema"
+                },
+                {
+                  "$ref": "#/$defs/DecimalSchema"
+                },
+                {
+                  "$ref": "#/$defs/ArraySchema"
+                },
+                {
+                  "$ref": "#/$defs/ObjectSchema"
+                },
+                {
+                  "$ref": "#/$defs/RefSchema"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Form Schema"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "intent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "human_task",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "form",
+            "review"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "assignment_policy_ref",
+        "timeout_seconds",
+        "mode"
+      ],
+      "title": "HumanTaskStep",
+      "type": "object"
+    },
+    "IndexSource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "iteration_index",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "IndexSource",
+      "type": "object"
+    },
+    "InputSource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "package_input",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "InputSource",
+      "type": "object"
+    },
+    "IntegerSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "integer",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "IntegerSchema",
+      "type": "object"
+    },
+    "ItemSource": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "iteration_item",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ItemSource",
+      "type": "object"
+    },
+    "IterationStep": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/Body"
+        },
+        "concurrency": {
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Concurrency",
+          "type": "integer"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "kind": {
+          "const": "iteration",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_items": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Max Items",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "input",
+        "max_items",
+        "concurrency",
+        "body"
+      ],
+      "title": "IterationStep",
+      "type": "object"
+    },
+    "KnowledgeDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_classifications": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Allowed Classifications",
+          "type": "array"
+        },
+        "citation_schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Citation Schema"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "ref": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "required_freshness_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Required Freshness Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "ref",
+        "required_freshness_seconds",
+        "allowed_classifications",
+        "citation_schema"
+      ],
+      "title": "KnowledgeDeclaration",
+      "type": "object"
+    },
+    "LiteralMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "literal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "kind",
+        "schema",
+        "value"
+      ],
+      "title": "LiteralMapping",
+      "type": "object"
+    },
+    "LogicalRule": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": [
+            "and",
+            "or"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "and": "#/$defs/LogicalRule",
+                "eq": "#/$defs/ComparisonRule",
+                "ge": "#/$defs/ComparisonRule",
+                "gt": "#/$defs/ComparisonRule",
+                "le": "#/$defs/ComparisonRule",
+                "lt": "#/$defs/ComparisonRule",
+                "ne": "#/$defs/ComparisonRule",
+                "or": "#/$defs/LogicalRule",
+                "present": "#/$defs/PresentRule"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ComparisonRule"
+              },
+              {
+                "$ref": "#/$defs/PresentRule"
+              },
+              {
+                "$ref": "#/$defs/LogicalRule"
+              }
+            ]
+          },
+          "maxItems": 63,
+          "minItems": 2,
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "op",
+        "rules"
+      ],
+      "title": "LogicalRule",
+      "type": "object"
+    },
+    "MappingField": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "MappingField",
+      "type": "object"
+    },
+    "NamedSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Schema"
+        }
+      },
+      "required": [
+        "name",
+        "schema"
+      ],
+      "title": "NamedSchema",
+      "type": "object"
+    },
+    "NullSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "null",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NullSchema",
+      "type": "object"
+    },
+    "NumberSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "number",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NumberSchema",
+      "type": "object"
+    },
+    "ObjectExport": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ExportField"
+          },
+          "maxItems": 64,
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "const": "object",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "ObjectExport",
+      "type": "object"
+    },
+    "ObjectMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/MappingField"
+          },
+          "maxItems": 64,
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "const": "object",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "ObjectMapping",
+      "type": "object"
+    },
+    "ObjectSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldSpec"
+          },
+          "maxItems": 64,
+          "title": "Fields",
+          "type": "array"
+        },
+        "kind": {
+          "const": "object",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "fields"
+      ],
+      "title": "ObjectSchema",
+      "type": "object"
+    },
+    "OutcomeVerificationStep": {
+      "additionalProperties": false,
+      "properties": {
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "kind": {
+          "const": "outcome_verification",
+          "title": "Kind",
+          "type": "string"
+        },
+        "read_operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Read Operation",
+          "type": "string"
+        },
+        "receipt": {
+          "$ref": "#/$defs/RefMapping"
+        },
+        "rule_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "and": "#/$defs/LogicalRule",
+                "eq": "#/$defs/ComparisonRule",
+                "ge": "#/$defs/ComparisonRule",
+                "gt": "#/$defs/ComparisonRule",
+                "le": "#/$defs/ComparisonRule",
+                "lt": "#/$defs/ComparisonRule",
+                "ne": "#/$defs/ComparisonRule",
+                "or": "#/$defs/LogicalRule",
+                "present": "#/$defs/PresentRule"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ComparisonRule"
+              },
+              {
+                "$ref": "#/$defs/PresentRule"
+              },
+              {
+                "$ref": "#/$defs/LogicalRule"
+              }
+            ]
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Target"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "connector_ref",
+        "read_operation",
+        "target",
+        "input",
+        "rule_id",
+        "version",
+        "rules",
+        "id",
+        "kind",
+        "receipt"
+      ],
+      "title": "OutcomeVerificationStep",
+      "type": "object"
+    },
+    "PackageLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "active_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Active Seconds",
+          "type": "integer"
+        },
+        "elapsed_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Elapsed Seconds",
+          "type": "integer"
+        },
+        "max_cost_microusd": {
+          "maximum": 1000000000000,
+          "minimum": 0,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_steps": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        },
+        "retained_waits": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Retained Waits",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_input_tokens",
+        "max_output_tokens",
+        "max_cost_microusd",
+        "max_steps",
+        "active_seconds",
+        "elapsed_seconds",
+        "retained_waits"
+      ],
+      "title": "PackageLimits",
+      "type": "object"
+    },
+    "ParallelStep": {
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "items": {
+            "$ref": "#/$defs/Branch"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Branches",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "join": {
+          "const": "all",
+          "title": "Join",
+          "type": "string"
+        },
+        "kind": {
+          "const": "parallel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "branches",
+        "join"
+      ],
+      "title": "ParallelStep",
+      "type": "object"
+    },
+    "Platform": {
+      "additionalProperties": false,
+      "properties": {
+        "architecture": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "os": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Os",
+          "type": "string"
+        }
+      },
+      "required": [
+        "os",
+        "architecture"
+      ],
+      "title": "Platform",
+      "type": "object"
+    },
+    "PresentRule": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "present",
+          "title": "Op",
+          "type": "string"
+        },
+        "readback_pointer": {
+          "maxLength": 512,
+          "title": "Readback Pointer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "readback_pointer"
+      ],
+      "title": "PresentRule",
+      "type": "object"
+    },
+    "ReadTool": {
+      "additionalProperties": false,
+      "properties": {
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetryPolicy"
+        }
+      },
+      "required": [
+        "connector_ref",
+        "operation",
+        "retry"
+      ],
+      "title": "ReadTool",
+      "type": "object"
+    },
+    "RefMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ref",
+          "title": "Kind",
+          "type": "string"
+        },
+        "pointer": {
+          "maxLength": 512,
+          "title": "Pointer",
+          "type": "string"
+        },
+        "source": {
+          "discriminator": {
+            "mapping": {
+              "iteration_index": "#/$defs/IndexSource",
+              "iteration_item": "#/$defs/ItemSource",
+              "package_input": "#/$defs/InputSource",
+              "step": "#/$defs/StepSource"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/InputSource"
+            },
+            {
+              "$ref": "#/$defs/StepSource"
+            },
+            {
+              "$ref": "#/$defs/ItemSource"
+            },
+            {
+              "$ref": "#/$defs/IndexSource"
+            }
+          ],
+          "title": "Source"
+        }
+      },
+      "required": [
+        "kind",
+        "source",
+        "pointer"
+      ],
+      "title": "RefMapping",
+      "type": "object"
+    },
+    "RefSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "ref",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "RefSchema",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff_seconds": {
+          "maximum": 3600,
+          "minimum": 0,
+          "title": "Backoff Seconds",
+          "type": "integer"
+        },
+        "max_attempts": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "retry_codes": {
+          "items": {
+            "enum": [
+              "unavailable",
+              "rate_limited",
+              "timeout_before_dispatch"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Retry Codes",
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_attempts",
+        "timeout_seconds",
+        "backoff_seconds",
+        "retry_codes"
+      ],
+      "title": "RetryPolicy",
+      "type": "object"
+    },
+    "StepSource": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "step",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "StepSource",
+      "type": "object"
+    },
+    "StringSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "string",
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_length": {
+          "maximum": 65536,
+          "minimum": 1,
+          "title": "Max Length",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "max_length"
+      ],
+      "title": "StringSchema",
+      "type": "object"
+    },
+    "SubworkflowStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "kind": {
+          "const": "subworkflow",
+          "title": "Kind",
+          "type": "string"
+        },
+        "workflow_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Workflow Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "workflow_ref",
+        "input"
+      ],
+      "title": "SubworkflowStep",
+      "type": "object"
+    },
+    "TimerStep": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Delay Seconds",
+          "type": "integer"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "timer",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "delay_seconds"
+      ],
+      "title": "TimerStep",
+      "type": "object"
+    },
+    "TransformStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "transform",
+          "title": "Kind",
+          "type": "string"
+        },
+        "mapping": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Mapping"
+        },
+        "output_schema": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArraySchema",
+              "boolean": "#/$defs/BooleanSchema",
+              "decimal": "#/$defs/DecimalSchema",
+              "integer": "#/$defs/IntegerSchema",
+              "null": "#/$defs/NullSchema",
+              "number": "#/$defs/NumberSchema",
+              "object": "#/$defs/ObjectSchema",
+              "ref": "#/$defs/RefSchema",
+              "string": "#/$defs/StringSchema"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NullSchema"
+            },
+            {
+              "$ref": "#/$defs/BooleanSchema"
+            },
+            {
+              "$ref": "#/$defs/IntegerSchema"
+            },
+            {
+              "$ref": "#/$defs/NumberSchema"
+            },
+            {
+              "$ref": "#/$defs/StringSchema"
+            },
+            {
+              "$ref": "#/$defs/DecimalSchema"
+            },
+            {
+              "$ref": "#/$defs/ArraySchema"
+            },
+            {
+              "$ref": "#/$defs/ObjectSchema"
+            },
+            {
+              "$ref": "#/$defs/RefSchema"
+            }
+          ],
+          "title": "Output Schema"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "mapping",
+        "output_schema"
+      ],
+      "title": "TransformStep",
+      "type": "object"
+    },
+    "VerificationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "connector_ref": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Ref",
+          "type": "string"
+        },
+        "input": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Input"
+        },
+        "read_operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Read Operation",
+          "type": "string"
+        },
+        "rule_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "and": "#/$defs/LogicalRule",
+                "eq": "#/$defs/ComparisonRule",
+                "ge": "#/$defs/ComparisonRule",
+                "gt": "#/$defs/ComparisonRule",
+                "le": "#/$defs/ComparisonRule",
+                "lt": "#/$defs/ComparisonRule",
+                "ne": "#/$defs/ComparisonRule",
+                "or": "#/$defs/LogicalRule",
+                "present": "#/$defs/PresentRule"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ComparisonRule"
+              },
+              {
+                "$ref": "#/$defs/PresentRule"
+              },
+              {
+                "$ref": "#/$defs/LogicalRule"
+              }
+            ]
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Rules",
+          "type": "array"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "array": "#/$defs/ArrayMapping",
+              "call": "#/$defs/CallMapping",
+              "literal": "#/$defs/LiteralMapping",
+              "object": "#/$defs/ObjectMapping",
+              "ref": "#/$defs/RefMapping"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiteralMapping"
+            },
+            {
+              "$ref": "#/$defs/RefMapping"
+            },
+            {
+              "$ref": "#/$defs/ObjectMapping"
+            },
+            {
+              "$ref": "#/$defs/ArrayMapping"
+            },
+            {
+              "$ref": "#/$defs/CallMapping"
+            }
+          ],
+          "title": "Target"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "connector_ref",
+        "read_operation",
+        "target",
+        "input",
+        "rule_id",
+        "version",
+        "rules"
+      ],
+      "title": "VerificationSpec",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agents": {
+      "items": {
+        "$ref": "#/$defs/Declaration"
+      },
+      "maxItems": 64,
+      "title": "Agents",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/Declaration"
+      },
+      "maxItems": 64,
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "assurance": {
+      "$ref": "#/$defs/Assurance"
+    },
+    "body": {
+      "$ref": "#/$defs/Body"
+    },
+    "connectors": {
+      "items": {
+        "$ref": "#/$defs/ConnectorDeclaration"
+      },
+      "maxItems": 64,
+      "title": "Connectors",
+      "type": "array"
+    },
+    "environment": {
+      "$ref": "#/$defs/Environment"
+    },
+    "evaluations": {
+      "items": {
+        "$ref": "#/$defs/Declaration"
+      },
+      "maxItems": 64,
+      "title": "Evaluations",
+      "type": "array"
+    },
+    "input_schema": {
+      "discriminator": {
+        "mapping": {
+          "array": "#/$defs/ArraySchema",
+          "boolean": "#/$defs/BooleanSchema",
+          "decimal": "#/$defs/DecimalSchema",
+          "integer": "#/$defs/IntegerSchema",
+          "null": "#/$defs/NullSchema",
+          "number": "#/$defs/NumberSchema",
+          "object": "#/$defs/ObjectSchema",
+          "ref": "#/$defs/RefSchema",
+          "string": "#/$defs/StringSchema"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NullSchema"
+        },
+        {
+          "$ref": "#/$defs/BooleanSchema"
+        },
+        {
+          "$ref": "#/$defs/IntegerSchema"
+        },
+        {
+          "$ref": "#/$defs/NumberSchema"
+        },
+        {
+          "$ref": "#/$defs/StringSchema"
+        },
+        {
+          "$ref": "#/$defs/DecimalSchema"
+        },
+        {
+          "$ref": "#/$defs/ArraySchema"
+        },
+        {
+          "$ref": "#/$defs/ObjectSchema"
+        },
+        {
+          "$ref": "#/$defs/RefSchema"
+        }
+      ],
+      "title": "Input Schema"
+    },
+    "knowledge": {
+      "items": {
+        "$ref": "#/$defs/KnowledgeDeclaration"
+      },
+      "maxItems": 64,
+      "title": "Knowledge",
+      "type": "array"
+    },
+    "limits": {
+      "$ref": "#/$defs/PackageLimits"
+    },
+    "models": {
+      "items": {
+        "$ref": "#/$defs/Declaration"
+      },
+      "maxItems": 64,
+      "title": "Models",
+      "type": "array"
+    },
+    "name": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "output_schema": {
+      "discriminator": {
+        "mapping": {
+          "array": "#/$defs/ArraySchema",
+          "boolean": "#/$defs/BooleanSchema",
+          "decimal": "#/$defs/DecimalSchema",
+          "integer": "#/$defs/IntegerSchema",
+          "null": "#/$defs/NullSchema",
+          "number": "#/$defs/NumberSchema",
+          "object": "#/$defs/ObjectSchema",
+          "ref": "#/$defs/RefSchema",
+          "string": "#/$defs/StringSchema"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NullSchema"
+        },
+        {
+          "$ref": "#/$defs/BooleanSchema"
+        },
+        {
+          "$ref": "#/$defs/IntegerSchema"
+        },
+        {
+          "$ref": "#/$defs/NumberSchema"
+        },
+        {
+          "$ref": "#/$defs/StringSchema"
+        },
+        {
+          "$ref": "#/$defs/DecimalSchema"
+        },
+        {
+          "$ref": "#/$defs/ArraySchema"
+        },
+        {
+          "$ref": "#/$defs/ObjectSchema"
+        },
+        {
+          "$ref": "#/$defs/RefSchema"
+        }
+      ],
+      "title": "Output Schema"
+    },
+    "package_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+      "title": "Package Id",
+      "type": "string"
+    },
+    "policies": {
+      "items": {
+        "$ref": "#/$defs/Declaration"
+      },
+      "maxItems": 64,
+      "title": "Policies",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "lotuspond.workflow-package.v2",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "schemas": {
+      "items": {
+        "$ref": "#/$defs/NamedSchema"
+      },
+      "maxItems": 64,
+      "title": "Schemas",
+      "type": "array"
+    },
+    "secret_refs": {
+      "items": {
+        "maxLength": 64,
+        "minLength": 1,
+        "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Secret Refs",
+      "type": "array"
+    },
+    "subworkflows": {
+      "items": {
+        "$ref": "#/$defs/Declaration"
+      },
+      "maxItems": 64,
+      "title": "Subworkflows",
+      "type": "array"
+    },
+    "version": {
+      "maxLength": 20,
+      "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "package_id",
+    "version",
+    "name",
+    "input_schema",
+    "output_schema",
+    "schemas",
+    "body",
+    "models",
+    "connectors",
+    "agents",
+    "subworkflows",
+    "evaluations",
+    "policies",
+    "knowledge",
+    "artifacts",
+    "secret_refs",
+    "environment",
+    "limits",
+    "assurance"
+  ],
+  "title": "ExecutablePackage",
+  "type": "object"
+}

@@ -5,7 +5,7 @@
 - Lotuspond is the single product: a licensable enterprise agent automation platform with separately offered transformation, implementation, training, and managed services across industries. Studio, Control Room, and execution are capabilities of this product, not separate brands. Releases, Scenarios, Production Evidence, and Governance remain its implemented assurance workflows.
 - This root is the owning repository. Resolve its branch and dirty state before editing or publishing.
 - Use `CLAUDE.md`, `docs/architecture/0009-agent-automation-platform.md`, and `docs/CAPABILITIES.md` for the current scope and implementation boundaries. ADR-0002 and later assurance decisions retain their applicable technical contracts; the October platform plans describe the expansion, not completed functionality.
-- Keep the current workflow-package v1 contract work separate from execution: local validation and a content digest do not install, sign, authorize, or run a package. The registry adds tenant-scoped immutable storage and admission-validator metadata; it grants no execution authority. Production runtime, Studio, signatures, commercial licensing, and qualified industry packs remain planned until their own evidence is recorded.
+- Keep workflow-package v1 tooling separate from execution: the standalone SDK owns strict validation, canonical content, local differences, detached signatures against independent trust, and exact synthetic capability checks. Local validation and a digest do not establish publisher trust; signatures and synthetic declarations do not authorize, admit, or run a package. The registry adds tenant-scoped immutable storage and admission-validator metadata; it grants no execution authority. Production runtime, Studio, hosted publisher trust/admission, commercial licensing, and qualified industry packs remain planned until their own evidence is recorded.
 - The current product goal authorizes selective recovery of archived agent-testing implementation. Restore useful behavior under Lotuspond naming, retain provenance, and preserve the archive. Do not restore unrelated products, obsolete affiliations, environment files, or previous Git history.
 - Preserve unrelated user changes. Never commit environment files, credentials, dependencies, local database files, or generated build output.
 
@@ -38,3 +38,16 @@
 - Prefer the AWS MCP server and a relevant AWS skill. Use profile `lotuspond-aws`, workload region `ap-south-2`, and toolkit endpoint region `us-east-1` unless instructed otherwise.
 - Prefer infrastructure-as-code. Inventory live resources before changing them.
 - Load the AWS secrets-manager skill before AWS secret tasks; resolve secrets at runtime with `asm-exec`. Never return secret values into conversation context.
+
+## Executable-v2 ownership (14 October 2026)
+
+`sdk/python/src/lotuspond_sdk/executable/` owns typed authoring, deterministic
+explicit-source compilation, JCS, private diffs, detached package/command
+signatures, synthetic capability and pure wire/transition contracts. Only a
+leading `v2` token selects its local CLI; root v1 APIs/bytes and registry admission
+remain unchanged. Schemas are structural, and every authenticated runtime must
+reload pinned sources/records and enforce current authority independently.
+Engine, Studio, providers, licensing and production qualification remain open.
+Agent goals/instructions/models/tools/context/evaluation/debugging/oversight
+follow customer needs in `docs/AGENT_PRODUCT_RATIONALE.md`; Automation Anywhere
+is a reference only. This SDK increment adds no UI or runtime behavior.

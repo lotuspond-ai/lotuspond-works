@@ -1,0 +1,1829 @@
+{
+  "$comment": "Structural contract only. Use SDK public validators for bounds, semantic references, hashes and correlations. No authentication or authority is established.",
+  "$defs": {
+    "ActionBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "approval_mode": {
+          "enum": [
+            "none",
+            "human"
+          ],
+          "title": "Approval Mode",
+          "type": "string"
+        },
+        "configuration_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Sha256",
+          "type": "string"
+        },
+        "connector_artifact_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Connector Artifact Sha256",
+          "type": "string"
+        },
+        "connector_name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Connector Name",
+          "type": "string"
+        },
+        "connector_version": {
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$",
+          "title": "Connector Version",
+          "type": "string"
+        },
+        "environment_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "execution_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "independent_approval": {
+          "title": "Independent Approval",
+          "type": "boolean"
+        },
+        "input_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Sha256",
+          "type": "string"
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "issued_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Issued At Ms",
+          "type": "integer"
+        },
+        "operation": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "plan_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Sha256",
+          "type": "string"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "project_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "record_type": {
+          "const": "action_binding",
+          "default": "action_binding",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "recovery_epoch": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Recovery Epoch",
+          "type": "integer"
+        },
+        "requester_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Requester Id",
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "target_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Sha256",
+          "type": "string"
+        },
+        "workspace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Workspace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "recovery_epoch",
+        "workspace_id",
+        "project_id",
+        "environment_id",
+        "execution_id",
+        "step_id",
+        "action_id",
+        "package_sha256",
+        "configuration_sha256",
+        "plan_sha256",
+        "connector_name",
+        "connector_version",
+        "connector_artifact_sha256",
+        "operation",
+        "target_sha256",
+        "input_sha256",
+        "policy_sha256",
+        "approval_mode",
+        "independent_approval",
+        "requester_id",
+        "issued_at_ms",
+        "expires_at_ms"
+      ],
+      "title": "ActionBinding",
+      "type": "object"
+    },
+    "ActionDispatchedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "$ref": "#/$defs/RuntimeCommand"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "ActionDispatchedPayload",
+      "type": "object"
+    },
+    "ActionIntent": {
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/ActionBinding"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "record_type": {
+          "const": "action_intent",
+          "default": "action_intent",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "binding",
+        "sha256"
+      ],
+      "title": "ActionIntent",
+      "type": "object"
+    },
+    "ActionReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "attempt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "intent_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Sha256",
+          "type": "string"
+        },
+        "receipt_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Receipt Id",
+          "type": "string"
+        },
+        "record_type": {
+          "const": "action_receipt",
+          "default": "action_receipt",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "accepted",
+            "observed_effect",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_operation_ref": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Target Operation Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "receipt_id",
+        "action_id",
+        "intent_sha256",
+        "attempt",
+        "target_operation_ref",
+        "status",
+        "evidence_refs"
+      ],
+      "title": "ActionReceipt",
+      "type": "object"
+    },
+    "ActionReceiptPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "receipt": {
+          "$ref": "#/$defs/ActionReceipt"
+        }
+      },
+      "required": [
+        "receipt"
+      ],
+      "title": "ActionReceiptPayload",
+      "type": "object"
+    },
+    "AdmissionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "configuration_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Configuration Sha256",
+          "type": "string"
+        },
+        "package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Package Sha256",
+          "type": "string"
+        },
+        "plan_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Sha256",
+          "type": "string"
+        },
+        "recovery_epoch": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Recovery Epoch",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "package_sha256",
+        "configuration_sha256",
+        "plan_sha256",
+        "recovery_epoch"
+      ],
+      "title": "AdmissionPayload",
+      "type": "object"
+    },
+    "CancellationRequestedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "reason_code": {
+          "enum": [
+            "owner_requested",
+            "policy_revoked",
+            "recovery_fence"
+          ],
+          "title": "Reason Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason_code"
+      ],
+      "title": "CancellationRequestedPayload",
+      "type": "object"
+    },
+    "DecisionRecordedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/HumanDecision"
+        }
+      },
+      "required": [
+        "decision"
+      ],
+      "title": "DecisionRecordedPayload",
+      "type": "object"
+    },
+    "DispatchTimeoutPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "intent_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Sha256",
+          "type": "string"
+        },
+        "may_have_dispatched": {
+          "title": "May Have Dispatched",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "intent_sha256",
+        "may_have_dispatched"
+      ],
+      "title": "DispatchTimeoutPayload",
+      "type": "object"
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "classification": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "title": "Classification",
+          "type": "string"
+        },
+        "media_type": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Media Type",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "source_kind": {
+          "enum": [
+            "target_readback",
+            "signed_receipt",
+            "deterministic_check"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "media_type",
+        "classification",
+        "source_kind"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "ExecutionCompletedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "output_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Output Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_sha256"
+      ],
+      "title": "ExecutionCompletedPayload",
+      "type": "object"
+    },
+    "ExecutionFailedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "unavailable",
+            "rate_limited",
+            "timeout_before_dispatch",
+            "invalid_output",
+            "cancelled",
+            "unknown"
+          ],
+          "title": "Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "ExecutionFailedPayload",
+      "type": "object"
+    },
+    "HumanDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "actor_kind": {
+          "enum": [
+            "human",
+            "service",
+            "worker",
+            "model"
+          ],
+          "title": "Actor Kind",
+          "type": "string"
+        },
+        "decision": {
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "decision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "intent_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Sha256",
+          "type": "string"
+        },
+        "issued_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Issued At Ms",
+          "type": "integer"
+        },
+        "policy_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Sha256",
+          "type": "string"
+        },
+        "record_type": {
+          "const": "human_decision",
+          "default": "human_decision",
+          "title": "Record Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision_id",
+        "intent_sha256",
+        "decision",
+        "actor_id",
+        "actor_kind",
+        "policy_sha256",
+        "issued_at_ms",
+        "expires_at_ms"
+      ],
+      "title": "HumanDecision",
+      "type": "object"
+    },
+    "IntentCreatedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "intent": {
+          "$ref": "#/$defs/ActionIntent"
+        }
+      },
+      "required": [
+        "intent"
+      ],
+      "title": "IntentCreatedPayload",
+      "type": "object"
+    },
+    "OutcomeRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "intent_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Sha256",
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        },
+        "outcome_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Outcome Id",
+          "type": "string"
+        },
+        "receipt_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Receipt Id",
+          "type": "string"
+        },
+        "record_type": {
+          "const": "outcome_record",
+          "default": "outcome_record",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "rule_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "rule_version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Rule Version",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "verified",
+            "not_verified",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome_id",
+        "action_id",
+        "intent_sha256",
+        "receipt_id",
+        "state",
+        "rule_id",
+        "rule_version",
+        "evidence_refs",
+        "observed_at_ms"
+      ],
+      "title": "OutcomeRecord",
+      "type": "object"
+    },
+    "OutcomeRecordedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/OutcomeRecord"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "OutcomeRecordedPayload",
+      "type": "object"
+    },
+    "ReconciliationObservedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "maxItems": 64,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "intent_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Sha256",
+          "type": "string"
+        },
+        "observation": {
+          "enum": [
+            "effect_present",
+            "effect_absent",
+            "unknown"
+          ],
+          "title": "Observation",
+          "type": "string"
+        },
+        "qualified_absence": {
+          "title": "Qualified Absence",
+          "type": "boolean"
+        },
+        "rule_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "rule_version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Rule Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "intent_sha256",
+        "observation",
+        "rule_id",
+        "rule_version",
+        "evidence_refs",
+        "qualified_absence"
+      ],
+      "title": "ReconciliationObservedPayload",
+      "type": "object"
+    },
+    "RuntimeCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "command_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "decision_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision Sha256"
+        },
+        "environment_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "execution_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "fencing_generation": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Fencing Generation",
+          "type": "integer"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "intent_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Sha256",
+          "type": "string"
+        },
+        "issued_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Issued At Ms",
+          "type": "integer"
+        },
+        "project_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "record_type": {
+          "const": "runtime_command",
+          "default": "runtime_command",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "recovery_epoch": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Recovery Epoch",
+          "type": "integer"
+        },
+        "replay_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Replay Id",
+          "type": "string"
+        },
+        "worker_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Worker Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Workspace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command_id",
+        "replay_id",
+        "intent_sha256",
+        "installation_id",
+        "recovery_epoch",
+        "workspace_id",
+        "project_id",
+        "environment_id",
+        "execution_id",
+        "action_id",
+        "worker_id",
+        "fencing_generation",
+        "issued_at_ms",
+        "expires_at_ms"
+      ],
+      "title": "RuntimeCommand",
+      "type": "object"
+    },
+    "RuntimeEvent": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "type": "null"
+                },
+                "event_kind": {
+                  "const": "admission"
+                },
+                "payload": {
+                  "$ref": "#/$defs/AdmissionPayload"
+                },
+                "step_id": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "step_started"
+                },
+                "payload": {
+                  "$ref": "#/$defs/StepStartedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "step_result"
+                },
+                "payload": {
+                  "$ref": "#/$defs/StepResultPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "step_failed"
+                },
+                "payload": {
+                  "$ref": "#/$defs/StepFailedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "wait_started"
+                },
+                "payload": {
+                  "$ref": "#/$defs/WaitStartedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "signal_received"
+                },
+                "payload": {
+                  "$ref": "#/$defs/SignalReceivedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "timer_elapsed"
+                },
+                "payload": {
+                  "$ref": "#/$defs/TimerElapsedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "intent_created"
+                },
+                "payload": {
+                  "$ref": "#/$defs/IntentCreatedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "decision_recorded"
+                },
+                "payload": {
+                  "$ref": "#/$defs/DecisionRecordedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "action_dispatched"
+                },
+                "payload": {
+                  "$ref": "#/$defs/ActionDispatchedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "action_receipt"
+                },
+                "payload": {
+                  "$ref": "#/$defs/ActionReceiptPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "dispatch_timeout"
+                },
+                "payload": {
+                  "$ref": "#/$defs/DispatchTimeoutPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "reconciliation_observed"
+                },
+                "payload": {
+                  "$ref": "#/$defs/ReconciliationObservedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "attempt": {
+                  "not": {
+                    "type": "null"
+                  }
+                },
+                "event_kind": {
+                  "const": "outcome_recorded"
+                },
+                "payload": {
+                  "$ref": "#/$defs/OutcomeRecordedPayload"
+                },
+                "step_id": {
+                  "not": {
+                    "type": "null"
+                  }
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "type": "null"
+                },
+                "event_kind": {
+                  "const": "execution_completed"
+                },
+                "payload": {
+                  "$ref": "#/$defs/ExecutionCompletedPayload"
+                },
+                "step_id": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "type": "null"
+                },
+                "event_kind": {
+                  "const": "cancellation_requested"
+                },
+                "payload": {
+                  "$ref": "#/$defs/CancellationRequestedPayload"
+                },
+                "step_id": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            },
+            {
+              "properties": {
+                "action_id": {
+                  "type": "null"
+                },
+                "attempt": {
+                  "type": "null"
+                },
+                "event_kind": {
+                  "const": "execution_failed"
+                },
+                "payload": {
+                  "$ref": "#/$defs/ExecutionFailedPayload"
+                },
+                "step_id": {
+                  "type": "null"
+                }
+              },
+              "required": [
+                "event_kind",
+                "payload",
+                "step_id",
+                "action_id",
+                "attempt"
+              ]
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "action_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        },
+        "environment_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "event_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_kind": {
+          "enum": [
+            "admission",
+            "step_started",
+            "step_result",
+            "step_failed",
+            "wait_started",
+            "signal_received",
+            "timer_elapsed",
+            "intent_created",
+            "decision_recorded",
+            "action_dispatched",
+            "action_receipt",
+            "dispatch_timeout",
+            "reconciliation_observed",
+            "outcome_recorded",
+            "execution_completed",
+            "cancellation_requested",
+            "execution_failed"
+          ],
+          "title": "Event Kind",
+          "type": "string"
+        },
+        "execution_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdmissionPayload"
+            },
+            {
+              "$ref": "#/$defs/StepStartedPayload"
+            },
+            {
+              "$ref": "#/$defs/StepResultPayload"
+            },
+            {
+              "$ref": "#/$defs/StepFailedPayload"
+            },
+            {
+              "$ref": "#/$defs/WaitStartedPayload"
+            },
+            {
+              "$ref": "#/$defs/SignalReceivedPayload"
+            },
+            {
+              "$ref": "#/$defs/TimerElapsedPayload"
+            },
+            {
+              "$ref": "#/$defs/IntentCreatedPayload"
+            },
+            {
+              "$ref": "#/$defs/DecisionRecordedPayload"
+            },
+            {
+              "$ref": "#/$defs/ActionDispatchedPayload"
+            },
+            {
+              "$ref": "#/$defs/ActionReceiptPayload"
+            },
+            {
+              "$ref": "#/$defs/DispatchTimeoutPayload"
+            },
+            {
+              "$ref": "#/$defs/ReconciliationObservedPayload"
+            },
+            {
+              "$ref": "#/$defs/OutcomeRecordedPayload"
+            },
+            {
+              "$ref": "#/$defs/ExecutionCompletedPayload"
+            },
+            {
+              "$ref": "#/$defs/CancellationRequestedPayload"
+            },
+            {
+              "$ref": "#/$defs/ExecutionFailedPayload"
+            }
+          ],
+          "title": "Payload"
+        },
+        "payload_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Payload Sha256",
+          "type": "string"
+        },
+        "project_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "record_type": {
+          "const": "runtime_event",
+          "default": "runtime_event",
+          "title": "Record Type",
+          "type": "string"
+        },
+        "recovery_epoch": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Recovery Epoch",
+          "type": "integer"
+        },
+        "source_generation": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Source Generation",
+          "type": "integer"
+        },
+        "source_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "source_sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Source Sequence",
+          "type": "integer"
+        },
+        "step_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step Id"
+        },
+        "workspace_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Workspace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "installation_id",
+        "recovery_epoch",
+        "workspace_id",
+        "project_id",
+        "environment_id",
+        "execution_id",
+        "source_id",
+        "source_generation",
+        "source_sequence",
+        "event_kind",
+        "observed_at_ms",
+        "payload",
+        "payload_sha256"
+      ],
+      "title": "RuntimeEvent",
+      "type": "object"
+    },
+    "SignalReceivedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Correlation Sha256",
+          "type": "string"
+        },
+        "signal_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Signal Sha256",
+          "type": "string"
+        },
+        "wait_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Wait Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_id",
+        "correlation_sha256",
+        "signal_sha256"
+      ],
+      "title": "SignalReceivedPayload",
+      "type": "object"
+    },
+    "StepFailedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "unavailable",
+            "rate_limited",
+            "timeout_before_dispatch",
+            "invalid_output",
+            "cancelled",
+            "unknown"
+          ],
+          "title": "Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "StepFailedPayload",
+      "type": "object"
+    },
+    "StepResultPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "output_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Output Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "output_sha256"
+      ],
+      "title": "StepResultPayload",
+      "type": "object"
+    },
+    "StepStartedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "input_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Input Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "input_sha256"
+      ],
+      "title": "StepStartedPayload",
+      "type": "object"
+    },
+    "TimerElapsedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "wait_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Wait Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_id"
+      ],
+      "title": "TimerElapsedPayload",
+      "type": "object"
+    },
+    "WaitStartedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "correlation_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Correlation Sha256",
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "timer",
+            "external",
+            "human"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "not_before_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Not Before Ms",
+          "type": "integer"
+        },
+        "wait_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Wait Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "wait_id",
+        "kind",
+        "correlation_sha256",
+        "not_before_ms",
+        "expires_at_ms"
+      ],
+      "title": "WaitStartedPayload",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "discriminator": {
+    "mapping": {
+      "action_binding": "#/$defs/ActionBinding",
+      "action_intent": "#/$defs/ActionIntent",
+      "action_receipt": "#/$defs/ActionReceipt",
+      "human_decision": "#/$defs/HumanDecision",
+      "outcome_record": "#/$defs/OutcomeRecord",
+      "runtime_command": "#/$defs/RuntimeCommand",
+      "runtime_event": "#/$defs/RuntimeEvent"
+    },
+    "propertyName": "record_type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ActionBinding"
+    },
+    {
+      "$ref": "#/$defs/ActionIntent"
+    },
+    {
+      "$ref": "#/$defs/HumanDecision"
+    },
+    {
+      "$ref": "#/$defs/RuntimeCommand"
+    },
+    {
+      "$ref": "#/$defs/RuntimeEvent"
+    },
+    {
+      "$ref": "#/$defs/ActionReceipt"
+    },
+    {
+      "$ref": "#/$defs/OutcomeRecord"
+    }
+  ],
+  "required": [
+    "record_type"
+  ]
+}

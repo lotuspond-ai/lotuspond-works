@@ -1,0 +1,16 @@
+Synthetic action binding oracle, authored for Task 5 (14 October 2026).
+
+The adjacent action-binding.jcs is frozen literal expected canonical bytes, with
+no trailing newline. Every character is ASCII; the only scalar domains are
+strings, exact safe integers and one boolean. This restricted fixture makes
+stdlib json.dumps(binding, sort_keys=True, separators=(",", ":"),
+ensure_ascii=False).encode("utf-8") identical to RFC 8785 without importing or
+calling the SDK or its RFC 8785 dependency. hashlib.sha256 independently computes:
+
+e3860ea56b81199fb42870a5ee4e17bc0d4c90e54026fe2d36e21debd5cc7c7c
+
+The test compares the entire committed literal byte artifact and literal hash,
+then revalidates both dictionary and typed intent forms. The fresh fixture uses
+only synthetic IDs and repeated-character hashes. No customer data or external
+record/provenance claims are present. This oracle does not replace the broader
+independent ECMAScript JCS coverage in the foundational canonical tests.
