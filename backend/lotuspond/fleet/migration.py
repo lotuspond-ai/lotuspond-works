@@ -75,9 +75,7 @@ def _normalize_check(expression: str) -> str:
 
 def _preflight(connection: Connection) -> None:
     inspector = inspect(connection)
-    old_tables = {
-        name: table for name, table in Base.metadata.tables.items() if name not in FLEET_TABLES
-    }
+    old_tables = {name: table for name, table in Base.metadata.tables.items() if name in V12_CHECKS}
     if set(inspector.get_table_names()) != set(old_tables):
         raise ValueError(ERROR)
     # Serialize against writes/DDL as well as other cooperating migrations. Static
@@ -146,7 +144,12 @@ def _preflight(connection: Connection) -> None:
             tuple(c.name for c in constraint.columns)
             for constraint in table.constraints
             if isinstance(constraint, UniqueConstraint)
-            and constraint.name != "environments_fleet_scope_unique"
+            and constraint.name
+            not in {
+                "environments_fleet_scope_unique",
+                "api_keys_execution_scope_unique", "runs_execution_scope_unique",
+                "releases_execution_candidate_unique",
+            }
         }
         actual_unique = {tuple(c["column_names"]) for c in inspector.get_unique_constraints(name)}
         if actual_unique != expected_unique:
@@ -247,7 +250,7 @@ def migrate_fleet_v13(connection: Connection) -> None:
         if table.name in FLEET_TABLES:
             for constraint in table.foreign_key_constraints:
                 if constraint.use_alter:
-                    connection.execute(AddConstraint(constraint))
+                    connection.execute(AddConstraint(constraint, isolate_from_table=False))
 
 
 # Frozen PostgreSQL expressions from the committed schema-v12 fixture.

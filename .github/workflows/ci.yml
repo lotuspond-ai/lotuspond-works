@@ -39,7 +39,29 @@ jobs:
       - name: Check backend dependency metadata
         run: uv pip check --python backend/.venv/bin/python
       - run: npm ci
-      - run: npm run check
+      - name: Check repository with independently verified execution test database
+        env:
+          LOTUSPOND_EXECUTION_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
+          LOTUSPOND_CI_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          backend/.venv/bin/python - <<'PYCI'
+          import os
+          import subprocess
+          from sqlalchemy import create_engine, text
+          query = "SELECT current_database(), current_user, current_setting('data_directory'), system_identifier FROM pg_control_system()"
+          expected = subprocess.check_output(
+              ["docker", "exec", os.environ["LOTUSPOND_CI_POSTGRES_CONTAINER"], "psql", "-X", "-U", "lotuspond", "-d", "lotuspond_platform_test", "-Atc", query],
+              text=True, timeout=30,
+          ).strip().split("|")
+          assert expected[:3] == ["lotuspond_platform_test", "lotuspond", "/var/lib/postgresql/18/docker"]
+          engine = create_engine(os.environ["LOTUSPOND_EXECUTION_TEST_DATABASE_URL"], connect_args={"connect_timeout": 10}, hide_parameters=True)
+          with engine.connect() as connection:
+              connection.execute(text("SET statement_timeout='10s'"))
+              assert list(map(str, connection.execute(text(query)).one())) == expected
+          engine.dispose()
+          print("Declared PostgreSQL test service and localhost client identity match")
+          PYCI
+          npm run check
       - run: backend/.venv/bin/python backend/export_schema.py --check
       - run: PYTHONPATH=sandbox/src backend/.venv/bin/python -m pytest sandbox/tests -q
       - run: backend/.venv/bin/python -m pytest deploy/checks -q
@@ -130,7 +152,7 @@ jobs:
           docker run --rm --network none --entrypoint python lotuspond-api:e03-ci -c
           'import importlib.metadata as m, json, pathlib, sys;
           import lotuspond.app, lotuspond_sdk, lotuspond_runtime.protocol;
-          assert m.version("lotuspond-sdk") == "0.2.0";
+          assert m.version("lotuspond-sdk") == "0.3.0";
           assert m.version("lotuspond-runtime") == "0.1.0";
           assert all(not json.loads(m.distribution(n).read_text("direct_url.json") or "{}").get("dir_info", {}).get("editable", False) for n in ("lotuspond-api", "lotuspond-sdk", "lotuspond-runtime"));
           assert pathlib.Path(lotuspond_sdk.__file__).is_relative_to(pathlib.Path(sys.prefix));

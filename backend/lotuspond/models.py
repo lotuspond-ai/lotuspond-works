@@ -193,6 +193,9 @@ class ApiKey(Scoped, Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="api_keys_execution_scope_unique"),
+    )
 
 
 class IdentityChallenge(Row, Base):
@@ -449,6 +452,9 @@ class Run(Scoped, Base):
         within("runners", "runner_id"),
         CheckConstraint("status IN ('queued','running','completed','failed','cancelled')"),
         Index("runs_workspace_status", "workspace_id", "status"),
+        UniqueConstraint(
+            "workspace_id", "project_id", "environment_id", "id", name="runs_execution_scope_unique"
+        ),
     )
 
 
@@ -497,6 +503,13 @@ class Release(Scoped, Base):
         within("runs", "candidate_run_id"),
         within("runs", "baseline_run_id"),
         within("policies", "policy_id"),
+        UniqueConstraint(
+            "workspace_id",
+            "project_id",
+            "id",
+            "candidate_run_id",
+            name="releases_execution_candidate_unique",
+        ),
     )
 
 
@@ -1197,3 +1210,751 @@ class FleetMutationRequest(FleetScoped, Base):
         CheckConstraint("length(request_digest) = 64"),
         CheckConstraint("length(request_key) BETWEEN 1 AND 128"),
     )
+
+
+# Durable execution records. Stored pins are evidence, never current authority.
+# Reuse the fleet's full scope and its normalized connection-version/secret links.
+EXECUTION_SCOPE = FLEET_SCOPE
+
+
+def execution_safe(*fields):
+    return tuple(CheckConstraint(f"{field} BETWEEN 0 AND 9007199254740991") for field in fields)
+
+
+def execution_hashes(*fields):
+    return tuple(CheckConstraint(f"length({field}) = 64") for field in fields)
+
+
+def execution_pair(left, right):
+    return CheckConstraint(f"({left} IS NULL) = ({right} IS NULL)")
+
+
+def execution_parent(table, field, *extra):
+    """Bind a child to the same execution, in addition to the complete tenant scope."""
+    return fleet_fk(
+        table,
+        (*FLEET_SCOPE, "execution_id", field, *extra),
+        (*FLEET_SCOPE, "execution_id", "id", *extra),
+    )
+
+
+def execution_artifact(prefix):
+    return fleet_fk(
+        "execution_artifacts",
+        (*FLEET_SCOPE, f"{prefix}_artifact_id", f"{prefix}_artifact_version", f"{prefix}_sha256"),
+        (*FLEET_SCOPE, "id", "version", "sha256"),
+    )
+
+
+class ExecutablePublication(FleetScoped, Base):
+    """Admitted v2 package or immutable admitted catalog record; no v1 conversion."""
+
+    __tablename__ = "executable_publications"
+    kind: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(128))
+    version: Mapped[str] = mapped_column(String(100))
+    canonical_package: Mapped[bytes] = mapped_column(LargeBinary)
+    canonical_plan: Mapped[bytes | None] = mapped_column(LargeBinary)
+    package_sha256: Mapped[str] = mapped_column(String(64))
+    plan_sha256: Mapped[str | None] = mapped_column(String(64))
+    validator_id: Mapped[str] = mapped_column(String(128))
+    compiler_id: Mapped[str | None] = mapped_column(String(128))
+    publisher_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    publisher_api_key_id: Mapped[str | None] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    __table_args__ = fleet_scoped(
+        within("api_keys", "publisher_api_key_id"),
+        UniqueConstraint(*FLEET_SCOPE, "kind", "name", "version"),
+        UniqueConstraint(*FLEET_SCOPE, "id", "package_sha256"),
+        fleet_status("'active','revoked'"),
+        CheckConstraint(
+            "kind IN ('workflow','connector','model','agent','evaluation','policy','knowledge','artifact')"
+        ),
+        CheckConstraint("length(canonical_package) BETWEEN 1 AND 1048576"),
+        CheckConstraint("length(canonical_plan) BETWEEN 1 AND 1048576"),
+        execution_pair("canonical_plan", "plan_sha256"),
+        execution_pair("canonical_plan", "compiler_id"),
+        CheckConstraint("(kind = 'workflow') = (canonical_plan IS NOT NULL)"),
+        *execution_hashes("package_sha256", "plan_sha256"),
+    )
+
+
+class ExecutableDependency(FleetScoped, Base):
+    __tablename__ = "executable_dependencies"
+    publication_id: Mapped[str] = mapped_column(String(36))
+    dependency_publication_id: Mapped[str] = mapped_column(String(36))
+    dependency_sha256: Mapped[str] = mapped_column(String(64))
+    canonical_dependency: Mapped[bytes] = mapped_column(LargeBinary)
+    __table_args__ = fleet_scoped(
+        fleet_parent("executable_publications", "publication_id"),
+        fleet_fk(
+            "executable_publications",
+            (*FLEET_SCOPE, "dependency_publication_id", "dependency_sha256"),
+            (*FLEET_SCOPE, "id", "package_sha256"),
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "publication_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "publication_id", "dependency_publication_id"),
+        CheckConstraint("length(canonical_dependency) BETWEEN 1 AND 65536"),
+        *execution_hashes("dependency_sha256"),
+    )
+
+
+class ExecutionDeployment(FleetScoped, Base):
+    __tablename__ = "execution_deployments"
+    status: Mapped[str] = mapped_column(String(20), default="disabled")
+    active_revision_id: Mapped[str | None] = mapped_column(String(36))
+    __table_args__ = fleet_scoped(
+        ForeignKeyConstraint(
+            (*FLEET_SCOPE, "id", "active_revision_id"),
+            [
+                f"execution_deployment_revisions.{field}"
+                for field in (*FLEET_SCOPE, "deployment_id", "id")
+            ],
+            name="execution_deployment_active_revision_fk",
+            use_alter=True,
+        ),
+        fleet_status("'active','disabled','revoked'"),
+    )
+
+
+class ExecutionDeploymentRevision(FleetScoped, Base):
+    __tablename__ = "execution_deployment_revisions"
+    deployment_id: Mapped[str] = mapped_column(String(36))
+    publication_id: Mapped[str] = mapped_column(String(36))
+    pool_id: Mapped[str] = mapped_column(String(36))
+    revision: Mapped[int] = mapped_column(Integer)
+    canonical_configuration: Mapped[bytes] = mapped_column(LargeBinary)
+    configuration_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="disabled")
+    __table_args__ = fleet_scoped(
+        fleet_parent("execution_deployments", "deployment_id"),
+        fleet_parent("executable_publications", "publication_id"),
+        fleet_parent("runtime_pools", "pool_id"),
+        UniqueConstraint(*FLEET_SCOPE, "deployment_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "id", "publication_id"),
+        UniqueConstraint(*FLEET_SCOPE, "deployment_id", "revision"),
+        fleet_positive("revision"),
+        fleet_status("'active','disabled','revoked'"),
+        CheckConstraint("length(canonical_configuration) BETWEEN 1 AND 1048576"),
+        *execution_hashes("configuration_sha256"),
+    )
+
+
+class ExecutionContextSource(FleetScoped, Base):
+    __tablename__ = "execution_context_sources"
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    access_policy_id: Mapped[str] = mapped_column(String(128))
+    __table_args__ = fleet_scoped(fleet_status("'active','revoked','deleted'"))
+
+
+class ExecutionContextVersion(FleetScoped, Base):
+    __tablename__ = "execution_context_versions"
+    source_id: Mapped[str] = mapped_column(String(36))
+    version: Mapped[int] = mapped_column(Integer)
+    classification: Mapped[str] = mapped_column(String(64))
+    observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    access_policy_id: Mapped[str] = mapped_column(String(128))
+    content_artifact_id: Mapped[str | None] = mapped_column(String(36))
+    content_artifact_version: Mapped[int | None] = mapped_column(Integer)
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
+    citation_artifact_id: Mapped[str | None] = mapped_column(String(36))
+    citation_artifact_version: Mapped[int | None] = mapped_column(Integer)
+    citation_sha256: Mapped[str | None] = mapped_column(String(64))
+    __table_args__ = fleet_scoped(
+        fleet_parent("execution_context_sources", "source_id"),
+        UniqueConstraint(*FLEET_SCOPE, "source_id", "version"),
+        fleet_positive("version"),
+        *execution_safe("observed_at_ms", "expires_at_ms"),
+        CheckConstraint("expires_at_ms >= observed_at_ms"),
+        CheckConstraint("length(classification) BETWEEN 1 AND 64"),
+        # Deferred solely to break source/artifact DDL cycles; writes are immediate.
+        ForeignKeyConstraint(
+            (
+                *FLEET_SCOPE,
+                "source_id",
+                "version",
+                "content_artifact_id",
+                "content_artifact_version",
+                "content_sha256",
+            ),
+            [
+                f"execution_artifacts.{field}"
+                for field in (
+                    *FLEET_SCOPE,
+                    "source_id",
+                    "source_version",
+                    "id",
+                    "version",
+                    "sha256",
+                )
+            ],
+            name="execution_context_content_fk",
+            use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            (
+                *FLEET_SCOPE,
+                "source_id",
+                "version",
+                "citation_artifact_id",
+                "citation_artifact_version",
+                "citation_sha256",
+            ),
+            [
+                f"execution_artifacts.{field}"
+                for field in (
+                    *FLEET_SCOPE,
+                    "source_id",
+                    "source_version",
+                    "id",
+                    "version",
+                    "sha256",
+                )
+            ],
+            name="execution_context_citation_fk",
+            use_alter=True,
+        ),
+        execution_pair("content_artifact_id", "content_artifact_version"),
+        execution_pair("content_artifact_id", "content_sha256"),
+        execution_pair("citation_artifact_id", "citation_artifact_version"),
+        execution_pair("citation_artifact_id", "citation_sha256"),
+    )
+
+
+class DeploymentBinding(FleetScoped, Base):
+    """Pins a normalized admitted dependency and exact connection/source revisions.
+
+    ConnectionVersionSecret already normalizes all secret pins for the immutable
+    connection revision. Services must compare these links to canonical bytes.
+    """
+
+    __tablename__ = "deployment_bindings"
+    deployment_revision_id: Mapped[str] = mapped_column(String(36))
+    publication_id: Mapped[str] = mapped_column(String(36))
+    dependency_id: Mapped[str] = mapped_column(String(36))
+    connection_id: Mapped[str | None] = mapped_column(String(36))
+    connection_version: Mapped[int | None] = mapped_column(Integer)
+    source_id: Mapped[str | None] = mapped_column(String(36))
+    source_version: Mapped[int | None] = mapped_column(Integer)
+    __table_args__ = fleet_scoped(
+        fleet_fk(
+            "execution_deployment_revisions",
+            (*FLEET_SCOPE, "deployment_revision_id", "publication_id"),
+            (*FLEET_SCOPE, "id", "publication_id"),
+        ),
+        fleet_fk(
+            "executable_dependencies",
+            (*FLEET_SCOPE, "publication_id", "dependency_id"),
+            (*FLEET_SCOPE, "publication_id", "id"),
+        ),
+        fleet_fk(
+            "connection_versions",
+            (*FLEET_SCOPE, "connection_id", "connection_version"),
+            (*FLEET_SCOPE, "connection_id", "version"),
+        ),
+        fleet_fk(
+            "execution_context_versions",
+            (*FLEET_SCOPE, "source_id", "source_version"),
+            (*FLEET_SCOPE, "source_id", "version"),
+        ),
+        execution_pair("connection_id", "connection_version"),
+        execution_pair("source_id", "source_version"),
+        UniqueConstraint(*FLEET_SCOPE, "deployment_revision_id", "dependency_id"),
+    )
+
+
+class DeploymentAssuranceBinding(FleetScoped, Base):
+    """Exact legacy release/candidate link, not package/config assurance by itself."""
+
+    __tablename__ = "deployment_assurance_bindings"
+    deployment_revision_id: Mapped[str] = mapped_column(String(36))
+    release_id: Mapped[str] = mapped_column(String(36))
+    candidate_run_id: Mapped[str] = mapped_column(String(36))
+    __table_args__ = fleet_scoped(
+        fleet_parent("execution_deployment_revisions", "deployment_revision_id"),
+        fleet_fk(
+            "releases",
+            ("workspace_id", "project_id", "release_id", "candidate_run_id"),
+            ("workspace_id", "project_id", "id", "candidate_run_id"),
+        ),
+        fleet_parent("runs", "candidate_run_id"),
+        UniqueConstraint(*FLEET_SCOPE, "deployment_revision_id"),
+    )
+
+
+class ExecutionArtifact(FleetScoped, Base):
+    __tablename__ = "execution_artifacts"
+    version: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary)
+    content_bytes: Mapped[int] = mapped_column(Integer)
+    classification: Mapped[str] = mapped_column(String(64))
+    source_id: Mapped[str | None] = mapped_column(String(36))
+    source_version: Mapped[int | None] = mapped_column(Integer)
+    access_policy_id: Mapped[str] = mapped_column(String(128))
+    key_id: Mapped[str] = mapped_column(String(128))
+    retain_until_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        UniqueConstraint(*FLEET_SCOPE, "id", "version", "sha256"),
+        UniqueConstraint(*FLEET_SCOPE, "source_id", "source_version", "id", "version", "sha256"),
+        fleet_fk(
+            "execution_context_versions",
+            (*FLEET_SCOPE, "source_id", "source_version"),
+            (*FLEET_SCOPE, "source_id", "version"),
+        ),
+        execution_pair("source_id", "source_version"),
+        fleet_positive("version"),
+        CheckConstraint("content_bytes BETWEEN 1 AND 1048576"),
+        CheckConstraint("length(ciphertext) = content_bytes + 16"),
+        CheckConstraint("length(nonce) = 12"),
+        CheckConstraint("length(classification) BETWEEN 1 AND 64"),
+        *execution_hashes("sha256"),
+        *execution_safe("retain_until_ms"),
+        Index("execution_artifact_retention_idx", *FLEET_SCOPE, "retain_until_ms", "id"),
+    )
+
+
+class Execution(FleetScoped, Base):
+    __tablename__ = "executions"
+    deployment_revision_id: Mapped[str] = mapped_column(String(36))
+    interpreter_id: Mapped[str] = mapped_column(String(128))
+    engine_identity: Mapped[str] = mapped_column(String(128), unique=True)
+    input_artifact_id: Mapped[str] = mapped_column(String(36))
+    input_artifact_version: Mapped[int] = mapped_column(Integer)
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    result_artifact_id: Mapped[str | None] = mapped_column(String(36))
+    result_artifact_version: Mapped[int | None] = mapped_column(Integer)
+    result_sha256: Mapped[str | None] = mapped_column(String(64))
+    initiating_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    initiating_api_key_id: Mapped[str | None] = mapped_column(String(36))
+    admitted_at_ms: Mapped[int] = mapped_column(BigInteger)
+    deadline_ms: Mapped[int] = mapped_column(BigInteger)
+    admission_digest: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(30), default="pending")
+    requested_state: Mapped[str] = mapped_column(String(20), default="running")
+    reason: Mapped[str | None] = mapped_column(String(40))
+    next_event_sequence: Mapped[int] = mapped_column(BigInteger, default=1)
+    __table_args__ = fleet_scoped(
+        fleet_parent("execution_deployment_revisions", "deployment_revision_id"),
+        within("api_keys", "initiating_api_key_id"),
+        execution_artifact("input"),
+        execution_artifact("result"),
+        execution_pair("result_artifact_id", "result_artifact_version"),
+        execution_pair("result_artifact_id", "result_sha256"),
+        CheckConstraint(
+            "state IN ('pending','running','waiting','paused','cancelled','succeeded','failed','reconciliation_required')"
+        ),
+        CheckConstraint("requested_state IN ('running','paused','cancelled')"),
+        CheckConstraint(
+            "reason IN ('capacity','budget','entitlement_unavailable','authority_revoked','deadline_exceeded','signal','control','provider_unavailable','uncertain','completed','invalid_result')"
+        ),
+        CheckConstraint("deadline_ms > admitted_at_ms"),
+        CheckConstraint("next_event_sequence BETWEEN 1 AND 9007199254740991"),
+        *execution_safe("admitted_at_ms", "deadline_ms"),
+        *execution_hashes("admission_digest"),
+        Index("execution_queue_idx", *FLEET_SCOPE, "state", "admitted_at_ms", "id"),
+        Index("execution_deadline_idx", "state", "deadline_ms", "id"),
+    )
+
+
+class ExecutionStepInstance(FleetScoped, Base):
+    __tablename__ = "execution_step_instances"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    occurrence_path: Mapped[str] = mapped_column(String(1024))
+    node_id: Mapped[str] = mapped_column(String(128))
+    __table_args__ = fleet_scoped(
+        fleet_parent("executions", "execution_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "occurrence_path"),
+        CheckConstraint("length(occurrence_path) BETWEEN 1 AND 1024"),
+    )
+
+
+class ExecutionAttempt(FleetScoped, Base):
+    __tablename__ = "execution_attempts"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    step_instance_id: Mapped[str] = mapped_column(String(36))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    parent_attempt_id: Mapped[str | None] = mapped_column(String(36))
+    child_request_id: Mapped[str | None] = mapped_column(String(128))
+    child_request_digest: Mapped[str | None] = mapped_column(String(64))
+    input_artifact_id: Mapped[str] = mapped_column(String(36))
+    input_artifact_version: Mapped[int] = mapped_column(Integer)
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    result_artifact_id: Mapped[str | None] = mapped_column(String(36))
+    result_artifact_version: Mapped[int | None] = mapped_column(Integer)
+    result_sha256: Mapped[str | None] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(20), default="reserved")
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_step_instances", "step_instance_id"),
+        execution_parent("execution_attempts", "parent_attempt_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "step_instance_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "step_instance_id", "ordinal"),
+        UniqueConstraint(*FLEET_SCOPE, "parent_attempt_id", "child_request_id"),
+        execution_pair("parent_attempt_id", "child_request_id"),
+        execution_pair("parent_attempt_id", "child_request_digest"),
+        CheckConstraint("parent_attempt_id IS NULL OR parent_attempt_id <> id"),
+        execution_artifact("input"),
+        execution_artifact("result"),
+        execution_pair("result_artifact_id", "result_artifact_version"),
+        execution_pair("result_artifact_id", "result_sha256"),
+        CheckConstraint(
+            "state IN ('reserved','dispatched','claimed','succeeded','failed','uncertain','cancelled')"
+        ),
+        fleet_positive("ordinal"),
+        *execution_hashes("child_request_digest"),
+    )
+
+
+class ExecutionWait(FleetScoped, Base):
+    __tablename__ = "execution_waits"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    step_instance_id: Mapped[str] = mapped_column(String(36))
+    wait_key: Mapped[str] = mapped_column(String(128))
+    deadline_ms: Mapped[int] = mapped_column(BigInteger)
+    state: Mapped[str] = mapped_column(String(20), default="open")
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_step_instances", "step_instance_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "wait_key"),
+        CheckConstraint("state IN ('open','satisfied','expired','cancelled')"),
+        *execution_safe("deadline_ms"),
+        Index("execution_wait_deadline_idx", *FLEET_SCOPE, "state", "deadline_ms", "id"),
+    )
+
+
+class ExecutionRequest(FleetScoped, Base):
+    __tablename__ = "execution_requests"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    request_key: Mapped[str] = mapped_column(String(128))
+    digest: Mapped[str] = mapped_column(String(64))
+    __table_args__ = fleet_scoped(
+        fleet_parent("executions", "execution_id"),
+        UniqueConstraint(*FLEET_SCOPE, "request_key"),
+        CheckConstraint("length(request_key) BETWEEN 1 AND 128"),
+        *execution_hashes("digest"),
+    )
+
+
+class ExecutionMessage(FleetScoped):
+    execution_id: Mapped[str] = mapped_column(String(36))
+    digest: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    available_at_ms: Mapped[int] = mapped_column(BigInteger, default=0)
+    lease_token_digest: Mapped[str | None] = mapped_column(String(64))
+    leased_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    lease_expires_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    delivery_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+def execution_message(*constraints):
+    return fleet_scoped(
+        fleet_parent("executions", "execution_id"),
+        fleet_status("'pending','leased','delivered','conflict'"),
+        *execution_hashes("digest", "lease_token_digest"),
+        *execution_safe("available_at_ms", "leased_at_ms", "lease_expires_at_ms"),
+        CheckConstraint("delivery_count BETWEEN 0 AND 2147483647"),
+        execution_pair("leased_at_ms", "lease_expires_at_ms"),
+        execution_pair("leased_at_ms", "lease_token_digest"),
+        CheckConstraint("status <> 'leased' OR leased_at_ms IS NOT NULL"),
+        CheckConstraint(
+            "lease_expires_at_ms > leased_at_ms AND lease_expires_at_ms <= leased_at_ms + 60000"
+        ),
+        *constraints,
+    )
+
+
+class ExecutionOutbox(ExecutionMessage, Base):
+    __tablename__ = "execution_outbox"
+    message_id: Mapped[str] = mapped_column(String(128))
+    kind: Mapped[str] = mapped_column(String(20))
+    attempt_id: Mapped[str | None] = mapped_column(String(36))
+    __table_args__ = execution_message(
+        execution_parent("execution_attempts", "attempt_id"),
+        UniqueConstraint(*FLEET_SCOPE, "message_id"),
+        CheckConstraint("kind IN ('engine_start','engine_signal','activity','control')"),
+        Index("execution_outbox_queue_idx", *FLEET_SCOPE, "status", "available_at_ms", "id"),
+    )
+
+
+class ExecutionInbox(ExecutionMessage, Base):
+    __tablename__ = "execution_inbox"
+    wait_id: Mapped[str] = mapped_column(String(36))
+    signal_id: Mapped[str] = mapped_column(String(128))
+    payload_artifact_id: Mapped[str] = mapped_column(String(36))
+    payload_artifact_version: Mapped[int] = mapped_column(Integer)
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = execution_message(
+        execution_parent("execution_waits", "wait_id"),
+        execution_artifact("payload"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "signal_id"),
+        *execution_safe("expires_at_ms"),
+        Index("execution_inbox_queue_idx", *FLEET_SCOPE, "status", "available_at_ms", "id"),
+    )
+
+
+class ExecutionEvent(FleetScoped, Base):
+    """Normalized identity and encrypted canonical event pin; storage is not authority."""
+
+    __tablename__ = "execution_events"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str | None] = mapped_column(String(36))
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    family: Mapped[str] = mapped_column(String(24))
+    format_version: Mapped[int] = mapped_column(Integer)
+    installation_id: Mapped[str] = mapped_column(String(128))
+    recovery_epoch: Mapped[int] = mapped_column(BigInteger)
+    source_id: Mapped[str] = mapped_column(String(128))
+    source_generation: Mapped[int] = mapped_column(BigInteger)
+    source_sequence: Mapped[int] = mapped_column(BigInteger)
+    event_id: Mapped[str] = mapped_column(String(128))
+    event_artifact_id: Mapped[str] = mapped_column(String(36))
+    event_artifact_version: Mapped[int] = mapped_column(Integer)
+    digest: Mapped[str] = mapped_column(String(64))
+    code: Mapped[str] = mapped_column(String(40))
+    occurred_at_ms: Mapped[int] = mapped_column(BigInteger)
+    application_state: Mapped[str] = mapped_column(String(16))
+    gap_slot: Mapped[int | None] = mapped_column(Integer)
+    __table_args__ = fleet_scoped(
+        fleet_parent("executions", "execution_id"),
+        execution_parent("execution_attempts", "attempt_id"),
+        fleet_fk(
+            "execution_artifacts",
+            (*FLEET_SCOPE, "event_artifact_id", "event_artifact_version", "digest"),
+            (*FLEET_SCOPE, "id", "version", "sha256"),
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "sequence"),
+        UniqueConstraint(
+            *FLEET_SCOPE, "execution_id", "source_id", "source_generation", "source_sequence"
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "source_id", "event_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "gap_slot"),
+        CheckConstraint("sequence BETWEEN 1 AND 9007199254740991"),
+        CheckConstraint("format_version = 1"),
+        CheckConstraint("length(installation_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(source_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(event_id) BETWEEN 1 AND 128"),
+        CheckConstraint("event_artifact_version > 0"),
+        CheckConstraint("application_state IN ('pending','applied','conflict')"),
+        CheckConstraint("gap_slot BETWEEN 1 AND 100"),
+        CheckConstraint("(application_state = 'pending') = (gap_slot IS NOT NULL)"),
+        CheckConstraint(
+            "(family = 'sdk_runtime_event' AND code IN ('admission','step_started','step_result','step_failed','wait_started','signal_received','timer_elapsed','intent_created','decision_recorded','action_dispatched','action_receipt','dispatch_timeout','reconciliation_observed','outcome_recorded','execution_completed','cancellation_requested','execution_failed')) OR "
+            "(family = 'execution_control' AND code IN ('admitted','started','attempt_reserved','attempt_dispatched','attempt_claimed','attempt_succeeded','attempt_failed','attempt_uncertain','waiting','signal_received','signal_conflict','paused','resumed','cancelled','succeeded','failed','reconciliation_required','capacity_refused','budget_refused','authority_revoked','deadline_exceeded','reconciled'))"
+        ),
+        *execution_safe("recovery_epoch", "source_generation", "source_sequence", "occurred_at_ms"),
+        *execution_hashes("digest"),
+    )
+
+
+class ExecutionControlRequest(FleetScoped, Base):
+    __tablename__ = "execution_control_requests"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    request_id: Mapped[str] = mapped_column(String(128))
+    action: Mapped[str] = mapped_column(String(20))
+    digest: Mapped[str] = mapped_column(String(64))
+    initiating_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    initiating_api_key_id: Mapped[str | None] = mapped_column(String(36))
+    __table_args__ = fleet_scoped(
+        fleet_parent("executions", "execution_id"),
+        within("api_keys", "initiating_api_key_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "request_id"),
+        CheckConstraint("action IN ('pause','resume','cancel')"),
+        *execution_hashes("digest"),
+    )
+
+
+class ExecutionUsageReservation(FleetScoped, Base):
+    __tablename__ = "execution_usage_reservations"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    step_instance_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    state: Mapped[str] = mapped_column(String(20), default="reserved")
+    input_tokens: Mapped[int] = mapped_column(BigInteger)
+    output_tokens: Mapped[int] = mapped_column(BigInteger)
+    cost_microusd: Mapped[int] = mapped_column(BigInteger)
+    active_ms: Mapped[int] = mapped_column(BigInteger)
+    observed_input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    observed_output_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    observed_cost_microusd: Mapped[int | None] = mapped_column(BigInteger)
+    completed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    compute_stopped_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    settlement_digest: Mapped[str | None] = mapped_column(String(64))
+    __table_args__ = fleet_scoped(
+        fleet_fk(
+            "execution_attempts",
+            (*FLEET_SCOPE, "execution_id", "step_instance_id", "attempt_id"),
+            (*FLEET_SCOPE, "execution_id", "step_instance_id", "id"),
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "attempt_id"),
+        CheckConstraint("state IN ('reserved','settled','uncertain','released')"),
+        *execution_safe(
+            "input_tokens",
+            "output_tokens",
+            "cost_microusd",
+            "active_ms",
+            "observed_input_tokens",
+            "observed_output_tokens",
+            "observed_cost_microusd",
+            "completed_at_ms",
+            "compute_stopped_at_ms",
+        ),
+        *execution_hashes("settlement_digest"),
+        CheckConstraint(
+            "state <> 'settled' OR (observed_input_tokens IS NOT NULL AND observed_output_tokens IS NOT NULL AND observed_cost_microusd IS NOT NULL AND completed_at_ms IS NOT NULL AND settlement_digest IS NOT NULL)"
+        ),
+        CheckConstraint("state <> 'released' OR compute_stopped_at_ms IS NOT NULL"),
+    )
+
+
+class ExecutionCapacity(FleetScoped, Base):
+    __tablename__ = "execution_capacities"
+    active: Mapped[int] = mapped_column(Integer, default=0)
+    pending: Mapped[int] = mapped_column(Integer, default=0)
+    retained_waits: Mapped[int] = mapped_column(Integer, default=0)
+    active_limit: Mapped[int] = mapped_column(Integer, default=5)
+    pending_limit: Mapped[int] = mapped_column(Integer, default=1000)
+    wait_limit: Mapped[int] = mapped_column(Integer, default=10000)
+    __table_args__ = fleet_scoped(
+        UniqueConstraint(*FLEET_SCOPE),
+        CheckConstraint("active_limit BETWEEN 0 AND 5 AND active BETWEEN 0 AND active_limit"),
+        CheckConstraint("pending_limit BETWEEN 0 AND 1000 AND pending BETWEEN 0 AND pending_limit"),
+        CheckConstraint(
+            "wait_limit BETWEEN 0 AND 10000 AND retained_waits BETWEEN 0 AND wait_limit"
+        ),
+    )
+
+
+class ExecutionSchedulerCursor(Row, Base):
+    """Installation-wide capacity and opaque round-robin cursor; no customer payload."""
+
+    __tablename__ = "execution_scheduler_cursors"
+    installation_id: Mapped[str] = mapped_column(String(128), unique=True)
+    cursor: Mapped[int] = mapped_column(BigInteger, default=0)
+    active: Mapped[int] = mapped_column(Integer, default=0)
+    active_limit: Mapped[int] = mapped_column(Integer, default=25)
+    __table_args__ = (
+        *execution_safe("cursor"),
+        CheckConstraint("active_limit BETWEEN 0 AND 25 AND active BETWEEN 0 AND active_limit"),
+    )
+
+
+class ExecutionActivityDelivery(FleetMachine, Base):
+    __tablename__ = "execution_activity_deliveries"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    instance_id: Mapped[str] = mapped_column(String(36))
+    session_id: Mapped[str] = mapped_column(String(36))
+    generation: Mapped[int] = mapped_column(BigInteger)
+    replay_id: Mapped[str] = mapped_column(String(36))
+    canonical_envelope: Mapped[bytes] = mapped_column(LargeBinary)
+    canonical_signature: Mapped[bytes] = mapped_column(LargeBinary)
+    digest: Mapped[str] = mapped_column(String(64))
+    issued_at_ms: Mapped[int] = mapped_column(BigInteger)
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    retain_until_ms: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    __table_args__ = fleet_machine(
+        execution_parent("execution_attempts", "attempt_id"),
+        fleet_fk(
+            "runtime_sessions",
+            (*FLEET_MACHINE, "session_id", "generation"),
+            (*FLEET_MACHINE, "id", "generation"),
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "attempt_id", "id"),
+        UniqueConstraint("installation_id", "recovery_epoch", "workspace_id", "replay_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "attempt_id"),
+        fleet_status("'pending','leased','delivered','conflict'"),
+        CheckConstraint(
+            "length(canonical_envelope) > 0 AND length(canonical_signature) > 0 AND length(canonical_envelope) + length(canonical_signature) <= 65536"
+        ),
+        CheckConstraint("generation BETWEEN 1 AND 9007199254740991"),
+        *execution_hashes("digest"),
+        *execution_safe("recovery_epoch", "issued_at_ms", "expires_at_ms", "retain_until_ms"),
+        CheckConstraint("expires_at_ms > issued_at_ms AND expires_at_ms <= issued_at_ms + 300000"),
+        CheckConstraint("retain_until_ms >= expires_at_ms + 30000"),
+        Index("execution_delivery_retention_idx", *FLEET_SCOPE, "retain_until_ms", "id"),
+    )
+
+
+class ExecutionLease(FleetScoped, Base):
+    """Lease expiration records lost authority; it never makes an attempt reclaimable."""
+
+    __tablename__ = "execution_leases"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    delivery_id: Mapped[str] = mapped_column(String(36))
+    token_digest: Mapped[str] = mapped_column(String(64))
+    claimed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    renewed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    __table_args__ = fleet_scoped(
+        fleet_fk(
+            "execution_activity_deliveries",
+            (*FLEET_SCOPE, "execution_id", "attempt_id", "delivery_id"),
+            (*FLEET_SCOPE, "execution_id", "attempt_id", "id"),
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "attempt_id"),
+        fleet_status("'active','stopped','uncertain'"),
+        *execution_hashes("token_digest"),
+        *execution_safe("claimed_at_ms", "renewed_at_ms", "expires_at_ms"),
+        CheckConstraint(
+            "renewed_at_ms >= claimed_at_ms AND expires_at_ms > renewed_at_ms AND expires_at_ms <= renewed_at_ms + 60000"
+        ),
+        Index("execution_lease_expiry_idx", *FLEET_SCOPE, "status", "expires_at_ms", "id"),
+    )
+
+
+class ExecutionReconciliationObservation(FleetScoped, Base):
+    __tablename__ = "execution_reconciliation_observations"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    source_id: Mapped[str] = mapped_column(String(128))
+    observation_id: Mapped[str] = mapped_column(String(128))
+    digest: Mapped[str] = mapped_column(String(64))
+    code: Mapped[str] = mapped_column(String(30))
+    observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_attempts", "attempt_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "attempt_id", "source_id", "observation_id"),
+        CheckConstraint(
+            "code IN ('compute_stopped','compute_running','outcome_unknown','usage_known','authority_revoked','engine_missing','identity_conflict')"
+        ),
+        *execution_hashes("digest"),
+        *execution_safe("observed_at_ms"),
+    )
+
+
+EXECUTION_TABLES = frozenset(
+    {
+        "executable_publications",
+        "executable_dependencies",
+        "execution_deployments",
+        "execution_deployment_revisions",
+        "deployment_bindings",
+        "deployment_assurance_bindings",
+        "execution_artifacts",
+        "execution_context_sources",
+        "execution_context_versions",
+        "executions",
+        "execution_step_instances",
+        "execution_attempts",
+        "execution_waits",
+        "execution_requests",
+        "execution_outbox",
+        "execution_inbox",
+        "execution_events",
+        "execution_control_requests",
+        "execution_usage_reservations",
+        "execution_capacities",
+        "execution_scheduler_cursors",
+        "execution_activity_deliveries",
+        "execution_leases",
+        "execution_reconciliation_observations",
+    }
+)

@@ -20,6 +20,7 @@ from lotuspond.models import (
     Workspace,
     new_id,
 )
+from lotuspond.schema_version import SCHEMA_VERSION
 
 
 def upgrade(engine, monkeypatch):
@@ -162,7 +163,7 @@ def test_upgrade_preserves_v12_rows(schema_database, monkeypatch):
     with engine.connect() as connection:
         existing_rows_after = {table: rows(connection)[table] for table in existing_rows_before}
         assert existing_rows_after == existing_rows_before
-        assert connection.scalar(select(SchemaVersion.version)) == 13
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
         assert all(
             not values
             for table, values in rows(connection).items()
@@ -473,7 +474,7 @@ def test_always_enabled_fk_triggers_preserve_normal_write_enforcement(
     with engine.connect() as connection:
         assert {name: rows(connection)[name] for name in before_rows} == before_rows
         assert set(before_triggers).issubset(set(fk_trigger_catalog(connection)))
-        assert connection.scalar(select(SchemaVersion.version)) == 13
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
 
 
 @pytest.mark.parametrize(
@@ -543,4 +544,4 @@ def test_accepted_check_cast_rendering_preserves_v12_rows(
     upgrade(engine, monkeypatch)
     with engine.connect() as connection:
         assert {name: rows(connection)[name] for name in before} == before
-        assert connection.scalar(select(SchemaVersion.version)) == 13
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
