@@ -1,3 +1,4 @@
 /* The console and the public introduction share one set of tokens, defined in console.css. */
 @import './styles/console.css';
+@import './styles/studio.css';
 @import './styles/landing.css';

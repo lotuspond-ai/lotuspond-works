@@ -655,10 +655,3 @@ export function validatePackage(raw: unknown): Validation {
   if (complete) return { ok: false, problems: [complete] };
   return { ok: true, package: read.package, canonical, problems: [] };
 }
-
-// A readable location for a problem, such as "nodes › 3 › agent › instructions".
-export function describePath(path: (string | number)[]): string {
-  return path.length
-    ? path.map((part) => String(part).replaceAll('_', ' ')).join(' › ')
-    : 'Package';
-}

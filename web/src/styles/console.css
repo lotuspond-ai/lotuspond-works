@@ -28,6 +28,9 @@
   --danger-soft: #f8e6e2;
   --neutral-soft: #f0f0ec;
   --lotus: #c4864a;
+  /* The field record's graph paper, shared by the public glyph panels and the Studio surface. */
+  --grid: rgba(35, 49, 43, 0.06);
+  --grid-major: rgba(35, 49, 43, 0.11);
   --shadow-sm: 0 1px 2px rgba(20, 28, 24, 0.06);
   --shadow-md: 0 1px 2px rgba(20, 28, 24, 0.05), 0 12px 32px -12px rgba(20, 28, 24, 0.22);
   --serif: 'Iowan Old Style', Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;

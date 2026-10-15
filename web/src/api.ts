@@ -31,14 +31,29 @@ export type Account = {
     offline_enrollment_enabled?: boolean;
   };
 };
+// A field-level problem the server reports without echoing the submitted value.
+export type FieldProblem = { path: (string | number)[]; code: string; message: string };
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
     public readonly code?: string,
+    public readonly problems: FieldProblem[] = [],
   ) {
     super(message);
   }
+}
+function fieldProblems(value: unknown): FieldProblem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) =>
+    item &&
+    typeof item === 'object' &&
+    Array.isArray(item.path) &&
+    typeof item.code === 'string' &&
+    typeof item.message === 'string'
+      ? [{ path: item.path, code: item.code, message: item.message }]
+      : [],
+  );
 }
 export async function api<T>(
   path: string,
@@ -46,6 +61,7 @@ export async function api<T>(
   body?: unknown,
   method = body === undefined ? 'GET' : 'POST',
   signal?: AbortSignal,
+  headers: Record<string, string> = {},
 ): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {
     method,
@@ -54,6 +70,7 @@ export async function api<T>(
     headers: {
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
       ...(workspace ? { 'x-lotuspond-workspace': workspace } : {}),
+      ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -73,6 +90,7 @@ export async function api<T>(
       message,
       response.status,
       typeof data?.error === 'string' ? data.error : undefined,
+      fieldProblems(data?.errors),
     );
   }
   return data as T;

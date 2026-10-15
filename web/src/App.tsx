@@ -6,6 +6,7 @@ import { VoiceSessions } from './pages/VoiceSessions.js';
 import { Workspaces } from './pages/Workspaces.js';
 import { Monitors } from './pages/Monitors.js';
 import { Incidents } from './pages/Incidents.js';
+import { Studio } from './pages/Studio.js';
 import { AccountSecurity } from './pages/AccountSecurity.js';
 import { IdentityFlow, IdentityFrame, VerificationCard } from './pages/IdentityFlow.js';
 import { Invitations } from './pages/Invitations.js';
@@ -230,6 +231,7 @@ const label = (key: string) =>
 // Pages whose records belong to a project, so the project filter applies to them.
 const projectScoped = [
   'projects',
+  'studio',
   'scenarios',
   'environments',
   'runs',
@@ -662,6 +664,14 @@ export function App({
               key={`${workspace}-${projectId}`}
               workspace={workspace}
               projectId={projectId}
+              role={currentWorkspace?.role || 'viewer'}
+            />
+          ) : page === 'studio' ? (
+            <Studio
+              key={`${workspace}-${projectId}`}
+              workspace={workspace}
+              projectId={projectId}
+              projectName={String(projects.find((item) => item.id === projectId)?.name ?? '')}
               role={currentWorkspace?.role || 'viewer'}
             />
           ) : page === 'voice-sessions' ? (
