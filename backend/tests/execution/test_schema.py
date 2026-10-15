@@ -88,6 +88,7 @@ def execution_rows(n=0):
                 version="1.0.0",
                 canonical_package=b"{}",
                 canonical_plan=b"{}",
+                canonical_signature=b"{}",
                 package_sha256="a" * 64,
                 plan_sha256="b" * 64,
                 validator_id="fixture",
@@ -622,7 +623,12 @@ def test_publication_catalog_kinds_match_sdk_artifact_references(engine):
         for kind in get_args(ArtifactKind):
             row = dict(values[publication.name], id=new_id(), name=f"catalog-{kind}", kind=kind)
             if kind != "workflow":
-                row.update(canonical_plan=None, plan_sha256=None, compiler_id=None)
+                row.update(
+                    canonical_plan=None,
+                    canonical_signature=None,
+                    plan_sha256=None,
+                    compiler_id=None,
+                )
             connection.execute(publication.insert().values(**row))
         for kind in ("tool", "context", "unknown"):
             with pytest.raises(IntegrityError), connection.begin_nested():
@@ -837,6 +843,7 @@ def test_agent_catalog_publication_preserves_real_document_without_plan(engine):
                 canonical_package=canonical,
                 package_sha256=hashlib.sha256(canonical).hexdigest(),
                 canonical_plan=None,
+                canonical_signature=None,
                 plan_sha256=None,
                 compiler_id=None,
             )

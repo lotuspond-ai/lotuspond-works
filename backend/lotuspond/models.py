@@ -1255,6 +1255,7 @@ class ExecutablePublication(FleetScoped, Base):
     version: Mapped[str] = mapped_column(String(100))
     canonical_package: Mapped[bytes] = mapped_column(LargeBinary)
     canonical_plan: Mapped[bytes | None] = mapped_column(LargeBinary)
+    canonical_signature: Mapped[bytes | None] = mapped_column(LargeBinary)
     package_sha256: Mapped[str] = mapped_column(String(64))
     plan_sha256: Mapped[str | None] = mapped_column(String(64))
     validator_id: Mapped[str] = mapped_column(String(128))
@@ -1272,6 +1273,8 @@ class ExecutablePublication(FleetScoped, Base):
         ),
         CheckConstraint("length(canonical_package) BETWEEN 1 AND 1048576"),
         CheckConstraint("length(canonical_plan) BETWEEN 1 AND 1048576"),
+        CheckConstraint("length(canonical_signature) BETWEEN 1 AND 65536"),
+        CheckConstraint("(kind = 'workflow') = (canonical_signature IS NOT NULL)"),
         execution_pair("canonical_plan", "plan_sha256"),
         execution_pair("canonical_plan", "compiler_id"),
         CheckConstraint("(kind = 'workflow') = (canonical_plan IS NOT NULL)"),
