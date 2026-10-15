@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
 import { api, ApiError, type Account, type Row } from './api.js';
 import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
@@ -6,7 +6,6 @@ import { VoiceSessions } from './pages/VoiceSessions.js';
 import { Workspaces } from './pages/Workspaces.js';
 import { Monitors } from './pages/Monitors.js';
 import { Incidents } from './pages/Incidents.js';
-import { Studio } from './pages/Studio.js';
 import { AccountSecurity } from './pages/AccountSecurity.js';
 import { IdentityFlow, IdentityFrame, VerificationCard } from './pages/IdentityFlow.js';
 import { Invitations } from './pages/Invitations.js';
@@ -42,6 +41,11 @@ import { Icon } from './components/console/icons.js';
 import { allPages, navigation, pageLabel } from './components/console/navigation.js';
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
+
+// The Studio carries the canvas and the contract validator, so it loads when first opened.
+const Studio = lazy(() =>
+  import('./pages/Studio.js').then((module) => ({ default: module.Studio })),
+);
 import { requestCreate, takeCreateRequest, useSetupProgress } from './lib/setup.js';
 import { fieldLabel, formatLatency } from './lib/format.js';
 import { documentTitle, useDocumentTitle } from './lib/title.js';
@@ -667,13 +671,21 @@ export function App({
               role={currentWorkspace?.role || 'viewer'}
             />
           ) : page === 'studio' ? (
-            <Studio
-              key={`${workspace}-${projectId}`}
-              workspace={workspace}
-              projectId={projectId}
-              projectName={String(projects.find((item) => item.id === projectId)?.name ?? '')}
-              role={currentWorkspace?.role || 'viewer'}
-            />
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Opening the Studio…
+                </p>
+              }
+            >
+              <Studio
+                key={`${workspace}-${projectId}`}
+                workspace={workspace}
+                projectId={projectId}
+                projectName={String(projects.find((item) => item.id === projectId)?.name ?? '')}
+                role={currentWorkspace?.role || 'viewer'}
+              />
+            </Suspense>
           ) : page === 'voice-sessions' ? (
             <VoiceSessions
               key={`${workspace}-${projectId}`}
