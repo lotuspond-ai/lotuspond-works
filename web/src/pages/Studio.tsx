@@ -201,10 +201,14 @@ export function Studio({
         { 'Idempotency-Key': publishKey.current },
       );
       publishKey.current = null;
+      // The registry answers an identical, already published version with the existing record.
+      const existing = versions.some((version) => version.id === result.id);
       setNotice({
         tone: 'success',
         text:
-          `Published ${result.package_id} ${result.version} to ${projectName || 'the project'}. ` +
+          (existing
+            ? `${result.package_id} ${result.version} was already published to ${projectName || 'the project'} with this exact content. `
+            : `Published ${result.package_id} ${result.version} to ${projectName || 'the project'}. `) +
           (result.sha256 === digest
             ? 'The registry digest matches the local digest.'
             : 'The registry digest differs from the local digest; review the stored content before relying on it.'),
@@ -277,7 +281,7 @@ export function Studio({
       if (!read.package) throw new Error('The stored content does not match the local contract.');
       replaceDraft(
         draftFromPackage(read.package),
-        `Opened ${version.package_id} ${version.version} as a new draft. Publishing it again needs a new version number.`,
+        `Opened ${version.package_id} ${version.version} as a new draft. A published version is immutable: changes need a new version number.`,
       );
     } catch (reason) {
       setVersionsError((reason as Error).message);
@@ -704,7 +708,7 @@ function VersionsSection({
                     </td>
                     <td>{version.content_bytes.toLocaleString()} bytes</td>
                     <td className="cell-mono" title={version.validator_revision}>
-                      {version.validator_revision.split('.').at(-1)}
+                      {version.validator_revision.replace(/^.*validator\./, '')}
                     </td>
                     <td>
                       <RelativeTime value={version.created_at} />

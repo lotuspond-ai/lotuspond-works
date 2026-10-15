@@ -33,7 +33,8 @@ function problemAt(problems: Problem[], path: Path): string | undefined {
   return problems.find((problem) => samePath(problem.path, path))?.message;
 }
 
-// A field with its label, optional hint and the admission problem recorded for it.
+// A field with its label, optional hint and the admission problem recorded for it. The hint
+// and problem sit outside the label and describe the control, so its name stays the label.
 function Field({
   label,
   hint,
@@ -44,7 +45,7 @@ function Field({
   label: string;
   hint?: string;
   problem?: string;
-  children: (ids: { describedBy: string | undefined; problemId: string }) => ReactNode;
+  children: (ids: { id: string; describedBy: string | undefined }) => ReactNode;
   wide?: boolean;
 }) {
   const id = useId();
@@ -53,9 +54,9 @@ function Field({
   const describedBy =
     [hintId, problem ? problemId : undefined].filter(Boolean).join(' ') || undefined;
   return (
-    <label className={wide ? 'wide' : undefined}>
-      {label}
-      {children({ describedBy, problemId })}
+    <div className={wide ? 'field wide' : 'field'}>
+      <label htmlFor={id}>{label}</label>
+      {children({ id, describedBy })}
       {hint && (
         <span className="hint" id={hintId}>
           {hint}
@@ -66,16 +67,18 @@ function Field({
           {problem}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 
 // Text that becomes a list only once editing pauses, so a comma can be typed.
 function ListText({
+  id,
   value,
   onCommit,
   describedBy,
 }: {
+  id: string;
   value: string[];
   onCommit: (items: string[]) => void;
   describedBy?: string;
@@ -85,6 +88,7 @@ function ListText({
   return (
     <input
       value={text}
+      id={id}
       aria-describedby={describedBy}
       onChange={(event) => setText(event.target.value)}
       onBlur={() => onCommit(parseOperations(text))}
@@ -133,11 +137,12 @@ function IdentifierField({
             : undefined
       }
     >
-      {({ describedBy }) => (
+      {({ id, describedBy }) => (
         <input
           className="code-input"
           value={text}
           maxLength={BOUNDS.identifier.max}
+          id={id}
           aria-describedby={describedBy}
           aria-invalid={collision || invalid || undefined}
           onChange={(event) => setText(event.target.value)}
@@ -288,9 +293,10 @@ function NodeEditor({
               problem={problemAt(problems, at('model_ref'))}
               hint={pkg.models.length ? undefined : 'Declare a model under Declarations first.'}
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <select
                   value={node.model_ref}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) => onUpdate({ ...node, model_ref: event.target.value })}
                 >
@@ -309,11 +315,12 @@ function NodeEditor({
               problem={problemAt(problems, at('instructions'))}
               hint={`${node.instructions.length.toLocaleString()} of ${BOUNDS.instructions.max.toLocaleString()} characters.`}
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <textarea
                   rows={5}
                   value={node.instructions}
                   maxLength={BOUNDS.instructions.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) => onUpdate({ ...node, instructions: event.target.value })}
                 />
@@ -326,7 +333,7 @@ function NodeEditor({
                 problem={problemAt(problems, at('limits', field))}
                 hint={`${LIMIT_RANGES[field].min.toLocaleString()}–${LIMIT_RANGES[field].max.toLocaleString()}`}
               >
-                {({ describedBy }) => (
+                {({ id, describedBy }) => (
                   <input
                     type="number"
                     inputMode="numeric"
@@ -334,6 +341,7 @@ function NodeEditor({
                     max={LIMIT_RANGES[field].max}
                     step={1}
                     value={Number.isFinite(node.limits[field]) ? node.limits[field] : ''}
+                    id={id}
                     aria-describedby={describedBy}
                     onChange={(event) =>
                       onUpdate({
@@ -360,9 +368,10 @@ function NodeEditor({
                 pkg.connectors.length ? undefined : 'Declare a connector under Declarations first.'
               }
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <select
                   value={node.connector_ref}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) => {
                     const connector = pkg.connectors.find((item) => item.id === event.target.value);
@@ -383,9 +392,10 @@ function NodeEditor({
               )}
             </Field>
             <Field label="Operation" problem={problemAt(problems, at('operation'))}>
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <select
                   value={node.operation}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) => onUpdate({ ...node, operation: event.target.value })}
                 >
@@ -483,11 +493,12 @@ function PackageEditor({
   return (
     <div className="form-grid studio-form">
       <Field label="Package identifier" problem={problemAt(problems, ['package_id'])}>
-        {({ describedBy }) => (
+        {({ id, describedBy }) => (
           <input
             className="code-input"
             value={pkg.package_id}
             maxLength={BOUNDS.identifier.max}
+            id={id}
             aria-describedby={describedBy}
             onChange={(event) => onUpdate({ package_id: event.target.value })}
           />
@@ -498,21 +509,23 @@ function PackageEditor({
         hint="Three numbers, such as 1.0.0. A published version is immutable."
         problem={problemAt(problems, ['version'])}
       >
-        {({ describedBy }) => (
+        {({ id, describedBy }) => (
           <input
             className="code-input"
             value={pkg.version}
             maxLength={BOUNDS.version.max}
+            id={id}
             aria-describedby={describedBy}
             onChange={(event) => onUpdate({ version: event.target.value })}
           />
         )}
       </Field>
       <Field label="Name" wide problem={problemAt(problems, ['name'])}>
-        {({ describedBy }) => (
+        {({ id, describedBy }) => (
           <input
             value={pkg.name}
             maxLength={BOUNDS.name.max}
+            id={id}
             aria-describedby={describedBy}
             onChange={(event) => onUpdate({ name: event.target.value })}
           />
@@ -559,11 +572,12 @@ function Declarations({
             onRemove={() => onUpdate({ models: without(pkg.models, index) })}
           >
             <Field label="Identifier" problem={problemAt(problems, ['models', index, 'id'])}>
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={model.id}
                   maxLength={BOUNDS.identifier.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -578,11 +592,12 @@ function Declarations({
               hint="The configured model profile this agent runs under."
               problem={problemAt(problems, ['models', index, 'profile'])}
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={model.profile}
                   maxLength={BOUNDS.identifier.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -593,11 +608,12 @@ function Declarations({
               )}
             </Field>
             <Field label="Revision" problem={problemAt(problems, ['models', index, 'revision'])}>
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={model.revision}
                   maxLength={BOUNDS.revision.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -636,11 +652,12 @@ function Declarations({
             onRemove={() => onUpdate({ connectors: without(pkg.connectors, index) })}
           >
             <Field label="Identifier" problem={problemAt(problems, ['connectors', index, 'id'])}>
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={connector.id}
                   maxLength={BOUNDS.identifier.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -658,11 +675,12 @@ function Declarations({
               hint="The connector type this reference points at."
               problem={problemAt(problems, ['connectors', index, 'connector'])}
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={connector.connector}
                   maxLength={BOUNDS.identifier.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -676,11 +694,12 @@ function Declarations({
               )}
             </Field>
             <Field label="Version" problem={problemAt(problems, ['connectors', index, 'version'])}>
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={connector.version}
                   maxLength={BOUNDS.version.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -697,9 +716,10 @@ function Declarations({
               label="Secret reference"
               problem={problemAt(problems, ['connectors', index, 'secret_ref'])}
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <select
                   value={connector.secret_ref ?? ''}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
@@ -733,8 +753,9 @@ function Declarations({
                 )?.message
               }
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <ListText
+                  id={id}
                   value={connector.operations}
                   describedBy={describedBy}
                   onCommit={(operations) =>
@@ -785,11 +806,12 @@ function Declarations({
               hint="A name the deployment resolves; never a value or a secret-store path."
               problem={problemAt(problems, ['secret_refs', index, 'id'])}
             >
-              {({ describedBy }) => (
+              {({ id, describedBy }) => (
                 <input
                   className="code-input"
                   value={secret.id}
                   maxLength={BOUNDS.identifier.max}
+                  id={id}
                   aria-describedby={describedBy}
                   onChange={(event) =>
                     onUpdate({
