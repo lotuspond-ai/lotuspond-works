@@ -123,27 +123,130 @@ test('cooperative abort lets the adapter finish its cleanup before group termina
   assert.equal(await readFile(cleanupFile, 'utf8'), 'clean');
 });
 
-test('early cooperative exit cancels the production cleanup-grace timer', async () => {
-  const { path } = await fixture(`export async function evaluate(_input, _expected, context) {
-    const keepAlive = setInterval(() => {}, 1000);
-    await new Promise((resolve) => context.signal.addEventListener('abort', () => {
-      clearInterval(keepAlive); resolve();
-    }, { once: true }));
-    return { passed: null, output: {} };
-  }`);
+test('early cooperative exit cancels the production cleanup-grace timer', async (t) => {
+  const { directory, path } = await fixture(`import { writeFileSync } from 'node:fs';
+    // Exercise startup slower than the former fixed 50ms cancellation delay.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    export async function evaluate(_input, _expected, context) {
+      const keepAlive = setInterval(() => {}, 1000);
+      await new Promise((resolve) => {
+        context.signal.addEventListener('abort', () => {
+          writeFileSync(process.env.CUSTOM_CLEANUP_FILE, 'clean');
+          clearInterval(keepAlive); resolve();
+        }, { once: true });
+        writeFileSync(process.env.CUSTOM_READY_FILE, 'ready');
+      });
+      return { passed: null, output: {} };
+    }`);
+  const readyFile = join(directory, 'ready');
+  const cleanupFile = join(directory, 'cleanup');
+  const pidFile = join(directory, 'adapter-pid');
+  const resultFile = join(directory, 'result.json');
   const moduleUrl = new URL('./runner-execution.mjs', import.meta.url).href;
-  const program = `const { executeScenario } = await import(${JSON.stringify(moduleUrl)});
-    const controller = new AbortController(); setTimeout(() => controller.abort(), 50);
+  const program = `import childProcess from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    // Record ownership at spawn, including failure before the fixture can start.
+    const originalSpawn = childProcess.spawn;
+    childProcess.spawn = (...args) => {
+      const adapter = originalSpawn(...args);
+      if (adapter.pid) writeFileSync(${JSON.stringify(pidFile)}, String(adapter.pid));
+      return adapter;
+    };
+    syncBuiltinESMExports();
+    const { executeScenario } = await import(${JSON.stringify(moduleUrl)});
+    const controller = new AbortController();
+    process.once('message', () => controller.abort());
     const result = await executeScenario({ adapterPath: ${JSON.stringify(path)}, input: {}, expected: {},
       revision: 1, runId: 'run', scenarioId: 'scenario', signal: controller.signal,
-      environment: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR } });
-    if (result.classification !== 'canceled') process.exitCode = 2;`;
-  const started = performance.now();
+      environment: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR,
+        LOTUSPOND_RUNNER_ADAPTER_ENV: 'CUSTOM_READY_FILE,CUSTOM_CLEANUP_FILE',
+        CUSTOM_READY_FILE: ${JSON.stringify(readyFile)},
+        CUSTOM_CLEANUP_FILE: ${JSON.stringify(cleanupFile)} } });
+    writeFileSync(${JSON.stringify(resultFile)}, JSON.stringify(result));
+    process.disconnect();`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', program], {
-    stdio: 'ignore',
+    detached: true,
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
-  assert.equal(await waitForChild(child), 0);
-  assert.ok(performance.now() - started < 1500);
+  const closed = new Promise((resolve) => child.once('close', resolve));
+  let spawnError;
+  child.on('error', (error) => {
+    spawnError = error;
+  });
+  const groupExists = (pid) => {
+    try {
+      process.kill(-pid, 0);
+      return true;
+    } catch (error) {
+      if (error.code === 'ESRCH') return false;
+      throw error;
+    }
+  };
+  try {
+    const startupDeadline = performance.now() + 2000;
+    while (true) {
+      try {
+        assert.equal(await readFile(readyFile, 'utf8'), 'ready');
+        break;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      if (spawnError) throw spawnError;
+      assert.equal(child.exitCode, null, 'supervisor exited before adapter readiness');
+      assert.ok(performance.now() < startupDeadline, 'adapter readiness exceeded its bound');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const started = performance.now();
+    const exited = waitForChild(child);
+    child.send('abort');
+    assert.equal(await exited, 0);
+    assert.ok(performance.now() - started < 1500);
+    assert.equal(await readFile(cleanupFile, 'utf8'), 'clean');
+    const result = JSON.parse(await readFile(resultFile, 'utf8'));
+    assert.equal(result.classification, 'canceled');
+    assert.equal(result.processGroupGone, true);
+    t.diagnostic(JSON.stringify({ result, cleanupMarker: 'clean' }));
+    const adapterPid = Number(await readFile(pidFile, 'utf8'));
+    assert.equal(groupExists(adapterPid), false);
+  } finally {
+    const groups = [child.pid];
+    try {
+      const adapterPid = Number(await readFile(pidFile, 'utf8'));
+      assert.ok(Number.isInteger(adapterPid) && adapterPid > 0);
+      groups.push(adapterPid);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    for (const pid of groups) {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch (error) {
+        if (error.code !== 'ESRCH') throw error;
+      }
+    }
+    let closeTimer;
+    try {
+      await Promise.race([
+        closed,
+        new Promise((_, reject) => {
+          closeTimer = setTimeout(() => reject(new Error('owned supervisor remains')), 1000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(closeTimer);
+    }
+    const cleanupDeadline = performance.now() + 1000;
+    while (groups.some(groupExists) && performance.now() < cleanupDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const cleanup = groups.map((pid) => ({ group: pid, absent: !groupExists(pid) }));
+    t.diagnostic(JSON.stringify({ cleanup }));
+    assert.ok(
+      cleanup.every(({ absent }) => absent),
+      'owned test groups remain',
+    );
+  }
 });
 
 test('unclosed pipes produce terminal cleanup failure without pinning the supervisor', async () => {
@@ -343,7 +446,6 @@ test('per-scenario budgeting reserves room for every required result', () => {
   assert.ok(Buffer.byteLength(body) <= 2 * 1024 * 1024);
   assert.deepEqual([first.passed, second.passed], [null, null]);
 });
-
 
 test('an adapter root confines which code the runner may import', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lotuspond-adapter-'));
