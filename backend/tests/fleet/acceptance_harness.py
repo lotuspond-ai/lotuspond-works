@@ -51,8 +51,13 @@ def wait_for(probe, seconds=12):
 
 
 def private(path, value):
-    path.write_text(json.dumps(value) if not isinstance(value, str) else value)
-    path.chmod(0o600)
+    temporary = path.with_name(path.name + ".tmp-" + uuid4().hex)
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        output.write(json.dumps(value) if not isinstance(value, str) else value)
+        output.flush()
+        os.fsync(output.fileno())
+    temporary.replace(path)
 
 
 class Recovery:
@@ -74,7 +79,21 @@ class Records:
 
 
 class Dispatch:
-    allowed = True
+    """One independent private grant source shared with the installed worker."""
+
+    def __init__(self, path):
+        self.path = path
+        self.allowed = True
+
+    @property
+    def allowed(self):
+        return json.loads(self.path.read_text())["allowed"] is True
+
+    @allowed.setter
+    def allowed(self, value):
+        temporary = self.path.with_suffix(".tmp")
+        private(temporary, {"allowed": value})
+        temporary.replace(self.path)
 
     def authorize(self, identity, digest, records):
         from lotuspond_runtime.errors import FleetError
@@ -133,6 +152,9 @@ class ObserveAndLose:
 
 def main():
     root = Path(sys.argv[3])
+    control_file = root / "test-control.json"
+    control = json.loads(control_file.read_text()) if control_file.exists() else {}
+    scenario = control.get("scenario", "full")
     raw = Path(sys.argv[1]).read_text().strip()
     url = make_url(raw)
     assert url.host == "127.0.0.1" and url.database == "lotuspond_platform_test" and not url.query
@@ -209,7 +231,12 @@ def main():
             assert all(after[key] == value for key, value in before.items())
             assert db.scalar(select(models.SchemaVersion.version)) == 13
         cases["v12_upgrade_preserves_environment_evaluation_registry_mfa"] = "passed"
-        recovery, records, dispatch, trust = Recovery(), Records(), Dispatch(), Trust()
+        recovery, records, dispatch, trust = (
+            Recovery(),
+            Records(),
+            Dispatch(root / "independent-grant.json"),
+            Trust(),
+        )
         deps = FleetDependencies(
             recovery,
             InstalledCatalog.fixture(
@@ -253,6 +280,14 @@ def main():
         thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]})
         thread.start()
         wait_for(lambda: server.started)
+        if control.get("pause_at") == "api":
+            private(
+                root / "interrupt-ready.json",
+                {"stage": "active-api", "pid": os.getpid(), "api_port": listener.getsockname()[1]},
+            )
+            # Explicit bounded test-only cancellation checkpoint, never a production hook.
+            threading.Event().wait(180)
+            raise TimeoutError("fixture cancellation checkpoint expired")
         with TestClient(app, headers={"origin": "http://testserver"}) as management:
             response = management.post(
                 "/api/v1/auth/register",
@@ -359,96 +394,97 @@ def main():
                     for p, status, when in observer.events
                 )
 
-            normal_cfg, _, normal_id = config_for("normal")
-            started = time.monotonic()
-            normal = start_cli(normal_cfg)
-            wait_for(lambda: seen("commands/poll", started))
-            wait_for(lambda: seen("heartbeat", started), seconds=28)
-            assert normal.poll() is None
-            cases["ordinary_cli_acquire_poll_first_heartbeat"] = "passed"
-            post(f"/runtime-instances/{normal_id}/revoke", {}, 200)
-            assert normal.wait(timeout=25) == 3
-            assert normal.communicate(timeout=1) == (b"unavailable\n", b"")
-            cases["ordinary_cli_observes_revocation"] = "passed"
-            rotate_cfg, rotate_state, rotate_id = config_for("rotation")
-            with factory.begin() as db:
-                credential = db.scalar(
-                    select(models.RuntimeCredential).where(
-                        models.RuntimeCredential.instance_id == rotate_id,
-                        models.RuntimeCredential.status == "active",
-                    )
-                )
-                original_expiry = credential.expires_at_ms
-                credential.expires_at_ms = time.time_ns() // 1000000 + 240000
-                assert credential.expires_at_ms < original_expiry
-            observer.lose_activate = True
-            failed = start_cli(rotate_cfg)
-            assert failed.wait(timeout=15) == 3
-            failed.communicate(timeout=1)
-            pending = json.loads((rotate_state / "state.json").read_text())
-            assert pending["pending_token"] is not None and pending["pending_version"] == 2
-            with factory() as db:
-                credentials = list(
-                    db.scalars(
+            if scenario == "full":
+                normal_cfg, _, normal_id = config_for("normal")
+                started = time.monotonic()
+                normal = start_cli(normal_cfg)
+                wait_for(lambda: seen("commands/poll", started))
+                wait_for(lambda: seen("heartbeat", started), seconds=28)
+                assert normal.poll() is None
+                cases["ordinary_cli_acquire_poll_first_heartbeat"] = "passed"
+                post(f"/runtime-instances/{normal_id}/revoke", {}, 200)
+                assert normal.wait(timeout=25) == 3
+                assert normal.communicate(timeout=1) == (b"unavailable\n", b"")
+                cases["ordinary_cli_observes_revocation"] = "passed"
+                rotate_cfg, rotate_state, rotate_id = config_for("rotation")
+                with factory.begin() as db:
+                    credential = db.scalar(
                         select(models.RuntimeCredential).where(
-                            models.RuntimeCredential.instance_id == rotate_id
+                            models.RuntimeCredential.instance_id == rotate_id,
+                            models.RuntimeCredential.status == "active",
                         )
                     )
-                )
-                assert {c.version: c.status for c in credentials} == {1: "revoked", 2: "active"}
-                expiry = next(c.expires_at_ms for c in credentials if c.version == 2)
-                old_session = db.scalar(
-                    select(models.RuntimeSession).where(
-                        models.RuntimeSession.instance_id == rotate_id,
-                        models.RuntimeSession.status == "active",
+                    original_expiry = credential.expires_at_ms
+                    credential.expires_at_ms = time.time_ns() // 1000000 + 240000
+                    assert credential.expires_at_ms < original_expiry
+                observer.lose_activate = True
+                failed = start_cli(rotate_cfg)
+                assert failed.wait(timeout=15) == 3
+                failed.communicate(timeout=1)
+                pending = json.loads((rotate_state / "state.json").read_text())
+                assert pending["pending_token"] is not None and pending["pending_version"] == 2
+                with factory() as db:
+                    credentials = list(
+                        db.scalars(
+                            select(models.RuntimeCredential).where(
+                                models.RuntimeCredential.instance_id == rotate_id
+                            )
+                        )
                     )
-                )
-                old_generation, lease_expiry = old_session.generation, old_session.expires_at_ms
-            restarted_at = time.monotonic()
-            restart = start_cli(rotate_cfg)
-            time.sleep(0.25)
-            assert restart.poll() is None
-            with factory() as db:
-                assert (
-                    db.scalar(
-                        select(models.RuntimeSession.generation).where(
+                    assert {c.version: c.status for c in credentials} == {1: "revoked", 2: "active"}
+                    expiry = next(c.expires_at_ms for c in credentials if c.version == 2)
+                    old_session = db.scalar(
+                        select(models.RuntimeSession).where(
                             models.RuntimeSession.instance_id == rotate_id,
                             models.RuntimeSession.status == "active",
                         )
                     )
-                    == old_generation
-                )
-            wait_for(lambda: seen("heartbeat", restarted_at), seconds=90)
-            assert restart.poll() is None
-            with factory() as db:
-                session = db.scalar(
-                    select(models.RuntimeSession).where(
-                        models.RuntimeSession.instance_id == rotate_id,
-                        models.RuntimeSession.status == "active",
+                    old_generation, lease_expiry = old_session.generation, old_session.expires_at_ms
+                restarted_at = time.monotonic()
+                restart = start_cli(rotate_cfg)
+                time.sleep(0.25)
+                assert restart.poll() is None
+                with factory() as db:
+                    assert (
+                        db.scalar(
+                            select(models.RuntimeSession.generation).where(
+                                models.RuntimeSession.instance_id == rotate_id,
+                                models.RuntimeSession.status == "active",
+                            )
+                        )
+                        == old_generation
                     )
-                )
-                assert session.generation == old_generation + 1
-                assert time.time_ns() // 1000000 >= lease_expiry
-                assert (
-                    db.scalar(
-                        select(models.RuntimeCredential.expires_at_ms).where(
-                            models.RuntimeCredential.instance_id == rotate_id,
-                            models.RuntimeCredential.version == 2,
+                wait_for(lambda: seen("heartbeat", restarted_at), seconds=90)
+                assert restart.poll() is None
+                with factory() as db:
+                    session = db.scalar(
+                        select(models.RuntimeSession).where(
+                            models.RuntimeSession.instance_id == rotate_id,
+                            models.RuntimeSession.status == "active",
                         )
                     )
-                    == expiry
+                    assert session.generation == old_generation + 1
+                    assert time.time_ns() // 1000000 >= lease_expiry
+                    assert (
+                        db.scalar(
+                            select(models.RuntimeCredential.expires_at_ms).where(
+                                models.RuntimeCredential.instance_id == rotate_id,
+                                models.RuntimeCredential.version == 2,
+                            )
+                        )
+                        == expiry
+                    )
+                recovered = json.loads((rotate_state / "state.json").read_text())
+                assert (
+                    recovered["active_token"] == pending["pending_token"]
+                    and recovered["pending_token"] is None
                 )
-            recovered = json.loads((rotate_state / "state.json").read_text())
-            assert (
-                recovered["active_token"] == pending["pending_token"]
-                and recovered["pending_token"] is None
-            )
-            post(f"/runtime-instances/{rotate_id}/revoke", {}, 200)
-            assert restart.wait(timeout=25) == 3
-            restart.communicate(timeout=1)
-            cases[
-                "ordinary_cli_forced_startup_rotation_lost_activation_response_restart_natural_lease"
-            ] = "passed"
+                post(f"/runtime-instances/{rotate_id}/revoke", {}, 200)
+                assert restart.wait(timeout=25) == 3
+                restart.communicate(timeout=1)
+                cases[
+                    "ordinary_cli_forced_startup_rotation_lost_activation_response_restart_natural_lease"
+                ] = "passed"
 
             # Fixture capability is a distinct instance; never widen either CLI ceiling.
             observation = {"platform": "linux", "connectors": [fixture_pin().model_dump()]}
@@ -461,6 +497,7 @@ def main():
                     "ca_file": str(ca),
                     "token": enrollment["token"],
                     "observation": observation,
+                    "grant_file": str(dispatch.path),
                 },
             )
             ready, proceed = root / "worker-ready.json", root / "worker-proceed.json"
@@ -519,9 +556,40 @@ def main():
                     "trust": case.trust.model_dump(mode="json"),
                 },
             )
-            assert worker.wait(timeout=20) == 0
-            output, error = worker.communicate(timeout=1)
-            assert output == b"fixture_worker_passed\n" and not error
+            positive = root / "worker-positive.json"
+            wait_for(lambda: positive.exists() or worker.poll() is not None)
+            assert worker.poll() is None and positive.exists(), (
+                "restore worker exited before live-sink checkpoint"
+            )
+            positive_result = json.loads(positive.read_text())
+            assert positive_result["effect_count"] == 1
+            assert positive_result["secret_resolution_count"] >= 1
+
+            def denied_effect(number, phase, proof_value, identity_value, digest):
+                private(
+                    root / f"worker-phase-{number}.json",
+                    {
+                        "phase": phase,
+                        "token": proof_value["token"],
+                        "session": proof_value["session"],
+                        "identity": identity_value.model_dump(mode="json"),
+                        "command_sha256": digest,
+                    },
+                )
+                result_path = root / f"worker-phase-{number}-result.json"
+                wait_for(lambda: result_path.exists() or worker.poll() is not None)
+                assert worker.poll() is None and result_path.exists()
+                observed = json.loads(result_path.read_text())
+                assert observed["status"] == "denied" and observed["sink_live"] is True
+                assert (
+                    observed["sink_after"]
+                    == observed["sink_before"]
+                    == positive_result["effect_count"]
+                )
+                assert observed["secret_resolutions_after"] == observed["secret_resolutions_before"]
+                assert observed["authority_denial"] == ("dispatch" if number == 2 else "api")
+                return observed
+
             with factory() as db:
                 admission = db.scalar(
                     select(models.RuntimeCommandAdmission).where(
@@ -560,7 +628,8 @@ def main():
             from pydantic import SecretStr
 
             client = RuntimeClient(ControlTransport(origin, ca, mode="test"))
-            for phase in ("fenced", "fresh_epoch_without_grants"):
+            restore_observations = []
+            for number, phase in enumerate(("fenced", "fresh_epoch_without_grants")):
                 if phase != "fenced":
                     recovery.epoch += 1
                     recovery.active = True
@@ -575,6 +644,9 @@ def main():
                     pass
                 else:
                     raise AssertionError("restored proof accepted")
+                restore_observations.append(
+                    denied_effect(number, phase, proof, identity, wire_digest(case.command))
+                )
             # Fresh enrollment/session under the new epoch still lacks a business grant.
             fresh_enrollment = post(f"/runtime-pools/{pool}/enrollments", observation)
             fresh_credential = client.enroll(
@@ -602,8 +674,29 @@ def main():
                 else:
                     raise AssertionError("new epoch authorized business effect")
             assert client.poll(fresh_credential.token, fresh_session.secret) is None
-            # Actual sink observation remains exactly the child's single fixture request.
-            assert json.loads((root / "worker-result.json").read_text())["effect_count"] == 1
+            restore_observations.append(
+                denied_effect(
+                    2,
+                    "fresh_identity_without_grant",
+                    {
+                        "token": fresh_credential.token.get_secret_value(),
+                        "session": fresh_session.secret.get_secret_value(),
+                    },
+                    fresh,
+                    wire_digest(fresh_case.command),
+                )
+            )
+            private(root / "worker-finish.json", {"finish": True})
+            assert worker.wait(timeout=8) == 0
+            output, error = worker.communicate(timeout=1)
+            assert output == b"fixture_worker_passed\n" and not error
+            measured = json.loads((root / "worker-result.json").read_text())
+            restored_state_new_effect_count = (
+                measured["effect_count"] - positive_result["effect_count"]
+            )
+            assert restored_state_new_effect_count == 0
+            assert measured["secret_resolution_count"] == positive_result["secret_resolution_count"]
+            assert len(restore_observations) == 3
             client.close()
             cases["restored_machine_records_fenced_new_epoch_no_regrant_no_new_effect"] = "passed"
     finally:
@@ -612,7 +705,7 @@ def main():
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGTERM)
                 try:
-                    process.wait(timeout=3)
+                    process.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=3)
@@ -664,7 +757,11 @@ def main():
             "installed_api_version": metadata.version("lotuspond-api"),
             "python_version": sys.version,
             "cases": cases,
-            "restored_state_new_effect_count": 0,
+            "scenario": scenario,
+            "restore_positive_effect_count": positive_result["effect_count"],
+            "restore_final_effect_count": measured["effect_count"],
+            "restore_phase_observations": restore_observations,
+            "restored_state_new_effect_count": restored_state_new_effect_count,
             "cleanup_confirmed": cleanup,
         },
     )

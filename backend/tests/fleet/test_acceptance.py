@@ -9,6 +9,25 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
+CHECKS = ROOT / "scripts/checks"
+sys.path.insert(0, str(CHECKS))
+from fleet_process import run_owned, wait_owned  # noqa: E402
+
+
+def outer_resource_outcome(result, report):
+    """Retain an explicit negative outcome if controller escalation lost its report."""
+    try:
+        child = json.loads(report.read_text())
+    except (OSError, ValueError):
+        child = {}
+    outcome = {
+        "timed_out": result.timed_out,
+        "controller_group_absent": result.cleanup_confirmed,
+        "cleanup_confirmed": result.cleanup_confirmed and child.get("cleanup_confirmed") is True,
+        "child_outcome": child.get("outcome", "unconfirmed"),
+    }
+    (report.parent / "outer-resource-outcome.json").write_text(json.dumps(outcome, indent=2) + "\n")
+    return outcome
 
 
 def test_migration_then_installed_journey(tmp_path):
@@ -23,7 +42,7 @@ def test_migration_then_installed_journey(tmp_path):
     private.write_text(database)
     private.chmod(0o600)
     report = tmp_path / "fleet-report.json"
-    result = subprocess.run(
+    result = run_owned(
         [
             sys.executable,
             str(ROOT / "scripts/checks/fleet-smoke.py"),
@@ -35,11 +54,13 @@ def test_migration_then_installed_journey(tmp_path):
             str(report),
         ],
         cwd=tmp_path,
-        capture_output=True,
-        text=True,
         timeout=420,
+        grace=45,
+        receipt=tmp_path / "outer-process-receipt.json",
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    outer_resource_outcome(result, report)
+    assert not result.timed_out and result.cleanup_confirmed
+    assert result.returncode == 0, (result.stdout + result.stderr).decode()
     data = json.loads(report.read_text())
     required_postgres_skips = data["required_postgres_skips"]
     assert required_postgres_skips == 0
@@ -149,3 +170,177 @@ def test_smoke_preserves_existing_report(tmp_path):
     assert result.returncode == 1
     assert report.read_bytes() == b"retained prior evidence"
     assert b"not a database URL" not in result.stdout + result.stderr
+
+
+def test_build_command_timeout_does_not_leave_owned_descendant(tmp_path):
+    """The same command runner used for uv must own descendants on timeout."""
+    import importlib.util
+    import signal
+    import time
+
+    spec = importlib.util.spec_from_file_location(
+        "fleet_smoke_probe", ROOT / "scripts/checks/fleet-smoke.py"
+    )
+    smoke = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(smoke)
+    marker = tmp_path / "owned-build-probe.json"
+    program = """
+import json,os,subprocess,sys,time
+if os.getpgrp()!=os.getpid(): os.setsid()
+child=subprocess.Popen([sys.executable,"-c","import time;time.sleep(60)"])
+with open(sys.argv[1],"w") as f: json.dump({"pid":os.getpid(),"group":os.getpgrp(),"child":child.pid},f)
+time.sleep(60)
+"""
+    try:
+        with pytest.raises((RuntimeError, subprocess.TimeoutExpired)):
+            smoke.run([sys.executable, "-c", program, str(marker)], tmp_path, timeout=0.5)
+        owned = json.loads(marker.read_text())
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(owned["group"], 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("timed-out build command left its exact owned process group alive")
+    finally:
+        if marker.exists():
+            owned = json.loads(marker.read_text())
+            try:
+                os.killpg(owned["group"], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_installed_restore_consumer_measures_live_sink(tmp_path):
+    database = os.environ.get("LOTUSPOND_PLATFORM_TEST_DATABASE_URL")
+    if not database:
+        pytest.skip("Verified localhost PostgreSQL required")
+    expected = os.environ["LOTUSPOND_FLEET_TEST_DATA_DIRECTORY"]
+    private = tmp_path / "database-url"
+    private.write_text(database)
+    private.chmod(0o600)
+    control = tmp_path / "test-control.json"
+    control.write_text(json.dumps({"scenario": "restore"}))
+    control.chmod(0o600)
+    report = tmp_path / "fleet-report.json"
+    result = run_owned(
+        [
+            sys.executable,
+            str(CHECKS / "fleet-smoke.py"),
+            "--database-url-file",
+            str(private),
+            "--expected-data-directory",
+            expected,
+            "--report",
+            str(report),
+            "--test-control-file",
+            str(control),
+        ],
+        cwd=tmp_path,
+        timeout=180,
+        grace=45,
+        receipt=tmp_path / "outer-process-receipt.json",
+    )
+    outer_resource_outcome(result, report)
+    assert result.returncode == 0, (result.stdout + result.stderr).decode()
+    data = json.loads(report.read_text())
+    assert data["scenario"] == "restore" and data["cleanup_confirmed"] is True
+    assert len(data["journeys"]) == 2
+    for journey in data["journeys"]:
+        assert journey["restore_positive_effect_count"] == 1
+        assert (
+            journey["restored_state_new_effect_count"]
+            == (journey["restore_final_effect_count"] - journey["restore_positive_effect_count"])
+            == 0
+        )
+        assert len(journey["restore_phase_observations"]) == 3
+
+
+def test_outer_deadline_cancels_active_harness_and_owned_schema(tmp_path):
+    import importlib.util
+    import socket
+    import time
+
+    from sqlalchemy import text
+
+    database = os.environ.get("LOTUSPOND_PLATFORM_TEST_DATABASE_URL")
+    if not database:
+        pytest.skip("Verified localhost PostgreSQL required")
+    expected = os.environ["LOTUSPOND_FLEET_TEST_DATA_DIRECTORY"]
+    private = tmp_path / "database-url"
+    private.write_text(database)
+    private.chmod(0o600)
+    control = tmp_path / "test-control.json"
+    control.write_text(json.dumps({"scenario": "restore", "pause_at": "api"}))
+    control.chmod(0o600)
+    report = tmp_path / "fleet-report.json"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(CHECKS / "fleet-smoke.py"),
+            "--database-url-file",
+            str(private),
+            "--expected-data-directory",
+            expected,
+            "--report",
+            str(report),
+            "--test-control-file",
+            str(control),
+        ],
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 180
+        ready = []
+        while time.monotonic() < deadline:
+            ready = list(
+                tmp_path.glob("lotuspond-fleet-artifacts-*/case-runtime/interrupt-ready.json")
+            )
+            if ready or process.poll() is not None:
+                break
+            time.sleep(0.02)
+        assert ready and process.poll() is None, "owned API/schema checkpoint not reached"
+        case = ready[0].parent
+        checkpoint = json.loads(ready[0].read_text())
+        outcome = wait_owned(
+            process, timeout=0.1, grace=45, receipt=tmp_path / "outer-process-receipt.json"
+        )
+        assert outcome.timed_out and outcome.returncode != 0 and outcome.cleanup_confirmed
+        resource_outcome = outer_resource_outcome(outcome, report)
+        assert resource_outcome["cleanup_confirmed"] is True
+        safe = json.loads(report.read_text())
+        assert safe["outcome"] == "cancelled" and safe["cleanup_confirmed"] is True
+        assert json.loads((case / "cleanup.json").read_text())["cleanup_confirmed"] is True
+        child = json.loads((case / "process-receipt.json").read_text())
+        assert child["cancelled"] is True and child["cleanup_confirmed"] is True
+        for group in (process.pid, child["group"]):
+            with pytest.raises(ProcessLookupError):
+                os.killpg(group, 0)
+        with socket.socket() as probe:
+            assert probe.connect_ex(("127.0.0.1", checkpoint["api_port"])) != 0
+        spec = importlib.util.spec_from_file_location("fleet_db_guard", CHECKS / "runner-smoke.py")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        _, admin = guard._database_target(database, Path(expected))
+        owned = json.loads((case / "schema-ownership.json").read_text())
+        try:
+            with admin.connect() as db:
+                assert (
+                    db.scalar(
+                        text("SELECT 1 FROM pg_namespace WHERE nspname=:schema"),
+                        {"schema": owned["schema"]},
+                    )
+                    is None
+                )
+        finally:
+            admin.dispose()
+    finally:
+        if process.poll() is None:
+            wait_owned(
+                process, timeout=0, grace=45, receipt=tmp_path / "outer-finally-receipt.json"
+            )

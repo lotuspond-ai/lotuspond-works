@@ -89,7 +89,9 @@ admission until expiry. A claim closes no-effect admission; it does not execute.
    expiry plus skew; uncertain records await explicit reconciliation/retention.
 6. Obtain separate production migration/recovery authorization and customer
    acceptance before releasing the fence. E03's restored machine-record fixture
-   proves denial with no new effects; it is not a full customer backup/restore
+   measures guarded attempts against a TLS sink kept live across restore, with
+   a pre-restore positive control, unchanged request/secret-open counts and a
+   derived zero-effect delta. It is not a full customer backup/restore
    drill, automatic rollback detection or exactly-once effect guarantee.
 
 ## Schema 13 forward repair

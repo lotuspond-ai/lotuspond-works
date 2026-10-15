@@ -9,12 +9,12 @@ import importlib.util
 import json
 import os
 import shutil
-import signal
-import subprocess
 import sys
 import tarfile
 import tempfile
 from pathlib import Path
+
+from fleet_process import Cancelled, cancellation_signals, run_owned
 
 ROOT = Path(__file__).resolve().parents[2]
 _RECEIPTS = None
@@ -22,10 +22,11 @@ _SEQUENCE = 0
 
 
 def run(args, root, *, env=None, timeout=240):
-    result = subprocess.run(
-        args, cwd=root, env=env, capture_output=True, timeout=timeout, check=False
-    )
-    if result.returncode:
+    global _SEQUENCE
+    _SEQUENCE += 1
+    receipt = None if _RECEIPTS is None else _RECEIPTS / f"command-{_SEQUENCE:02}.json"
+    result = run_owned(args, cwd=root, env=env, timeout=timeout, receipt=receipt)
+    if result.returncode or result.timed_out or not result.cleanup_confirmed:
         raise RuntimeError("qualification subprocess failed")
     return result.stdout
 
@@ -35,6 +36,11 @@ def main():
     parser.add_argument("--database-url-file", type=Path, required=True)
     parser.add_argument("--expected-data-directory", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument(
+        "--test-control-file",
+        type=Path,
+        help="Private test-only scenario/checkpoint selection",
+    )
     args = parser.parse_args()
     # Reuse the existing independently reviewed guard without changing its harness.
     spec = importlib.util.spec_from_file_location(
@@ -60,10 +66,8 @@ def main():
     global _RECEIPTS
     _RECEIPTS = evidence
     data = {
-        "source_commit": run(["git", "rev-parse", "HEAD"], ROOT).decode().strip(),
-        "source_dirty": bool(
-            run(["git", "status", "--porcelain", "--untracked-files=normal"], ROOT)
-        ),
+        "source_commit": None,
+        "source_dirty": None,
         "required_postgres_skips": 0,
         "journeys": [],
         "cleanup_confirmed": False,
@@ -71,6 +75,23 @@ def main():
     }
     administration = None
     try:
+        data["source_commit"] = run(["git", "rev-parse", "HEAD"], ROOT).decode().strip()
+        data["source_dirty"] = bool(
+            run(["git", "status", "--porcelain", "--untracked-files=normal"], ROOT)
+        )
+        control = (
+            {}
+            if args.test_control_file is None
+            else json.loads(read_private_file(args.test_control_file.absolute(), 4096))
+        )
+        if (
+            not isinstance(control, dict)
+            or set(control) - {"scenario", "pause_at"}
+            or control.get("scenario", "full") not in {"full", "restore"}
+            or control.get("pause_at") not in {None, "api"}
+        ):
+            raise RuntimeError("invalid test control")
+        data["scenario"] = control.get("scenario", "full")
         raw = (
             read_private_file(args.database_url_file.absolute(), 4096).decode().strip()
         )
@@ -80,6 +101,7 @@ def main():
         source = {}
         for directory in (
             "backend/lotuspond",
+            "backend/tests/fleet",
             "runtime/python",
             "sdk/python",
             "scripts/checks",
@@ -211,7 +233,10 @@ def main():
             config = case / "private-database-url"
             config.write_text(raw)
             config.chmod(0o600)
-            process = subprocess.Popen(
+            if control:
+                (case / "test-control.json").write_text(json.dumps(control))
+                (case / "test-control.json").chmod(0o600)
+            result = run_owned(
                 [
                     python,
                     "-I",
@@ -222,36 +247,13 @@ def main():
                 ],
                 cwd=case,
                 env=clean,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
+                timeout=210,
+                grace=30,
+                receipt=case / "process-receipt.json",
             )
-            timed_out = False
-            try:
-                stdout, stderr = process.communicate(timeout=210)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                # Test harness handles TERM by running its owned-resource finally block.
-                process.terminate()
-                try:
-                    stdout, stderr = process.communicate(timeout=20)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    stdout, stderr = process.communicate(timeout=3)
-            (case / "process-receipt.json").write_text(
-                json.dumps(
-                    {
-                        "pid": process.pid,
-                        "exit": process.returncode,
-                        "timed_out": timed_out,
-                    }
-                )
-                + "\n"
-            )
-            # Harness emits fixed assertion locations only. Preserve actual failed evidence privately.
-            (case / "harness.stdout").write_bytes(stdout)
-            (case / "harness.stderr").write_bytes(stderr)
-            if process.returncode or timed_out:
+            (case / "harness.stdout").write_bytes(result.stdout)
+            (case / "harness.stderr").write_bytes(result.stderr)
+            if result.returncode or result.timed_out or not result.cleanup_confirmed:
                 raise RuntimeError("installed journey failed")
             item = json.loads((case / "result.json").read_text())
             item["artifact_variant"] = variant
@@ -270,12 +272,21 @@ def main():
         data["outcome"] = "passed"
     except Exception:  # noqa: BLE001 - sanitize all failures at this private harness boundary
         cases = list(evidence.glob("case-*"))
-        data["cleanup_confirmed"] = bool(cases) and all(
+        process_receipts = list(evidence.glob("command-*.json")) + list(
+            evidence.glob("case-*/process-receipt.json")
+        )
+        commands_clean = all(
+            json.loads(path.read_text()).get("cleanup_confirmed") is True
+            for path in process_receipts
+        )
+        data["cleanup_confirmed"] = commands_clean and all(
             (case / "cleanup.json").is_file()
             and json.loads((case / "cleanup.json").read_text()).get("cleanup_confirmed")
             is True
             for case in cases
         )
+        if isinstance(sys.exception(), Cancelled):
+            data["outcome"] = "cancelled"
         print("fleet qualification failed; private evidence retained", file=sys.stderr)
     finally:
         if administration is not None:
@@ -286,7 +297,8 @@ def main():
 
 if __name__ == "__main__":
     try:
-        outcome = main()
+        with cancellation_signals():
+            outcome = main()
     except Exception:  # noqa: BLE001 - sanitize all failures at this private harness boundary
         print("fleet qualification input refused", file=sys.stderr)
         outcome = 1

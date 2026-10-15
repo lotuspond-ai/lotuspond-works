@@ -24,8 +24,12 @@ connector ceiling and independent record/trust/dispatch inputs. It verifies a
 signed no-effect command/claim and a fixed child resolving only its mounted
 synthetic secret over approved real TLS. Production settings refuse injected
 hooks. Restored machine/admission records remain fenced by authority outside the
-schema; a fresh epoch without current business grants still denies, with zero new
-effects. This is not a complete customer backup/restore drill.
+schema; a fresh epoch without current business grants still denies. Correction
+round1 keeps the installed consumer and its TLS sink alive across those phases:
+a positive fixture send precedes restore, then real guarded invocation attempts
+measure receiver and Linux secret-file-open deltas under restored and fresh-epoch
+proof. The reported new-effect value is derived from those live counts. This is
+not a complete customer backup/restore drill.
 
 ## Failures and corrections
 
@@ -63,7 +67,7 @@ overlap with focused runs and are not added together.
 | Runtime Python3.14.5 | 623 passed, zero skips, 29.18s |
 | SDK Python3.13.13, separate environment | 1472 passed +68 subtests, zero skips, 93.32s |
 | Runtime Python3.13.13, separate environment | 623 passed, zero skips, 30.83s |
-| Installed API/CLI/library smoke | Direct wheel and independently rebuilt sdist-wheel: all eight fixed subjourneys each passed, required PostgreSQL skips0, restored new effects0, owned cleanup confirmed |
+| Initial API/CLI/library smoke | Direct wheel and independently rebuilt sdist-wheel passed lifecycle/API assertions with zero PostgreSQL skips; its initial literal zero-effect metric was rejected in independent review and is superseded by correction round1 live observation |
 | Schema export, lint, v1/v2 contract/schema checks, frontend build | Passed |
 | Deployment checks | 38 passed +13 subtests |
 | Strict MkDocs1.6.1 build | Passed with no strict warnings |
@@ -117,3 +121,28 @@ fixtures are not actual historical deployment snapshots; unknown/customized
 schemas need reviewed forward repair. No destructive downgrade, automatic witness,
 exactly-once external effect or memory zeroization is claimed. A revoked oldest
 admission may block later polls until expiry.
+
+
+## Correction round1 qualification
+
+Independent review found that the initial worker/sink exited before restore and
+its reported zero was literal. The revised installed worker retains the live
+receiver across three actual guarded effect attempts: fenced restored proof,
+old proof after epoch advance, and fresh-epoch identity without renewed business
+grants. Backend Dispatch and worker authority read one private independent grant
+source outside restored rows. API proof is checked first. A real verified TLS
+handshake confirms receiver liveness during every denial. Linux IN_OPEN watches
+measure actual secret-version-file opens without reading or exposing values.
+The positive send observes one request and at least one secret open; all denied
+phases must preserve both counts, and the report derives its delta by subtraction.
+
+The outer deadline now terminates the owned smoke controller cooperatively and
+waits boundedly. The controller forwards cancellation to its active artifact
+harness or build/install process group, waits for cleanup and retains process,
+output and schema receipts. Escalation targets only exact owned groups; missing
+resource confirmation produces an explicit failed outcome. A real PostgreSQL/API
+interruption case independently checks process-group absence, closed API port and
+owned namespace absence. A fixed build-descendant timeout probe checks the same
+supervision mechanism. These changes are test-only; shipped API/SDK/runtime and
+its previously qualified image bytes remain unchanged. Correction receipts and
+actual focused final results are recorded in the retained Task9 report.

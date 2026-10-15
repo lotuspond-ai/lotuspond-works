@@ -110,6 +110,14 @@ jobs:
           path: |
             ${{ runner.temp }}/fleet-required-pytest/**/fleet-report.json
             ${{ runner.temp }}/fleet-required-pytest/**/source-manifest.json
+            ${{ runner.temp }}/fleet-required-pytest/**/outer-process-receipt.json
+            ${{ runner.temp }}/fleet-required-pytest/**/outer-resource-outcome.json
+            ${{ runner.temp }}/fleet-required-pytest/**/process-receipt.json
+            ${{ runner.temp }}/fleet-required-pytest/**/cleanup.json
+            ${{ runner.temp }}/fleet-required-pytest/**/schema-ownership.json
+            ${{ runner.temp }}/fleet-required-pytest/**/worker-positive.json
+            ${{ runner.temp }}/fleet-required-pytest/**/worker-phase-*-result.json
+            ${{ runner.temp }}/fleet-required-pytest/**/worker-result.json
             ${{ runner.temp }}/fleet-required-pytest/**/sdk/*.whl
             ${{ runner.temp }}/fleet-required-pytest/**/runtime/*.whl
             ${{ runner.temp }}/fleet-required-pytest/**/runtime/*.tar.gz
