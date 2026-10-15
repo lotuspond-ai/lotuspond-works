@@ -270,7 +270,13 @@ class PackageContractTests(unittest.TestCase):
         self.assertEqual(schema.get("$id"), "urn:lotuspond:workflow-package:v1")
         self.assertEqual(json.loads(schema_path.read_text()), schema)
         example = json.loads((root / "contracts/examples/reviewed-action.v1.json").read_text())
-        self.assertEqual(self.contract().validate_package(example).package_id, "reviewed-action")
+        package = self.contract().validate_package(example)
+        self.assertEqual(package.package_id, "reviewed-action")
+        # The console's local validator (web/src/lib/packageContract.test.ts) pins this value.
+        self.assertEqual(
+            self.contract().package_digest(package),
+            "305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3",
+        )
 
 
 if __name__ == "__main__":
