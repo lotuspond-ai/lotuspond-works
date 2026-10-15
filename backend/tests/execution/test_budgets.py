@@ -764,3 +764,72 @@ def test_known_usage_cannot_release_liability_before_confirmed_stop(budget_harne
         )
         with pytest.raises(ExecutionError, match="budget_exceeded"):
             h.budgets.reserve_attempt(db, h.actor, second, demand())
+
+
+def test_duplicate_node_ids_across_subworkflows_refuse_guessed_source(budget_harness):
+    import json
+
+    from lotuspond.execution.contracts import DependencyBinding
+    from lotuspond.execution.publication import publication_ref
+    from lotuspond.models import ExecutablePublication
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        child = db.scalar(
+            select(ExecutablePublication).where(ExecutablePublication.kind == "workflow")
+        )
+        model = db.scalar(
+            select(ExecutablePublication).where(ExecutablePublication.kind == "model")
+        )
+        other = json.loads(child.canonical_package)
+        other["package_id"] = "other-child"
+        second = h.publish(db, other, (model.id,), request_key="other-child")
+        second = db.get(ExecutablePublication, second.id)
+        raw = example("minimal")
+        raw["package_id"] = "ambiguous-wrapper"
+        raw["limits"]["max_steps"] = 1000
+        raw["subworkflows"] = [
+            dict(id=name, ref=publication_ref(row).model_dump())
+            for name, row in (("left", child), ("right", second))
+        ]
+        raw["body"]["steps"] = [
+            dict(
+                id=name,
+                kind="subworkflow",
+                workflow_ref=name,
+                input=dict(kind="literal", schema=dict(kind="null"), value=None),
+            )
+            for name in ("left", "right")
+        ]
+        publication = h.publish(
+            db, raw, (child.id, second.id, model.id), request_key="ambiguous-wrapper"
+        )
+        request = deployment_request(h, publication.id)
+        request = request.model_copy(
+            update={
+                "configuration": request.configuration.model_copy(
+                    update={
+                        "bindings": tuple(
+                            DependencyBinding(dependency=publication_ref(row))
+                            for row in (child, second, model)
+                        )
+                    }
+                )
+            }
+        )
+        view = create_deployment(db, h.actor, request, "ambiguous", dependencies=h.dependencies)
+        set_deployment_status(
+            db,
+            h.actor,
+            view.id,
+            view.revision_id,
+            "enabled",
+            "enable-ambiguous",
+            dependencies=h.dependencies,
+        )
+        h.revision_id = view.revision_id
+        attempt, _ = h.add(db)
+        with pytest.raises(ExecutionError, match="dependency_unavailable"):
+            h.budgets.reserve_attempt(db, h.actor, attempt, demand(1))
+        assert db.scalar(select(ExecutionUsageReservation)) is None
+        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0

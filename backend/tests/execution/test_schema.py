@@ -37,6 +37,16 @@ MODEL_NAMES = (
 )
 
 
+@pytest.fixture
+def engine(execution_database):
+    """Route schema checks through positive-control owned PostgreSQL cleanup."""
+    from copy import deepcopy
+
+    engine = execution_database()
+    deepcopy(Base.metadata).create_all(engine)
+    return engine
+
+
 def test_scoped_records_exist():
     assert all(hasattr(models, name) for name in MODEL_NAMES)
 
