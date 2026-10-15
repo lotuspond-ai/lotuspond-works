@@ -532,3 +532,84 @@ def test_admission_snapshots_exact_input_before_provider_waits(admission):
             )
             == b"[]"
         )
+
+
+def numeric_schema(kind, nested):
+    scalar = {"kind": kind}
+    return (
+        {"kind": "object", "fields": [{"name": "value", "schema": scalar, "required": True}]}
+        if nested
+        else scalar
+    )
+
+
+def numeric_value(value, nested):
+    return {"value": value} if nested else value
+
+
+@pytest.fixture
+def typed_admission(admission, request):
+    from lotuspond.execution.deployments import create_deployment, set_deployment_status
+
+    from .test_deployments import deployment_request
+    from .test_publication import example
+
+    h = admission
+    kind, h.nested = request.param
+    raw = example("minimal")
+    raw["package_id"] = "typed-admission"
+    raw["input_schema"] = numeric_schema(kind, h.nested)
+    with Session(h.engine) as db, db.begin():
+        pub = h.publish(db, raw, request_key="typed-publication")
+        view = create_deployment(
+            db,
+            h.actor,
+            deployment_request(h, pub.id),
+            "typed-deployment",
+            dependencies=h.dependencies,
+        )
+        set_deployment_status(
+            db,
+            h.actor,
+            view.id,
+            view.revision_id,
+            "enabled",
+            "typed-enable",
+            dependencies=h.dependencies,
+        )
+    h.request = AdmissionRequest(
+        deployment_revision_id=view.revision_id, input=numeric_value(0, h.nested)
+    )
+    return h
+
+
+@pytest.mark.parametrize("typed_admission", [("integer", False), ("integer", True)], indirect=True)
+@pytest.mark.parametrize("invalid", [1.0, -0.0], ids=["integral-float", "negative-zero"])
+@pytest.mark.parametrize("replay", [False, True], ids=["new", "equal-replay"])
+def test_admission_preserves_strict_integer_domain(typed_admission, invalid, replay):
+    from lotuspond.execution.contracts import canonical_value
+
+    h = typed_admission
+    valid = h.request.model_copy(update={"input": numeric_value(int(invalid), h.nested)})
+    first = admit(h, "valid", valid)
+    assert admit(h, "valid", valid).id == first.id
+    bad = h.request.model_copy(update={"input": numeric_value(invalid, h.nested)})
+    assert canonical_value(valid.input) == canonical_value(bad.input)
+    with Session(h.engine) as db:
+        before = counts(db)
+    with pytest.raises(ExecutionError, match="invalid_request"):
+        admit(h, "valid" if replay else "new-invalid", bad)
+    with Session(h.engine) as db:
+        assert counts(db) == before
+        assert db.scalar(select(ExecutionCapacity.pending)) == 1
+
+
+@pytest.mark.parametrize("typed_admission", [("number", False), ("number", True)], indirect=True)
+def test_admission_accepts_declared_number_domain(typed_admission):
+    h = typed_admission
+    for index, value in enumerate((1.0, -0.0, 1.25)):
+        request = h.request.model_copy(update={"input": numeric_value(value, h.nested)})
+        first = admit(h, f"number-{index}", request)
+        assert admit(h, f"number-{index}", request).id == first.id
+    with Session(h.engine) as db:
+        assert db.scalar(select(ExecutionCapacity.pending)) == 3

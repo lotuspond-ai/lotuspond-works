@@ -19,7 +19,7 @@ from lotuspond.models import (
 )
 
 from .test_admission import admission as admission
-from .test_admission import admit
+from .test_admission import admit, numeric_schema, numeric_value
 from .test_budgets import budget_harness as budget_harness
 from .test_deployments import deployment_request, form_package
 from .test_publication import harness as harness
@@ -30,7 +30,9 @@ def signals(admission, request):
     h = admission
     raw, policy = form_package()
     raw["package_id"] = "signal-fixture"
-    human = getattr(request, "param", "external") == "human"
+    options = getattr(request, "param", "external")
+    options = options if isinstance(options, dict) else {"kind": options}
+    human = options["kind"] == "human"
     original_steps = raw["body"]["steps"]
     raw["body"]["steps"] = [
         dict(
@@ -56,6 +58,10 @@ def signals(admission, request):
         raw["body"]["steps"][0]["signal_schema"] = {"kind": "string", "max_length": 100}
     if human:
         raw["body"]["steps"] = original_steps
+    if "schema" in options:
+        field = "form_schema" if human else "signal_schema"
+        raw["body"]["steps"][0][field] = options["schema"]
+        h.nested = options["nested"]
     with Session(h.engine) as db, db.begin():
         dep = h.publish(db, policy, request_key="signal-policy")
         pub = h.publish(db, raw, (dep.id,), request_key="signal-package")
@@ -387,3 +393,64 @@ def test_signal_snapshots_exact_payload_before_provider_waits(signals):
             )
             == b"[]"
         )
+
+
+@pytest.mark.parametrize(
+    "signals",
+    [
+        {"kind": kind, "schema": numeric_schema("integer", nested), "nested": nested}
+        for kind in ("external", "human")
+        for nested in (False, True)
+    ],
+    ids=["external-root", "external-nested", "human-root", "human-nested"],
+    indirect=True,
+)
+@pytest.mark.parametrize("invalid", [1.0, -0.0], ids=["integral-float", "negative-zero"])
+@pytest.mark.parametrize("replay", [False, True], ids=["new", "equal-replay"])
+def test_signal_preserves_strict_integer_domain(signals, invalid, replay):
+    from lotuspond.execution.contracts import canonical_value
+
+    from .test_admission import counts
+
+    h = signals
+    valid = h.signal.model_copy(update={"payload": numeric_value(int(invalid), h.nested)})
+    first = accept(h, valid)
+    assert accept(h, valid) == first
+    bad = h.signal.model_copy(
+        update={
+            "signal_id": "signal" if replay else "new-invalid",
+            "payload": numeric_value(invalid, h.nested),
+        }
+    )
+    assert canonical_value(valid.payload) == canonical_value(bad.payload)
+    with Session(h.engine) as db:
+        before = counts(db)
+    with pytest.raises(ExecutionError, match="invalid_request"):
+        accept(h, bad)
+    with Session(h.engine) as db:
+        assert counts(db) == before
+        assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1
+        assert db.get(ExecutionWait, h.wait_id).state == "open"
+
+
+@pytest.mark.parametrize(
+    "signals",
+    [
+        {"kind": kind, "schema": numeric_schema("number", nested), "nested": nested}
+        for kind in ("external", "human")
+        for nested in (False, True)
+    ],
+    ids=["external-root", "external-nested", "human-root", "human-nested"],
+    indirect=True,
+)
+def test_signal_accepts_declared_number_domain(signals):
+    h = signals
+    for index, value in enumerate((1.0, -0.0, 1.25)):
+        request = h.signal.model_copy(
+            update={"signal_id": f"number-{index}", "payload": numeric_value(value, h.nested)}
+        )
+        first = accept(h, request)
+        assert accept(h, request) == first
+    with Session(h.engine) as db:
+        assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 3
+        assert db.get(ExecutionWait, h.wait_id).state == "open"

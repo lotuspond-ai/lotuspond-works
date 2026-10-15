@@ -5,9 +5,9 @@ records and rechecks their exact identity/expiry; it cannot infer authority from
 an inbox token. Transactions/commit-before-HTTP-ack belong to the caller.
 """
 
-import json
 from hashlib import sha256
 
+from lotuspond_sdk.executable.input import project_json
 from lotuspond_sdk.executable.types import validate_value
 from lotuspond_sdk.executable.validation import validate_executable_package
 
@@ -78,11 +78,12 @@ class InboxService:
         self.budgets._cursor(db)
         actor = reauthorize(db, actor, "signal")
         request = SignalRequest.model_validate(request)
-        # Own the nested JSON snapshot before any independently waiting provider.
+        # Own the nested JSON graph before provider waits, preserving exact numeric
+        # types until the declared wait schema validates them (including replays).
         request = SignalRequest(
             signal_id=request.signal_id,
             wait_id=request.wait_id,
-            payload=json.loads(canonical_value(request.payload)),
+            payload=project_json(request.payload),
         )
         hint = record(db, Execution, actor.scope, execution_id)
         package, sources = self._deployment(db, actor, hint.deployment_revision_id)

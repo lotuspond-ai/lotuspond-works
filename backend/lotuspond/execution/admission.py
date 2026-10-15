@@ -10,6 +10,7 @@ from hashlib import sha256
 
 from lotuspond_runtime.protocol import OpaqueId
 from lotuspond_sdk.activity import ArtifactHandle
+from lotuspond_sdk.executable.input import project_json
 from lotuspond_sdk.executable.types import validate_value
 from lotuspond_sdk.executable.validation import validate_executable_package
 from pydantic import TypeAdapter
@@ -105,10 +106,11 @@ class AdmissionService:
         actor = reauthorize(db, actor, "execute")
         request = AdmissionRequest.model_validate(request)
         # Frozen DTOs may still contain caller-owned mutable JSON containers.
-        # Capture once before provider calls; identity, typing and storage share it.
+        # Copy before provider calls without normalizing numbers: only the declared
+        # schema may select a numeric domain. Identity and storage share this copy.
         request = AdmissionRequest(
             deployment_revision_id=request.deployment_revision_id,
-            input=json.loads(canonical_value(request.input)),
+            input=project_json(request.input),
         )
         key = request_identity(request_key)
         digest = sha256(
@@ -120,11 +122,14 @@ class AdmissionService:
         )
         if existing is not None:
             # Current actor and deployment authorization precede conflict disclosure.
-            _current_deployment(
+            package, _ = _current_deployment(
                 db, actor, revision.id, dependencies=self.budgets.deployments, operation="execute"
             )
             if existing.digest != digest:
                 raise ExecutionError("conflict")
+            # JCS numeric identities can coincide across int/float types. Equal
+            # bytes are not proof that the caller supplied the declared domain.
+            validate_value(request.input, package.input_schema, package.schemas)
             row = record(db, Execution, actor.scope, existing.execution_id, locked=True)
             if row.admission_digest != digest or row.deployment_revision_id != revision.id:
                 raise ExecutionError("conflict")
