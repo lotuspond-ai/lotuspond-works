@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
 import { api, ApiError, type Account, type Row } from './api.js';
-import { Alert, StatusBadge } from './components/ui.js';
+import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
 import { VoiceSessions } from './pages/VoiceSessions.js';
 import { Workspaces } from './pages/Workspaces.js';
@@ -42,7 +42,7 @@ import { allPages, navigation, pageLabel } from './components/console/navigation
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
 import { requestCreate, takeCreateRequest, useSetupProgress } from './lib/setup.js';
-import { exactTime, fieldLabel, formatLatency, relativeTime } from './lib/format.js';
+import { fieldLabel, formatLatency } from './lib/format.js';
 import { documentTitle, useDocumentTitle } from './lib/title.js';
 
 type Field = {
@@ -1318,13 +1318,7 @@ function Resource({
                       ) : ['status', 'severity', 'outcome'].includes(field) ? (
                         <StatusBadge value={row[field]} />
                       ) : field.endsWith('_at') && row[field] ? (
-                        <time
-                          className="cell-time"
-                          dateTime={String(row[field])}
-                          title={exactTime(String(row[field]))}
-                        >
-                          {relativeTime(String(row[field]))}
-                        </time>
+                        <RelativeTime value={row[field]} />
                       ) : field === 'latency_ms' && Number.isFinite(Number(row[field])) ? (
                         formatLatency(Number(row[field]))
                       ) : (

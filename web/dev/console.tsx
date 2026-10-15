@@ -157,7 +157,7 @@ const lists: Record<string, Record<string, unknown>[]> = {
       project_id: project.id,
       name: 'Refunds cite the policy',
       enabled: true,
-      sample_rate: 0.1,
+      sample_basis_points: 1000,
       criteria: 'Cites the refund policy',
       created_at: ago(3000),
     },
