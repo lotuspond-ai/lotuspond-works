@@ -124,21 +124,31 @@ test('cooperative abort lets the adapter finish its cleanup before group termina
 });
 
 test('early cooperative exit cancels the production cleanup-grace timer', async (t) => {
-  const { directory, path } = await fixture(`import { writeFileSync } from 'node:fs';
+  const { directory, path } = await fixture(`import { existsSync, writeFileSync } from 'node:fs';
     // Exercise startup slower than the former fixed 50ms cancellation delay.
     await new Promise((resolve) => setTimeout(resolve, 150));
     export async function evaluate(_input, _expected, context) {
       const keepAlive = setInterval(() => {}, 1000);
-      await new Promise((resolve) => {
+      const stopped = new Promise((resolve) => {
         context.signal.addEventListener('abort', () => {
           writeFileSync(process.env.CUSTOM_CLEANUP_FILE, 'clean');
           clearInterval(keepAlive); resolve();
         }, { once: true });
-        writeFileSync(process.env.CUSTOM_READY_FILE, 'ready');
       });
+      // Force create -> parent read -> complete publication across processes.
+      writeFileSync(process.env.CUSTOM_READY_FILE, '');
+      const publicationDeadline = Date.now() + 1000;
+      while (!existsSync(process.env.CUSTOM_OBSERVED_FILE)) {
+        if (Date.now() >= publicationDeadline) throw new Error('readiness was not observed');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      writeFileSync(process.env.CUSTOM_READY_FILE, 'ready');
+      await stopped;
       return { passed: null, output: {} };
     }`);
   const readyFile = join(directory, 'ready');
+  const observedFile = join(directory, 'observed-incomplete-ready');
   const cleanupFile = join(directory, 'cleanup');
   const pidFile = join(directory, 'adapter-pid');
   const resultFile = join(directory, 'result.json');
@@ -160,8 +170,9 @@ test('early cooperative exit cancels the production cleanup-grace timer', async 
     const result = await executeScenario({ adapterPath: ${JSON.stringify(path)}, input: {}, expected: {},
       revision: 1, runId: 'run', scenarioId: 'scenario', signal: controller.signal,
       environment: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR,
-        LOTUSPOND_RUNNER_ADAPTER_ENV: 'CUSTOM_READY_FILE,CUSTOM_CLEANUP_FILE',
+        LOTUSPOND_RUNNER_ADAPTER_ENV: 'CUSTOM_READY_FILE,CUSTOM_CLEANUP_FILE,CUSTOM_OBSERVED_FILE',
         CUSTOM_READY_FILE: ${JSON.stringify(readyFile)},
+        CUSTOM_OBSERVED_FILE: ${JSON.stringify(observedFile)},
         CUSTOM_CLEANUP_FILE: ${JSON.stringify(cleanupFile)} } });
     writeFileSync(${JSON.stringify(resultFile)}, JSON.stringify(result));
     process.disconnect();`;
@@ -185,10 +196,15 @@ test('early cooperative exit cancels the production cleanup-grace timer', async 
   };
   try {
     const startupDeadline = performance.now() + 2000;
+    let incompleteReadyReads = 0;
     while (true) {
       try {
-        assert.equal(await readFile(readyFile, 'utf8'), 'ready');
-        break;
+        const content = await readFile(readyFile, 'utf8');
+        if (content === 'ready') break;
+        if (content === '') {
+          incompleteReadyReads += 1;
+          if (incompleteReadyReads === 1) await writeFile(observedFile, 'observed');
+        }
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
       }
@@ -197,6 +213,7 @@ test('early cooperative exit cancels the production cleanup-grace timer', async 
       assert.ok(performance.now() < startupDeadline, 'adapter readiness exceeded its bound');
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
+    assert.ok(incompleteReadyReads > 0, 'fixture did not exercise incomplete publication');
     const started = performance.now();
     const exited = waitForChild(child);
     child.send('abort');
@@ -206,7 +223,7 @@ test('early cooperative exit cancels the production cleanup-grace timer', async 
     const result = JSON.parse(await readFile(resultFile, 'utf8'));
     assert.equal(result.classification, 'canceled');
     assert.equal(result.processGroupGone, true);
-    t.diagnostic(JSON.stringify({ result, cleanupMarker: 'clean' }));
+    t.diagnostic(JSON.stringify({ incompleteReadyReads, result, cleanupMarker: 'clean' }));
     const adapterPid = Number(await readFile(pidFile, 'utf8'));
     assert.equal(groupExists(adapterPid), false);
   } finally {
