@@ -18,6 +18,9 @@ class ExecutionCode(StrEnum):
     AUTHORITY_UNAVAILABLE = "authority_unavailable"
     ASSURANCE_UNAVAILABLE = "assurance_unavailable"
     DEPLOYMENT_UNAVAILABLE = "deployment_unavailable"
+    SOURCE_UNAVAILABLE = "source_unavailable"
+    KEY_UNAVAILABLE = "key_unavailable"
+    ARTIFACT_CORRUPT = "artifact_corrupt"
 
 
 class ExecutionError(Exception):
