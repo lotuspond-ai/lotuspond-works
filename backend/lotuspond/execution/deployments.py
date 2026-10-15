@@ -1,9 +1,19 @@
 """Immutable deployment revisions and separate current enablement authority."""
 
+from collections import defaultdict
 from hashlib import sha256
 from typing import Literal
 
 from lotuspond_runtime.protocol import ConnectorPin
+from lotuspond_sdk.executable.catalog import validate_catalog
+from lotuspond_sdk.executable.package import (
+    AgentStep,
+    ConnectorReadStep,
+    DecisionStep,
+    IterationStep,
+    ParallelStep,
+)
+from lotuspond_sdk.executable.validation import validate_executable_package
 from sqlalchemy import func, select
 
 from ..fleet.authority import database_now_ms
@@ -75,6 +85,37 @@ def _pool(db, scope, pool_id):
         raise ExecutionError("authority_unavailable") from None
 
 
+def _body_steps(body):
+    """Walk executable positions only; mappings and schemas remain customer data."""
+    for step in body.steps:
+        yield step
+        if isinstance(step, DecisionStep):
+            yield from _body_steps(step.then_body)
+            yield from _body_steps(step.else_body)
+        elif isinstance(step, IterationStep):
+            yield from _body_steps(step.body)
+        elif isinstance(step, ParallelStep):
+            for branch in step.branches:
+                yield from _body_steps(branch.body)
+
+
+def _required_operations(packages, catalog):
+    required = defaultdict(set)
+    for package in packages:
+        declarations = {d.id: d.ref.sha256 for d in package.connectors}
+        for step in _body_steps(package.body):
+            if isinstance(step, ConnectorReadStep):
+                required[declarations[step.connector_ref]].add(step.operation)
+            elif isinstance(step, AgentStep):
+                for tool in step.read_tools:
+                    required[declarations[tool.connector_ref]].add(tool.operation)
+    for document in catalog.documents:
+        if document.kind in {"model", "agent"}:
+            for tool in document.definition.read_tools:
+                required[tool.connector_ref.sha256].add(tool.operation)
+    return required
+
+
 def _configuration(db, scope, configuration, package, links, rows, sources, policy, snapshot):
     """Validate every exact pin, current status and normalized secret/source linkage."""
     configuration = DeploymentConfig.model_validate(configuration)
@@ -91,10 +132,15 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
     }
     if set(expected) != set(bindings):
         raise ExecutionError("dependency_unavailable")
-    packages = [
-        package.model_dump(mode="json"),
-        *[sources[row.id] for row in rows if row.kind == "workflow"],
+    workflow_packages = [
+        package,
+        *[validate_executable_package(sources[row.id]) for row in rows if row.kind == "workflow"],
     ]
+    catalog = validate_catalog(
+        {"documents": [sources[row.id] for row in rows if row.kind != "workflow"]}
+    )
+    required_operations = _required_operations(workflow_packages, catalog)
+    packages = [source.model_dump(mode="json") for source in workflow_packages]
     for source in packages:
         environment = source["environment"]
         if (
@@ -158,33 +204,7 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
                             if credential is not None and credential not in secrets:
                                 raise ValueError
                 # Every actual connector-read/tool operation must be permitted by this connection.
-                required = set()
-
-                def visit(value, declarations):
-                    if isinstance(value, dict):
-                        if (
-                            value.get("kind") == "connector_read"
-                            and declarations.get(value.get("connector_ref")) == row.package_sha256
-                        ):
-                            required.add(value["operation"])
-                        ref = value.get("connector_ref")
-                        if (
-                            isinstance(ref, dict)
-                            and ref.get("sha256") == row.package_sha256
-                            and "operation" in value
-                        ):
-                            required.add(value["operation"])
-                        for child in value.values():
-                            visit(child, declarations)
-                    elif isinstance(value, list):
-                        for child in value:
-                            visit(child, declarations)
-
-                for source in packages:
-                    visit(source, {d["id"]: d["ref"]["sha256"] for d in source["connectors"]})
-                for source in sources.values():
-                    visit(source, {})
-                if not required <= set(config.operations):
+                if not required_operations[row.package_sha256] <= set(config.operations):
                     raise ValueError
             except Exception:
                 raise ExecutionError("dependency_unavailable") from None

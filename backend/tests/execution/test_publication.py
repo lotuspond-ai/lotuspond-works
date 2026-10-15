@@ -475,3 +475,62 @@ def test_request_json_rejects_duplicate_keys_before_pydantic_projection():
         b'{"package":{},"dependency_ids":[],"signature":null}'
     )
     assert accepted.dependency_ids == ()
+
+
+def nested_body(inner, branch, *, nested=False):
+    """Use the SDK's real decision fields, optionally inside parallel + iteration."""
+    body = example("decision")["body"]
+    body["steps"][0][branch] = inner
+    if nested:
+        iteration = example("iteration")["body"]
+        iteration["steps"][0]["body"] = body
+        body = example("parallel")["body"]
+        body["steps"][0]["branches"][0]["body"] = iteration
+    return body
+
+
+def reviewed_conditional(branch, nested):
+    raw = example("reviewed_action")
+    documents = [example("catalog")["documents"][i] for i in (0, 4)]
+    documents[1]["definition"]["assignment"] = "workspace_admins"
+    for family, document in zip(("connectors", "policies"), documents, strict=True):
+        raw[family][0]["ref"]["sha256"] = catalog_document_digest(document)
+    raw["body"] = nested_body(raw["body"], branch, nested=nested)
+    # A policy rejection must not be accidentally satisfied by invalid SDK input.
+    compile_package(raw, dependencies=[], catalog={"documents": documents})
+    return raw, documents
+
+
+@pytest.mark.parametrize("branch", ["then_body", "else_body"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_compiled_conditional_effects_refused(harness, branch, nested):
+    raw, documents = reviewed_conditional(branch, nested)
+    with Session(harness.engine) as db, db.begin():
+        ids = tuple(
+            harness.publish(db, doc, request_key=f"catalog-{i}").id
+            for i, doc in enumerate(documents)
+        )
+        with pytest.raises(ExecutionError, match="unsupported_step"):
+            harness.publish(db, raw, ids)
+
+
+@pytest.mark.parametrize("branch", ["then_body", "else_body"])
+def test_stored_dependency_conditional_effects_refused(harness, monkeypatch, branch):
+    raw, documents = reviewed_conditional(branch, True)
+    parent = example("subworkflow")
+    parent["subworkflows"][0]["ref"].update(
+        name=raw["package_id"], sha256=sha256(canonical_executable_json(raw)).hexdigest()
+    )
+    compile_package(parent, dependencies=[raw], catalog={"documents": documents})
+    with Session(harness.engine) as db, db.begin():
+        ids = tuple(
+            harness.publish(db, doc, request_key=f"catalog-{i}").id
+            for i, doc in enumerate(documents)
+        )
+        # Model an already persisted package admitted by the old scanner. All bytes,
+        # signatures, exact closure and plan still pass the real publication service.
+        with monkeypatch.context() as setup:
+            setup.setattr("lotuspond.execution.publication._unsupported", lambda raw: None)
+            child = harness.publish(db, raw, ids, request_key="historical-child")
+        with pytest.raises(ExecutionError, match="unsupported_step"):
+            harness.publish(db, parent, (*ids, child.id))

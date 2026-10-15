@@ -135,8 +135,8 @@ def _unsupported(raw):
             if step.get("escalation_policy_ref") is not None:
                 raise ExecutionError("unsupported_policy")
             if kind == "decision":
-                body(step.get("then"))
-                body(step.get("otherwise"))
+                body(step.get("then_body"))
+                body(step.get("else_body"))
             elif kind == "iteration":
                 body(step.get("body"))
             elif kind == "parallel":
