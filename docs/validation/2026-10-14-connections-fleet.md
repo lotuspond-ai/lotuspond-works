@@ -146,3 +146,23 @@ owned namespace absence. A fixed build-descendant timeout probe checks the same
 supervision mechanism. These changes are test-only; shipped API/SDK/runtime and
 its previously qualified image bytes remain unchanged. Correction receipts and
 actual focused final results are recorded in the retained Task9 report.
+
+
+Correction round1 was tested from clean
+`07f28ce9f108c6898e741c630dd65bbad84ca6f5`: the full affected acceptance file
+passed12 tests, zero skips,326.80s, with the existing Starlette/AnyIO warning.
+Both full ordinary CLI journeys and both isolated restore consumers passed direct
+wheel and rebuilt-sdist-wheel paths. Each live receiver observed1 positive request
+and1 secret-version open; all three denial phases kept both counts at1, deriving
+1−1=0 new effects. The active API outer deadline produced a cancelled outcome with
+independently confirmed cleanup. Five exact namespaces/harness groups, three outer
+controller groups and the inert build-probe group were independently absent.
+
+The final result update changes documentation only; all tested correction code
+matches07f28ce. Package wheel/sdist digests and shipped API/SDK/runtime/image bytes
+match the c74 foundation evidence. Failed correction attempts remain recorded,
+including a missing test import whose exact controller was stopped and whose
+namespace/harness were cleaned. That failed attempt's terminated controller remains
+a non-executing PID1-owned zombie; its PID absence is not claimed. The successful
+correction interruption cases have no remaining process groups or schemas. Fresh
+independent review and hosted exact-head CI remain separate root-owned gates.
