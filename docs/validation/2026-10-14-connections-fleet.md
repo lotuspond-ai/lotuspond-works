@@ -214,3 +214,16 @@ source `1036507c2f2111da6c42bfcca647aa64714e0348` passed17/17 affected tests and
 runs observed six incomplete reads before real cooperative cleanup and confirmed
 owned-group absence. Production grace and post-abort bounds remain unchanged;
 fresh scoped closure and hosted correction-head evidence remain separate.
+
+## Required PostgreSQL CI allowance
+
+Published-source run38664198824 timed out at the combined step's15-minute bound
+while the full backend suite was still progressing at59%; no test failure was
+displayed, and the sequential runner smoke had not been reached. Local full
+PostgreSQL qualification took625.45s; observed hosted throughput suggests roughly
+21–22minutes for the suite, without proving a completion time or diagnosing a hang.
+The combined suite/setup/runner allowance is now bounded at30minutes, with named
+test progress and20 slowest durations. Coverage, inner deadlines, database guards,
+cleanup and artifact paths are unchanged. Completion/counts/skips/cleanup at the
+published correction head remain pending; the allowance change is not passing
+hosted evidence.
