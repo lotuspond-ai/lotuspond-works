@@ -239,3 +239,140 @@ def test_database_configuration_refuses_missing_conflicting_or_remote(monkeypatc
         monkeypatch.setenv(dedicated, invalid)
         with pytest.raises(ValueError, match="Isolated localhost"):
             execution_test_url()
+
+
+def write_hooks(connection):
+    """Snapshot definitions and enabled state, including normal internal FK triggers."""
+    return {
+        "triggers": list(
+            connection.execute(
+                text(
+                    "SELECT c.relname, t.tgname, t.tgenabled, t.tgisinternal, "
+                    "pg_get_triggerdef(t.oid), pg_get_functiondef(t.tgfoid) "
+                    "FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid "
+                    "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                    "WHERE n.nspname=current_schema() ORDER BY c.relname, t.tgname"
+                )
+            )
+        ),
+        "rules": list(
+            connection.execute(
+                text(
+                    "SELECT c.relname, r.rulename, r.ev_enabled, pg_get_ruledef(r.oid) "
+                    "FROM pg_rewrite r JOIN pg_class c ON c.oid=r.ev_class "
+                    "JOIN pg_namespace n ON n.oid=c.relnamespace "
+                    "WHERE n.nspname=current_schema() ORDER BY c.relname, r.rulename"
+                )
+            )
+        ),
+    }
+
+
+def install_ledger_hook(connection, behavior):
+    if behavior == "rule":
+        connection.execute(
+            text("CREATE RULE unexpected_ledger AS ON UPDATE TO schema_version DO INSTEAD NOTHING")
+        )
+        return
+    body = {
+        "suppress": "RETURN NULL;",
+        "mutate": "UPDATE users SET name='changed-by-trigger'; RETURN NEW;",
+        "redirect": "NEW.version := 15; RETURN NEW;",
+        "extra_row": "INSERT INTO schema_version VALUES (99, CURRENT_TIMESTAMP); RETURN NEW;",
+    }[behavior]
+    connection.execute(
+        text(
+            "CREATE FUNCTION unexpected_ledger() RETURNS trigger LANGUAGE plpgsql "
+            "AS $$ BEGIN " + body + " END $$"
+        )
+    )
+    connection.execute(
+        text(
+            "CREATE TRIGGER unexpected_ledger BEFORE UPDATE ON schema_version "
+            "FOR EACH ROW EXECUTE FUNCTION unexpected_ledger()"
+        )
+    )
+
+
+@pytest.mark.parametrize("behavior", ["suppress", "mutate", "rule"])
+def test_unexpected_write_hooks_refused_before_mutation(execution_database, behavior):
+    from lotuspond.execution.migration import LEGACY_ADDITIONS, migrate_execution_v14
+
+    engine = execution_database(v13=True)
+    with engine.begin() as connection:
+        populated(connection)
+        install_ledger_hook(connection, behavior)
+        before, before_signature, before_hooks = (
+            rows(connection),
+            signature(connection),
+            write_hooks(connection),
+        )
+    # Catch inside the transaction and commit: refusal must happen before any
+    # mutation, not merely rely on a caller rolling back partially executed DDL.
+    refused = False
+    with engine.begin() as connection:
+        connection.execute(text("SELECT pg_advisory_xact_lock(736183)"))
+        try:
+            migrate_execution_v14(connection)
+        except ValueError as error:
+            assert str(error) == "Unexpected schema state; no changes made"
+            refused = True
+    with engine.connect() as connection:
+        after = rows(connection)
+        print(
+            {
+                "hook": behavior,
+                "refused": refused,
+                "version": connection.scalar(select(SchemaVersion.version)),
+                "legacy_rows_equal": {name: after[name] for name in before} == before,
+                "execution_tables_present": bool(
+                    set(inspect(connection).get_table_names()) & EXECUTION_TABLES
+                ),
+            }
+        )
+        assert refused
+        assert after == before
+        assert signature(connection) == before_signature
+        assert write_hooks(connection) == before_hooks
+        assert connection.scalar(select(SchemaVersion.version)) == 13
+        assert not set(inspect(connection).get_table_names()) & EXECUTION_TABLES
+        assert (
+            not {
+                constraint["name"]
+                for table in ("api_keys", "runs", "releases")
+                for constraint in inspect(connection).get_unique_constraints(table)
+            }
+            & LEGACY_ADDITIONS
+        )
+
+
+@pytest.mark.parametrize("behavior", ["suppress", "redirect", "extra_row"])
+def test_final_ledger_postcondition_rolls_back_all_ddl(execution_database, monkeypatch, behavior):
+    from lotuspond.execution import migration
+
+    engine = execution_database(v13=True)
+    with engine.begin() as connection:
+        populated(connection)
+        before, before_signature, before_hooks = (
+            rows(connection),
+            signature(connection),
+            write_hooks(connection),
+        )
+    original = migration._preflight
+
+    def inject_after_valid_preflight(connection):
+        original(connection)
+        # Fault injection after real preflight exercises defensive write/read
+        # postconditions using PostgreSQL behavior, not mocked result objects.
+        install_ledger_hook(connection, behavior)
+
+    monkeypatch.setattr(migration, "_preflight", inject_after_valid_preflight)
+    with pytest.raises(ValueError, match="Unexpected schema state; no changes made"):
+        with engine.begin() as connection:
+            connection.execute(text("SELECT pg_advisory_xact_lock(736183)"))
+            migration.migrate_execution_v14(connection)
+    with engine.connect() as connection:
+        assert rows(connection) == before
+        assert signature(connection) == before_signature
+        assert write_hooks(connection) == before_hooks
+        assert connection.scalar(select(SchemaVersion.version)) == 13

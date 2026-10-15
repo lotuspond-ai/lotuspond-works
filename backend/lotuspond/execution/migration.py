@@ -55,6 +55,22 @@ def _preflight(connection: Connection) -> None:
     )
     if invalid:
         raise ValueError(ERROR)
+    # Frozen v13 has no user triggers or table rewrite rules. These can
+    # suppress the ledger write or mutate unrelated legacy rows even when all
+    # constraints match. Refuse before DDL; never repair operator-owned objects.
+    unexpected_hooks = connection.scalar(
+        text(
+            "SELECT EXISTS (SELECT FROM pg_trigger h JOIN pg_class t ON t.oid=h.tgrelid "
+            "JOIN pg_namespace n ON n.oid=t.relnamespace "
+            "WHERE n.nspname=current_schema() AND t.relkind IN ('r','p') "
+            "AND NOT h.tgisinternal) OR EXISTS "
+            "(SELECT FROM pg_rewrite r JOIN pg_class t ON t.oid=r.ev_class "
+            "JOIN pg_namespace n ON n.oid=t.relnamespace "
+            "WHERE n.nspname=current_schema() AND t.relkind IN ('r','p'))"
+        )
+    )
+    if unexpected_hooks:
+        raise ValueError(ERROR)
     # A validated FK is insufficient when its internal insert/update or
     # referenced-table delete/update triggers do not enforce normal writes.
     # Refuse the operator's state unchanged; never silently enable triggers.
@@ -231,7 +247,13 @@ def migrate_execution_v14(connection: Connection) -> None:
             for constraint in table.foreign_key_constraints:
                 if constraint.use_alter:
                     connection.execute(AddConstraint(constraint, isolate_from_table=False))
-    connection.execute(SchemaVersion.__table__.update().values(version=14))
+    result = connection.execute(
+        SchemaVersion.__table__.update().where(SchemaVersion.version == 13).values(version=14)
+    )
+    if result.rowcount != 1 or list(
+        connection.execute(select(SchemaVersion.version)).scalars()
+    ) != [14]:
+        raise ValueError(ERROR)
 
 
 # Frozen PostgreSQL expressions captured from the committed BASE v13 fixture.
