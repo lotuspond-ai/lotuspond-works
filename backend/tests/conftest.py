@@ -66,8 +66,13 @@ def db_factory(engine):
 
 
 @pytest.fixture
-def app(settings, engine):
-    return create_app(settings, engine=engine)
+def fleet_dependencies():
+    return None
+
+
+@pytest.fixture
+def app(settings, engine, fleet_dependencies):
+    return create_app(settings, engine=engine, fleet_dependencies=fleet_dependencies)
 
 
 @pytest.fixture

@@ -1,0 +1,1 @@
+{"connection_ids":[],"connectors":[{"artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"lotuspond-fixture","version":"1.0.0"}],"format_version":1,"max_concurrent_invocations":1,"max_instances":1,"platforms":["linux"]}

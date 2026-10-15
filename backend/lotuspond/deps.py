@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from functools import lru_cache
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,7 +15,20 @@ def database_session(request: Request) -> Iterator[Session]:
             yield db
             db.commit()
         except BaseException:
-            db.rollback()
+            from .fleet.audit import persist_clock_fence, take_clock_fence
+
+            event = take_clock_fence(db)
+            db.rollback()  # Release all authority locks before audit-only work.
+            if event is not None:
+                try:
+                    persist_clock_fence(db, event)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    # Audit storage failure cannot turn a denied request into a grant.
+                    raise HTTPException(
+                        503, {"error": "authority_unavailable", "message": "authority_unavailable"}
+                    ) from None
             raise
 
 

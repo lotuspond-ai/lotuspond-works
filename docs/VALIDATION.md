@@ -324,3 +324,13 @@ Reports: `output/airgap/local-v11-install-report.json`, `output/airgap/lotuspond
 ## Immutable workflow package registry increment
 
 The separate `codex/package-registry` increment extends foundation `c1da02edcb3fb4db57f63a8e403db8e379cf5a2a`. See [registry validation and migration evidence](plans/2026-10-13-package-registry-progress.md) for the restored cloud baseline, exact commands, independent review and limitations. Cloud tests, GitHub publication/CI and deployment remain separate states.
+
+
+## Connections and runtime identity (E03)
+
+See [the E03 qualification record](validation/2026-10-14-connections-fleet.md) for
+actual source/artifact/API/PostgreSQL evidence and remaining limitations. The
+installed ordinary CLI lifecycle is separate from an explicitly authorized
+fixture-library signed-command/child journey. Production authorities, business
+execution, customer restore/custody/network qualification, licensing and UI remain
+open. Local qualification, hosted exact-head CI and deployment are separate gates.
