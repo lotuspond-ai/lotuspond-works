@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { api, ApiError, type FieldProblem } from '../api.js';
-import { Alert, EmptyState, RelativeTime, SectionHeader } from '../components/ui.js';
+import { Alert, RelativeTime, SectionHeader } from '../components/ui.js';
 import { StudioCanvas, type Selection } from '../components/studio/StudioCanvas.js';
 import { StudioInspector } from '../components/studio/StudioInspector.js';
+import { PatternChooser } from '../components/studio/PatternChooser.js';
 import {
   jsonBoundsProblem,
   readPackage,
@@ -18,7 +19,6 @@ import {
   autoLayout,
   checkDraft,
   draftFromPackage,
-  emptyDraft,
   moveNode,
   nextNodeId,
   parseDraft,
@@ -32,7 +32,6 @@ import {
   type Draft,
   type Position,
 } from '../lib/studio.js';
-import example from '../../../contracts/examples/reviewed-action.v1.json';
 
 type PackageVersion = {
   id: string;
@@ -50,11 +49,6 @@ type Notice = { tone: 'success' | 'neutral'; text: string; undo?: Draft };
 
 const storageKey = (workspace: string, projectId: string) =>
   `lotuspond.studio.${workspace}.${projectId || 'workspace'}`;
-
-function exampleDraft(): Draft {
-  const read = readPackage(example);
-  return read.package ? draftFromPackage(read.package) : emptyDraft();
-}
 
 export function Studio({
   workspace,
@@ -364,27 +358,12 @@ export function Studio({
       <>
         {header}
         {noticeElement}
-        <EmptyState
-          glyph="network"
-          title="Compose a workflow package"
-          description="Start from the reviewed-action example — a connector read, an agent proposal, a human review and a connector write — or from a blank start and end."
-          action={
-            <div className="button-row">
-              <button type="button" onClick={() => setDraft(exampleDraft())}>
-                Start from the example
-              </button>
-              <button type="button" className="secondary" onClick={() => setDraft(emptyDraft())}>
-                Start blank
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => fileInput.current?.click()}
-              >
-                Open JSON…
-              </button>
-            </div>
-          }
+        <PatternChooser
+          onStart={(next, label) => {
+            setDraft(next);
+            setNotice({ tone: 'neutral', text: `Started a draft from ${label}.` });
+          }}
+          onOpenFile={() => fileInput.current?.click()}
         />
         <input
           ref={fileInput}
@@ -455,18 +434,13 @@ export function Studio({
         />
         <button
           type="button"
-          className="secondary"
-          onClick={() =>
-            replaceDraft(exampleDraft(), 'Replaced the draft with the reviewed-action example.')
-          }
-        >
-          Use the example
-        </button>
-        <button
-          type="button"
           className="text-button danger"
           onClick={() => {
-            setNotice({ tone: 'neutral', text: 'Discarded the draft.', undo: draft });
+            setNotice({
+              tone: 'neutral',
+              text: 'Discarded the draft. Choose a pattern to start another.',
+              undo: draft,
+            });
             setDraft(null);
             setSelection(null);
             setConnecting(null);
