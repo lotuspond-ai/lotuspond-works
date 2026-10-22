@@ -5,8 +5,9 @@ specification approved by the owner; the detailed plan and implementation were a
 approved on 15 October 2026, and Tasks 1–6 are implemented. **Revision 2**, dated
 22 October 2026, applies [ADR-0011](../../architecture/0011-postgresql-durable-execution.md):
 the owner confirmed a Lotuspond-owned PostgreSQL state machine instead of Temporal.
-The revised sections await the owner's approval together with the revised plan, and
-Tasks 7–14 do not start before that approval. The sections are engine choice, component
+On 22 October 2026 the owner approved the revised sections together with the revised
+plan. Implementation of Tasks 7–14 has not started and begins when the owner asks for
+it. The sections are engine choice, component
 ownership, outbox and signal delivery, interpreter progression, history, versioning,
 recovery and verification. Engine selection authorizes the specified local integration,
 not production adoption. This specification continues the approved product-completion
@@ -387,10 +388,12 @@ fourteen-task plan and implementation with the already-selected subagent method.
 No additional merge, deployment, production database access, provider/customer
 connection, public distribution or external commitment is requested by it.
 
-On 22 October 2026 the owner confirmed ADR-0011's PostgreSQL engine. Revision 2 of
-this specification and the revised Tasks 7–14 are submitted for the owner's
-approval. Until it is given, the Temporal sections they replace are withdrawn and
-nothing from either version of Tasks 7–14 is implemented.
+On 22 October 2026 the owner confirmed ADR-0011's PostgreSQL engine. The same day
+the owner approved Revision 2 of this specification and the revised Tasks 7–14
+(“approved for revision 2”). The plan's other owner decisions were not answered
+individually and are recorded there as accepted with their recommended options.
+The Temporal sections they replace are withdrawn. Implementation of Tasks 7–14 has
+not been requested yet, and nothing from either version is implemented.
 
 Author review checks: the proposed activity contract is additive and does not
 reinterpret existing action signatures; execution authorization is distinct from

@@ -4,7 +4,7 @@ Date: 2026-10-22. Status: **accepted. The owner confirmed on 2026-10-22 that E04
 
 A local draft of this record, dated 15 October 2026, recorded the owner's acceptance after the [durable-engine spike](../plans/2026-10-15-durable-engine-spike.md). It was never published. Meanwhile the E04 specification merged in PR #10 selected Temporal. The 22 October confirmation resolves that conflict in favour of this record.
 
-Three parts of the text below revise the draft to fit the contracts already merged on `origin`. Decision 2's scope now follows executable-v2. Decision 3 makes the row lock the orchestration fence. Decision 6 settles packaging. These revisions are proposed together with the [revised E04 plan](../superpowers/plans/2026-10-15-durable-execution.md) and are accepted when the owner approves that plan. No engine code, schema v15 or dependency exists yet.
+Three parts of the text below revise the draft to fit the contracts already merged on `origin`. Decision 2's scope now follows executable-v2. Decision 3 makes the row lock the orchestration fence. Decision 6 settles packaging. The owner accepted these revisions on 22 October 2026 by approving Revision 2 of the [revised E04 plan](../superpowers/plans/2026-10-15-durable-execution.md). No engine code, schema v15 or dependency exists yet.
 
 This record:
 
