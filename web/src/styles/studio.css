@@ -615,6 +615,14 @@
 .studio-drafts .table-wrap {
   margin-bottom: 0;
 }
+/* On a narrow screen the table scrolls inside its frame rather than breaking names apart. */
+.studio-drafts td.primary-cell {
+  min-width: 18ch;
+  overflow-wrap: normal;
+}
+.studio-drafts td.cell-mono {
+  white-space: nowrap;
+}
 .studio-drafts-count {
   color: var(--muted);
   font-size: 13px;
