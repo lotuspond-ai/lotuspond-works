@@ -2,7 +2,9 @@
 // /dev/console.html during `npm run dev:web`; `vite build` only builds web/index.html, so it
 // never ships. It answers the console's API requests from the fixtures below, so layouts can
 // be reviewed without an account or a database. Append `?empty` to see every list empty,
-// or `?failing` to see every list fail. Fixture records are fictional and never leave this page.
+// `?failing` to see every list fail, or `?viewer` to see every workspace as a read-only
+// member, whose writes the fixtures refuse as the API does. Fixture records are fictional and
+// never leave this page.
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '../src/App.js';
@@ -214,6 +216,7 @@ const lists: Record<string, Record<string, unknown>[]> = {
   ],
 };
 
+const role = mode.has('viewer') ? 'viewer' : 'owner';
 const account = {
   user: {
     id: 'u1',
@@ -224,12 +227,12 @@ const account = {
     identity_verified: true,
   },
   workspaces: [
-    { id: 'w-personal', name: 'Personal', kind: 'personal', role: 'owner' },
+    { id: 'w-personal', name: 'Personal', kind: 'personal', role },
     {
       id: 'w-org',
       name: 'Example organization',
       kind: 'organization',
-      role: 'owner',
+      role,
       require_mfa: false,
     },
   ],
@@ -298,6 +301,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   // admission, an identical version is returned again, and a changed one conflicts. The
   // fixture version lives in this page only.
   const publish = /^projects\/([^/]+)\/packages$/.exec(path);
+  // A viewer is refused with the API's own message (backend/lotuspond/security.py).
+  if (method === 'POST' && publish && role === 'viewer')
+    return json({ error: 'forbidden', message: 'Your role has read-only access.' }, 403);
   if (method === 'POST' && publish) {
     let raw: unknown;
     try {
