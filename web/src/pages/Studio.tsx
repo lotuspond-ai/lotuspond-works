@@ -26,12 +26,27 @@ import {
   removeEdge,
   removeNode,
   renameNode,
-  serializeDraft,
   updateNode,
   updatePackage,
   type Draft,
   type Position,
 } from '../lib/studio.js';
+import {
+  MAX_DRAFTS,
+  addDraft,
+  canAddDraft,
+  draftLabel,
+  openDraft,
+  readShelf,
+  removeDraft,
+  restoreDraft,
+  serializeShelf,
+  shelfKey,
+  singleDraftKey,
+  updateDraft,
+  type DraftShelf,
+  type StoredDraft,
+} from '../lib/studioDrafts.js';
 
 type PackageVersion = {
   id: string;
@@ -45,10 +60,10 @@ type PackageVersion = {
   content_bytes: number;
   publisher_kind: string;
 };
-type Notice = { tone: 'success' | 'neutral'; text: string; undo?: Draft };
+type Notice = { tone: 'success' | 'neutral'; text: string; undo?: StoredDraft };
 
-const storageKey = (workspace: string, projectId: string) =>
-  `lotuspond.studio.${workspace}.${projectId || 'workspace'}`;
+const now = () => new Date().toISOString();
+const fullNote = `This browser keeps up to ${MAX_DRAFTS} drafts here. Delete one to start another.`;
 
 export function Studio({
   workspace,
@@ -61,7 +76,8 @@ export function Studio({
   projectName: string;
   role: string;
 }) {
-  const [draft, setDraft] = useState<Draft | null | undefined>(undefined);
+  const [shelf, setShelf] = useState<DraftShelf | undefined>(undefined);
+  const [storageProblem, setStorageProblem] = useState('');
   const [selection, setSelection] = useState<Selection>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [digest, setDigest] = useState('');
@@ -82,20 +98,40 @@ export function Studio({
   const publishKey = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const canWrite = role !== 'viewer';
+  const openEntry = shelf?.open ? shelf.drafts.find((entry) => entry.id === shelf.open) : undefined;
+  const draft = shelf === undefined ? undefined : (openEntry?.draft ?? null);
+  const full = shelf ? !canAddDraft(shelf) : false;
 
-  // The draft lives in this browser only, per workspace and project.
+  // Drafts live in this browser only, per workspace and project. A draft kept under the
+  // earlier single-draft key joins the shelf, and that key is cleared once the shelf is saved.
   useEffect(() => {
-    setDraft(parseDraft(localStorage.getItem(storageKey(workspace, projectId))));
+    let stored: string | null = null;
+    let single: string | null = null;
+    try {
+      stored = localStorage.getItem(shelfKey(workspace, projectId));
+      single = localStorage.getItem(singleDraftKey(workspace, projectId));
+    } catch {
+      setStorageProblem(
+        'This browser does not let the Studio keep drafts. Export a draft as JSON to keep it.',
+      );
+    }
+    setShelf(readShelf(stored, parseDraft(single), now(), () => crypto.randomUUID()));
   }, [workspace, projectId]);
   useEffect(() => {
-    if (draft === undefined) return;
-    const key = storageKey(workspace, projectId);
+    if (shelf === undefined) return;
     const timer = setTimeout(() => {
-      if (draft) localStorage.setItem(key, serializeDraft(draft));
-      else localStorage.removeItem(key);
+      try {
+        localStorage.setItem(shelfKey(workspace, projectId), serializeShelf(shelf));
+        localStorage.removeItem(singleDraftKey(workspace, projectId));
+        setStorageProblem('');
+      } catch {
+        setStorageProblem(
+          'This browser could not save the drafts. Export the open draft as JSON before you leave.',
+        );
+      }
     }, 250);
     return () => clearTimeout(timer);
-  }, [draft, workspace, projectId]);
+  }, [shelf, workspace, projectId]);
 
   const validation = useMemo(() => (draft ? checkDraft(draft.package) : null), [draft?.package]);
   const canonical = validation?.ok ? validation.canonical : '';
@@ -160,7 +196,12 @@ export function Studio({
   }, [loadVersions, versionsRefresh]);
 
   const change = (update: (current: Draft) => Draft) =>
-    setDraft((current) => (current ? update(current) : current));
+    setShelf((current) => {
+      const entry = current?.drafts.find((item) => item.id === current.open);
+      return current && entry
+        ? updateDraft(current, entry.id, update(entry.draft), now())
+        : current;
+    });
   const select = useCallback((next: Selection) => setSelection(next), []);
   const startConnect = useCallback((id: string | null) => setConnecting(id), []);
 
@@ -170,13 +211,35 @@ export function Studio({
     else change((current) => removeEdge(current, target.edge));
     setSelection(null);
   }
-  function replaceDraft(next: Draft, text: string) {
-    setNotice({ tone: 'neutral', text, undo: draft ?? undefined });
-    setDraft(next);
+  function resetEditor() {
     setSelection(null);
     setConnecting(null);
     setImportError(null);
     setPublishError(null);
+  }
+  // Opening a pattern, a file or a published version always adds a draft, so none is replaced.
+  function startDraft(next: Draft, text: string) {
+    if (full) {
+      setNotice({ tone: 'neutral', text: fullNote });
+      return;
+    }
+    setShelf((current) => current && addDraft(current, next, now(), crypto.randomUUID()));
+    setNotice({ tone: 'neutral', text });
+    resetEditor();
+  }
+  function showDraft(id: string | null) {
+    setShelf((current) => current && openDraft(current, id));
+    setNotice(null);
+    resetEditor();
+  }
+  function deleteDraft(entry: StoredDraft) {
+    setShelf((current) => current && removeDraft(current, entry.id));
+    setNotice({
+      tone: 'neutral',
+      text: `Deleted the draft ${draftLabel(entry.draft)}.`,
+      undo: entry,
+    });
+    resetEditor();
   }
 
   async function publish() {
@@ -244,7 +307,7 @@ export function Studio({
         });
         return;
       }
-      replaceDraft(draftFromPackage(read.package), `Opened ${file.name} as the draft.`);
+      startDraft(draftFromPackage(read.package), `Opened ${file.name} as a new draft.`);
     });
   }
   function exportJson() {
@@ -273,7 +336,7 @@ export function Studio({
       );
       const read = readPackage(content);
       if (!read.package) throw new Error('The stored content does not match the local contract.');
-      replaceDraft(
+      startDraft(
         draftFromPackage(read.package),
         `Opened ${version.package_id} ${version.version} as a new draft. A published version is immutable: changes need a new version number.`,
       );
@@ -326,12 +389,12 @@ export function Studio({
             type="button"
             className="text-button"
             onClick={() => {
-              setDraft(notice.undo ?? null);
+              const entry = notice.undo;
+              if (entry) setShelf((current) => current && restoreDraft(current, entry));
               setNotice(null);
-              setSelection(null);
             }}
           >
-            Restore the previous draft
+            Restore it
           </button>
         </>
       )}
@@ -358,11 +421,19 @@ export function Studio({
       <>
         {header}
         {noticeElement}
+        {storageProblem && <Alert>{storageProblem}</Alert>}
+        {importError && <ImportAlert error={importError} onDismiss={() => setImportError(null)} />}
+        {shelf && shelf.drafts.length > 0 && (
+          <DraftsSection
+            drafts={shelf.drafts}
+            scope={projectName ? `the ${projectName} project` : 'this workspace'}
+            onOpen={(entry) => showDraft(entry.id)}
+            onDelete={deleteDraft}
+          />
+        )}
         <PatternChooser
-          onStart={(next, label) => {
-            setDraft(next);
-            setNotice({ tone: 'neutral', text: `Started a draft from ${label}.` });
-          }}
+          fullNote={full ? fullNote : ''}
+          onStart={(next, label) => startDraft(next, `Started a draft from ${label}.`)}
           onOpenFile={() => fileInput.current?.click()}
         />
         <input
@@ -374,7 +445,6 @@ export function Studio({
           aria-hidden="true"
           onChange={importFile}
         />
-        {importError && <ImportAlert error={importError} onDismiss={() => setImportError(null)} />}
         <VersionsSection
           projectId={projectId}
           projectName={projectName}
@@ -394,6 +464,7 @@ export function Studio({
     <>
       {header}
       {noticeElement}
+      {storageProblem && <Alert>{storageProblem}</Alert>}
       {importError && <ImportAlert error={importError} onDismiss={() => setImportError(null)} />}
       {publishError && (
         <Alert>
@@ -413,6 +484,10 @@ export function Studio({
         </Alert>
       )}
       <div className="studio-toolbar">
+        <button type="button" className="secondary" onClick={() => showDraft(null)}>
+          All drafts
+        </button>
+        <span className="studio-toolbar-name">{draftLabel(draft)}</span>
         <button
           type="button"
           className="secondary"
@@ -435,18 +510,9 @@ export function Studio({
         <button
           type="button"
           className="text-button danger"
-          onClick={() => {
-            setNotice({
-              tone: 'neutral',
-              text: 'Discarded the draft. Choose a pattern to start another.',
-              undo: draft,
-            });
-            setDraft(null);
-            setSelection(null);
-            setConnecting(null);
-          }}
+          onClick={() => openEntry && deleteDraft(openEntry)}
         >
-          Discard draft
+          Delete draft
         </button>
         <span className="studio-toolbar-note">{publishNote}</span>
       </div>
@@ -567,6 +633,96 @@ export function Studio({
         onOpen={(version) => void openVersion(version)}
       />
     </>
+  );
+}
+
+// The drafts kept in this browser, most recently changed first, each with its own check.
+function DraftsSection({
+  drafts,
+  scope,
+  onOpen,
+  onDelete,
+}: {
+  drafts: StoredDraft[];
+  scope: string;
+  onOpen: (entry: StoredDraft) => void;
+  onDelete: (entry: StoredDraft) => void;
+}) {
+  return (
+    <section className="studio-drafts" aria-labelledby="studio-drafts-heading">
+      <div className="section-row">
+        <div>
+          <p className="eyebrow">Drafts</p>
+          <h2 id="studio-drafts-heading">Drafts in this browser</h2>
+        </div>
+        <span className="studio-drafts-count">
+          {drafts.length} of {MAX_DRAFTS}
+        </span>
+      </div>
+      <p className="hint">
+        Kept in this browser for {scope} until you delete them. Publishing stores a copy in the
+        registry; the draft stays here.
+      </p>
+      <div className="table-wrap">
+        <table>
+          <caption className="sr-only">Drafts in this browser</caption>
+          <thead>
+            <tr>
+              <th scope="col">Draft</th>
+              <th scope="col">Package</th>
+              <th scope="col">Admission check</th>
+              <th scope="col">Changed</th>
+              <th className="actions">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {drafts.map((entry) => {
+              const label = draftLabel(entry.draft);
+              const { package_id: packageId, version } = entry.draft.package;
+              const check = checkDraft(entry.draft.package);
+              const count = check.ok ? 0 : check.problems.length;
+              const named = `${label}${version ? ` ${version}` : ''}`;
+              return (
+                <tr key={entry.id}>
+                  <td className="primary-cell">{label}</td>
+                  <td className="cell-mono">
+                    {packageId || 'No identifier'} {version}
+                  </td>
+                  <td>
+                    <span className={`badge badge-${check.ok ? 'success' : 'warning'}`}>
+                      <span aria-hidden="true" />
+                      {check.ok ? 'Admissible' : `${count} ${count === 1 ? 'problem' : 'problems'}`}
+                    </span>
+                  </td>
+                  <td>
+                    <RelativeTime value={entry.updatedAt} />
+                  </td>
+                  <td className="actions">
+                    <button
+                      type="button"
+                      aria-label={`Open the draft ${named}`}
+                      onClick={() => onOpen(entry)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      aria-label={`Delete the draft ${named}`}
+                      onClick={() => onDelete(entry)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

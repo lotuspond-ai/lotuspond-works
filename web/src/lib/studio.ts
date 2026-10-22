@@ -338,28 +338,30 @@ export function loosePackage(raw: unknown): WorkflowPackage | null {
     })),
   };
 }
+export function readDraft(raw: unknown): Draft | null {
+  if (!isRecord(raw)) return null;
+  // A fully valid package is read strictly, so stored content never gains extra fields.
+  const pkg = readPackage(raw.package).package ?? loosePackage(raw.package);
+  if (!pkg || !pkg.nodes.length) return null;
+  const positions = isRecord(raw.layout) ? raw.layout : {};
+  const layout: Layout = {};
+  for (const node of pkg.nodes) {
+    const position = positions[node.id];
+    layout[node.id] =
+      isRecord(position) &&
+      typeof position.x === 'number' &&
+      typeof position.y === 'number' &&
+      Number.isFinite(position.x) &&
+      Number.isFinite(position.y)
+        ? { x: snap(position.x), y: snap(position.y) }
+        : { x: MARGIN, y: MARGIN };
+  }
+  return { package: pkg, layout };
+}
 export function parseDraft(stored: string | null): Draft | null {
   if (!stored) return null;
   try {
-    const raw: unknown = JSON.parse(stored);
-    if (!isRecord(raw)) return null;
-    // A fully valid package is read strictly, so stored content never gains extra fields.
-    const pkg = readPackage(raw.package).package ?? loosePackage(raw.package);
-    if (!pkg || !pkg.nodes.length) return null;
-    const positions = isRecord(raw.layout) ? raw.layout : {};
-    const layout: Layout = {};
-    for (const node of pkg.nodes) {
-      const position = positions[node.id];
-      layout[node.id] =
-        isRecord(position) &&
-        typeof position.x === 'number' &&
-        typeof position.y === 'number' &&
-        Number.isFinite(position.x) &&
-        Number.isFinite(position.y)
-          ? { x: snap(position.x), y: snap(position.y) }
-          : { x: MARGIN, y: MARGIN };
-    }
-    return { package: pkg, layout };
+    return readDraft(JSON.parse(stored));
   } catch {
     return null;
   }
