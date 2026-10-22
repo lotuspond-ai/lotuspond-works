@@ -1,0 +1,90 @@
+# Durable-engine spike: Temporal versus a PostgreSQL-backed state machine
+
+Date: 15 October 2026. Status: **design evidence for [ADR-0011](../architecture/0011-postgresql-durable-execution.md), whose decision the owner confirmed on 22 October 2026. No production dependency was added.** Time-boxed, local only.
+
+On 22 October 2026 this report was imported from a local session's unpublished work, which had recorded the recommendation as accepted on 15 October. Its body is unchanged except for this status, the evidence section at the end and the links to unpublished files. Its code was never product code and is not in this repository (see [Evidence location](#evidence-location)).
+
+Read the results with two limits:
+
+- The spike ran the withdrawn [ADR-0010](../architecture/0010-workflow-package-v2-graph-proposal.md) prototype, which is sequential and acyclic. Executable-v2's parallel, iteration, subworkflow and timer regions were not exercised.
+- It predates schema v14. The [revised E04 plan](../superpowers/plans/2026-10-15-durable-execution.md) maps its checks onto the merged records.
+
+## Recommendation
+
+Build the first production runtime (E04) on a **PostgreSQL-backed state machine owned by Lotuspond**, behind the orchestration-adapter interface the architecture already requires, and keep Temporal as the named fallback with explicit revisit triggers (below).
+
+Both options passed every criterion locally. The deciding factors are not capability but ownership and operations for Lotuspond's case:
+
+1. **One authority, one transaction.** The architecture already puts executions, human tasks, action intents and outcomes in product PostgreSQL. With an in-database engine, admission, wait state, approval binding and action intent commit in the same transaction as the business records. Temporal adds a second durable store of execution state, so every admission and every effect needs the outbox, projection and reconciliation-by-ID machinery of architecture §4 between the two.
+2. **Deployment matrix.** Customer-managed and air-gapped modes must install, upgrade, back up and restore every stateful component coherently (architecture §7–§8, RPO/RTO row). PostgreSQL is already there and already backed up; Temporal adds a server, its own schema and upgrade path, and its own backup coherence problem.
+3. **No new production dependency.** The PostgreSQL option needs only `psycopg`, already in `backend/pyproject.toml`. Temporal needs `temporalio` (48 MB installed, including a 28 MB native core) plus a server.
+4. **The workload is small and the definitions are data.** The planning target is 5 admissions/s, 25 active steps and 10,000 waiting cases. v2 packages are bounded, acyclic, sequential graphs interpreted by one generic interpreter; Temporal's main advantage, durable execution of arbitrary code, is mostly unused, while its replay-determinism rules still apply to that interpreter (observed below).
+5. **The hard parts are Lotuspond's either way.** Idempotent admission with payload-conflict detection, approval binding, reconciliation of uncertain writes, fencing and cancellation-with-effects had to be written by hand in both prototypes. Temporal supplied durable waits, timers, retries and history; it did not supply any of those semantics.
+
+## What was run
+
+Environment: macOS arm64, Python 3.13, disposable PostgreSQL 14.20 cluster created in a scratch directory (TCP 127.0.0.1:55491 only; never the project cluster on 55439), Temporal CLI 1.9.1 (Server 1.32.0) dev server with a SQLite file, `temporalio` 1.34.0, `psycopg` 3.3.6, pydantic 2.14.1. Both prototypes execute the real `threshold-review` v2 example through `spike/workflow-package-v2/package_contract_v2.py`, against the same synthetic "external" system in a separate database with injectable faults. Full transcripts: `spike/durable-engine/results/pg-demo.txt` and `results/temporal-probe.txt`.
+
+| Criterion                          | PostgreSQL state machine (`demo_pg.py`, 35/35 checks, ~25 s; 5 of 5 runs passed)                                                                                                                                                                                          | Temporal probe (`demo_temporal.py`, 18/18 checks, ~55 s; 3 of 3 runs after the final probe changes passed)                                                                                                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Restart during a human wait        | Worker SIGKILL plus `pg_ctl -m immediate` restart; wait, binding and digest intact; stale-digest decision refused; new process finished with one write. Paused worker lost its lease and its late commit was refused (fencing).                                           | Worker and dev server SIGKILL; wait and binding restored by replay; stale digest rejected by an update validator; one write.                                                                                                                                        |
+| Duplicate trigger admission        | 25 concurrent deliveries → one execution; same key with a different payload refused; repeated schedule occurrence returns the original; one write.                                                                                                                        | 25 concurrent starts with one workflow ID → one run. **Same ID with a different payload silently returned the existing run**; with the default reuse policy a late duplicate after completion started a second run (absorbed only by the target's idempotency key). |
+| Ambiguous external write           | Lost response → `uncertain` → read-back → applied, one dispatch. Lost request → verified absent → resent under the same key, one write. Worker killed after the target applied the write → next worker found the interrupted attempt and reconciled instead of resending. | Same three cases pass using a no-retry write activity followed by a reconcile activity. Crash recovery waited on activity and task timeouts (13 s with a 5 s start-to-close).                                                                                       |
+| Cancellation                       | During a review wait: cancelled with its task, later decision refused. During a read: stopped at the next step boundary. During a write: the write finished, was recorded and reported as a completed effect.                                                             | Same outcomes. The in-flight write needed `asyncio.shield`; activities observe cancellation only through heartbeats (Temporal semantics; not measured further).                                                                                                     |
+| Pinned-version upgrade             | 2.0.0 execution waiting while 2.1.0 and a new threshold were deployed: new work used 2.1.0, old work kept 2.0.0, its admitted configuration and binding. Interpreter-semantics pin: a worker without `v2.1` never claimed a `v2.1` execution.                             | Package and configuration travel as workflow input, so package pinning is free. **Changing the interpreter itself** made replay of a waiting execution fail with `NON_DETERMINISTIC_ERROR`; it was stuck until a `workflow.patched()` version was deployed.         |
+| Extra: approval invalidation (E05) | Expired review followed its `expired` edge without writing; a parameter changed after approval was refused before dispatch (`parameters_changed`).                                                                                                                        | Not repeated; the same `approval_status` check runs inside the workflow.                                                                                                                                                                                            |
+
+Additional Temporal observation: one reviewed execution produced 30 history events (10 KB), and inputs, step outputs and bound parameters are stored there as plain JSON payloads. Sensitive packages would need a payload codec with managed keys and a retention policy for engine history, on top of product-database controls.
+
+What these runs do **not** show: throughput or latency at the planning load, behaviour under PostgreSQL failover, multi-node workers on separate hosts, long-duration timers, backup/restore of a production deployment, or a production Temporal topology (only the single-binary dev server with SQLite was run). Zero duplicate writes in these finite tests is an observation, not a proof.
+
+## Trade-offs
+
+| Dimension               | PostgreSQL state machine                                                                                                                                            | Temporal (self-hosted)                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New runtime pieces      | None beyond the product database and worker processes                                                                                                               | Temporal server, its persistence and visibility schemas, CLI/admin tooling; optional UI (dev binary alone: 150.8 MB)                                                                                                                                                                                                                        |
+| Python dependencies     | `psycopg` (already a backend dependency)                                                                                                                            | `temporalio` 1.34.0 (MIT) with `nexus-rpc` (MIT), `protobuf` (BSD-3-Clause), `types-protobuf` (Apache-2.0); 48 MB installed incl. native core                                                                                                                                                                                               |
+| Licensing               | No new licence                                                                                                                                                      | SDK and server are MIT (SDK from package metadata; server from the [upstream licence](https://github.com/temporalio/temporal/blob/main/LICENSE); re-check the exact version if ever adopted)                                                                                                                                                |
+| State authority         | Execution state is product data; one backup; transactional admission and intents                                                                                    | Two stores; outbox, projection and reconciliation between them; coherent backup/restore across both                                                                                                                                                                                                                                         |
+| Operations              | Index, vacuum and partition the execution/event tables as volume grows; SKIP LOCKED polling load is bounded by worker count                                         | Server upgraded "sequentially, one minor version at a time" with `temporal-sql-tool` schema upgrades ([upgrade guide](https://docs.temporal.io/self-hosted-guide/upgrade-server)); history-shard count fixed at first start ([configuration](https://docs.temporal.io/references/configuration)); separate monitoring and capacity planning |
+| Engineering we must own | Lease/fencing, timers/sweepers, retry backoff, event history, operator views — about 700 lines in the spike including its synthetic target, far more for production | Replay determinism of the interpreter, versioning (patching or worker versioning), payload codec, mapping engine history into product records                                                                                                                                                                                               |
+| Offline / air-gapped    | Nothing new to package                                                                                                                                              | Server binary, schema tooling and their upgrades become part of the signed offline bundle                                                                                                                                                                                                                                                   |
+| Scale headroom          | Adequate for the planning targets; untested beyond them                                                                                                             | Proven at much larger scale; strongest if workflows become long-running, high fan-out or code-defined                                                                                                                                                                                                                                       |
+
+## Risks of the recommendation and revisit triggers
+
+Building in-house risks slowly re-implementing an orchestrator. Mitigations: keep the engine to v2's bounded vocabulary; keep it behind the narrow adapter interface (start, signal/decide, cancel, reconcile, project) so Temporal can replace it; turn the spike's 35 checks into the engine's conformance suite and run the same suite against any replacement.
+
+Revisit Temporal if any of these becomes true: package vocabulary adds loops, large parallel fan-out or subworkflows; measured load approaches the limits of a single PostgreSQL primary for execution tables; durable timers or waits dominate operator incidents; or a customer requires Temporal Cloud or an existing Temporal estate.
+
+## If accepted, next steps (each separately reviewed)
+
+These steps were written before the local session knew of schema v14 and executable-v2. The [revised E04 plan](../superpowers/plans/2026-10-15-durable-execution.md) replaces them: schema v14 plus an additive v15 instead of a new table family, and its Tasks 7–14 instead of steps 2 and 3. They are kept as recorded.
+
+1. ~~Record an ADR for the engine choice.~~ Drafted as [ADR-0011](../architecture/0011-postgresql-durable-execution.md); review its text, in particular the control-plane/runtime split (decision 5).
+2. Design the additive schema (executions, events, human tasks, action attempts) with a reviewed migration plan, isolated PostgreSQL integration tests and the existing data-preservation rules; nothing from `spike/` is copied wholesale.
+3. Define the adapter interface and port the spike scenarios as conformance tests; add the remaining acceptance-matrix cases (revocation, disconnected runtime, restore from an older backup, load test at the planning targets).
+
+## Evidence location
+
+The spike code, the withdrawn v2 prototype it imports, and both transcripts are not in this repository. They are retained on the owner's local branch `claude/local-work-2026-10-15`, commit `5b5cd5be61f08fa91b4ac4968748f76db976784e`, which had not been pushed on 22 October 2026. This follows the probe's practice of keeping generated evidence outside the source tree, with receipts:
+
+| File at that commit                               | SHA-256                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| `spike/durable-engine/pg_engine.py`               | `d7822fc3cc0c65aece50d79dd49fa5212907ee0cee2cc4b5f24f24e902919d4b` |
+| `spike/durable-engine/demo_pg.py`                 | `43e8c453dede21ffab6bb4a7461a65aadac35bdaf2b8b03f2772509572b541bb` |
+| `spike/durable-engine/demo_temporal.py`           | `8d7aafae03000bc7f9c8a75c50680817b2ef17eb432ae4c26c270f48578954d9` |
+| `spike/durable-engine/results/pg-demo.txt`        | `2f6b3a33e3d6f632383f87996a64cb477e453d88371107f0d4242ce7523a1a8c` |
+| `spike/durable-engine/results/temporal-probe.txt` | `cca68223841c8f86f694700516fda1a7601371206a35df97a4316a8dc8136f8c` |
+
+To rerun, check out that commit in a separate worktree and run, from its root:
+
+```bash
+spike/durable-engine/run_pg_demo.sh <python-with-psycopg-and-pydantic> <scratch-dir>
+```
+
+```bash
+spike/durable-engine/run_temporal_probe.sh <python-with-temporalio> <scratch-dir> <temporal-cli-binary>
+```
+
+The first script creates a throwaway cluster under `<scratch-dir>/pg` (set `PG_BIN` to the PostgreSQL bin directory) and refuses ports 5432 and 55439. The second needs that cluster running and a Temporal CLI binary (for example the one `temporalio.testing.WorkflowEnvironment.start_local()` downloads).

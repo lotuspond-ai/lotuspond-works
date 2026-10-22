@@ -8,7 +8,7 @@ A customer needs an agent to use the right business systems under explicit permi
 
 Studio will select permitted tools and connections; operations will show connection/worker health and actionable failures. E03 does not prescribe additional screens or an Automation Anywhere navigation model. Its administration API and local bootstrap tooling precede the later integrated Studio/Control Room experience.
 
-The accepted engine probe supports Temporal as the preferred candidate for later durable orchestration, with [findings and limitations recorded separately](../../plans/2026-10-14-durable-engine-probe.md). E03 installs no engine dependency. Customer identity, connection policy, replay protection and recovery authority remain independent of an engine's restored history.
+The accepted engine probe supports Temporal as the preferred candidate for later durable orchestration, with [findings and limitations recorded separately](../../plans/2026-10-14-durable-engine-probe.md). E03 installs no engine dependency. (On 22 October 2026 [ADR-0011](../../architecture/0011-postgresql-durable-execution.md) superseded that engine recommendation: E04 uses a Lotuspond-owned PostgreSQL state machine.) Customer identity, connection policy, replay protection and recovery authority remain independent of an engine's restored history.
 
 ## Architecture and alternatives
 

@@ -2,6 +2,8 @@
 
 Date: 14 October 2026 (Asia/Kolkata). Status: approved local feasibility probe completed and independently reviewed. Current review findings: 0 Critical, 0 Important, 0 Minor; two documentation findings were corrected and independently closed. This records research, not a product dependency, runtime implementation, deployment, or production qualification.
 
+**Superseded in part on 22 October 2026.** The [engine recommendation](#engine-recommendation) below (carry Temporal forward) is superseded by [ADR-0011](../architecture/0011-postgresql-durable-execution.md): the owner confirmed a Lotuspond-owned PostgreSQL state machine for E04. The observations, measurements, data-handling findings and receipts remain valid research evidence, and the document is otherwise unchanged.
+
 ## Customer need and scope
 
 An agent request must survive a process restart or a long human wait. If an external write succeeds but its acknowledgement is lost, recovery must discover that effect before trying again. Revocation and current permissions must remain effective after restoring older workflow history. Those needs justify durable orchestration infrastructure; they do not prescribe a customer-facing engine console or queue-management screen. The product rationale remains [agent needs and UI boundaries](../AGENT_PRODUCT_RATIONALE.md).
@@ -44,6 +46,8 @@ Default history payloads contained the synthetic sentinel after base64 decoding.
 The simulator serialized authority and effect insertion in one local SQLite transaction. Real providers do not share that transaction. Remote idempotency, authorization/write races, query uncertainty, credential revocation, network isolation and trustworthy evidence require connector-specific qualification. There is no generic exactly-once external-write claim.
 
 ## Engine recommendation
+
+Superseded on 22 October 2026 by [ADR-0011](../architecture/0011-postgresql-durable-execution.md). Retained as the recommendation made at the time.
 
 Carry Temporal forward as the preferred candidate behind a narrow orchestration adapter. Use it for history, progression, waits, retries and replay. Lotuspond must own customer authority, exact business identity, command/event deduplication, connection permissions, action decisions, current recovery authority and verified business outcomes. An engine namespace or queue is not a tenant authorization boundary.
 

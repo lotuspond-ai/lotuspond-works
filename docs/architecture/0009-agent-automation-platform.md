@@ -32,7 +32,7 @@ E01 (baseline and product ADR) is in progress. E02 (package contract and SDK) is
 ## Target boundaries for later slices
 
 1. A separate production runtime executes reviewed, versioned packages in an explicit customer isolation boundary. Customer code and credentials do not run inside the shared API process.
-2. A durable orchestration adapter owns progression, waits, retries, and reconciliation through a narrow internal interface. Temporal is a candidate for an architecture spike, not an adopted dependency in this slice.
+2. A durable orchestration adapter owns progression, waits, retries, and reconciliation through a narrow internal interface. Temporal is a candidate for an architecture spike, not an adopted dependency in this slice. Resolved by [ADR-0011](0011-postgresql-durable-execution.md) on 22 October 2026: the adapter is backed by a Lotuspond-owned PostgreSQL state machine, and Temporal is not adopted.
 3. Future Studio and SDK authoring produce the same versioned representation. Published definitions and deployment configuration have separate immutable identities; existing executions remain pinned unless explicitly migrated under tested rules.
 4. Production actions require current tenant/environment authorization and exact reviewed inputs. Packages, model outputs, semantic assessments, and cached approvals cannot independently grant permission. Ambiguous external effects require reconciliation before retry.
 5. Business outcomes link the deployed version, allowed action, human decision, and downstream evidence. A model response or successful HTTP status alone does not establish completion.
