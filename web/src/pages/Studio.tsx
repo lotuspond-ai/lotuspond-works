@@ -48,6 +48,7 @@ import {
   type DraftShelf,
   type StoredDraft,
 } from '../lib/studioDrafts.js';
+import { nextFreeVersion, publication, sameContent } from '../lib/studioVersions.js';
 
 type PackageVersion = {
   id: string;
@@ -90,6 +91,8 @@ export function Studio({
   const [publishError, setPublishError] = useState<{
     text: string;
     problems: FieldProblem[];
+    // A free version to offer when the registry already holds this one with other content.
+    suggestion?: string;
   } | null>(null);
   const [versions, setVersions] = useState<PackageVersion[]>([]);
   const [versionsNext, setVersionsNext] = useState<string | null>(null);
@@ -151,6 +154,10 @@ export function Studio({
     };
   }, [canonical]);
   const problems = validation?.problems ?? [];
+  // What the listed versions say the registry will answer; it still decides on publishing.
+  const registry = draft
+    ? publication(versions, draft.package, digest)
+    : ({ state: 'unknown' } as const);
   const flagged = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const problem of problems)
@@ -274,13 +281,30 @@ export function Studio({
       setVersionsRefresh((value) => value + 1);
     } catch (reason) {
       const error = reason as ApiError;
+      const conflict = error instanceof ApiError && error.status === 409;
       setPublishError({
         text: error.message,
         problems: error instanceof ApiError ? error.problems : [],
+        suggestion: conflict
+          ? nextFreeVersion(
+              versions
+                .filter((item) => item.package_id === draft.package.package_id)
+                .map((item) => item.version),
+              draft.package.version,
+            )
+          : undefined,
       });
+      // The list may predate another publication, so it is read again.
+      if (conflict) setVersionsRefresh((value) => value + 1);
     } finally {
       setPublishing(false);
     }
+  }
+
+  function adoptVersion(version: string) {
+    change((current) => updatePackage(current, { version }));
+    setPublishError(null);
+    setNotice({ tone: 'neutral', text: `Changed the draft’s version to ${version}.` });
   }
 
   function importFile(event: ChangeEvent<HTMLInputElement>) {
@@ -360,7 +384,13 @@ export function Studio({
             </button>
             <button
               type="button"
-              disabled={!validation?.ok || !projectId || !canWrite || publishing}
+              disabled={
+                !validation?.ok ||
+                !projectId ||
+                !canWrite ||
+                publishing ||
+                registry.state === 'conflict'
+              }
               title={
                 !canWrite
                   ? 'Publishing needs editor access.'
@@ -368,7 +398,9 @@ export function Studio({
                     ? 'Choose a project in the breadcrumb to publish.'
                     : !validation?.ok
                       ? 'Resolve the admission problems first.'
-                      : undefined
+                      : registry.state === 'conflict'
+                        ? 'This version is already published with different content.'
+                        : undefined
               }
               onClick={() => void publish()}
             >
@@ -457,6 +489,7 @@ export function Studio({
           onRetry={() => setVersionsRefresh((value) => value + 1)}
           onMore={() => void loadVersions(new AbortController().signal, versionsNext ?? undefined)}
           onOpen={(version) => void openVersion(version)}
+          digest=""
         />
       </>
     );
@@ -483,7 +516,39 @@ export function Studio({
               ))}
             </ul>
           )}
+          {publishError.suggestion && (
+            <p className="studio-registry-fix">
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => adoptVersion(publishError.suggestion ?? '')}
+              >
+                Use version {publishError.suggestion}
+              </button>
+            </p>
+          )}
         </Alert>
+      )}
+      {registry.state === 'conflict' && !publishError && (
+        <p className="notice" role="status">
+          {draft.package.package_id} {draft.package.version} is already published in{' '}
+          {projectName || 'this project'} with different content, and a published version never
+          changes.{' '}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => adoptVersion(registry.suggestion)}
+          >
+            Use version {registry.suggestion}
+          </button>
+        </p>
+      )}
+      {registry.state === 'same' && (
+        <p className="notice" role="status">
+          {draft.package.package_id} {draft.package.version} is already published in{' '}
+          {projectName || 'this project'} with this exact content. Publishing it again changes
+          nothing.
+        </p>
       )}
       <div className="studio-toolbar">
         <button type="button" className="secondary" onClick={() => showDraft(null)}>
@@ -633,6 +698,7 @@ export function Studio({
         onRetry={() => setVersionsRefresh((value) => value + 1)}
         onMore={() => void loadVersions(new AbortController().signal, versionsNext ?? undefined)}
         onOpen={(version) => void openVersion(version)}
+        digest={digest}
       />
     </>
   );
@@ -768,6 +834,7 @@ function VersionsSection({
   onRetry,
   onMore,
   onOpen,
+  digest,
 }: {
   projectId: string;
   projectName: string;
@@ -778,6 +845,8 @@ function VersionsSection({
   onRetry: () => void;
   onMore: () => void;
   onOpen: (version: PackageVersion) => void;
+  // The open draft's digest, to mark a version that holds exactly its content.
+  digest: string;
 }) {
   return (
     <section className="studio-versions" aria-labelledby="studio-versions-heading">
@@ -833,7 +902,15 @@ function VersionsSection({
               <tbody>
                 {versions.map((version) => (
                   <tr key={version.id}>
-                    <td className="primary-cell">{version.package_id}</td>
+                    <td className="primary-cell">
+                      {version.package_id}
+                      {sameContent(version, digest) && (
+                        <span className="badge badge-success studio-same">
+                          <span aria-hidden="true" />
+                          Same content as this draft
+                        </span>
+                      )}
+                    </td>
                     <td className="cell-mono">{version.version}</td>
                     <td className="cell-mono" title={version.sha256}>
                       {version.sha256.slice(0, 12)}…

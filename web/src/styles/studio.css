@@ -596,6 +596,15 @@
   opacity: 0.8;
 }
 
+/* The registry's answer foreseen from the listed versions. */
+.studio-registry-fix {
+  margin: 6px 0 0;
+}
+.studio-same {
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
 /* The drafts kept in this browser. */
 .studio-drafts {
   margin: 0 0 24px;
