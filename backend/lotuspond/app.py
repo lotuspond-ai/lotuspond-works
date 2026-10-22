@@ -294,6 +294,20 @@ def create_app(
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "console-planned-areas",
+                    "date": "2026-10-22",
+                    "title": "Navigation grouped as Build, Assure, Operate and Administer",
+                    "description": "The console navigation now follows the platform's shape: Build (Projects, Studio, Connections), Assure (scenarios, runners, evaluation runs and release decisions), Operate (Control Room, Human tasks, traces, monitors, incidents and voice sessions) and Administer. Control Room, Connections and Human tasks carry a Planned tag and open a page that says what each will do, what it depends on, what is already built underneath and what to use meanwhile; they show no records and run nothing. A new License page shows the workspace's provisioned trace plan beside the proposed platform editions, services and delegated service access, all labelled as proposals. The console collects no payment.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "automation-introduction",
+                    "date": "2026-10-22",
+                    "title": "An introduction for agent automation",
+                    "description": "The signed-out page now introduces Lotuspond as an enterprise agent automation platform with services, under the headline Agents at work, people in charge. The opening scene draws the synthetic reviewed-action workflow package on the water, where a connector reads a case, an agent proposes an update, a person reviews it and the case is written, and a Pause motion control stops the scene. The page explains the three ways to work with Lotuspond, the assessment, implementation, operations and training services, and the workflow families each workflow is qualified against. A register marks each part of the platform as available, in progress or planned, so Control Room and the production runtime are never presented as shipped. The assurance console preview, the human-control rules and the release gate remain. Four more synthetic example packages (document intake, case approval, knowledge answer and record reconciliation) join the contract examples.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "studio-canvas",
                     "date": "2026-10-15",
                     "title": "The Studio composes workflow packages",

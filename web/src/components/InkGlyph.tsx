@@ -4,7 +4,19 @@ import { useArrival } from '../lib/useArrival.js';
 // The field-record glyphs: broad-nib ink marks on a 64-unit square. Each stroke carries its
 // order (--i) so a glyph draws itself the way a hand would, then its nodes are set down.
 export type GlyphName =
-  'snapshot' | 'trace' | 'seal' | 'pulse' | 'network' | 'enclosure' | 'sealed';
+  | 'snapshot'
+  | 'trace'
+  | 'seal'
+  | 'pulse'
+  | 'network'
+  | 'enclosure'
+  | 'sealed'
+  | 'solo'
+  | 'together'
+  | 'relay'
+  | 'survey'
+  | 'package'
+  | 'handover';
 
 const order = (index: number) => ({ '--i': index }) as CSSProperties;
 const stroke = (d: string, index: number, className = 'ink') => (
@@ -13,6 +25,17 @@ const stroke = (d: string, index: number, className = 'ink') => (
 const node = (cx: number, cy: number, r: number, index: number, className = 'node') => (
   <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={r} className={className} style={order(index)} />
 );
+
+// The platform as the three ways of working draw it: a sage field inside a frame.
+const platform = (index: number) => [
+  <path
+    key="field"
+    d="M34 15 H54 Q59 15 59 20 V44 Q59 49 54 49 H34 Q29 49 29 44 V20 Q29 15 34 15 Z"
+    className="ink-field"
+  />,
+  stroke('M34 15 H54 Q59 15 59 20 V44 Q59 49 54 49 H34 Q29 49 29 44 V20 Q29 15 34 15 Z', index),
+  stroke('M37 39 L44 26 L51 39', index + 1, 'ink ink-fine'),
+];
 
 const glyphs: Record<GlyphName, ReactNode> = {
   // A frozen scenario snapshot: a viewfinder closing around three seeds.
@@ -78,6 +101,49 @@ const glyphs: Record<GlyphName, ReactNode> = {
     stroke('M32 51 V45', 1, 'ink ink-fine'),
     stroke('M13 32 H19', 1, 'ink ink-fine'),
     node(32, 32, 6, 2, 'node node-warm'),
+  ],
+  // On your own: one hand on the platform.
+  solo: [...platform(0), stroke('M14 32 H29', 2), node(9, 32, 4.6, 3, 'node node-warm')],
+  // With our team: two hands on the same platform, one of them ours.
+  together: [
+    ...platform(0),
+    stroke('M13 22 L29 28', 2),
+    stroke('M13 42 L29 36', 2),
+    node(9, 20, 4, 3),
+    node(9, 44, 4.6, 3, 'node node-warm'),
+  ],
+  // Through a partner: the work is handed on, then reaches the platform.
+  relay: [
+    ...platform(0),
+    stroke('M8 28 Q12.5 18 17 28', 2, 'ink ink-fine'),
+    stroke('M23.5 32 H29', 3),
+    node(5, 32, 4, 4),
+    node(19, 32, 4.6, 4, 'node node-warm'),
+  ],
+  // An assessment: a process inventory read through a lens.
+  survey: [
+    stroke('M8 16 H36', 0),
+    stroke('M8 28 H30', 1, 'ink ink-fine'),
+    stroke('M8 40 H24', 2, 'ink ink-fine'),
+    stroke('M40 26 A12 12 0 1 1 39.99 26', 3),
+    stroke('M48.5 46.5 L57 55', 4),
+    node(40, 38, 4, 5, 'node node-warm'),
+  ],
+  // An implementation: the process sealed into a package.
+  package: [
+    <path key="field" d="M10 26 L32 14 L54 26 L32 38 Z" className="ink-field" />,
+    stroke('M10 26 L32 14 L54 26 L32 38 Z', 0),
+    stroke('M10 26 V46 L32 58 L54 46 V26', 1),
+    stroke('M32 38 V58', 2, 'ink ink-fine'),
+    node(32, 26, 4.6, 3, 'node node-warm'),
+  ],
+  // Training and enablement: what one side knows, carried across to the other.
+  handover: [
+    stroke('M6 54 H58', 0, 'ink ink-fine'),
+    stroke('M12 44 Q32 4 52 44', 1),
+    node(12, 44, 4, 2),
+    node(52, 44, 4, 2),
+    node(32, 24, 4.6, 3, 'node node-warm'),
   ],
 };
 

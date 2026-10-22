@@ -19,7 +19,8 @@ import {
   saveOrganizationDraft,
 } from './lib/registration.js';
 import { AuthenticatorPolicy } from './components/AuthenticatorPolicy.js';
-import { billingView, type Billing } from './lib/billing.js';
+import { type Billing } from './lib/billing.js';
+import { BillingCard } from './components/BillingCard.js';
 import {
   authenticatorRequirement,
   type AuthenticatorPolicy as AuthenticatorPolicyState,
@@ -41,6 +42,9 @@ import { Icon } from './components/console/icons.js';
 import { allPages, navigation, pageLabel } from './components/console/navigation.js';
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
+import { License } from './pages/License.js';
+import { Planned } from './pages/Planned.js';
+import { plannedArea } from './lib/roadmap.js';
 
 // The Studio carries the canvas and the contract validator, so it loads when first opened.
 const Studio = lazy(() =>
@@ -702,6 +706,10 @@ export function App({
             />
           ) : page === 'changelog' ? (
             <Changelog />
+          ) : page === 'license' ? (
+            <License key={workspace} workspace={workspace} />
+          ) : plannedArea(page) ? (
+            <Planned area={plannedArea(page)!} />
           ) : definitions[page] ? (
             <Resource
               key={`${page}-${workspace}`}
@@ -853,15 +861,16 @@ function Welcome({
       {initialError && <Alert>{initialError}</Alert>}
       <main className="welcome-grid auth-active">
         <section>
-          <p className="eyebrow">Agent release assurance</p>
+          <p className="eyebrow">Enterprise agent automation</p>
           {/* A tagline, not a heading: the form's "Welcome back" is this page's one h1. */}
           <p className="hero-title">
-            Release agents
-            <br /> on the record.
+            Agents at work,
+            <br /> people in charge.
           </p>
           <p className="lede">
-            Evaluate every candidate against frozen scenarios, apply a policy no one can quietly
-            edit, and keep the reasons behind each release decision.
+            Put AI agents to work in real business processes, with rules where rules suffice and
+            people where accountability belongs. Agent testing, release decisions, production
+            evidence and a Studio for workflow packages are available today.
           </p>
           <button
             className="text-button"
@@ -1693,35 +1702,6 @@ function RecordForm({
   );
 }
 
-function BillingCard({ billing }: { billing?: Billing }) {
-  if (!billing) return null;
-  const view = billingView(billing);
-  return (
-    <section className="panel">
-      <h2>Plan and allowance</h2>
-      <p>
-        <StatusBadge value={view.plan} />{' '}
-        <StatusBadge
-          value={
-            view.state === 'exhausted'
-              ? 'exhausted'
-              : view.state === 'nearly'
-                ? 'nearly used'
-                : 'within allowance'
-          }
-        />
-      </p>
-      <p>{view.allowance}</p>
-      <p className="hint">{view.retention}</p>
-      <p className="hint">{billing.payment.message}</p>
-      <p className="hint">
-        A workspace administrator cannot change this plan. Ask your Lotuspond operator to provision
-        a different one.
-      </p>
-    </section>
-  );
-}
-
 function Settings({
   workspace,
   role,
@@ -1773,7 +1753,7 @@ function Settings({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Workspace</p>
+          <p className="eyebrow">Administer</p>
           <h1>Settings</h1>
           <p>Manage your workspace name, access policy, and model usage budget.</p>
         </div>

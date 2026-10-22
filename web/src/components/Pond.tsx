@@ -26,16 +26,26 @@ type Scene = {
   pads: Pad[];
 };
 
+// Each pad is [x, depth, size] as shares of the scene. The first one ripples.
+export type PadLayout = readonly (readonly [x: number, depth: number, size: number])[];
+
 // Pads sit toward the edges so they never sit under the reading column on wide screens.
-const padLayout = [
+const edgePads: PadLayout = [
   [0.9, 0.2, 0.05],
   [0.97, 0.52, 0.075],
   [0.66, 0.1, 0.028],
   [0.03, 0.82, 0.085],
   [0.78, 0.8, 0.07],
-] as const;
+];
 
-function compose(width: number, height: number, horizon: number, sunX: number, sunR: number) {
+function compose(
+  width: number,
+  height: number,
+  horizon: number,
+  sunX: number,
+  sunR: number,
+  padLayout: PadLayout,
+) {
   const random = seeded(1847);
   const depth = Math.max(1, height - horizon);
   const water: Stroke[] = [];
@@ -237,6 +247,8 @@ export function Pond({
   title,
   eyebrow,
   className = '',
+  pads = edgePads,
+  paused = false,
   children,
 }: {
   as?: 'h1' | 'h2';
@@ -244,6 +256,9 @@ export function Pond({
   title: string;
   eyebrow?: ReactNode;
   className?: string;
+  pads?: PadLayout;
+  // Holds the current frame, for a reader who has asked the motion to stop.
+  paused?: boolean;
   children?: ReactNode;
 }) {
   const filterId = `pond-ripple-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -254,9 +269,16 @@ export function Pond({
   const sun = useRef<HTMLSpanElement>(null);
   const turbulence = useRef<SVGFETurbulenceElement>(null);
   const displacement = useRef<SVGFEDisplacementMapElement>(null);
+  const halted = useRef(paused);
+  const resume = useRef<() => void>(() => undefined);
   const split = title.lastIndexOf(' ') + 1;
   const lead = title.slice(0, split);
   const last = title.slice(split);
+
+  useEffect(() => {
+    halted.current = paused;
+    resume.current();
+  }, [paused]);
 
   useEffect(() => {
     const root = stage.current;
@@ -297,6 +319,7 @@ export function Pond({
         place.top + disc.offsetHeight,
         place.left + disc.offsetWidth / 2,
         disc.offsetWidth / 2,
+        pads,
       );
     }
 
@@ -329,7 +352,8 @@ export function Pond({
     }
 
     function schedule() {
-      if (frame || !visible || still.matches || document.visibilityState !== 'visible') return;
+      if (frame || !visible || halted.current || still.matches) return;
+      if (document.visibilityState !== 'visible') return;
       frame = requestAnimationFrame(loop);
     }
 
@@ -339,6 +363,7 @@ export function Pond({
       schedule();
     }
 
+    resume.current = schedule;
     const resize = new ResizeObserver(refresh);
     resize.observe(root);
     const view = new IntersectionObserver(
@@ -362,12 +387,13 @@ export function Pond({
     void document.fonts?.ready.then(refresh);
     return () => {
       cancelAnimationFrame(frame);
+      resume.current = () => undefined;
       resize.disconnect();
       view.disconnect();
       document.removeEventListener('visibilitychange', schedule);
       still.removeEventListener('change', refresh);
     };
-  }, []);
+  }, [pads]);
 
   const words = (anchor?: typeof sun) => (
     <span className="pond-title-text">

@@ -2320,3 +2320,151 @@ label:has(textarea:not(.code-input)) textarea {
 .operations-worker .badge {
   white-space: normal;
 }
+
+/* Planned areas in the navigation -------------------------------------------------- */
+.nav-tag {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 17px;
+}
+
+/* Planned areas -------------------------------------------------------------------- */
+.planned h1 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.planned-note {
+  margin-bottom: 20px;
+  padding: 10px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: #fcfcfb;
+  font-size: 13.5px;
+}
+.planned-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.planned-grid .panel {
+  margin: 0;
+}
+.planned-grid h3 {
+  margin: 16px 0 4px;
+  font-size: 13.5px;
+}
+.planned-list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+}
+.planned-list li {
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+.planned-today {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.planned-today li {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.planned-today li:first-child {
+  border-top: 0;
+}
+.planned-today span {
+  color: var(--muted);
+}
+
+/* License -------------------------------------------------------------------------- */
+.license > section {
+  margin-bottom: 24px;
+}
+.license-heading {
+  margin: 8px 0 10px;
+  font-size: 16px;
+}
+.license-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.license-section-head h2 {
+  margin-bottom: 8px;
+}
+.license-lede {
+  max-width: 82ch;
+  margin-bottom: 14px;
+}
+.license-editions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.license-editions .panel {
+  margin: 0;
+  border-style: dashed;
+  border-color: var(--line-strong);
+}
+.license-editions h3 {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+.license-use {
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.license-editions p:last-child,
+.license-services dd {
+  font-size: 13.5px;
+}
+.license-services {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 0 0 16px;
+}
+.license-services dt {
+  margin-bottom: 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.license-services dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 1080px) {
+  .license-editions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 860px) {
+  .planned-grid,
+  .license-services {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .planned-today li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}

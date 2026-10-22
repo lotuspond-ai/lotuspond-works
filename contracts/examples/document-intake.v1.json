@@ -1,0 +1,116 @@
+{
+  "schema_version": "lotuspond.workflow-package.v1",
+  "package_id": "document-intake",
+  "version": "1.0.0",
+  "name": "Synthetic document intake pattern",
+  "entry_node": "start",
+  "models": [
+    {
+      "id": "reasoner",
+      "profile": "primary-model",
+      "revision": "2026-10-15"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "document-source",
+      "connector": "synthetic-document-store",
+      "version": "1.0.0",
+      "secret_ref": "document-credential",
+      "operations": ["read-document"]
+    },
+    {
+      "id": "records-system",
+      "connector": "synthetic-records-system",
+      "version": "1.0.0",
+      "secret_ref": "records-credential",
+      "operations": ["create-record"]
+    }
+  ],
+  "secret_refs": [
+    {
+      "id": "document-credential"
+    },
+    {
+      "id": "records-credential"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "start"
+    },
+    {
+      "id": "read",
+      "kind": "connector",
+      "connector_ref": "document-source",
+      "operation": "read-document"
+    },
+    {
+      "id": "extract",
+      "kind": "agent",
+      "model_ref": "reasoner",
+      "instructions": "Extract the fields the synthetic intake form declares. Cite the page each value came from and mark any field you cannot find as missing.",
+      "limits": {
+        "max_steps": 6,
+        "timeout_seconds": 120,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 1500,
+        "max_cost_microusd": 200000
+      }
+    },
+    {
+      "id": "check",
+      "kind": "agent",
+      "model_ref": "reasoner",
+      "instructions": "Compare the extracted fields with the declared validation rules. List every exception with the rule it breaks; do not correct values.",
+      "limits": {
+        "max_steps": 6,
+        "timeout_seconds": 120,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 1500,
+        "max_cost_microusd": 200000
+      }
+    },
+    {
+      "id": "review",
+      "kind": "human_review"
+    },
+    {
+      "id": "create",
+      "kind": "connector",
+      "connector_ref": "records-system",
+      "operation": "create-record"
+    },
+    {
+      "id": "end",
+      "kind": "end"
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "read"
+    },
+    {
+      "source": "read",
+      "target": "extract"
+    },
+    {
+      "source": "extract",
+      "target": "check"
+    },
+    {
+      "source": "check",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "create"
+    },
+    {
+      "source": "create",
+      "target": "end"
+    }
+  ]
+}
