@@ -1244,6 +1244,15 @@ tbody tr:hover td {
 .home-grid .panel > .text-button {
   margin-top: auto;
 }
+.home-studio {
+  grid-column: 1 / -1;
+}
+.home-studio .hint {
+  max-width: 82ch;
+}
+.home-studio .inline-actions {
+  margin: 4px 0 0;
+}
 .activity {
   width: 100%;
   margin: 0 0 12px;

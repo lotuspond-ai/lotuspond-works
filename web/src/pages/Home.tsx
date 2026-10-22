@@ -167,6 +167,23 @@ export function Home({
       )}
 
       <div className="home-grid">
+        <section className="panel home-studio" aria-labelledby="studio-title">
+          <h2 id="studio-title">Design a workflow</h2>
+          <p className="hint">
+            Studio composes a workflow package: the systems it reads and writes, agent steps with
+            hard limits, and where a person reviews. Start from a synthetic pattern such as document
+            intake or case approval, or from a blank workflow. Nothing in the Studio runs a
+            workflow.
+          </p>
+          <div className="inline-actions">
+            <button type="button" className="secondary" onClick={() => requestCreate('studio')}>
+              New workflow
+            </button>
+            <a className="text-button" href="#studio">
+              Open Studio
+            </a>
+          </div>
+        </section>
         <section className="panel" aria-labelledby="activity-title">
           <h2 id="activity-title">Recent activity</h2>
           {activityError ? (

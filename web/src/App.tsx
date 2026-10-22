@@ -252,6 +252,7 @@ const projectScoped = [
 // Records a reader can create from the command palette, with the verb the page uses.
 const creatable: Record<string, string> = {
   projects: 'Create project',
+  studio: 'New workflow',
   scenarios: 'Add scenario',
   runners: 'Register runner',
   runs: 'Start evaluation run',

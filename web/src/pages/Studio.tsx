@@ -49,6 +49,7 @@ import {
   type StoredDraft,
 } from '../lib/studioDrafts.js';
 import { nextFreeVersion, publication, sameContent } from '../lib/studioVersions.js';
+import { CREATE_REQUESTED, takeCreateRequest } from '../lib/setup.js';
 
 type PackageVersion = {
   id: string;
@@ -101,6 +102,9 @@ export function Studio({
   const [versionsRefresh, setVersionsRefresh] = useState(0);
   const publishKey = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const startHeading = useRef<HTMLHeadingElement>(null);
+  // "New workflow" from Home or the palette opens the list at the pattern chooser.
+  const [startRequested, setStartRequested] = useState(() => takeCreateRequest('studio'));
   const canWrite = role !== 'viewer';
   const openEntry = shelf?.open ? shelf.drafts.find((entry) => entry.id === shelf.open) : undefined;
   const draft = shelf === undefined ? undefined : (openEntry?.draft ?? null);
@@ -202,6 +206,23 @@ export function Studio({
     void loadVersions(controller.signal);
     return () => controller.abort();
   }, [loadVersions, versionsRefresh]);
+
+  useEffect(() => {
+    const hear = () => {
+      if (takeCreateRequest('studio')) setStartRequested(true);
+    };
+    window.addEventListener(CREATE_REQUESTED, hear);
+    return () => window.removeEventListener(CREATE_REQUESTED, hear);
+  }, []);
+  useEffect(() => {
+    if (!startRequested || shelf === undefined) return;
+    if (shelf.open) {
+      showDraft(null);
+      return;
+    }
+    startHeading.current?.focus();
+    setStartRequested(false);
+  }, [startRequested, shelf]);
 
   const change = (update: (current: Draft) => Draft) =>
     setShelf((current) => {
@@ -465,6 +486,7 @@ export function Studio({
           />
         )}
         <PatternChooser
+          headingRef={startHeading}
           fullNote={full ? fullNote : ''}
           onStart={(next, label) => startDraft(next, `Started a draft from ${label}.`)}
           onOpenFile={() => fileInput.current?.click()}
