@@ -4,6 +4,7 @@ import { Alert, RelativeTime, SectionHeader } from '../components/ui.js';
 import { StudioCanvas, type Selection } from '../components/studio/StudioCanvas.js';
 import { StudioInspector } from '../components/studio/StudioInspector.js';
 import { PatternChooser } from '../components/studio/PatternChooser.js';
+import { StudioStages } from '../components/studio/StudioStages.js';
 import {
   jsonBoundsProblem,
   readPackage,
@@ -445,6 +446,7 @@ export function Studio({
           aria-hidden="true"
           onChange={importFile}
         />
+        <StudioStages />
         <VersionsSection
           projectId={projectId}
           projectName={projectName}

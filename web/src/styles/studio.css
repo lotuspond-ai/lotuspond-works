@@ -619,6 +619,55 @@
   white-space: nowrap;
 }
 
+/* Where a package goes after the canvas: available stages, then planned ones. */
+.studio-stages {
+  margin-top: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.studio-stages h2 {
+  margin-bottom: 14px;
+}
+.studio-stage-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.studio-stage-list li {
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line-strong);
+}
+.studio-stage-list li[data-state='planned'] {
+  border-top-style: dashed;
+}
+.studio-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.studio-stage-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.studio-stage-number {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.studio-stage-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
 /* Starting a draft: the synthetic patterns from contracts/examples, then a blank workflow. */
 .studio-start {
   margin: 0 0 24px;
@@ -693,7 +742,8 @@
   .studio-workbench {
     grid-template-columns: 1fr;
   }
-  .studio-patterns {
+  .studio-patterns,
+  .studio-stage-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -717,7 +767,8 @@
   .studio-connect {
     grid-template-columns: 1fr;
   }
-  .studio-patterns {
+  .studio-patterns,
+  .studio-stage-list {
     grid-template-columns: minmax(0, 1fr);
   }
 }
