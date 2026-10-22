@@ -294,6 +294,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "studio-patterns-and-drafts",
+                    "date": "2026-10-22",
+                    "title": "Studio patterns, named drafts and version help",
+                    "description": "A new Studio draft can start from five synthetic patterns from the package contract (document intake, case approval, knowledge answer, record reconciliation and reviewed action) or a blank workflow. The Studio keeps up to 20 named drafts per workspace and project in your browser, listed with their admission state, and opening a file or a published version adds a draft instead of replacing one. A From draft to production list shows that composing, checking, publishing and agent evaluation are available while deployment and operation are planned. When the project already holds the draft's version, the Studio says whether the content is the same, and if it differs it disables Publish and offers the next free version; the registry still decides. Published versions with the open draft's exact content are marked. Home and the command palette gain New workflow. Drafts never leave the browser until published, and nothing in the Studio runs a workflow.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "console-planned-areas",
                     "date": "2026-10-22",
                     "title": "Navigation grouped as Build, Assure, Operate and Administer",

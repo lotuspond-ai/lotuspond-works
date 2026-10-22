@@ -69,3 +69,6 @@ registry API, adds no routes, schema or authority, and composes v1 packages only
 executable-v2 authoring, Control Room and execution remain open. Keep
 `web/src/lib/packageContract.ts` in step with `sdk/python/src/lotuspond_sdk/contract.py`;
 `web/src/lib/packageContract.test.ts` quotes the SDK source and pins the example digest.
+Studio patterns are the synthetic v1 files in `contracts/examples/`; add a pattern there, never
+as a browser-only definition (`web/src/lib/studioPatterns.test.ts` pins each CLI digest). Drafts
+stay in browser storage; the Studio's version-conflict help only foresees the registry's answer.
