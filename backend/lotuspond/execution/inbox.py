@@ -26,6 +26,7 @@ from .authorization import lock, reauthorize, record, scoped
 from .contracts import SignalReceipt, SignalRequest, canonical_value
 from .deployments import _body_steps
 from .errors import ExecutionError, execution_service
+from .orchestrator import mark_runnable
 
 
 class InboxService:
@@ -164,17 +165,17 @@ class InboxService:
         )
         db.add(row)
         db.flush()
-        db.add(
-            ExecutionOutbox(
-                **actor.scope.model_dump(),
-                execution_id=execution.id,
-                message_id=row.id,
-                kind="engine_signal",
-                digest=digest,
-                available_at_ms=database_now_ms(db),
-            )
+        wakeup = ExecutionOutbox(
+            **actor.scope.model_dump(),
+            execution_id=execution.id,
+            message_id=row.id,
+            kind="engine_signal",
+            digest=digest,
+            available_at_ms=database_now_ms(db),
         )
+        db.add(wakeup)
         db.flush()
+        mark_runnable(db, execution, wakeup.available_at_ms)
         current()
         return SignalReceipt(id=row.id, status=row.status)
 

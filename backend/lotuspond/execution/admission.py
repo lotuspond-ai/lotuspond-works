@@ -30,6 +30,7 @@ from .authorization import lock, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
 from .deployments import _configuration, _pool, _stored_configuration, load_deployment
 from .errors import ExecutionError, execution_service
+from .orchestrator import mark_runnable
 from .publication import current_snapshot, load_publication
 
 
@@ -188,6 +189,7 @@ class AdmissionService:
             )
         )
         db.flush()
+        mark_runnable(db, row, admitted_at)
         # Later key/reservation/provider waits must not extend any authority/deadline.
         self.budgets._final(db, actor, revision, grant, tenant, recovery, row)
         self.artifacts._current_time(db, self.policy, None)

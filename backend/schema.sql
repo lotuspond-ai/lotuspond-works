@@ -1304,6 +1304,7 @@ CREATE TABLE executions (
 	workspace_id VARCHAR(36) NOT NULL,
 	id VARCHAR(36) NOT NULL,
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	runnable_at_ms BIGINT,
 	PRIMARY KEY (id),
 	FOREIGN KEY(workspace_id, project_id, environment_id, deployment_revision_id) REFERENCES execution_deployment_revisions (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, initiating_api_key_id) REFERENCES api_keys (workspace_id, id),
@@ -1321,6 +1322,8 @@ CREATE TABLE executions (
 	CHECK (length(admission_digest) = 64),
 	CHECK (admission_sequence BETWEEN 1 AND 9007199254740991),
 	UNIQUE (workspace_id, project_id, environment_id, admission_sequence),
+	CONSTRAINT executions_runnable_at_ms_check CHECK (runnable_at_ms BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT executions_runnable_terminal_check CHECK (runnable_at_ms IS NULL OR state NOT IN ('succeeded','failed','cancelled')),
 	UNIQUE (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
 	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
@@ -1849,9 +1852,13 @@ CREATE INDEX execution_artifact_retention_idx ON execution_artifacts (workspace_
 
 CREATE INDEX execution_deadline_idx ON executions (state, deadline_ms, id);
 
+CREATE INDEX execution_delivery_due_idx ON execution_activity_deliveries (expires_at_ms, id) WHERE status = 'pending';
+
 CREATE INDEX execution_delivery_retention_idx ON execution_activity_deliveries (workspace_id, project_id, environment_id, retain_until_ms, id);
 
 CREATE INDEX execution_inbox_queue_idx ON execution_inbox (workspace_id, project_id, environment_id, status, available_at_ms, id);
+
+CREATE INDEX execution_lease_due_idx ON execution_leases (expires_at_ms, id) WHERE status = 'active';
 
 CREATE INDEX execution_lease_expiry_idx ON execution_leases (workspace_id, project_id, environment_id, status, expires_at_ms, id);
 
@@ -1859,7 +1866,11 @@ CREATE INDEX execution_outbox_queue_idx ON execution_outbox (workspace_id, proje
 
 CREATE INDEX execution_queue_idx ON executions (workspace_id, project_id, environment_id, state, admission_sequence, id);
 
+CREATE INDEX execution_runnable_idx ON executions (interpreter_id, runnable_at_ms, id) WHERE runnable_at_ms IS NOT NULL;
+
 CREATE INDEX execution_wait_deadline_idx ON execution_waits (workspace_id, project_id, environment_id, state, deadline_ms, id);
+
+CREATE INDEX execution_wait_due_idx ON execution_waits (deadline_ms, id) WHERE state = 'open';
 
 CREATE INDEX gateway_usage_workspace_created ON gateway_usage (workspace_id, created_at);
 
@@ -2059,6 +2070,6 @@ CREATE INDEX runtime_pool_policies_inventory_idx ON runtime_pool_policies (works
 
 CREATE INDEX sessions_mfa_factor_idx ON sessions (user_id, mfa_factor_id, mfa_factor_version);
 
-INSERT INTO schema_version (version, installed_at) VALUES (14, CURRENT_TIMESTAMP);
+INSERT INTO schema_version (version, installed_at) VALUES (15, CURRENT_TIMESTAMP);
 
 COMMIT;

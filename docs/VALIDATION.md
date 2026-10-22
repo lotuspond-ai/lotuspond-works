@@ -325,7 +325,6 @@ Reports: `output/airgap/local-v11-install-report.json`, `output/airgap/lotuspond
 
 The separate `codex/package-registry` increment extends foundation `c1da02edcb3fb4db57f63a8e403db8e379cf5a2a`. See [registry validation and migration evidence](plans/2026-10-13-package-registry-progress.md) for the restored cloud baseline, exact commands, independent review and limitations. Cloud tests, GitHub publication/CI and deployment remain separate states.
 
-
 ## Connections and runtime identity (E03)
 
 See [the E03 qualification record](validation/2026-10-14-connections-fleet.md) for
@@ -342,3 +341,35 @@ Branch `codex/durable-execution`. Hosted run `38731740438` at `7bbb92d` failed o
 The same 998 tests completed in hosted run `38734866955` (stacked Studio head `e9ff15b`): `998 passed, 1 warning, 97 subtests passed in 1762.94s (0:29:22)`, after which the bound stopped the runner smoke. Compared at the last common test, the slower runners of `38731740438` and `38732845075` were 1.15× and 1.27× slower, projecting 34.0 and 37.4 minutes of pytest. The step bound is now 60 minutes: at least 1.5× the slowest projection, and still a hang bound far below the job's six-hour default. Tests, database guards, owned-schema cleanup, the runner smoke and every retained artifact path, including `fleet-report.json`, are unchanged; nothing is skipped, sharded or reordered. Faster owned-schema fixtures or a split step were not chosen because they change the qualification harness while E04 is still in progress. Later E04 tasks add tests, so revisit the bound from hosted `--durations` output rather than raising it again.
 
 Hosted result at correction head `592fdd4`: run `39739131739` passed every job. The required step took 30 min 41 s, so the old bound would have stopped it again. It reported `998 passed, 1 warning, 97 subtests passed in 1784.93s (0:29:44)`, then the runner smoke reported all seven cases true, cleanup confirmed, no external network and schema version 14. The retained `fleet-postgres-python-3.14` artifact holds 124 files, including six `fleet-report.json` reports. On the stacked Studio head `abe7696` (run `39739133362`), the same step took 39 min 26 s on a slower runner (`2310.62s (0:38:30)` of pytest) and also passed, which leaves about 1.5× headroom against the slowest observed run. This is hosted CI evidence at those heads, not deployment.
+
+## E04 Task 7: PostgreSQL orchestration claim, schema v15 and worker, 2026-10-23
+
+Branch `claude/e04-postgresql-impl` from `7b3a0c7` (PR #13's recorded owner approval of Revision 2). Local evidence only: not pushed, no hosted CI and no deployment.
+
+**Environment.** A private disposable PostgreSQL 14.20 cluster (Homebrew, macOS arm64) on `127.0.0.1:55471`, TCP only, with its own data directory and the `lotuspond_platform_test` database. Its `TimeZone` is UTC to match CI's container. No other cluster, port 5432, port 55439 or development database was used. Python 3.14.3. CI runs PostgreSQL 18.6; the frozen v14 check-constraint texts in `migration.py` were captured on 14 and use the same forms as the v13 texts that already pass there, so hosted CI must confirm them.
+
+**Red before implementation.** The new tests were copied onto unmodified `7b3a0c7`. The contract, orchestrator and worker tests failed at collection because `engine_contracts`, `orchestrator` and `execution_worker` did not exist. The v15 migration tests failed: the initializer refused a v14 database as already current, and `migrate_execution_v15` was missing.
+
+**Green after implementation:**
+
+- The named Task 7 tests in `test_engine_contracts.py`, `test_orchestrator.py` and `test_execution_worker.py`: 28 passed. `test_migration_v15.py` with the existing `test_migration.py`, `test_admission.py`, `test_inbox.py` and `test_outbox.py`: 124 passed. `tests/test_migrations.py` and `tests/fleet/test_migration.py`: 68 passed. No database skips.
+- The full backend suite against the same cluster (`pytest -q`, 1,047 tests): 1,039 passed and 8 failed in 1,035 s. All 8 failures are in `tests/fleet/test_acceptance.py`. Its harness refuses non-Linux hosts on purpose (`lotuspond_runtime.state.private_directory` returns `unsafe_storage`), so these tests run only in CI's Linux job. This run used the content before the last review round; that round's engine and test fixes were then rerun with the targeted sets above.
+- **Measured.** A worker stopped with SIGSTOP while holding an execution row was ended by `idle_in_transaction_session_timeout` (5 s in the test), and a second worker claimed the execution 4.998 s after the stop. A worker stuck inside a transition exited through the shutdown bound with code 3 after 2.047 s (bound 2 s). Cleanup of the owned sessions was observed in `pg_stat_activity`.
+- Ruff is clean and `export_schema.py --check` matches `schema.sql` at version 15.
+
+**Reviews.**
+
+- The independent specification review approved Task 7 with seven minor findings. All were fixed and the reviewer confirmed them.
+- The independent quality review required changes for two liveness defects:
+  - The workspace `FOR KEY SHARE` lock waited on API transactions, so one tenant could stall every claim.
+  - A pending capacity step, or a pass that made no progress, re-marked the execution due at once and spun the worker.
+
+  Both were fixed, and the re-review passed. Its last minor findings were fixed too: continuation after progress with a non-capacity reason, back-off for repeated capacity refusals, and two test hazards.
+
+**Proposed for the owner's acknowledgement** (marked in the plan):
+
+- Locked workspaces are skipped like locked executions. The cost is that a tenant with continuous traffic can have its own executions skipped repeatedly; Task 13 tier 3 measures this.
+- Work that made no progress is re-marked only after back-off.
+- A new `apply_capacity` interface for Task 8.
+
+**Pre-existing, out of scope.** On unmodified `7b3a0c7`, 7 tests (3 in `test_assurance.py`, 4 in `test_entitlement.py`) fail when the PostgreSQL session time zone is not UTC and pass with UTC. Release-binding evidence compares timestamps serialized in different time zones.

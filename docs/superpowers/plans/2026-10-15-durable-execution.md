@@ -215,7 +215,7 @@ It alters no other column, constraint or row.
 4. applies at most 64 pure transitions;
 5. writes rows and events, and commits.
 
-No network or provider call happens inside it. The worker's database role sets `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`, initially 15 s, so a stalled worker's transaction is ended and rolled back. Tokened leases exist only for runtime activity attempts.
+**Amendment proposed in Task 7's review, for the owner's acknowledgement:** a candidate whose workspace row is locked is skipped like a locked execution, so one tenant's API transaction cannot stall claims elsewhere. The known cost is that a tenant with continuous admission, signal or reservation traffic can have its due executions skipped repeatedly; Task 13 tier 3 measures this alongside owner decision 6. Work that made no progress (a refused transition, a pending capacity step or an empty pass) is marked due again only after a back-off, never immediately; repeated refusals back off exponentially per worker up to 60 s, and Task 11's reconciliation fences executions that keep failing. No network or provider call happens inside it. The worker's database role sets `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout`, initially 15 s, so a stalled worker's transaction is ended and rolled back. Tokened leases exist only for runtime activity attempts.
 
 **Orchestrator lock order.** A pure transition never acquires the installation cursor, environment capacity, runtime pool, connection or usage-reservation rows. Some transitions change capacity counters: retaining or releasing wait quota, and releasing pending or active counts at a terminal state. Those run through Task 5 services in a separate transaction that follows Task 5's documented order from the installation cursor, acting for the execution's initiating principal after current reauthorization, exactly as `Scheduler.schedule_batch` does. When such a transition is next, the pure transaction leaves the execution runnable with reason `capacity`. PostgreSQL deadlock tests race orchestrator transitions with admission, reservation, renewal, revocation and cancellation.
 
@@ -223,7 +223,8 @@ No network or provider call happens inside it. The worker's database role sets `
 
 - `load_progression(db, execution, region_path) -> ProgressionState`, which reads only the affected region occurrence's committed step, attempt, wait and inbox rows;
 - pure `next_actions(plan: CompiledPlan, state: ProgressionState, now_ms: int) -> tuple[Action, ...]`;
-- `advance_execution(db, worker, execution, *, bound=64) -> AdvanceOutcome`.
+- `advance_execution(db, worker, execution, *, bound=64) -> AdvanceOutcome`;
+- `apply_capacity(db, worker, execution_id) -> AdvanceOutcome` (amendment proposed in Task 7's review, for the owner's acknowledgement). The engine calls it in its own transaction after a pure transaction returns `runnable` with reason `capacity`. It enters Task 5's order from the installation cursor before locking the execution and must be idempotent, because another orchestrator may run the same step concurrently. Its `transitions` count is the number of capacity changes made; only a nonzero count makes the execution due again at once.
 
 `Action` is a closed union of `RecordPure`, `CreateAttempt`, `OpenWait`, `ConsumeSignal`, `CancelUndispatched`, `Complete` and `Fail`. The pure function never reads a clock, randomness, environment, network or provider; it receives database time as `now_ms`. Applying the same actions twice creates no rows, because the unique occurrence-path and attempt-ordinal keys of v14 make repeats no-ops.
 

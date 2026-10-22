@@ -23,6 +23,7 @@
     "worker": "node --env-file-if-exists=.env scripts/python.mjs worker",
     "worker:alerts": "node --env-file-if-exists=.env scripts/python.mjs alert-worker",
     "worker:mail": "node --env-file-if-exists=.env scripts/python.mjs mail-worker",
+    "worker:execution": "node --env-file-if-exists=.env scripts/python.mjs execution-worker",
     "test:database": "node scripts/python.mjs test-database",
     "db:start": "node scripts/database.mjs start",
     "db:stop": "node scripts/database.mjs stop",

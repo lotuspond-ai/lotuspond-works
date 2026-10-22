@@ -189,7 +189,7 @@ def main():
     cases = {}
     try:
         for package, version in (
-            ("lotuspond-api", "0.2.0"),
+            ("lotuspond-api", "0.3.0"),
             ("lotuspond-runtime", "0.1.0"),
             ("lotuspond-sdk", "0.3.0"),
         ):
@@ -229,7 +229,7 @@ def main():
         with engine.connect() as db:
             after = legacy.rows(db)
             assert all(after[key] == value for key, value in before.items())
-            assert db.scalar(select(models.SchemaVersion.version)) == 14
+            assert db.scalar(select(models.SchemaVersion.version)) == 15
         cases["v12_upgrade_preserves_environment_evaluation_registry_mfa"] = "passed"
         recovery, records, dispatch, trust = (
             Recovery(),
