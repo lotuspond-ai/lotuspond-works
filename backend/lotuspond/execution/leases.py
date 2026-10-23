@@ -15,6 +15,7 @@ changes no counter and enters at the workspace.
 from hashlib import sha256
 
 from lotuspond_runtime.activity_protocol import MAX_LEASE_MS, ActivityLease
+from lotuspond_runtime.errors import FleetError
 from lotuspond_sdk.activity import UsageObservation
 from sqlalchemy import select
 
@@ -26,6 +27,7 @@ from ..models import (
     ExecutionCapacity,
     ExecutionLease,
     ExecutionReconciliationObservation,
+    ExecutionRequest,
     ExecutionStepInstance,
     ExecutionUsageReservation,
     Workspace,
@@ -37,8 +39,15 @@ from .errors import ExecutionError
 from .orchestrator import TERMINAL, mark_runnable
 from .progression import record_event
 
+# One row per declined delivery: makes an equal repeated decline a no-op.
+DECLINE_PREFIX = "activity.decline:"
+
 
 class LeaseService:
+    # A runtime's declines per minute: even a broken or hostile runtime cannot fail
+    # work much faster than unclaimed deliveries expiring would.
+    DECLINES_PER_MINUTE = 6
+
     def __init__(self, activities):
         if activities is None:
             raise ValueError("Activity service required")
@@ -65,7 +74,7 @@ class LeaseService:
         except Exception:
             raise ExecutionError("recovery_unavailable") from None
 
-    def _event(self, db, execution, epoch, code, attempt_id, detail=None):
+    def _event(self, db, execution, epoch, code, attempt_id, detail=None, origin="sweeper"):
         a = self.activities
         record_event(
             db,
@@ -78,7 +87,7 @@ class LeaseService:
             path=None,
             attempt_id=attempt_id,
             detail=detail,
-            origin="sweeper",
+            origin=origin,
         )
 
     @activity_service
@@ -215,15 +224,27 @@ class LeaseService:
             db, scope, execution, attempt, reservation, "expired:" + delivery.id, now, epoch
         )
 
-    def _fail_unstarted(self, db, scope, execution, attempt, reservation, identifier, now, epoch):
+    def _fail_unstarted(
+        self,
+        db,
+        scope,
+        execution,
+        attempt,
+        reservation,
+        identifier,
+        now,
+        epoch,
+        *,
+        code="timeout_before_dispatch",
+        detail="timeout_before_dispatch",
+        source="sweeper",
+    ):
         """Fail an attempt that never started; zero usage, compute stop, due again.
 
         The caller holds the cursor, workspace, capacity, execution and attempt rows.
         """
         a = self.activities
-        handle = a.artifacts._put_internal(
-            db, scope, failure_content("timeout_before_dispatch", now), a.policy
-        )
+        handle = a.artifacts._put_internal(db, scope, failure_content(code, now), a.policy)
         attempt.result_artifact_id = handle.id
         attempt.result_artifact_version = handle.version
         attempt.result_sha256 = handle.sha256
@@ -242,7 +263,7 @@ class LeaseService:
                 **scope.model_dump(),
                 execution_id=execution.id,
                 attempt_id=attempt.id,
-                source_id="sweeper",
+                source_id=source,
                 observation_id=identifier,
                 digest=sha256(identifier.encode()).hexdigest(),
                 code="compute_stopped",
@@ -251,11 +272,75 @@ class LeaseService:
             db.add(observation)
             db.flush()
             self.budgets.confirm_stopped(db, attempt.id, observation.id)
-        self._event(
-            db, execution, epoch, "attempt_failed", attempt.id, detail="timeout_before_dispatch"
-        )
+        self._event(db, execution, epoch, "attempt_failed", attempt.id, detail, origin=source)
         if execution.state not in TERMINAL:
             mark_runnable(db, execution, now)
+
+    @activity_service
+    def decline_activity(self, db, principal, delivery_id: str, digest: str) -> None:
+        """A runtime refuses a delivery it cannot verify, so it stops heading its polls.
+
+        Owner-approved addition beyond E04 (see the plan). Only the session the
+        delivery was dispatched to may decline it, by its exact stored digest, while
+        it is pending and unclaimed: an altered or forged envelope declines nothing,
+        and a claimed attempt is reported or reconciled, never declined. The attempt
+        fails exactly as if its delivery had expired now (`timeout_before_dispatch`,
+        zero usage, compute stop confirmed, due again; only the event detail says
+        `declined`), so the step's retry classes apply unchanged. An equal repeat
+        changes nothing. Like a result it grants nothing, so the initiator's current
+        `execute` permission is not required; the runtime's current identity, session
+        and recovery epoch are. A runtime may decline at most `DECLINES_PER_MINUTE`
+        deliveries a minute. Routes call `ActivityService.lock_cursor` first, as for
+        results.
+        """
+        a = self.activities
+        identity = principal.identity
+        a.fleet.limit("activity-decline:" + identity.instance_id, self.DECLINES_PER_MINUTE)
+        hint = record(db, ExecutionActivityDelivery, identity.scope, delivery_id)
+        rows = a._locked(db, principal, hint.attempt_id, counters=True, authority=False)
+        execution, attempt = rows["execution"], rows["attempt"]
+        delivery = rows["deliveries"].get(attempt.id)
+        if (
+            delivery is None
+            or delivery.id != hint.id
+            or delivery.instance_id != identity.instance_id
+            or delivery.generation != identity.generation
+            or delivery.pool_id != identity.pool_id
+        ):
+            raise FleetError("unauthenticated")
+        if delivery.session_id != principal.session_id or delivery.digest != digest:
+            raise ExecutionError("conflict")
+        now = a._finish(db, rows["locked"])
+        scope = scope_of(execution)
+        key = DECLINE_PREFIX + delivery.id
+        if db.scalar(scoped(ExecutionRequest, scope).where(ExecutionRequest.request_key == key)):
+            return  # an equal repeated decline changes nothing
+        if (
+            delivery.status != "pending"
+            or attempt.state != "dispatched"
+            or rows["leases"].get(attempt.id) is not None
+        ):
+            raise ExecutionError("conflict")
+        delivery.status = "conflict"
+        db.add(
+            ExecutionRequest(
+                **scope.model_dump(), execution_id=execution.id, request_key=key, digest=digest
+            )
+        )
+        db.flush()
+        self._fail_unstarted(
+            db,
+            scope,
+            execution,
+            attempt,
+            rows["reservations"].get(attempt.id),
+            "declined:" + delivery.id,
+            now,
+            identity.recovery_epoch,
+            code="timeout_before_dispatch",
+            detail="declined",
+            source="activity",
+        )
 
     @activity_service
     def expire_reservation(self, db, attempt_id: str, *, epoch=None) -> None:

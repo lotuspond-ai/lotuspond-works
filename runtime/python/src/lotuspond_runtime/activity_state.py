@@ -13,7 +13,8 @@ the worker is about to report (identities, codes and usage numbers, never values
 so it survives a crash as evidence for reconciliation. After a restart an attempt in
 `started` (or a record that cannot be read) is ambiguous: it is abandoned and never
 invoked again. A `fenced` marker persists an unconfirmed provider cleanup across
-restarts until an operator removes it. Entries hold identities and digests only,
+restarts until an operator removes it. A `declines` count keeps the worker's decline
+circuit breaker across workers and restarts. Entries hold identities and digests only,
 never values, prompts or secrets.
 """
 
@@ -36,6 +37,7 @@ _NAME = re.compile(r"attempt-[0-9a-f-]{36}\.json")
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _TEMP = ".journal-"
 _FENCE = "fenced"
+_DECLINES = "declines"
 MAX_ENTRY = 8192
 
 
@@ -224,6 +226,38 @@ class InvocationJournal:
         finally:
             os.close(fd)
         return True
+
+    def declines_in_a_row(self) -> int:
+        """Declines since the last verified delivery, across workers and restarts.
+
+        An unreadable count proves nothing, so it reads as the most allowed:
+        nothing more is declined until a delivery verifies again.
+        """
+        self._check()
+        try:
+            fd = self._open(_DECLINES)
+        except FileNotFoundError:
+            return 0
+        except OSError:
+            raise FleetError("unsafe_storage") from None
+        try:
+            _regular(fd)
+            data = os.read(fd, 65)
+            count = json.loads(data).get("in_a_row") if len(data) <= 64 else None
+            if type(count) is not int or count < 0:
+                raise ValueError
+            return count
+        except (OSError, ValueError, AttributeError):
+            return 2**31
+        finally:
+            os.close(fd)
+
+    def count_decline(self):
+        self._write(_DECLINES, b'{"in_a_row":%d}' % min(self.declines_in_a_row() + 1, 2**31))
+
+    def clear_declines(self):
+        if self.declines_in_a_row():
+            self._write(_DECLINES, b'{"in_a_row":0}')
 
     def close(self):
         for attribute in ("_lock", "_directory"):

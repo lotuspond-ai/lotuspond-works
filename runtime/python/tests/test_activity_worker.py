@@ -187,7 +187,8 @@ def test_tampered_misaddressed_or_untrusted_deliveries_are_refused(tmp_path):
         }
     )
     env.server.offers.append(delivery)
-    with pytest.raises(FleetError, match="command_rejected"):
+    # An unknown signer is a gap in this runtime's own trust, not a bad delivery.
+    with pytest.raises(FleetError, match="trust_unavailable"):
         worker_.run_once()
     assert calls(env.counter) == 0 and env.server.claims == []
 
@@ -268,6 +269,8 @@ def test_a_runtime_on_its_own_wall_clock_would_refuse_a_valid_delivery(tmp_path)
     local = dataclasses.replace(env.deps, clock=Local())
     with pytest.raises(FleetError, match="command_rejected"):
         ActivityWorker(local).run_once()  # issued in the runtime's future
+    # A local clock fault is never a reason to decline: the anchored clock serves it.
+    assert env.server.declines == []
     assert ActivityWorker(env.deps).run_once() == "succeeded"
 
 
@@ -438,3 +441,174 @@ def test_a_surviving_provider_group_fences_the_restarted_worker(tmp_path):
     finally:
         os.killpg(survivor.pid, 9)
         survivor.wait(timeout=5)
+
+
+def test_an_unverifiable_delivery_is_declined_and_no_longer_heads_the_polls(tmp_path):
+    from fixtures.activity_provider import MODEL
+
+    env = build(tmp_path)
+    stuck = env.server.root("connector_read")
+    served = env.server.root("connector_read")
+    # The pinned records no longer match the signed envelope: it cannot be verified.
+    stuck.dependency = MODEL.model_copy(update={"kind": "connector"})
+    worker_ = ActivityWorker(env.deps)
+    assert worker_.run_once() == "declined"
+    assert env.server.declines == [stuck.id] and env.server.claims == []
+    # The next poll is no longer headed by it: the other delivery runs.
+    assert worker_.run_once() == "succeeded"
+    assert [r.attempt_id for r in env.server.results] == [served.id]
+    assert calls(env.counter) == 1 and env.journal.get(stuck.id) is None
+
+
+def test_a_refused_decline_leaves_the_original_refusal(tmp_path):
+    env = build(tmp_path)
+    attempt = env.server.root("connector_read")
+    env.server.withdraw(attempt)  # no longer pending: the control plane refuses
+    envelope = json.loads(attempt.delivery.envelope)
+    env.server.offers.append(signed(env, dict(envelope, generation=2)))
+    with pytest.raises(FleetError, match="command_rejected"):
+        ActivityWorker(env.deps).run_once()
+    assert env.server.declines == []
+
+
+def test_a_local_trust_outage_declines_nothing(tmp_path):
+    env = build(tmp_path)
+    env.server.root("connector_read")
+
+    def unavailable(scope, now):
+        raise RuntimeError("trust provider down")
+
+    env.server.current = unavailable  # every delivery would fail alike
+    with pytest.raises(FleetError, match="trust_unavailable"):
+        ActivityWorker(env.deps).run_once()
+    assert env.server.declines == []
+
+
+def stale_trust(env):
+    """The runtime's trust holds only another key: stale after a rotation."""
+    import hashlib
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from lotuspond_sdk.trust import TrustSet
+
+    other = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    env.server.current = lambda scope, now: TrustSet.model_validate(
+        {
+            "format_version": 1,
+            "keys": [
+                {
+                    "key_id": hashlib.sha256(other).hexdigest(),
+                    "public_key": other.hex(),
+                    "state": "allowed",
+                }
+            ],
+        }
+    )
+
+
+def test_a_stale_trust_set_declines_nothing(tmp_path):
+    env = build(tmp_path)
+    for _ in range(3):
+        env.server.root("connector_read")  # genuine, pending deliveries
+    stale_trust(env)
+    worker_ = ActivityWorker(env.deps)
+    for _ in range(3):
+        with pytest.raises(FleetError, match="trust_unavailable"):
+            worker_.run_once()
+    # Declining would let one stale runtime fail its pool's attempts at poll rate.
+    assert env.server.declines == [] and env.server.claims == []
+
+
+@pytest.mark.parametrize("code", ["forbidden", "not_found", "conflict"])
+def test_a_records_refusal_is_declined_but_an_outage_is_not(tmp_path, code):
+    env = build(tmp_path)
+    refused = env.server.root("connector_read")
+    original = env.server.load
+
+    def load(envelope):
+        if envelope.attempt_id == refused.id:
+            raise FleetError(code)  # the control plane will not serve this delivery
+        return original(envelope)
+
+    env.server.load = load
+    assert ActivityWorker(env.deps).run_once() == "declined"
+    assert env.server.declines == [refused.id]
+    outage = env.server.root("connector_read")
+
+    def down(envelope):
+        raise FleetError("authority_unavailable")
+
+    env.server.load = down
+    with pytest.raises(FleetError, match="authority_unavailable"):
+        ActivityWorker(env.deps).run_once()
+    assert outage.id not in env.server.declines
+
+
+def revoked_trust(env):
+    """The runtime's trust marks the control plane's signing key revoked."""
+    import hashlib
+
+    from lotuspond_sdk.trust import TrustSet
+
+    public = env.server.key.public_key().public_bytes_raw()
+    env.server.current = lambda scope, now: TrustSet.model_validate(
+        {
+            "format_version": 1,
+            "keys": [
+                {
+                    "key_id": hashlib.sha256(public).hexdigest(),
+                    "public_key": public.hex(),
+                    "state": "revoked",
+                }
+            ],
+        }
+    )
+
+
+def test_a_broken_runtime_declines_at_most_three_in_a_row(tmp_path):
+    env = build(tmp_path)
+    attempts = [env.server.root("connector_read") for _ in range(5)]
+    good = env.server.current
+    revoked_trust(env)  # every delivery now fails alike, in a way no rule singles out
+    worker_ = ActivityWorker(env.deps)
+    assert [worker_.run_once() for _ in range(3)] == ["declined"] * 3
+    with pytest.raises(FleetError, match="command_rejected"):
+        worker_.run_once()  # the breaker holds: the refusal stands, nothing declined
+    assert env.server.declines == [a.id for a in attempts[:3]]
+    # One verified delivery resets it.
+    env.server.current = good
+    assert worker_.run_once() == "succeeded"
+    revoked_trust(env)
+    env.server.root("connector_read")
+    assert worker_.run_once() == "declined"
+
+
+def test_a_stale_runtime_identity_declines_nothing(tmp_path):
+    import dataclasses
+
+    env = build(tmp_path)
+    for _ in range(3):
+        env.server.root("connector_read")
+    stale = dataclasses.replace(
+        env.deps, identity=env.deps.identity.model_copy(update={"generation": 2})
+    )
+    worker_ = ActivityWorker(stale)
+    for _ in range(3):
+        with pytest.raises(FleetError, match="command_rejected"):
+            worker_.run_once()  # misaddressed by this runtime's own stale identity
+    assert env.server.declines == []
+
+
+def test_the_decline_breaker_survives_new_workers_and_restarts(tmp_path):
+    env = build(tmp_path)
+    for _ in range(5):
+        env.server.root("connector_read")
+    revoked_trust(env)
+    # A fresh worker for every poll, then a restarted process: still 3 in a row.
+    assert [ActivityWorker(env.deps).run_once() for _ in range(2)] == ["declined"] * 2
+    restarted = reopen(env)
+    assert ActivityWorker(restarted.deps).run_once() == "declined"
+    for _ in range(2):
+        with pytest.raises(FleetError, match="command_rejected"):
+            ActivityWorker(restarted.deps).run_once()
+    assert len(env.server.declines) == 3

@@ -83,7 +83,9 @@ class ActivityClient:
             raise FleetError("command_rejected")
         return delivery
 
-    def claim(self, delivery: ActivityDelivery) -> ActivityLease:
+    @staticmethod
+    def _named(delivery) -> tuple:
+        """The delivery's envelope and the claim body naming its exact digest."""
         delivery = ActivityDelivery.model_validate(delivery)
         try:
             envelope = validate_activity(decode_executable_bytes(delivery.envelope.encode("utf-8")))
@@ -94,6 +96,10 @@ class ActivityClient:
             delivery_id=envelope.delivery_id,
             delivery_sha256=hashlib.sha256(canonical).hexdigest(),
         )
+        return envelope, request
+
+    def claim(self, delivery: ActivityDelivery) -> ActivityLease:
+        envelope, request = self._named(delivery)
         lease = ActivityLease.model_validate_json(self._call("/activities/claim", _body(request)))
         if (
             lease.attempt_id != envelope.attempt_id
@@ -102,6 +108,16 @@ class ActivityClient:
         ):
             raise FleetError("command_rejected")
         return lease
+
+    def decline(self, delivery: ActivityDelivery) -> None:
+        """Refuse a delivery this runtime cannot verify; it is never claimed.
+
+        Names the delivery by its exact digest, so the control plane can match it to
+        what it dispatched to this session. Nothing in the delivery is trusted.
+        """
+        _, request = self._named(delivery)
+        if decode_fleet_json(self._call("/activities/decline", _body(request))) != {}:
+            raise FleetError("command_rejected")
 
     def renew(self, lease: ActivityLease) -> ActivityLease:
         lease = ActivityLease.model_validate(lease)

@@ -595,3 +595,55 @@ Results:
   - the targeted poll's `parent_attempt_id` body field.
 - Re-anchoring of the activity clock from the E03 supervisor's heartbeat loop.
 - One activity worker per process.
+
+## Owner-approved addition beyond E04: declining an unverifiable delivery, 2026-10-23
+
+This is not an E04 task. The owner decided "fix outside E04" for Task 10's known limitation, so it is a separate commit on the same branch. It delivers the behaviour behind the service boundary; the HTTP route `POST /activities/decline` and its changelog item are a Task 12 obligation. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Red before the change.** The new tests were run on the Task 10 commit `8f4f790`:
+
+- Backend `test_decline.py`: 3 failed, because `LeaseService.decline_activity` did not exist.
+- Runtime: 6 failed, because the client had no `decline` and the worker never declined.
+- Two guard tests passed there, as they should, since they assert that nothing is declined.
+
+**Mutations.** 13 reverted fixes, 5 in the backend and 8 in the runtime, each made their witness test fail. An unmutated control copy passed all 6 backend tests. They cover:
+
+- **Backend:** the digest check, the pending-only rule, idempotency, the per-instance allowance and the retry class.
+- **Runtime:** declining at all; declining only `command_rejected`; children; the local-state exemptions (`LocalMismatch`, `untrusted_key`); record-source refusals; the circuit breaker; its journaled count.
+
+**Green:**
+
+- Backend activity tests (`test_dispatch.py`, `test_leases.py`, `test_reconciliation.py`, `test_activity_races.py`, `test_decline.py`) on the local PostgreSQL cluster: 67 passed. They include:
+  - decline and expiry in either order ending the attempt once;
+  - a decline racing a claim with one winner;
+  - the 6-per-minute allowance.
+- Runtime activity tests on macOS with the dev-only shim: 92 passed, of which 78 were rerun after the last change. One failed: the mounted-secrets test, which is Linux-only by design.
+
+**Local Linux evidence (not hosted CI).** Same container setup as the Task 10 entry, from a standalone clone of the commit.
+
+- At the final source: runtime 717 passed.
+- At the review checkpoint just before it, which differs only in counting a decline before sending it: runtime 717 passed; full backend 1,156 passed, 97 subtests, 0 failed, 0 skipped, in 17 min 26 s, including all 8 fleet acceptance tests.
+- At the first review checkpoint: runtime 710 passed; backend 1,153 passed, 97 subtests, 0 failed.
+
+**Reviews.** The specification review approved all three rounds, each with Minors:
+
+- a stale trust set declining everything;
+- the retry class;
+- record-source refusals;
+- cross-references;
+- the wording of the narrowed limitation;
+- `invalid_request`.
+
+The quality review required changes once. Its Important finding was that a runtime broken in its own state (wrong trust, a stale identity, a wrong clock) would decline every delivery and fail its pool's work at poll rate. The fix has three layers:
+
+- local-state refusals decline nothing;
+- a journaled circuit breaker allows 3 declines in a row;
+- the backend allows 6 declines a minute per instance.
+
+After both approvals, the quality reviewer's last suggestion was applied: count a decline before sending it, so a crash never loses one. It only swaps the order of two calls, and the Linux runtime suite was run again on it.
+
+**For the owner's acknowledgement** (in the plan's "Owner-approved addition beyond E04" section):
+
+- A decline fails its attempt exactly as an expiry does (`timeout_before_dispatch`, zero usage).
+- It requires the dispatched session and the delivery's exact digest, but not the initiator's current `execute`.
+- **Trade-off:** a runtime with stale trust declines nothing, and its delivery still expires within 5 minutes.

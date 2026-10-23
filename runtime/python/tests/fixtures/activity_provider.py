@@ -13,7 +13,8 @@ the behaviour a runtime must survive in production:
 - child admission under a shared root budget, checking the declaration and that the
   arguments are a value the parent's holder stored;
 - results that need the live lease, refuse a root while one of its children is
-  claimed, refuse a completion in the server's future and are idempotent by attempt.
+  claimed, refuse a completion in the server's future and are idempotent by attempt;
+- declines of a pending delivery by its exact canonical bytes.
 
 Faults are injected per call name (`faults["claim_ack"] = ["transport_failed"]`
 fails one root claim after committing it, `child_claim_ack` a child's); `child_override = (kind, changes)` signs the
@@ -188,6 +189,7 @@ class FakeControlPlane:
         self.values, self.attempts, self.agent_records = {}, {}, {}
         self.offers, self.child_requests, self.reported = [], {}, {}
         self.claims, self.renewals, self.results, self.calls = [], [], [], []
+        self.declines = []
         self.faults, self.child_override, self.refuse_renewal_ids = {}, None, set()
         self.children = self.overlaps = 0
         self._busy = False
@@ -409,6 +411,25 @@ class FakeControlPlane:
             if lost:
                 raise FleetError(lost.pop(0))  # committed, but the answer is lost
             return attempt.lease
+
+    def decline(self, delivery):
+        with self._flight("decline"):
+            envelope = validate_activity(json.loads(delivery.envelope))
+            attempt = self.attempts.get(envelope.attempt_id)
+            # Only what was dispatched, named by its exact canonical bytes.
+            if (
+                attempt is None
+                or attempt.delivery is None
+                or (attempt.delivery.envelope != canonical_activity_json(envelope).decode())
+            ):
+                raise FleetError("conflict")
+            if attempt.status == "declined":
+                return None  # an equal repeat changes nothing
+            if attempt.status != "pending":
+                raise FleetError("conflict")
+            attempt.status = "declined"
+            self.declines.append(attempt.id)
+            return None
 
     def renew(self, lease):
         with self._flight("renew"):

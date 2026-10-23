@@ -180,7 +180,7 @@ class _Children:
 
     def _receive(self, kind, name, stored, dependency, operation):
         """Admit a child and take its delivery, bound to exactly what was asked."""
-        from .activity_worker import _canonical, retry, verify_delivery
+        from .activity_worker import _canonical, declinable, decline, retry, verify_delivery
 
         deps, root, keeper = self.deps, self.request.attempt_id, self.keeper
         content = _canonical(stored)
@@ -214,8 +214,11 @@ class _Children:
                 or envelope.input != handle
             ):
                 raise FleetError("command_rejected")
-        except FleetError:
-            # Not the child this agent asked for: never claimed, never invoked.
+        except FleetError as error:
+            # Not the child this agent asked for: never claimed, never invoked; a bad
+            # delivery is also declined so it heads no later poll.
+            if declinable(error):
+                decline(deps, delivery)
             raise ActivityFailure("provider_failed", reached=False) from None
         return delivery, envelope, records
 

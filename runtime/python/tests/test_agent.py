@@ -148,7 +148,8 @@ def test_a_child_bound_to_anything_else_is_never_claimed(tmp_path, kind, changes
     assert ActivityWorker(env.deps).run_once() == "provider_failed"
     (misbound,) = [c for c in children(env) if c.kind == kind and c.result is None]
     assert misbound.id not in env.server.claims  # refused before any claim
-    assert misbound.status == "cancelled"  # the root's outcome ended it
+    # It is what the control plane dispatched, so it is declined at once.
+    assert misbound.status == "declined" and env.server.declines == [misbound.id]
     assert calls(env.counter) == invoked
 
 

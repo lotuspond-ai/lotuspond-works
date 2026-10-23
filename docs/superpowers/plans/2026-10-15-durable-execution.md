@@ -576,7 +576,7 @@ assert lost_response_usage.cost_microusd is None
   - The call is bounded by the earlier of the attempt deadline, the lease and `timeout_ms`. A response larger than `max_response_bytes`, or the 64 KiB value bound, is `invalid_output`.
   - Every pinned secret of the connection, and every worker-local credential of the descriptor (a model's API key, for example), is resolved by the worker after `started` and immediately before the call. They are never logged, stored or journaled.
   - The secret source takes a `SecretPin`. In production, `MountedActivitySecrets` wraps E03's `MountedSecretResolver` with the operator's pin-to-binding mapping, as E03 commands do.
-  - **Deferred, with reason:** destination enforcement. The child receives the pinned destinations inside the records. Because no real provider is installed, no network path exists. The first real provider must connect only through E03's `DestinationTransport` under the operator's egress policy. Whichever change installs it owns that wiring and its tests.
+  - **Deferred, with reason (owner decision, 2026-10-23):** destination enforcement. The child receives the pinned destinations inside the records. Because no real provider is installed, no network path exists. The first real provider must connect only through E03's `DestinationTransport` under the operator's egress policy. Whichever change installs it owns that wiring and its tests. The owner has no real provider to supply ("I cant provide a provider as of now so proceed accordingly"). E04 therefore uses synthetic test providers only and never claims live-provider evidence. Nothing reaches a real network by default: the provider child selects nothing but the test-mode fixtures, which have no network effect.
 - **Model rounds.**
   - Resolved context, instructions, input and the transcript stay in worker memory and reach only the model child.
   - A round's stored argument is `{"round", "request_sha256"}` and its stored result is `{"reply_sha256"}`, so source-bound context never becomes a workspace-policy value. Transcript growth no longer counts against the 64 KiB value bound; the 1 MiB frame bounds a round's request.
@@ -619,7 +619,7 @@ assert lost_response_usage.cost_microusd is None
   - Before any provider may have run, authority-type errors map to `unavailable` and all others to `provider_failed`. After one may have run (a read's, a child's or an agent's output could not be stored, or an agent's later control call failed), the code is `provider_failed`, so a retry never runs it again. `unsafe_storage` stops the worker without reporting around the journal.
   - When the lease is lost, the worker reports no outcome; the control plane's lapse makes the attempt uncertain.
   - `unavailable` for a changed pin or a write operation means "this runtime cannot serve it". Another runtime may, within the attempt's retry bounds.
-  - **Known limitation, for the owner:** a pending delivery the runtime cannot verify (after a trust rotation, for example) is offered first on each of that session's polls until it expires. That takes at most 5 minutes, after which it fails with `timeout_before_dispatch` and only a new ordinal retries. Declining a delivery would need a new route, which is outside E04.
+  - **Narrowed beyond E04:** a pending delivery the runtime cannot verify used to head each of that session's polls until it expired (up to 5 minutes). The owner-approved decline addition below removes that for deliveries that are themselves bad. On purpose, it keeps the old behaviour (expiry within 5 minutes) for local gaps (stale trust, a stale identity, a wrong clock, outages) and once its circuit breaker has stopped declining; see the addition's safeguards and trade-off.
 - **Journal.**
   - One owner-only (0600) file per attempt, in a private directory held by one process through an exclusive lock. Files are written by atomic replacement with file and directory fsync, and have crash-point hooks. A temporary file left by a crash is removed when the journal is reopened.
   - Records are opened without following links and without blocking, so a planted FIFO is refused.
@@ -656,7 +656,8 @@ assert lost_response_usage.cost_microusd is None
   - the pinned records and the agent declarations (instructions, model name, declared tools with their schemas, context references and limits);
   - fetches of the attempt's input;
   - context reads under current source access;
-  - the targeted poll's `parent_attempt_id` body field.
+  - the targeted poll's `parent_attempt_id` body field;
+  - the decline route and its records-route refusal codes (see the owner-approved addition beyond E04).
 
   The runtime integration must also re-anchor the activity clock on every E03 session or heartbeat response. Re-anchoring has to come from the E03 supervisor's own heartbeat loop (every 20 s or less, on its own transport), not from the activity worker's thread. The worker can sit inside one provider call or agent for longer than the clock's 10-minute anchor age, and lease responses carry no server time. `ServerClock.anchor` replaces one tuple, so calling it from that loop's thread is safe.
 
@@ -720,7 +721,7 @@ assert resumed_wait.deadline_ms == original_deadline_ms
 
 **Files:** Ownership-table Task 12 files; `backend/tests/execution/{test_routes.py,test_runtime_routes.py,test_boundary.py}`. Modify `schemas.py` to add `execute`, `execution_signal` API-key scopes; do not reinterpret `run`. Add scoped changelog entry in `app.py` only for implemented capability.
 
-**Interfaces:** Prefix `M=/api/v1/projects/{project_id}/environments/{environment_id}`; workspace only from authenticated context. `POST/GET M/executable-packages`, `GET M/executable-packages/{id}` and `/content`; `POST/GET M/deployments`, `GET M/deployments/{id}`, `POST M/deployments/{id}/status`, `POST M/deployments/{id}/revisions/{revision_id}/status`; `POST/GET M/executions`, `GET M/executions/{id}`, `GET M/executions/{id}/events`, `GET M/executions/{id}/waits`, `POST M/executions/{id}/signals`, `/control`, `/reconciliation`; `POST M/context-sources` and `POST M/context-sources/{id}/versions`, `/revoke`; `GET M/artifacts/{id}/versions/{version}`. Runtime prefix `/api/v1/runtime/activities`: `POST /poll`, `/{delivery_id}/claim`, `/leases/renew`, `/children`, `/results`; separately scoped worker artifact/context reads and result uploads under `/api/v1/runtime/activity-artifacts`. Worker gets only artifacts linked to its current claimed attempt, never a generic artifact bearer capability.
+**Interfaces:** Prefix `M=/api/v1/projects/{project_id}/environments/{environment_id}`; workspace only from authenticated context. `POST/GET M/executable-packages`, `GET M/executable-packages/{id}` and `/content`; `POST/GET M/deployments`, `GET M/deployments/{id}`, `POST M/deployments/{id}/status`, `POST M/deployments/{id}/revisions/{revision_id}/status`; `POST/GET M/executions`, `GET M/executions/{id}`, `GET M/executions/{id}/events`, `GET M/executions/{id}/waits`, `POST M/executions/{id}/signals`, `/control`, `/reconciliation`; `POST M/context-sources` and `POST M/context-sources/{id}/versions`, `/revoke`; `GET M/artifacts/{id}/versions/{version}`. Runtime prefix `/api/v1/runtime/activities`: `POST /poll`, `/{delivery_id}/claim`, `/leases/renew`, `/children`, `/results`, and `/decline` (the owner-approved addition beyond E04; serve it here with its changelog item); separately scoped worker artifact/context reads and result uploads under `/api/v1/runtime/activity-artifacts`. Worker gets only artifacts linked to its current claimed attempt, never a generic artifact bearer capability.
 
 - [ ] **Step 1:** Add `test_route_role_scope_matrix`, `test_runtime_credentials_cannot_enter_customer_routes`, `test_human_form_rejects_api_key`, `test_headers_body_and_pagination_boundaries`, `test_orchestrator_outage_keeps_evidence_available`. Assertions: owner/admin sessions manage/publish; editors execute enabled work and control their own executions, owner/admin control any scoped execution; viewers read only; keys require explicit scope and current creator role and cannot manage/human-form/reconcile; no implicit platform-admin access. Duplicated auth/session/workspace headers and cross-scope IDs refuse; stopped orchestrator workers do not block read/export/admin.
 
@@ -921,6 +922,51 @@ assert required_report_missing_error.code == "missing_required_evidence"
 | Projection p95 at 50 events per execution                 | Over 100 ms                                           | Investigate plans; never index event payload columns                                                                   |
 | Claim p95 at target load, or execution-table WAL          | Over 50 ms, or over 50 % of measured primary capacity | ADR-0011 revisit trigger                                                                                               |
 | Lock wait on `execution_scheduler_cursors` at target load | p95 over 100 ms (proposed)                            | Review Task 5's installation-wide serialization                                                                        |
+
+## Owner-approved addition beyond E04: declining an unverifiable delivery (2026-10-23)
+
+This is not an E04 task. The owner reviewed Task 10's known limitation and decided: "fix outside E04". It lands as its own commit on this branch, with its own specification and quality review, tests and validation entry.
+
+The commit delivers the decline behaviour behind the service boundary: the backend service, the runtime client and the worker's use of it. The HTTP surface, `POST /activities/decline`, comes in Task 12 with the other runtime activity routes. Until then no API serves it.
+
+- **Service.** `LeaseService.decline_activity(db, principal, delivery_id, digest)`.
+  - Only the runtime session the delivery was dispatched to may decline it, matching instance, pool and generation, and naming its exact stored digest. So an altered or forged envelope declines nothing.
+  - Only while it is pending and unclaimed. A claimed attempt is still reported or reconciled, never declined.
+  - The attempt fails exactly as if its delivery had expired now: the same transition and the same failure code, `timeout_before_dispatch`, so each step's declared retry classes apply unchanged; only the event detail says `declined`. That means zero usage, compute stop confirmed and the execution due again, so progression may retry it on a new ordinal within the step's bounds.
+  - An equal repeat changes nothing; an `activity.decline:<delivery>` request row records it. There is no schema change: the delivery takes the existing `conflict` status, as on expiry.
+- **Rules kept.**
+  - Authorization: the runtime's current identity, credential, session and recovery epoch are required. As for results, the initiator's current `execute` permission is not, because declining grants nothing. A runtime that never claims achieves the same outcome, only later.
+  - Tenancy: scoped records and the pool check.
+  - Lock order: the Task 9 order, with the cursor taken `NOWAIT`; routes call `ActivityService.lock_cursor` first.
+  - Leases and reconciliation: unchanged.
+- **Runtime.**
+  - `ActivityClient.decline(delivery)` posts `{delivery_id, delivery_sha256}` to `/activities/decline`, which is added to the control transport's allowlist.
+  - The worker declines a delivery only when the refusal is about the delivery itself:
+    - it does not parse;
+    - its signature is invalid or made with a key its trust revokes;
+    - it does not match its pinned records;
+    - the record source refuses it as one it will not serve (`forbidden`, `not_found`, `conflict`).
+
+    An agent declines such a child.
+
+  - Local state declines nothing, because every later delivery would fail alike:
+    - a trust or authority outage;
+    - an expired session;
+    - a signer its trust does not know (`untrusted_key`);
+    - a recipient mismatch against its own identity;
+    - a time-window failure on its own clock.
+  - **Safeguards against a broken or hostile runtime.** Before this addition, an unclaimed delivery cost about one attempt per 5-minute expiry; these keep declining from failing a pool's work much faster than that.
+    - Circuit breaker: the worker stops declining after 3 declines in a row with no verified delivery in between, and the refusal then stands until a delivery verifies. The count is kept in the invocation journal, so neither a new worker nor a restarted process resets it. It is counted before the decline is sent, so a crash never loses one; an unreadable count stops declining.
+    - The control plane accepts at most 6 declines a minute from one runtime instance (`LeaseService.DECLINES_PER_MINUTE`); above that it answers `rate_limited`.
+    - **Trade-off for the owner:** a runtime whose trust is stale after a rotation declines nothing; its delivery expires as before, at most 5 minutes. Nothing servable waits behind it, since every delivery to that runtime fails alike.
+  - A refused decline leaves the original refusal standing.
+- **Obligations for Task 12:**
+  - Serve `POST /activities/decline` with the other runtime activity routes, and add the API changelog item in the same change. The route does not exist before then, so a changelog item now would describe behaviour the API does not have.
+  - The records route answers a delivery it will not serve with `forbidden`, `not_found` or `conflict`, and an outage with `authority_unavailable`, so the runtime declines only the former.
+- **Files:**
+  - `execution/leases.py`: `_fail_unstarted` takes the failure code, event detail and observation source;
+  - `runtime/.../activity_client.py`, `control_transport.py`, `activity_worker.py` and `agent.py`;
+  - tests: backend `test_decline.py`; runtime `test_activity_worker.py`, `test_agent.py`, `test_activity_client.py` and the fake control plane.
 
 ## Author self-review and scope trace
 

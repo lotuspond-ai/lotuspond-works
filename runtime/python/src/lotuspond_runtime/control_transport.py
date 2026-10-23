@@ -41,6 +41,7 @@ _ACTIVITY_ROUTES = {
     "/activities/renew",
     "/activities/children",
     "/activities/results",
+    "/activities/decline",
 }
 _ACTIVITY_VALUE = re.compile(
     r"/activities/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/values"

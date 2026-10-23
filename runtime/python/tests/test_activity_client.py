@@ -211,6 +211,7 @@ def test_transport_allows_activity_routes_only_with_a_session(tmp_path):
             "/activities/renew",
             "/activities/children",
             "/activities/results",
+            "/activities/decline",
             f"/activities/{ATTEMPT}/values",
         ):
             with pytest.raises(FleetError, match="invalid_request"):
@@ -237,3 +238,23 @@ def test_a_targeted_poll_names_its_parent_and_nothing_else():
     assert client.poll() is None and transport.calls[1][2] == b"{}"
     with pytest.raises(FleetError, match="invalid_request"):
         client.poll(parent_attempt_id="not-a-uuid")
+
+
+def test_a_decline_names_the_exact_delivery_and_nothing_else():
+    from lotuspond_sdk.activity import ActivityDelivery
+
+    module = client_module()
+    transport = Transport({"/activities/decline": {}})
+    client = module.ActivityClient(transport, TOKEN, SESSION)
+    delivery = ActivityDelivery.model_validate(json.loads(delivery_bytes()))
+    assert client.decline(delivery) is None
+    method, route, body, token, session = transport.calls[0]
+    envelope = json.loads(delivery.envelope)
+    assert (method, route, token, session) == ("POST", "/activities/decline", TOKEN, SESSION)
+    assert json.loads(body) == {
+        "delivery_id": envelope["delivery_id"],
+        "delivery_sha256": hashlib.sha256(delivery.envelope.encode()).hexdigest(),
+    }
+    transport.responses["/activities/decline"] = {"declined": True}
+    with pytest.raises(FleetError, match="command_rejected"):
+        client.decline(delivery)  # anything but the empty acknowledgement

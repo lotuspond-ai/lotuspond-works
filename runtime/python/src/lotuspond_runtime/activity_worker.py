@@ -58,6 +58,11 @@ RENEW_EVERY_MS = 20000
 RENEW_MARGIN_MS = int(ATTEMPT_SECONDS * 1000) + 3000
 # Codes that say "not now" rather than "no": the call may be repeated.
 TRANSIENT = frozenset({"transport_failed", "rate_limited", "authority_unavailable"})
+# Declines without one verified delivery in between before the worker stops declining.
+MAX_DECLINES_IN_A_ROW = 3
+# The record source's answers for a delivery it will not serve (Task 12's route).
+# (`invalid_request` is not one: it may answer this runtime's own malformed request.)
+RECORD_REFUSALS = frozenset({"forbidden", "not_found", "conflict"})
 # Failures meaning this runtime cannot serve the attempt now, so a new ordinal may.
 _UNAVAILABLE = TRANSIENT | {"trust_unavailable", "secret_unavailable", "unauthenticated"}
 
@@ -200,6 +205,22 @@ class ActivityDependencies:
             raise ValueError("Renewal cadence must be at most 20 s")
 
 
+class LocalMismatch(FleetError):
+    """Refused against this runtime's own identity or clock, not for the delivery.
+
+    Every delivery would fail alike (a stale identity, a wrong anchor), so it is
+    never a reason to decline one; the code stays `command_rejected`.
+    """
+
+    def __init__(self):
+        super().__init__("command_rejected")
+
+
+def declinable(error) -> bool:
+    """A refusal that is about the delivery itself, never about local state."""
+    return error.code == "command_rejected" and type(error) is not LocalMismatch
+
+
 class LeaseLost(Exception):
     """The lease ended before an outcome; the attempt stays uncertain server-side."""
 
@@ -324,17 +345,26 @@ def verify_delivery(delivery, deps: ActivityDependencies):
         or envelope.generation != identity.generation
         or not envelope.issued_at_ms <= now < envelope.expires_at_ms
     ):
-        raise FleetError("command_rejected")
+        raise LocalMismatch
     try:
         trust = TrustSet.model_validate(deps.trust.current(identity.scope, now))
-        valid = verify_activity(envelope, signature, trust).valid
+        report = verify_activity(envelope, signature, trust)
     except Exception:
         raise FleetError("trust_unavailable") from None
-    if not valid:
-        raise FleetError("command_rejected")
+    if not report.valid:
+        # A signer this runtime's trust does not know is a local trust gap (stale
+        # after a rotation): every later delivery fails alike, so it is not a reason
+        # to decline one. Any other invalid signature is a bad delivery.
+        raise FleetError(
+            "trust_unavailable" if report.code == "untrusted_key" else "command_rejected"
+        )
     try:
         records = deps.records.load(envelope)
-    except FleetError:
+    except FleetError as error:
+        # The control plane will not serve this delivery: bad for this runtime. An
+        # outage or an expired session is local and stands as it is.
+        if error.code in RECORD_REFUSALS:
+            raise FleetError("command_rejected") from None
         raise
     except Exception:
         raise FleetError("authority_unavailable") from None
@@ -361,6 +391,20 @@ def _resumable(entry, digest, generation) -> bool:
         and entry.get("delivery_sha256") == digest
         and entry.get("generation") == generation
     )
+
+
+def decline(deps, delivery) -> bool:
+    """Refuse a delivery this runtime will not run, so it stops heading its polls.
+
+    Best effort: the control plane accepts it only for a pending delivery it
+    dispatched to this session, named by its exact digest. When it does not, the
+    delivery still expires on its own (at most 5 minutes).
+    """
+    try:
+        retry(lambda: deps.client.decline(delivery), deps)
+    except FleetError:
+        return False
+    return True
 
 
 def checked_lease(lease, envelope, deps) -> ActivityLease:
@@ -699,7 +743,24 @@ class ActivityWorker:
         delivery = deps.client.poll()
         if delivery is None:
             return "idle"
-        envelope, records = verify_delivery(delivery, deps)
+        try:
+            envelope, records = verify_delivery(delivery, deps)
+        except FleetError as error:
+            # This delivery itself is bad (altered, badly signed, not matching its
+            # records, or refused by the record source): declined, so it stops
+            # heading the polls and another runtime or a new ordinal may serve it.
+            # Local state (trust, identity, clock, outages) fails every delivery
+            # alike and declines nothing. A circuit breaker stops declining after a
+            # few in a row without one verified delivery, so a runtime broken in a
+            # way not caught here cannot fail its pool's work at poll rate.
+            # The count is journaled, so a new worker or a restart cannot reset it,
+            # and counted before the decline is sent, so a crash never loses one.
+            if declinable(error) and deps.journal.declines_in_a_row() < MAX_DECLINES_IN_A_ROW:
+                deps.journal.count_decline()
+                if decline(deps, delivery):
+                    return "declined"
+            raise
+        deps.journal.clear_declines()
         digest = delivery_digest(delivery)
         existing = deps.journal.get(envelope.attempt_id)
         if existing is not None and not _resumable(existing, digest, envelope.generation):
