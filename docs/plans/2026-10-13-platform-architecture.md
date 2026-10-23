@@ -7,11 +7,11 @@ Date: 13 October 2026. Status: proposed target architecture. Companion to the [m
 1. Keep one modular Python control-plane application and one React console. Extract services only for execution isolation, independent scaling or demonstrated team/operational ownership.
 2. Add a separately deployed production runtime. Preserve the existing supervised evaluation runner and its contracts.
 3. Own a versioned Lotuspond workflow/package format, public API, connector/action contract, product UX, authorization and business outcome model.
-4. Reuse durable orchestration infrastructure. Temporal with its Python SDK is the recommended candidate, subject to a bounded architecture spike, dependency/license review and operational validation.
+4. Own durable orchestration as a PostgreSQL-backed state machine behind a narrow adapter ([ADR-0011](../architecture/0011-postgresql-durable-execution.md), confirmed by the owner on 22 October 2026). This supersedes the original recommendation of Temporal with its Python SDK, subject to a spike; Temporal remains the named fallback behind the same adapter.
 5. Start with one qualified deployment topology and one production worker environment. Support broader topologies through explicit qualification, not configuration flags alone.
 6. Keep customer code and credentials outside the shared API process. Per-customer execution isolation is the initial hosted boundary; hostile shared execution is a later architecture program.
 
-Temporal documents replayable workflow history, deterministic orchestration and external work in Activities. Its message-passing primitives support long waits for external decisions and its service can be self-hosted. These primitives reduce the need to invent timers, replay and recovery; they do not supply Lotuspond's authorization, isolation or business semantics. [Tasks](https://docs.temporal.io/tasks), [message passing](https://docs.temporal.io/encyclopedia/workflow-message-passing), [self-hosting](https://docs.temporal.io/self-hosted-guide).
+Superseded by ADR-0011 and retained for context: Temporal documents replayable workflow history, deterministic orchestration and external work in Activities. Its message-passing primitives support long waits for external decisions and its service can be self-hosted. These primitives reduce the need to invent timers, replay and recovery; they do not supply Lotuspond's authorization, isolation or business semantics. [Tasks](https://docs.temporal.io/tasks), [message passing](https://docs.temporal.io/encyclopedia/workflow-message-passing), [self-hosting](https://docs.temporal.io/self-hosted-guide).
 
 Agent frameworks may run inside bounded agent activities. Use one supported framework initially, with an adapter contract. Do not introduce a second competing system of record for business execution state. Evaluate LangGraph or simpler model/tool loops for agent behavior; Lotuspond's external package and action contracts must remain independent of that choice.
 
@@ -25,7 +25,7 @@ flowchart TB
     SDK[SDK and CI client] --> API
     API --> DB[(Product PostgreSQL)]
     API --> Registry[Immutable package and artifact registry]
-    API --> Engine[Durable orchestration service]
+    API --> Engine[Orchestrator workers on product PostgreSQL]
     API --> Limits[(Redis limits and cache)]
     Engine --> Runtime[Isolated production runtime pool]
     Runtime --> Actions[Policy-enforcing action executor]
@@ -98,12 +98,12 @@ Keep production `Execution` separate from evaluation `Run`. Existing release app
 Authority is explicit:
 
 - Lotuspond PostgreSQL owns definitions, tenancy, authorization, deployment intent, business cases and action decisions.
-- The orchestration engine owns durable workflow progression and its history; Lotuspond exposes a reconciled projection with event sequence/last-observed markers.
+- The orchestration engine owns durable workflow progression and its history; Lotuspond exposes a reconciled projection with event sequence/last-observed markers. Under ADR-0011 that engine is Lotuspond's own, and its progression and history are rows in product PostgreSQL.
 - Customer systems own their business records. An agent's output is not their source of truth.
 - Encrypted artifact storage owns retained large payloads; database records and engine events reference them. Secrets live in a supported secret store, not Redis, packages or event histories.
 - Redis supports quotas/caching/short-lived coordination. It is not the authoritative execution queue or business ledger.
 
-Use a transactional outbox to publish commands from committed Lotuspond state. Stable tenant-scoped execution IDs and inbox deduplication make repeated delivery safe. If a database commit succeeds but the engine response is lost, reconcile by that ID; never create a second business execution speculatively. Idempotent event projection resolves delayed or duplicated engine events. Document ordering and conflict behavior per event type.
+Use a transactional outbox to publish commands from committed Lotuspond state. Under ADR-0011 the engine shares that database, so the orchestrator consumes the outbox in the same transaction that applies it; the cross-store lost-response case below applies only to a replacement engine. Stable tenant-scoped execution IDs and inbox deduplication make repeated delivery safe. If a database commit succeeds but the engine response is lost, reconcile by that ID; never create a second business execution speculatively. Idempotent event projection resolves delayed or duplicated engine events. Document ordering and conflict behavior per event type.
 
 Suggested additive API resources: `/api/v1/packages`, `/agents/{id}/versions`, `/workflows/{id}/versions`, `/connections`, `/runtime-pools`, `/deployments`, `/executions`, `/human-tasks`, `/action-intents`, `/outcomes`, `/licenses` and `/service-grants`. Final schemas require a contract ADR.
 

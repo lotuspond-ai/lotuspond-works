@@ -1,16 +1,33 @@
 # Durable agent execution foundation (E04)
 
-Date: 15 October 2026 (Asia/Calcutta). Status: written specification approved by
-the owner; the detailed plan and implementation were also approved on 15 October 2026.
-Engine selection authorizes the specified local integration, not production adoption. This specification
-continues the approved product-completion sequence after E03. It is not a
-production-readiness claim or a replacement for the remaining requirements.
+Date: 15 October 2026 (Asia/Calcutta); revised 22 October 2026. Status: written
+specification approved by the owner; the detailed plan and implementation were also
+approved on 15 October 2026, and Tasks 1–6 are implemented. **Revision 2**, dated
+22 October 2026, applies [ADR-0011](../../architecture/0011-postgresql-durable-execution.md):
+the owner confirmed a Lotuspond-owned PostgreSQL state machine instead of Temporal.
+On 22 October 2026 the owner approved the revised sections together with the revised
+plan. Implementation of Tasks 7–14 has not started and begins when the owner asks for
+it. The sections are engine choice, component
+ownership, outbox and signal delivery, interpreter progression, history, versioning,
+recovery and verification. Engine selection authorizes the specified local integration,
+not production adoption. This specification continues the approved product-completion
+sequence after E03. It is not a production-readiness claim or a replacement for the
+remaining requirements.
+
+Revision 2 changes only what depends on the engine. Customer intent, publication and
+deployment admission, authority, artifacts, budgets, waits and capacity keep their
+approved text, and the schema-v14 records from Tasks 1–6 become the engine's state.
+The [revised plan](../plans/2026-10-15-durable-execution.md#temporal-assumptions-in-completed-tasks-16)
+lists every element of Tasks 1–6 that assumed Temporal and how each is reused.
 
 Authorities: [approved completion design](2026-10-14-product-completion-design.md),
 [executable-v2 specification](2026-10-14-executable-package-v2-design.md),
 [connections/runtime identity specification](2026-10-14-connections-fleet-design.md),
-[agent needs and UI boundaries](../../AGENT_PRODUCT_RATIONALE.md), and
-[completed engine probe](../../plans/2026-10-14-durable-engine-probe.md).
+[agent needs and UI boundaries](../../AGENT_PRODUCT_RATIONALE.md),
+[ADR-0011](../../architecture/0011-postgresql-durable-execution.md) with its
+[durable-engine spike](../../plans/2026-10-15-durable-engine-spike.md), and the
+[completed engine probe](../../plans/2026-10-14-durable-engine-probe.md), whose engine
+recommendation ADR-0011 supersedes.
 The complete requirement register remains in the completion design.
 
 ## Customer intent and stage boundary
@@ -42,38 +59,44 @@ do not authorize removing the other approved features.
 
 ## Engine choice and operating cost
 
-Recommend Temporal server 1.32.1 and Python SDK 1.34.0, the versions exercised in
-the approved probe, behind a narrow adapter for start, signal, cancel, describe
-and replay/version compatibility. The completed local probe supports persistent
-waits, restart, duplicate workflow IDs, pinned replay and recovery fencing. It
-does not establish production HA, remote write semantics, workload capacity or
-security configuration. The implementation plan must pin the SDK and server
-artifacts, record license/transitive inventories and use a separately owned
-local PostgreSQL-backed server for integration qualification.
+Use a Lotuspond-owned state machine in product PostgreSQL
+([ADR-0011](../../architecture/0011-postgresql-durable-execution.md)) behind a narrow
+orchestration adapter. Orchestrator workers in the control plane advance executions in
+short transactions that hold the execution row lock. A sweeper handles due timers, wait
+and execution deadlines, lapsed activity leases and unclaimed deliveries. Runtimes
+perform every read and model activity over the signed, leased activity protocol. No new
+production dependency, engine server or engine-owned schema is introduced. The
+schema-v14 records are the engine's state, and one additive v15 migration adds its claim
+marker and sweep indexes.
 
-DBOS remains a credible alternative with fewer separate service components;
-it received source/documentation inspection, not equivalent failure testing.
-Building an engine from the evaluation worker would transfer responsibility for
-timers, history, replay, signals and version evolution to Lotuspond. Temporal is
-recommended because its exercised behavior fits the required waits and recovery,
-with explicit cost: another stateful service, history/data controls, replay-aware
-upgrades, operational staffing and separate release qualification.
+The local spike showed restart during waits, duplicate admission, fencing,
+cancellation and pinned upgrades on both PostgreSQL and Temporal; the probe showed
+Temporal's restore and replay behavior. Neither exercised executable-v2's parallel,
+iteration, subworkflow or timer regions, workers on separate hosts, failover or load.
+Choosing PostgreSQL makes these engine responsibilities Lotuspond's: claim and fencing,
+timers, retry backoff, interpreter versioning, event history and its growth, vacuum
+and polling load. The conformance suite and load test of the implementation plan
+establish their correctness, not the spike.
+
+Temporal server 1.32.1 with Python SDK 1.34.0, the previous recommendation, remains
+the named fallback behind the same adapter. DBOS was reviewed from documentation and
+not chosen. Any replacement must pass the same conformance suite.
 
 The public package and API never accept engine workflow code, queue names or
 arbitrary workflow types. A fixed Lotuspond interpreter executes only the
-compiled, validated representation. Temporal's determinism sandbox is not a
-security boundary; untrusted code is not loaded into it. Namespace and task
-queue selection are operator-owned routing, never tenant authorization.
+compiled, validated representation. Orchestrator processes never load customer code.
+Worker roles and supported interpreter versions are operator-owned routing, never
+tenant authorization.
 
 ## Authority and component ownership
 
 The API/PostgreSQL authority owns packages, deployment pins, execution identities,
 authorized data, current permissions, inbox/outbox, usage reservations and
-customer projections. The engine owns durable progression, timers and waits.
-An orchestrator service translates committed product work through the narrow
-engine adapter. A separately managed runtime owns bounded model/read activities,
+customer projections. Orchestrator workers own durable progression, timers and waits
+as rows in the same database, behind the narrow engine adapter. They hold no
+authority beyond what the persisted records grant. A separately managed runtime owns bounded model/read activities,
 actual destination checks and late credential resolution. Customer credentials
-never enter the API, engine history, package, model context or event payload.
+never enter the API, execution history, package, model context or event payload.
 
 No authority is inferred from an engine task or previously successful activity.
 Every new activity checks the current tenant/environment, deployment, pool,
@@ -82,8 +105,8 @@ entitlement. The authoritative record source supplies complete deployment-to-
 connection and secret linkage; a deployment digest is not a connection digest.
 Current revocation wins over historical pinning. Missing providers deny activity.
 
-Keep the engine library outside the pure SDK and existing evaluation runner.
-The API can operate for evidence/administration while the engine is unavailable;
+Keep orchestration code outside the pure SDK and the existing evaluation runner.
+The API can operate for evidence/administration while orchestrator workers are stopped;
 admitted work remains visibly pending, subject to explicit backlog limits. The
 interpreter and activity dispatcher run in separate supervised services, not
 inside API request handlers.
@@ -133,14 +156,17 @@ records before applying transitions. Caller-supplied context grants nothing.
 Execution admission takes a bounded idempotency key and validated typed input.
 Under one transaction, authorize, pin deployment/package/configuration/plan/
 interpreter version and input identity, reserve applicable admission capacity,
-insert the execution and append an engine-start outbox entry. Equal key and
+insert the execution, append a start outbox entry and mark the execution runnable. Equal key and
 digest returns the same execution after current authorization; changed content
 conflicts. An HTTP retry cannot create another business execution.
 
-Outbox workers lease bounded batches using database time. Publishing to Temporal
-can occur more than once; a stable opaque engine workflow ID and exact stored
-digest resolve the lost-response window. Never mark an outbox entry delivered
-before the engine acknowledges its matching identity. Engine queries and API
+The outbox is the durable record of each start, signal and control request. Because
+the engine shares the database, the outbox's delivery hop collapses. The orchestrator
+consumes an execution's pending entries in the same transaction that applies them,
+so a crash leaves both unapplied and pending, and no acknowledgement can be lost
+between stores. Task 6's bounded two-transaction lease and matching-digest
+acknowledgement remain the protocol for external consumers and for a replacement
+engine; the PostgreSQL engine does not use them. Engine observations and API
 projections are observations, not permission to perform an activity.
 
 Human/external signals use a separately authenticated, durable inbox with unique
@@ -159,6 +185,14 @@ external waits, typed human-information waits, connector reads and bounded agent
 Use exactly the SDK's integer/decimal/schema/mapping semantics and bounds. No
 eval, imports, shell, filesystem access, ambient clock/randomness or network
 exists inside package expressions. Reject unsupported plans before starting.
+
+Progression is a deterministic function of the pinned compiled plan, the committed
+step, attempt, wait and signal rows of the affected region occurrence, and
+database time passed in explicitly. Workers keep no execution state between
+transactions. One transaction applies the pure transitions available for one execution,
+up to a fixed bound. It creates attempts or waits, records encrypted results and events,
+and commits. If the bound is reached, the execution stays runnable. Unique
+occurrence and attempt-ordinal keys make a repeated transition a no-op.
 
 Read activities and model activities need a distinct, versioned signed activity
 envelope because the existing RuntimeCommand is action-intent-specific. Introduce
@@ -205,10 +239,10 @@ reviewed complete implementation. This retains those goals without a fake path.
 
 Keep bounded inputs/results in tenant-authorized artifact records with immutable
 content identity, classification, source version, encryption/access policy and
-retention metadata. Engine history carries opaque references, digests, fixed
-codes and bounded routing metadata rather than prompts, documents or secrets.
-Result lookup requires current scope/source access; a content digest is not an
-access token. Avoid private values in search attributes, workflow IDs and logs.
+retention metadata. Execution events and orchestration rows carry opaque references,
+digests, fixed codes and bounded routing metadata rather than prompts, documents or
+secrets. Result lookup requires current scope/source access; a content digest is not
+an access token. Avoid private values in identifiers, index keys and logs.
 
 The initial artifact interface limits each admitted JSON value to 1 MiB and the
 existing SDK depth/item limits. It verifies exact bytes on writes and reads and
@@ -218,11 +252,11 @@ keys deny storage/use, and no key is kept in the same artifact row. Database-bac
 bounded ciphertext is sufficient for this stage; object-store and large-document
 support remain explicit later providers, not implicit unbounded paths.
 
-The implementation plan must test decoded exported engine histories and errors
-with sentinel content. Reference minimization does not eliminate sensitive
+The implementation plan must test decoded event artifacts, projections, logs and
+errors with sentinel content. Reference minimization does not eliminate sensitive
 metadata or replace encryption, access controls, deletion/retention policy and
-key custody. A production history backend remains unqualified until those
-controls are configured and tested for the chosen topology.
+key custody. Production retention of execution history remains unqualified until
+those controls are configured and tested for the chosen topology.
 
 Authorized knowledge references retain source/version, ACL/freshness and
 citations. E04 accepts bounded supplied context and fixed synthetic source
@@ -276,50 +310,66 @@ observed terminal state. Neither status promises to undo an external effect.
 Resume requires current authority and remaining deadlines/budgets. Parallel
 failure stops undispatched siblings and retains already received results/errors.
 
-Pin the interpreter implementation independently of package/configuration hashes.
-Route existing histories to their compatible implementation; deployment of new
-code cannot silently reroute them. Retain old supported code until histories
-finish or an explicitly reviewed migration exists. Replay recorded histories
-against compatible/incompatible implementations and refuse unsupported versions.
-Engine history rollover, if needed, preserves the same execution/step/wait and
-deduplication identities and budgets; it cannot create a fresh allowance.
+Pin the interpreter version independently of package/configuration hashes. A
+worker claims only executions whose interpreter version it implements, so deploying
+new code cannot silently reroute existing executions. Retain old supported
+interpreter versions until their executions finish or an explicitly reviewed
+migration exists. Golden progression fixtures recorded under each supported version
+must re-derive identically; an incompatible change needs a new version, and
+unsupported versions are refused at admission and claim. Execution history is
+ordinary rows bounded by the contract's expansion limits. There is no history
+rollover, and nothing resets identities, deadlines or budgets.
 
 ## Recovery and migration
 
-Use the existing independent RecoveryAuthority contract. Restored application
-and engine rows cannot establish current epoch, grants, revocations or identity.
+Use the existing independent RecoveryAuthority contract. Restored rows cannot
+establish current epoch, grants, revocations or identity.
 Fence before controlled restore; revalidate current identity/permissions and
 reconcile state before any resumed activity. No always-allow provider is added
 to make production startup appear successful. Real custody/rollback detection
 remains a separate qualified integration, not a local database flag.
 
 Add the next reviewed schema revision from exact v13, with strict preflight,
-full-scope constraints, caller-transaction migration and version written last.
-Preserve every legacy/evaluation/registry/fleet record. No destructive downgrade
-or empty-database initializer as upgrade. Engine persistence is separately owned
-and versioned; app migration does not silently initialize or reset it. Forward
-repair and operator recovery procedures must preserve uncertain records.
+full-scope constraints, caller-transaction migration and version written last
+(Task 2, implemented). The engine adds one further additive revision from exact v14:
+the orchestration claim marker and sweep indexes. Preserve every
+legacy/evaluation/registry/fleet/execution record. No destructive downgrade or
+empty-database initializer as upgrade. Engine state is product schema. It evolves
+only through reviewed additive migrations in `initialize.py`, and nothing
+initializes or resets it when a worker starts. Forward repair and operator recovery
+procedures must preserve uncertain records.
+
+A restore returns execution and business records together from one backup. Before
+work resumes, orchestration, sweeping and dispatch refuse to proceed until the
+independent RecoveryAuthority reports the current epoch. Attempts dispatched or
+claimed at backup time become uncertain and reconcile. Waits keep their absolute
+deadlines. Admissions and signals accepted after the backup are absent and must be
+resubmitted under their original idempotency identities.
 
 ## Verification and completion criteria
 
 Require meaningful red/green tests and independent review per implementation
 task. Exercise actual PostgreSQL races/rollback, separately installed artifacts,
-real API/TLS/runtime boundaries and a disposable persistent Temporal server.
+real API/TLS/runtime boundaries and disposable PostgreSQL clusters owned by the
+test tiers.
 Test complete typed control flow, cross-scope pins, malformed signed activity,
 revocation/expiry during lock waits, changed policy, forged tool output, budgets
 including retries, authorized context and no-secret/history sentinel controls.
 
-Inject failures before/after app commit, engine start acknowledgement, activity
-claim/result, signal persistence and projection. Demonstrate duplicate admission,
-signal conflicts/gaps, worker/server/database restarts during waits, pause/cancel
-around dispatch, old/new implementation coexistence and incompatible replay.
-Restore app and engine snapshots with independently current revocation/epoch
-records; stale workers and lost grants must deny. Observe physical fixture calls
+Inject failures before/after admission commit, orchestrator transition commit,
+activity claim/result, signal persistence and projection. Demonstrate duplicate
+admission, signal conflicts/gaps, worker and database restarts (including immediate
+PostgreSQL restart) during waits, pause/cancel around dispatch, old/new interpreter
+coexistence and refusal of unsupported interpreter versions. Restore the database
+from an older backup with independently current revocation/epoch records; stale
+workers and lost grants must deny. Port the spike checks that apply to E04 and add
+cases for parallel, iteration, subworkflow and timer regions, revocation,
+disconnected runtimes and tenant isolation, plus a load test at the planning targets. Observe physical fixture calls
 and resource cleanup with live positive controls, not hardcoded report counters.
 
 Run required full repository checks, both supported Python versions, installed
 artifact/image checks, schema parity, strict docs and exact-head hosted CI.
-Record source/engine/dependency/artifact identities, failed attempts and limits.
+Record source/interpreter/dependency/artifact identities, failed attempts and limits.
 Local deterministic/model fixtures do not qualify real providers, workload,
 customer outcomes, HA, hostile-tenant isolation, RPO/RTO or service availability.
 
@@ -337,6 +387,13 @@ permitted detailed implementation planning. The owner subsequently approved the
 fourteen-task plan and implementation with the already-selected subagent method.
 No additional merge, deployment, production database access, provider/customer
 connection, public distribution or external commitment is requested by it.
+
+On 22 October 2026 the owner confirmed ADR-0011's PostgreSQL engine. The same day
+the owner approved Revision 2 of this specification and the revised Tasks 7–14
+(“approved for revision 2”). The plan's other owner decisions were not answered
+individually and are recorded there as accepted with their recommended options.
+The Temporal sections they replace are withdrawn. Implementation of Tasks 7–14 has
+not been requested yet, and nothing from either version is implemented.
 
 Author review checks: the proposed activity contract is additive and does not
 reinterpret existing action signatures; execution authorization is distinct from
