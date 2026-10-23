@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
 import { api, ApiError, type Account, type Row } from './api.js';
-import { Alert, StatusBadge } from './components/ui.js';
+import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
 import { VoiceSessions } from './pages/VoiceSessions.js';
 import { Workspaces } from './pages/Workspaces.js';
@@ -41,8 +41,13 @@ import { Icon } from './components/console/icons.js';
 import { allPages, navigation, pageLabel } from './components/console/navigation.js';
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
+
+// The Studio carries the canvas and the contract validator, so it loads when first opened.
+const Studio = lazy(() =>
+  import('./pages/Studio.js').then((module) => ({ default: module.Studio })),
+);
 import { requestCreate, takeCreateRequest, useSetupProgress } from './lib/setup.js';
-import { exactTime, fieldLabel, formatLatency, relativeTime } from './lib/format.js';
+import { fieldLabel, formatLatency } from './lib/format.js';
 import { documentTitle, useDocumentTitle } from './lib/title.js';
 
 type Field = {
@@ -230,6 +235,7 @@ const label = (key: string) =>
 // Pages whose records belong to a project, so the project filter applies to them.
 const projectScoped = [
   'projects',
+  'studio',
   'scenarios',
   'environments',
   'runs',
@@ -664,6 +670,22 @@ export function App({
               projectId={projectId}
               role={currentWorkspace?.role || 'viewer'}
             />
+          ) : page === 'studio' ? (
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Opening the Studio…
+                </p>
+              }
+            >
+              <Studio
+                key={`${workspace}-${projectId}`}
+                workspace={workspace}
+                projectId={projectId}
+                projectName={String(projects.find((item) => item.id === projectId)?.name ?? '')}
+                role={currentWorkspace?.role || 'viewer'}
+              />
+            </Suspense>
           ) : page === 'voice-sessions' ? (
             <VoiceSessions
               key={`${workspace}-${projectId}`}
@@ -1318,13 +1340,7 @@ function Resource({
                       ) : ['status', 'severity', 'outcome'].includes(field) ? (
                         <StatusBadge value={row[field]} />
                       ) : field.endsWith('_at') && row[field] ? (
-                        <time
-                          className="cell-time"
-                          dateTime={String(row[field])}
-                          title={exactTime(String(row[field]))}
-                        >
-                          {relativeTime(String(row[field]))}
-                        </time>
+                        <RelativeTime value={row[field]} />
                       ) : field === 'latency_ms' && Number.isFinite(Number(row[field])) ? (
                         formatLatency(Number(row[field]))
                       ) : (

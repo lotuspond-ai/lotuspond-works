@@ -12,6 +12,7 @@ export const navigation: readonly NavSection[] = [
     title: 'Build',
     items: [
       { id: 'projects', label: 'Projects', icon: 'projects' },
+      { id: 'studio', label: 'Studio', icon: 'studio' },
       { id: 'scenarios', label: 'Scenarios', icon: 'scenarios' },
       { id: 'environments', label: 'Environments', icon: 'environments' },
       { id: 'runners', label: 'Runners', icon: 'runners' },

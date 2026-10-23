@@ -28,6 +28,9 @@
   --danger-soft: #f8e6e2;
   --neutral-soft: #f0f0ec;
   --lotus: #c4864a;
+  /* The field record's graph paper, shared by the public glyph panels and the Studio surface. */
+  --grid: rgba(35, 49, 43, 0.06);
+  --grid-major: rgba(35, 49, 43, 0.11);
   --shadow-sm: 0 1px 2px rgba(20, 28, 24, 0.06);
   --shadow-md: 0 1px 2px rgba(20, 28, 24, 0.05), 0 12px 32px -12px rgba(20, 28, 24, 0.22);
   --serif: 'Iowan Old Style', Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
@@ -877,9 +880,6 @@ tbody tr:hover td {
   margin-bottom: 18px;
   font-size: 14px;
 }
-.empty-line {
-  display: none;
-}
 .error {
   margin-bottom: 16px;
   padding: 10px 14px;
@@ -1667,7 +1667,7 @@ textarea {
   color: var(--success);
   background: #e8f1e8;
   border-left: 3px solid var(--success);
-  border-radius: 4px;
+  border-radius: 8px;
 }
 .narrow-form {
   max-width: 640px;
@@ -1731,9 +1731,10 @@ label:has(textarea:not(.code-input)) textarea {
 .raw-record pre {
   overflow: auto;
   max-height: 480px;
-  background: #f1f4ef;
   padding: 18px;
-  font-size: 11px;
+  border-radius: 8px;
+  background: var(--sunken);
+  font-size: 12px;
 }
 .decision-summary > .record-facts {
   display: grid;
@@ -1745,7 +1746,7 @@ label:has(textarea:not(.code-input)) textarea {
   font-size: 13px;
 }
 .decision-summary .record-facts dt {
-  font-size: 11px;
+  font-size: 12px;
 }
 .workspace-list {
   display: grid;
@@ -1758,7 +1759,7 @@ label:has(textarea:not(.code-input)) textarea {
   padding: 22px;
   border: 1px solid var(--line);
   background: var(--paper);
-  border-radius: 6px;
+  border-radius: 12px;
 }
 .workspace-card > div:nth-child(2) {
   min-width: 0;
@@ -1773,7 +1774,7 @@ label:has(textarea:not(.code-input)) textarea {
   font-size: 12px;
 }
 .workspace-card .eyebrow {
-  font-size: 9px;
+  margin-bottom: 0;
 }
 .workspace-card button {
   margin-left: auto;
@@ -1785,11 +1786,11 @@ label:has(textarea:not(.code-input)) textarea {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  font-family: Georgia, serif;
-  font-size: 23px;
+  font-size: 17px;
+  font-weight: 600;
   color: var(--accent);
   background: var(--accent-soft);
-  border-radius: 6px;
+  border-radius: 10px;
 }
 .support-note {
   padding: 24px 0;
@@ -1827,7 +1828,7 @@ label:has(textarea:not(.code-input)) textarea {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border: 1px solid var(--line);
   background: var(--paper);
-  border-radius: 6px;
+  border-radius: 12px;
   overflow: hidden;
   margin: 0;
 }
@@ -1866,7 +1867,7 @@ label:has(textarea:not(.code-input)) textarea {
   display: grid;
   grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 12px;
   background: var(--paper);
   min-height: 420px;
   overflow: hidden;
@@ -1896,7 +1897,7 @@ label:has(textarea:not(.code-input)) textarea {
 }
 .session-row .hint {
   width: 100%;
-  font-size: 11px;
+  font-size: 12px;
 }
 .session-title {
   font-weight: 550;
@@ -1925,8 +1926,7 @@ label:has(textarea:not(.code-input)) textarea {
   margin-bottom: 0;
 }
 .section-row .eyebrow {
-  font-size: 9px;
-  margin-bottom: 7px;
+  margin-bottom: 6px;
 }
 .compact-facts {
   display: flex;
@@ -1935,11 +1935,11 @@ label:has(textarea:not(.code-input)) textarea {
   margin: 0 0 24px;
 }
 .compact-facts dt {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
 }
 .compact-facts dd {
-  font-size: 12px;
+  font-size: 13px;
   margin: 3px 0 0;
 }
 .evidence-section {
@@ -1965,12 +1965,10 @@ label:has(textarea:not(.code-input)) textarea {
   gap: 10px;
   align-items: center;
   margin-bottom: 6px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
-  text-transform: capitalize;
 }
 .transcript-meta strong {
-  font-size: 11px;
   color: var(--ink);
 }
 .transcript p {
@@ -1981,7 +1979,7 @@ label:has(textarea:not(.code-input)) textarea {
 }
 .assessment {
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: 10px;
   padding: 16px;
   margin-bottom: 12px;
 }
@@ -2058,7 +2056,7 @@ label:has(textarea:not(.code-input)) textarea {
   display: block;
   margin-top: 4px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 400;
 }
 .incident-filters {
@@ -2114,7 +2112,7 @@ label:has(textarea:not(.code-input)) textarea {
 }
 .incident-links code {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -2217,7 +2215,7 @@ label:has(textarea:not(.code-input)) textarea {
 .setup-key,
 .setup-uri code,
 .recovery-code-list code {
-  font-family: monospace;
+  font-family: var(--mono);
 }
 .setup-uri code {
   display: block;

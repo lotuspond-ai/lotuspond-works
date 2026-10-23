@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, type Row } from '../api.js';
-import { Alert, EmptyState, SectionHeader, StatusBadge, displayValue } from '../components/ui.js';
+import { Alert, EmptyState, RelativeTime, SectionHeader, StatusBadge } from '../components/ui.js';
 import { Operations } from './Operations.js';
 
 type Overview = {
@@ -68,7 +68,8 @@ export function Admin() {
       setBusy(false);
     }
   }
-  const records = (tab === 'users' ? users : workspaces).filter((row) =>
+  const loaded = tab === 'users' ? users : workspaces;
+  const records = loaded.filter((row) =>
     [row.name, row.email, row.kind, row.status].some((value) =>
       String(value || '')
         .toLowerCase()
@@ -167,7 +168,12 @@ export function Admin() {
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
-            <span className="hint">{records.length} loaded records</span>
+            {/* Always present, so a filter's new count is announced as it changes. */}
+            <span className="toolbar-count" role="status">
+              {records.length === loaded.length
+                ? `${loaded.length} ${loaded.length === 1 ? 'record' : 'records'}`
+                : `${records.length} of ${loaded.length} records`}
+            </span>
           </div>
           {selected && (
             <form
@@ -210,8 +216,20 @@ export function Admin() {
           )}
           {!records.length ? (
             <EmptyState
-              title="No records found"
-              description="Try another filter or refresh the records."
+              glyph={query ? undefined : 'network'}
+              title={query ? 'No matching records' : `No ${tab} recorded`}
+              description={
+                query
+                  ? 'Try another filter, or clear it to see every loaded record.'
+                  : 'Refresh after accounts or workspaces have been created.'
+              }
+              action={
+                query ? (
+                  <button className="secondary" onClick={() => setQuery('')}>
+                    Clear filter
+                  </button>
+                ) : undefined
+              }
             />
           ) : (
             <div className="table-wrap">
@@ -219,11 +237,15 @@ export function Admin() {
                 <caption className="sr-only">{tab === 'users' ? 'Users' : 'Workspaces'}</caption>
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>{tab === 'users' ? 'Email' : 'Type'}</th>
-                    <th>{tab === 'users' ? 'Platform role' : 'Status'}</th>
-                    <th>Created</th>
-                    {tab === 'workspaces' && <th>Action</th>}
+                    <th scope="col">Name</th>
+                    <th scope="col">{tab === 'users' ? 'Email' : 'Type'}</th>
+                    <th scope="col">{tab === 'users' ? 'Platform role' : 'Status'}</th>
+                    <th scope="col">Created</th>
+                    {tab === 'workspaces' && (
+                      <th className="actions">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -242,9 +264,11 @@ export function Admin() {
                           <StatusBadge value={row.status} />
                         )}
                       </td>
-                      <td>{displayValue(row.created_at)}</td>
+                      <td>
+                        <RelativeTime value={row.created_at} />
+                      </td>
                       {tab === 'workspaces' && (
-                        <td>
+                        <td className="actions">
                           <button
                             className={`text-button ${row.status !== 'suspended' ? 'danger' : ''}`}
                             onClick={() => setSelected(row)}

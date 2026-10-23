@@ -190,10 +190,13 @@ class GatewayApiTests(unittest.TestCase):
     def test_total_deadline_stops_slow_trickle_and_retains_reservation(self) -> None:
         class TrickleStream(httpx.AsyncByteStream):
             closed = False
+            chunks = 0
 
             async def __aiter__(self):
-                for _ in range(100):
+                # Undeadlined, this drains 1,000 bytes (under the 1,024-byte limit) in 10 s.
+                for _ in range(1000):
                     await asyncio.sleep(0.01)
+                    self.chunks += 1
                     yield b" "
 
             async def aclose(self):
@@ -209,7 +212,11 @@ class GatewayApiTests(unittest.TestCase):
                 json=self.request_body(),
                 headers=self.headers,
             )
-        self.assertLess(monotonic() - started, 0.5)
+        # Each chunk waits 10 ms of event-loop time, so the 40 ms total deadline admits at
+        # most four however the runner schedules the process. The wall-clock bound only
+        # rules out waiting for the drain; a stall elsewhere in the request must not fail it.
+        self.assertLessEqual(stream.chunks, 4)
+        self.assertLess(monotonic() - started, 5)
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["error"], "provider_unavailable")
         self.assertTrue(stream.closed)

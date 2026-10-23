@@ -7,11 +7,19 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '../src/App.js';
 import { createIdentityLinks } from '../src/lib/identityLinks.js';
+import { packageDigest, validatePackage } from '../src/lib/packageContract.js';
 import { sampleDecision } from '../src/components/platform/sample.js';
+import examplePackage from '../../contracts/examples/reviewed-action.v1.json';
 import '../src/styles.css';
 
 const mode = new URLSearchParams(location.search);
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+const exampleValidation = validatePackage(examplePackage);
+const exampleCanonical = exampleValidation.ok ? exampleValidation.canonical : '';
+const VALIDATOR_REVISION = 'lotuspond.workflow-package.validator.v1.1';
+const CANONICALIZATION = 'lotuspond.workflow-package.canonical-json.v1';
+// Canonical content by fixture version id, so an opened version round-trips through the Studio.
+const packageContents = new Map<string, string>([['pkg-1', exampleCanonical]]);
 const project = {
   id: 'p-refunds',
   name: 'Refund assistant',
@@ -157,7 +165,7 @@ const lists: Record<string, Record<string, unknown>[]> = {
       project_id: project.id,
       name: 'Refunds cite the policy',
       enabled: true,
-      sample_rate: 0.1,
+      sample_basis_points: 1000,
       criteria: 'Cites the refund policy',
       created_at: ago(3000),
     },
@@ -176,6 +184,25 @@ const lists: Record<string, Record<string, unknown>[]> = {
     },
   ],
   'voice/sessions': [],
+  // The registry's reviewed-action example, as the registry would record it. Its digest is the
+  // one pinned by packageContract.test.ts and the Python contract tests.
+  packages: [
+    {
+      id: 'pkg-1',
+      created_at: ago(2400),
+      workspace_id: 'w-org',
+      project_id: project.id,
+      package_id: examplePackage.package_id,
+      version: examplePackage.version,
+      schema_version: examplePackage.schema_version,
+      validator_revision: VALIDATOR_REVISION,
+      canonicalization: CANONICALIZATION,
+      sha256: '305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3',
+      content_bytes: new TextEncoder().encode(exampleCanonical).length,
+      publisher_id: 'u1',
+      publisher_kind: 'user',
+    },
+  ],
   'auth/sessions': [
     {
       id: 'sess1',
@@ -267,12 +294,89 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         },
       },
     });
+  // Publishing a package answers as the registry does: the same local validator decides
+  // admission, an identical version is returned again, and a changed one conflicts. The
+  // fixture version lives in this page only.
+  const publish = /^projects\/([^/]+)\/packages$/.exec(path);
+  if (method === 'POST' && publish) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(typeof init?.body === 'string' ? init.body : '');
+    } catch {
+      return json({ error: 'invalid_package', message: 'The body is not valid JSON.' }, 422);
+    }
+    const result = validatePackage(raw);
+    if (!result.ok)
+      return json(
+        {
+          error: 'invalid_package',
+          message: 'The package does not satisfy the supported contract.',
+          errors: result.problems.map(({ path: at, code, message }) => ({
+            path: at,
+            code,
+            message,
+          })),
+        },
+        422,
+      );
+    const sha256 = await packageDigest(result.canonical);
+    const existing = lists.packages.find(
+      (item) =>
+        item.project_id === publish[1] &&
+        item.package_id === result.package.package_id &&
+        item.version === result.package.version,
+    );
+    if (existing) {
+      if (existing.sha256 === sha256) return json(existing);
+      return json(
+        {
+          error: 'package_conflict',
+          message: 'The immutable version or request key already identifies different content.',
+        },
+        409,
+      );
+    }
+    const created = {
+      id: `pkg-${lists.packages.length + 1}`,
+      created_at: new Date().toISOString(),
+      workspace_id: 'w-org',
+      project_id: publish[1],
+      package_id: result.package.package_id,
+      version: result.package.version,
+      schema_version: result.package.schema_version,
+      validator_revision: VALIDATOR_REVISION,
+      canonicalization: CANONICALIZATION,
+      sha256,
+      content_bytes: new TextEncoder().encode(result.canonical).length,
+      publisher_id: 'u1',
+      publisher_kind: 'user',
+    };
+    lists.packages.unshift(created);
+    packageContents.set(created.id, result.canonical);
+    return json(created, 201);
+  }
   if (method !== 'GET')
     return json({ error: 'fixture', message: 'The console fixtures are read-only.' }, 400);
   if (mode.has('failing'))
     return json({ error: 'unavailable', message: 'The data service is unavailable.' }, 503);
   const list = lists[path];
-  if (list) return json({ items: mode.has('empty') ? [] : list, next: null });
+  const projectFilter = url.searchParams.get('project_id');
+  if (list)
+    return json({
+      items: mode.has('empty')
+        ? []
+        : projectFilter
+          ? list.filter((item) => !('project_id' in item) || item.project_id === projectFilter)
+          : list,
+      next: null,
+    });
+  const content = /^packages\/([^/]+)\/content$/.exec(path);
+  if (content) {
+    const stored = packageContents.get(content[1]);
+    return stored
+      ? new Response(stored, { headers: { 'content-type': 'application/json' } })
+      : json({ error: 'not_found', message: 'No fixture for this request.' }, 404);
+  }
   const [resource, id] = path.split('/');
   const record = resource ? lists[resource]?.find((item) => item.id === id) : undefined;
   if (record) return json(record);

@@ -294,6 +294,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "studio-canvas",
+                    "date": "2026-10-15",
+                    "title": "The Studio composes workflow packages",
+                    "description": "Developers can compose a workflow package as a graph in the console: drag start, agent, connector, human review and end nodes onto graph paper, move them, connect them by dragging a port or by keyboard, and edit each node, the package and its declared models, connectors and secret names in an inspector. An admission check in the browser mirrors the registry validator as you work and points at the nodes concerned, a passing draft shows its content digest, and publishing stores an immutable version in the project through the registry. Drafts stay in the browser until published. The Studio runs nothing: a published version is admitted content, not a deployment, an approval or permission to execute.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "fleet-runtime-foundation-qualification",
                     "date": "2026-10-14",
                     "title": "Installable Linux runtime identity foundation",

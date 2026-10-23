@@ -1,0 +1,624 @@
+/* Studio: a workflow package composed on graph paper. The surface is the field record's grid,
+   the nodes are index cards with the kind's ink glyph, start and end are round stamps, and the
+   edges are ink traces with a small arrowhead. Everything is built from the console tokens. */
+.studio-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.studio-toolbar-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.studio-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+/* Canvas ------------------------------------------------------------------------- */
+.studio-canvas {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+}
+.studio-palette {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #fcfcfb;
+}
+.studio-palette-label {
+  margin-right: 4px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.studio-palette-item {
+  min-height: 30px;
+  padding: 0 10px 0 8px;
+  border-color: var(--line-strong);
+  background: var(--paper);
+  box-shadow: none;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: grab;
+  touch-action: none;
+}
+.studio-palette-item:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.studio-palette-item .icon {
+  color: var(--accent);
+}
+.studio-palette-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.studio-surface {
+  position: relative;
+  height: clamp(360px, 56vh, 640px);
+  overflow: auto;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:
+    60px 60px,
+    60px 60px,
+    12px 12px,
+    12px 12px;
+  background-attachment: local;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.studio-connecting {
+  cursor: crosshair;
+}
+.studio-frame {
+  position: relative;
+}
+/* Where the canvas continues past the view, its edge fades into the frame. */
+.studio-shade {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+.studio-shade-left,
+.studio-shade-right {
+  top: 0;
+  bottom: 0;
+  width: 28px;
+}
+.studio-shade-top,
+.studio-shade-bottom {
+  right: 0;
+  left: 0;
+  height: 28px;
+}
+.studio-shade-left {
+  left: 0;
+  background: linear-gradient(90deg, rgba(27, 36, 32, 0.08), transparent);
+}
+.studio-shade-right {
+  right: 0;
+  background: linear-gradient(270deg, rgba(27, 36, 32, 0.08), transparent);
+}
+.studio-shade-top {
+  top: 0;
+  background: linear-gradient(180deg, rgba(27, 36, 32, 0.08), transparent);
+}
+.studio-shade-bottom {
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(27, 36, 32, 0.08), transparent);
+}
+.studio-world-extent {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+}
+.studio-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.studio-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.studio-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.studio-edge-line {
+  fill: none;
+  stroke: var(--ink-mark);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.studio-edge-hit:hover + .studio-edge-line {
+  stroke-width: 2.4;
+}
+.studio-edge-accent .studio-edge-line {
+  stroke: var(--accent);
+  stroke-width: 2.4;
+}
+.studio-edge-danger .studio-edge-line {
+  stroke: var(--danger);
+  stroke-dasharray: 4 4;
+}
+.studio-arrow path {
+  fill: none;
+  stroke: var(--ink-mark);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.studio-arrow-accent path {
+  stroke: var(--accent);
+}
+.studio-arrow-danger path {
+  stroke: var(--danger);
+}
+.studio-wire {
+  stroke: var(--accent);
+  stroke-dasharray: 5 4;
+}
+
+/* Nodes ------------------------------------------------------------------------- */
+.studio-node {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 176px;
+  height: 60px;
+  padding: 0 18px 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+}
+.studio-node-start,
+.studio-node-end {
+  border-radius: 999px;
+}
+.studio-node-end {
+  background: var(--sunken);
+}
+.studio-node-human_review {
+  border-style: dashed;
+}
+.studio-node:hover {
+  border-color: var(--field-line);
+}
+.studio-node-selected,
+.studio-node-selected:hover {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px var(--accent-soft),
+    var(--shadow-sm);
+}
+.studio-node-dragging {
+  box-shadow: var(--shadow-md);
+  cursor: grabbing;
+}
+.studio-node-flagged,
+.studio-node-flagged:hover {
+  border-color: var(--danger);
+}
+.studio-node-target {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  cursor: crosshair;
+}
+.studio-node-icon {
+  color: var(--accent);
+}
+.studio-node-text {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.studio-node-id {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-node-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-node-port {
+  position: absolute;
+  display: block;
+  width: 14px;
+  height: 14px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--field-line);
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: none;
+}
+.studio-node-port-in {
+  top: 50%;
+  left: -7px;
+  transform: translateY(-50%);
+}
+.studio-node-port-out {
+  top: 0;
+  left: 0;
+  cursor: crosshair;
+  touch-action: none;
+}
+.studio-node-port-out:hover:not(:disabled),
+.studio-node-port-out.active {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.studio-node-flag {
+  position: absolute;
+  top: -5px;
+  right: 10px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--danger);
+}
+.studio-canvas-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px 6px 14px;
+  border-top: 1px solid var(--line);
+}
+.studio-canvas-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.studio-zoom {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.studio-zoom button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  box-shadow: none;
+  font-size: 12.5px;
+}
+.studio-zoom-level {
+  min-width: 40px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.studio-ghost {
+  position: fixed;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: var(--shadow-md);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.studio-ghost .icon {
+  color: var(--accent);
+}
+
+/* Inspector ---------------------------------------------------------------------- */
+.studio-inspector {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.studio-section {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.studio-section h2 {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+.studio-section > .hint {
+  margin-bottom: 14px;
+}
+.studio-section h3 {
+  margin: 18px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.studio-form {
+  grid-template-columns: 1fr;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.field > label {
+  margin-bottom: 0;
+}
+/* Instructions are prose for a model, not code. */
+.field textarea {
+  font-family: inherit;
+}
+.field-problem {
+  color: var(--danger);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.studio-node-problems {
+  margin: 0 0 14px;
+  padding: 10px 12px 10px 28px;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+.studio-node-problems li + li {
+  margin-top: 4px;
+}
+.studio-edge-summary {
+  color: var(--ink);
+  font-size: 14px;
+}
+.studio-edge-summary code {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.studio-edge-list {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.studio-edge-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.studio-edge-list .text-button:first-child {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.studio-connect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+.studio-connect label {
+  margin-bottom: 0;
+}
+.studio-node-actions {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.studio-fact-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.studio-fact {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.studio-fact code {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.studio-declaration {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.studio-declaration:last-child {
+  padding-bottom: 0;
+}
+.studio-declaration summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.studio-declaration summary::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+}
+.studio-declaration summary::-webkit-details-marker {
+  display: none;
+}
+.studio-declaration[open] summary::before {
+  transform: rotate(45deg);
+}
+.studio-count {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.studio-declaration > button {
+  margin-top: 12px;
+}
+.studio-declaration-row {
+  margin-top: 12px;
+  padding: 12px 14px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fcfcfb;
+}
+.studio-declaration-row .section-row {
+  align-items: center;
+  margin-bottom: 10px;
+}
+.studio-declaration-row h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* Admission check and registry ------------------------------------------------- */
+.studio-check,
+.studio-versions {
+  margin-top: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.studio-check .section-row {
+  align-items: center;
+  margin-bottom: 14px;
+}
+.studio-versions .section-row {
+  margin-bottom: 14px;
+}
+.studio-versions .table-wrap {
+  margin-bottom: 0;
+}
+.studio-versions .table-wrap + button {
+  margin-top: 12px;
+}
+.studio-digest {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 24px;
+  margin: 0;
+}
+.studio-digest > div {
+  min-width: 0;
+}
+.studio-digest dt {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.studio-digest dd {
+  margin: 0;
+  font-size: 13.5px;
+}
+.studio-digest code {
+  display: block;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.studio-problem-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+.studio-check .studio-problem-list {
+  margin: 0;
+  color: var(--ink);
+}
+.studio-problem-list li + li {
+  margin-top: 6px;
+}
+.studio-problem-location {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.error .studio-problem-location {
+  color: inherit;
+  opacity: 0.8;
+}
+
+@media (max-width: 1080px) {
+  .studio-workbench {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 720px) {
+  .studio-surface {
+    height: 60vh;
+  }
+  .studio-canvas-footer {
+    flex-wrap: wrap;
+  }
+  .studio-palette-hint {
+    display: none;
+  }
+  .studio-toolbar-note {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .studio-digest {
+    grid-template-columns: 1fr;
+  }
+  .studio-connect {
+    grid-template-columns: 1fr;
+  }
+}

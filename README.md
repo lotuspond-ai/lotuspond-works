@@ -4,7 +4,7 @@ Lotuspond is being developed as a licensable enterprise agent automation platfor
 
 The implemented core tests AI agents, records production evidence, and governs releases through Scenarios, Releases, Production Evidence, and Governance. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. A Go collector accepts OTLP/HTTP protobuf and JSON, a Rust CLI verifies artifact manifests, and Node tooling runs customer-controlled evaluation adapters and release gates.
 
-The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The registry adds immutable, tenant-scoped package storage with admission-validator metadata. A standalone Python SDK shares the v1 validator and canonical content behavior, with local differences, detached signatures against independent trust, and exact synthetic capability checks. Production runtime, Studio authoring, hosted publisher trust, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
+The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The registry adds immutable, tenant-scoped package storage with admission-validator metadata. A standalone Python SDK shares the v1 validator and canonical content behavior, with local differences, detached signatures against independent trust, and exact synthetic capability checks. The console Studio composes a v1 package as a graph, checks it against the same contract in the browser and publishes it to that registry. Production runtime, executable-v2 authoring in the Studio, hosted publisher trust, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
 
 ## Run locally
 
@@ -68,7 +68,6 @@ and [explicit requirements](contracts/examples/synthetic-requirements.v1.json)
 illustrate declared compatibility; a match never establishes runtime support or
 grants execution authority.
 
-
 The current platform expansion starts with the [workflow-package v1 schema](contracts/workflow-package.v1.schema.json) and a synthetic reviewed-action example:
 
 ```sh
@@ -92,7 +91,8 @@ Executable-v2 authoring is available through the standalone SDK's explicit
 `lotuspond-package v2` commands: bounded validation/JCS, explicit-source
 compilation, private diffs, signatures, synthetic compatibility and structural
 schemas. See the [executable guide](docs-site/docs/executable-packages.md). The
-registry remains v1-only. Studio, engine execution, authenticated runtime
+registry remains v1-only, and the console Studio composes v1 packages only.
+Studio authoring of v2 definitions, engine execution, authenticated runtime
 admission, providers, commercial licensing and production qualification retain
 their separate gates. `npm run check:executable-contracts` verifies all three
 committed schema exports; Node/OpenSSL are SDK test tools only.

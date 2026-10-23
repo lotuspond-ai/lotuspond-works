@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type Row } from '../api.js';
-import { Alert, EmptyState, SectionHeader } from '../components/ui.js';
+import { Alert, EmptyState, RelativeTime, SectionHeader, StatusBadge } from '../components/ui.js';
 
 export function Monitors({
   workspace,
@@ -177,8 +177,14 @@ export function Monitors({
         </p>
       ) : !monitors.length && !error ? (
         <EmptyState
+          glyph="pulse"
           title="No production monitors configured"
           description="Create a monitor to sample future traces. Existing evidence is unchanged."
+          action={
+            canWrite && !showForm ? (
+              <button onClick={() => setShowForm(true)}>Create monitor</button>
+            ) : undefined
+          }
         />
       ) : (
         <div className="table-wrap">
@@ -186,12 +192,15 @@ export function Monitors({
             <caption className="sr-only">Monitors</caption>
             <thead>
               <tr>
-                <th>Monitor</th>
-                <th>Project</th>
-                <th>Criteria</th>
-                <th>Sample</th>
-                <th>State</th>
-                <th>Action</th>
+                <th scope="col">Monitor</th>
+                <th scope="col">Project</th>
+                <th scope="col">Criteria</th>
+                <th scope="col">Sample</th>
+                <th scope="col">State</th>
+                <th scope="col">Created</th>
+                <th className="actions">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -203,8 +212,13 @@ export function Monitors({
                     <td>{projectNames.get(String(monitor.project_id)) || 'Project unavailable'}</td>
                     <td>{String(monitor.criteria)}</td>
                     <td>{(Number(monitor.sample_basis_points) / 100).toLocaleString()}%</td>
-                    <td>{enabled ? 'Enabled' : 'Disabled'}</td>
                     <td>
+                      <StatusBadge value={enabled ? 'enabled' : 'disabled'} />
+                    </td>
+                    <td>
+                      <RelativeTime value={monitor.created_at} />
+                    </td>
+                    <td className="actions">
                       {canWrite ? (
                         <button
                           className="text-button"
@@ -223,8 +237,12 @@ export function Monitors({
               })}
             </tbody>
           </table>
-          <p className="hint">Showing {monitors.length.toLocaleString()} monitor records.</p>
         </div>
+      )}
+      {!loading && monitors.length > 0 && (
+        <p className="hint" role="status">
+          {monitors.length === 1 ? '1 monitor loaded.' : `${monitors.length} monitors loaded.`}
+        </p>
       )}
     </>
   );

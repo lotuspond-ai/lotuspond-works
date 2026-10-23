@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, type Account, type Workspace } from '../api.js';
-import { Alert, EmptyState, SectionHeader, StatusBadge } from '../components/ui.js';
+import {
+  Alert,
+  EmptyState,
+  RelativeTime,
+  SectionHeader,
+  StatusBadge,
+  humanize,
+} from '../components/ui.js';
 
 type Invitation = {
   id: string;
@@ -131,23 +138,23 @@ export function Invitations({ workspace, account }: { workspace: Workspace; acco
                     <th scope="col">Role</th>
                     <th scope="col">Status</th>
                     <th scope="col">Expires</th>
-                    <th scope="col">Action</th>
+                    <th className="actions">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((item) => (
                     <tr key={item.id}>
-                      <td>{item.email}</td>
-                      <td>{item.role}</td>
+                      <td className="primary-cell">{item.email}</td>
+                      <td>{humanize(item.role)}</td>
                       <td>
                         <StatusBadge value={item.status} />
                       </td>
                       <td>
-                        <time dateTime={item.expires_at}>
-                          {new Date(item.expires_at).toLocaleString()}
-                        </time>
+                        <RelativeTime value={item.expires_at} />
                       </td>
-                      <td>
+                      <td className="actions">
                         {item.status === 'pending' ? (
                           <button
                             className="text-button danger"
@@ -171,7 +178,7 @@ export function Invitations({ workspace, account }: { workspace: Workspace; acco
                             Revoke
                           </button>
                         ) : (
-                          '—'
+                          <span className="hint">No action</span>
                         )}
                       </td>
                     </tr>
@@ -182,6 +189,7 @@ export function Invitations({ workspace, account }: { workspace: Workspace; acco
           ) : (
             !error && (
               <EmptyState
+                glyph="network"
                 title="No invitations yet"
                 description="Invitations appear here after they have been created."
               />
