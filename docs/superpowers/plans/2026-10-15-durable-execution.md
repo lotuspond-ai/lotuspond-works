@@ -557,6 +557,113 @@ assert lost_response_usage.cost_microusd is None
 - [ ] **Step 4:** Repeat Step 2 and existing runtime suite; PASS with positive controls that prove fixture execution, cancellation, child cleanup, bounded response/time and no credential/prompt leakage. Process groups are lifecycle controls, not hostile-code isolation.
 - [ ] **Step 5:** Commit Task 10 files as `feat: execute bounded agent and read activities with current authority`.
 
+**Conventions fixed by Task 10, for the owner's acknowledgement:**
+
+- **Provider children.**
+  - Every provider call runs in a fresh child: `python -I -m lotuspond_runtime.activity_child <fd> <worker pid>`, with an empty environment and its own process group. On Linux the child dies with the worker (parent-death signal), and it refuses to start if the worker is already gone.
+  - The request travels only over the child's private socket, in bounded frames (1 MiB, SDK JSON limits). That includes the pinned records, any resolved secrets, a model round's context and the call's deadline. The child is bounded by that deadline (at most one hour), not by a fixed cap.
+  - The child rebuilds the frozen types and calls `ReadProvider.invoke(records, arguments, deadline_ms)` or `ModelProvider.generate(request, deadline_ms)` on the implementation registered under the descriptor's fixed identifier. No code is loaded by path. This distribution installs no real provider, so a call reports `unavailable` with nothing sent.
+  - A provider failure carries a fixed code, plus the usage the provider reported, or a positive "not reached" marker; nothing else leaves the child.
+  - Every call ends with the group gone. This holds on success, failure, cancellation (lease loss, deadline) and any exception, including an interrupt, and also when a group outlives its finished leader. The stop is SIGTERM, 1 s, SIGKILL, and exit confirmed within 1 s.
+  - An unconfirmed cleanup fences the worker. The fence is persisted in the journal where it is detected, so a restarted worker stays fenced until an operator confirms no orphan remains and removes the marker. A fenced worker stops before polling.
+  - Each provider's process group is journaled, with this boot's identity, before the child receives its request. On recovery, an ambiguous attempt whose group still exists in this boot fences the worker. The worker never kills a group after a restart, because the number may have been reused.
+- **Connections, secrets and limits.**
+  - A read runs only when all of these hold:
+    - the pinned connection's connector pin names the catalog dependency (name and version);
+    - its artifact digest equals the installed connector the provider descriptor serves;
+    - the operation is allowed;
+    - the canonical arguments fit `max_request_bytes`.
+  - The call is bounded by the earlier of the attempt deadline, the lease and `timeout_ms`. A response larger than `max_response_bytes`, or the 64 KiB value bound, is `invalid_output`.
+  - Every pinned secret of the connection, and every worker-local credential of the descriptor (a model's API key, for example), is resolved by the worker after `started` and immediately before the call. They are never logged, stored or journaled.
+  - The secret source takes a `SecretPin`. In production, `MountedActivitySecrets` wraps E03's `MountedSecretResolver` with the operator's pin-to-binding mapping, as E03 commands do.
+  - **Deferred, with reason:** destination enforcement. The child receives the pinned destinations inside the records. Because no real provider is installed, no network path exists. The first real provider must connect only through E03's `DestinationTransport` under the operator's egress policy. Whichever change installs it owns that wiring and its tests.
+- **Model rounds.**
+  - Resolved context, instructions, input and the transcript stay in worker memory and reach only the model child.
+  - A round's stored argument is `{"round", "request_sha256"}` and its stored result is `{"reply_sha256"}`, so source-bound context never becomes a workspace-policy value. Transcript growth no longer counts against the 64 KiB value bound; the 1 MiB frame bounds a round's request.
+  - Each round receives the limits that remain after earlier rounds. A tool read's cost counts against the same cost limit.
+  - A round or read whose usage is unknown, or exceeds what was left, ends the agent with `provider_failed`; the child itself reports its real usage.
+  - Context references are read one at a time, with the lease kept live between reads; an agent declares at most 64.
+- **Children.**
+  - An agent takes each child's delivery through a poll targeted at its own parent (below), never an untargeted one.
+  - Before the claim, the child's signed envelope must name exactly the requested kind, dependency, operation and stored argument handle. If it does not, the child is never claimed and the agent ends with `provider_failed`.
+  - The child's lease passes `validate_lease`. A granted lease it refuses is reported like a root's, as `unavailable` with zero usage, so the root can still report.
+  - A child claim whose answer is lost on every retry is left as lease loss: the claim may have committed, and a claimed child keeps the root from reporting.
+  - A tool read runs through the same connection, secret and bound checks as a root read, using the child's own verified records.
+  - A refused admission ends the agent with `provider_failed`. A child that is not dispatched ends it with `unavailable`; the root's outcome then cancels the child.
+  - A failed child ends the agent with the child's code.
+  - A child outcome that cannot be reported is treated as lease loss, because the root could not report either. Both lapse to reconciliation, and the journal keeps the child's outcome.
+- **Time.** The worker's clock is the control plane's: confirmed server time plus elapsed monotonic time (`ServerClock`, anchored from an E03 session or heartbeat as `RuntimeSupervisor` is).
+  - `now_ms` counts the whole roundtrip and never runs behind the server, so every validity check uses it. A lease is judged on the clock read after its response arrives.
+  - `settled_ms` never runs ahead, so usage completion is stamped with it rather than the provider's time.
+  - Both bounds include a drift allowance of 50 ms plus 1 ms per second since the anchor.
+  - A wall clock that disagrees with monotonic time by more than 30 s, or an anchor older than 10 minutes, makes time unavailable.
+  - Time that becomes unavailable after a provider may have run is treated as lease loss: nothing is reported, and in particular never zero usage.
+  - `ActivityDependencies.clock` is required; local wall time is never a default.
+- **Leases.**
+  - The control transport carries one request at a time, so leases are renewed on the worker's own thread. Renewal happens inside the provider loop (every 50 ms) and before each control call; there is no renewal thread.
+  - An explicit refusal ends a lease at once. A transient failure (`transport_failed`, `rate_limited`, `authority_unavailable`) is retried until 13 s before expiry. That leaves room for one more request blocked for the transport's 10 s bound, then 2 s to stop the provider.
+  - Renewal also runs between the agent's control-plane reads (agent records, input, each context reference).
+  - A child's lease is lost with its parent's.
+  - Idempotent control calls (claim, store, child request, result) are retried on transient failures while the lease holds.
+- **Results and usage.**
+  - A reply with no tool proposals is final, and its output may be `null`.
+  - Usage is:
+    - zero, and known, when nothing was sent;
+    - the provider's report when there is one, failures included, so the declared retry classes stay retryable;
+    - unknown, never zero, otherwise.
+  - An agent's root attempt reports zero usage of its own.
+  - Once a lease is held, every ending except lease loss is reported:
+    - a refusal before anything started (a lease out of bounds, for example) is reported as `unavailable` with zero usage;
+    - a refused input digest is reported as `provider_failed`;
+    - a failure to store after success is reported with the known usage.
+  - Before any provider may have run, authority-type errors map to `unavailable` and all others to `provider_failed`. After one may have run (a read's, a child's or an agent's output could not be stored, or an agent's later control call failed), the code is `provider_failed`, so a retry never runs it again. `unsafe_storage` stops the worker without reporting around the journal.
+  - When the lease is lost, the worker reports no outcome; the control plane's lapse makes the attempt uncertain.
+  - `unavailable` for a changed pin or a write operation means "this runtime cannot serve it". Another runtime may, within the attempt's retry bounds.
+  - **Known limitation, for the owner:** a pending delivery the runtime cannot verify (after a trust rotation, for example) is offered first on each of that session's polls until it expires. That takes at most 5 minutes, after which it fails with `timeout_before_dispatch` and only a new ordinal retries. Declining a delivery would need a new route, which is outside E04.
+- **Journal.**
+  - One owner-only (0600) file per attempt, in a private directory held by one process through an exclusive lock. Files are written by atomic replacement with file and directory fsync, and have crash-point hooks. A temporary file left by a crash is removed when the journal is reopened.
+  - Records are opened without following links and without blocking, so a planted FIFO is refused.
+  - Phases move only forward: `claimed`, `started`, `finished`, then `recorded` or `abandoned`. `started` is durable before any provider is reached.
+  - `finished` keeps the outcome (identities, code and usage numbers) before it is reported. An unreported outcome stays there as reconciliation evidence, and the worker answers `unreported`.
+  - A torn or unreadable record counts as started and may only be abandoned. After a restart every ambiguous attempt is abandoned and never invoked again: a worker runs this recovery once, by itself, before its first poll. The journal's lock allows one holder, so the runtime wiring keeps one worker per process.
+  - A delivery seen past its claim is refused. A delivery journaled only as `claimed`, with the same digest and generation, is claimed again: an equal claim returns the same live lease after a lost acknowledgement.
+- **Agents.**
+  - Every proposal in a model reply is checked, and its provider selected, before any of them runs. An undeclared tool, any other argument shape or a mistyped argument raises `ProposalRefused` (`forbidden`), and only that error becomes `invalid_output`.
+  - The step limit ends the agent with `invalid_output`.
+  - Context is reread for every activity under current access. A refusal ends it with `provider_failed`; no context client means `unavailable`.
+  - `AgentRecords` is validated: 1–64 steps, at most 64 uniquely named tools, and safe nonnegative limits.
+- **Interfaces as implemented.**
+  - `run_activity(delivery, lease, dependencies, *, verified=None)`: a caller that has just verified the delivery passes the envelope and records on, so each claim is verified once.
+  - `run_agent(request, dependencies, keeper)`: the keeper renews the parent's lease and reports its loss.
+  - `ActivityDependencies` takes:
+    - the runtime identity, the journal and the server-anchored clock;
+    - a record source (pinned records and agent declarations) and a value source;
+    - the trust authority and the provider set;
+    - optionally, the secret source and the context client.
+  - There is no separate "immutable catalog" or "supervisor" object. `ProviderSet` holds the immutable descriptors (its test mode is fixed at construction, and a script is canonical JSON text), and `activity_invocation` is the supervisor, with its fence.
+  - `ModelReply` keeps the frozen fields. `ModelRequest` gains JSON conversion for the child.
+  - The `activity-worker` CLI command fails closed with `unavailable` until real providers and the control-plane routes exist.
+  - Files beyond Task 10's row, each necessary:
+    - `activity_child.py` (the fixed child), `activity_framing.py` (its frames) and `activity_fixture.py` (the test-only providers; see below);
+    - `activity_client.py` and backend `execution/dispatch.py`: `poll(parent_attempt_id)` and `poll_activity(..., parent_attempt_id)`. With it, only that parent's children are candidates, only for the session holding the parent's live lease, under a separate 600-per-minute allowance; a backend test covers it;
+    - `cli.py`, as the task allows;
+    - tests: `activity_env.py`, `test_activity_state.py` and the `activity-worker` test in `test_cli.py`.
+- **Synthetic providers.** The test-only read and model providers are packaged as `lotuspond_runtime/activity_fixture.py`, as E03 packaged `fixture_connector.py`, because the `-I` child cannot import from `tests`.
+  - They are selectable only with test-mode descriptors, and their behaviour is a data script.
+  - Their only file effect is a call counter: an absolute path whose file name is `provider-calls`, opened for append without following links.
+  - `tests/fixtures/activity_provider.py` is a control plane that behaves like the real one: its own skewed clock, single-flight calls with latency, pending-first and targeted polls, refusal of a root result while a child is claimed, and of a completion in its future.
+- **Obligations for Task 12.** The runtime routes must serve:
+  - the pinned records and the agent declarations (instructions, model name, declared tools with their schemas, context references and limits);
+  - fetches of the attempt's input;
+  - context reads under current source access;
+  - the targeted poll's `parent_attempt_id` body field.
+
+  The runtime integration must also re-anchor the activity clock on every E03 session or heartbeat response. Re-anchoring has to come from the E03 supervisor's own heartbeat loop (every 20 s or less, on its own transport), not from the activity worker's thread. The worker can sit inside one provider call or agent for longer than the clock's 10-minute anchor age, and lease responses carry no server time. `ServerClock.anchor` replaces one tuple, so calling it from that loop's thread is safe.
+
+  Task 12 also owns the runtime-side clients for the record, value and context routes, because no runtime file in its row exists yet. It must add them, or name the files they need, as files beyond its row. Until then the runtime's record, value and context sources deny.
+
+- **Platform.** The journal tests, like the existing runtime storage tests, run only on Linux, because `state.private_directory` refuses other platforms by design.
+
 ## Task 11: Sweep due work and preserve controls, versions and restore fences
 
 **Files:** Ownership-table Task 11 files; `backend/tests/execution/{test_control.py,test_projections.py,test_recovery.py,test_sweeper.py,test_interpreters.py}`.

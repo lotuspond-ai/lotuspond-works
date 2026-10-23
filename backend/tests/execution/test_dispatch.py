@@ -608,6 +608,39 @@ def test_child_lease_needs_its_parents_live_lease(activity):
         renew(h, child_lease)
 
 
+def test_an_agents_targeted_poll_offers_only_its_own_children(activity):
+    from lotuspond_runtime.activity_protocol import tool_name
+
+    h = activity
+    model = json.loads((FLOW / "agent_tools.model.json").read_text())
+    _, parent = h.ready("agent_tools", model=model, path="think", capacity=2)
+    h.claim(h.dispatch(parent))
+    # Another agent's root: an unrelated pending delivery for the same session.
+    _, unrelated = h.ready("agent_tools", model=model, path="think", capacity=2)
+    h.dispatch(unrelated)
+
+    def targeted(principal=None):
+        with Session(h.engine) as db, db.begin():
+            return h.activities.poll_activity(
+                db, principal or h.principal_runtime, parent_attempt_id=parent
+            )
+
+    # Neither the unrelated pending delivery nor any root is handed to the agent.
+    assert targeted() is None
+    arguments = h.store_value(parent, {"target": None, "input": None})
+    child = request_child(
+        h, parent, "tool-1", "connector_read", tool_name("connector-fixture", "read"), arguments
+    )
+    # Only the session holding the parent's live lease receives its children.
+    assert targeted(runtime(h)) is None
+    delivery = targeted()
+    assert json.loads(delivery.envelope)["attempt_id"] == child
+    # A lost poll response: the pending child is offered again, to its parent's poll.
+    assert targeted().envelope == delivery.envelope
+    # Positive control: an untargeted poll serves the older unrelated delivery first.
+    assert json.loads(poll(h).envelope)["attempt_id"] == unrelated
+
+
 def second_member(h, role="editor"):
     """Another workspace member whose authority a test can later change."""
     from lotuspond.execution.authorization import authorize_execution

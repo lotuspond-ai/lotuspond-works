@@ -575,7 +575,9 @@ class ActivityService:
         return ActivityDelivery(envelope=canonical.decode("utf-8"), signature=text)
 
     @activity_service
-    def poll_activity(self, db, principal) -> ActivityDelivery | None:
+    def poll_activity(
+        self, db, principal, parent_attempt_id: str | None = None
+    ) -> ActivityDelivery | None:
         """The next delivery for this runtime session: a pending one, or a new one.
 
         Pending deliveries of running executions come first, then children of
@@ -585,11 +587,34 @@ class ActivityService:
         (revoked initiator, disabled deployment, passed deadline) is skipped, so it
         never blocks the rest of the pool. Scheduling and reservation (Task 5)
         happen before, in their own transaction.
+
+        With `parent_attempt_id` (an agent waiting for the child it just requested),
+        only that parent's children are candidates, and only while this session
+        holds the parent's live lease: an unrelated pending delivery or root is never
+        handed to an agent in the middle of a call. Every model round and tool call
+        needs such a poll, so they have their own, larger rate allowance.
         """
-        self.fleet.limit("activity-poll:" + principal.identity.instance_id, 60)
+        instance = principal.identity.instance_id
+        if parent_attempt_id is None:
+            self.fleet.limit("activity-poll:" + instance, 60)
+        else:
+            self.fleet.limit("activity-child-poll:" + instance, 600)
         locked = self._identity(db, principal)
         identity = principal.identity
         now = locked[-1]
+        if parent_attempt_id is not None:
+            parent_attempt_id = record(db, ExecutionAttempt, identity.scope, parent_attempt_id).id
+        targeted = (
+            []
+            if parent_attempt_id is None
+            else [
+                ExecutionActivityDelivery.attempt_id.in_(
+                    select(ExecutionAttempt.id).where(
+                        ExecutionAttempt.parent_attempt_id == parent_attempt_id
+                    )
+                )
+            ]
+        )
         pending = list(
             db.scalars(
                 select(ExecutionActivityDelivery.attempt_id)
@@ -605,6 +630,7 @@ class ActivityService:
                     ExecutionActivityDelivery.expires_at_ms > now,
                     Execution.requested_state == "running",
                     Execution.state == "running",
+                    *targeted,
                 )
                 .order_by(ExecutionActivityDelivery.issued_at_ms, ExecutionActivityDelivery.id)
                 .limit(POLL_CLASS)
@@ -645,15 +671,21 @@ class ActivityService:
             )
             .order_by(Execution.admission_sequence, ExecutionAttempt.ordinal, ExecutionAttempt.id)
         )
+        if parent_attempt_id is not None:
+            held = held.where(ExecutionActivityDelivery.attempt_id == parent_attempt_id)
         children = list(
             db.scalars(
                 reserved.where(ExecutionAttempt.parent_attempt_id.in_(held)).limit(POLL_CLASS)
             )
         )
-        roots = list(
-            db.scalars(
-                reserved.where(ExecutionAttempt.parent_attempt_id.is_(None)).limit(
-                    POLL_CANDIDATES - len(pending) - len(children)
+        roots = (
+            []
+            if parent_attempt_id is not None
+            else list(
+                db.scalars(
+                    reserved.where(ExecutionAttempt.parent_attempt_id.is_(None)).limit(
+                        POLL_CANDIDATES - len(pending) - len(children)
+                    )
                 )
             )
         )

@@ -260,3 +260,9 @@ def test_cli_accepts_relative_private_input_without_following_links(tmp_path, mo
     (tmp_path / "alias").symlink_to(token)
     with pytest.raises(FleetError):
         cli_module()._token("alias")
+
+
+def test_activity_worker_command_refuses_without_installed_providers(tmp_path, capsys):
+    module = cli_module()
+    assert module.main(["activity-worker", "--config", str(config_file(tmp_path))]) == 3
+    assert capsys.readouterr().err.strip() == "unavailable"

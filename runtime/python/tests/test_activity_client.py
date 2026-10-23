@@ -226,3 +226,14 @@ def test_transport_allows_activity_routes_only_with_a_session(tmp_path):
             with pytest.raises(FleetError, match="invalid_request"):
                 t.request("POST", route, b"{}", TOKEN, SESSION)
         assert t.request("POST", "/activities/poll", b"{}", TOKEN, SESSION) == b"null"
+
+
+def test_a_targeted_poll_names_its_parent_and_nothing_else():
+    module = client_module()
+    transport = Transport({"/activities/poll": b"null"})
+    client = module.ActivityClient(transport, TOKEN, SESSION)
+    assert client.poll(parent_attempt_id=ATTEMPT) is None
+    assert json.loads(transport.calls[0][2]) == {"parent_attempt_id": ATTEMPT}
+    assert client.poll() is None and transport.calls[1][2] == b"{}"
+    with pytest.raises(FleetError, match="invalid_request"):
+        client.poll(parent_attempt_id="not-a-uuid")

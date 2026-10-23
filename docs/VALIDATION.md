@@ -428,6 +428,7 @@ All of these are fixed. Both reviews approved the final content. The quality rev
 Same branch, cluster and limits as Task 7. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is currently refusing jobs because of an account billing problem. The runtime distribution is now 0.2.0.
 
 **Red before implementation.** The new tests were copied onto the Task 8 commit `8326b39`. `test_dispatch.py` failed at collection because `lotuspond_runtime.activity_protocol` did not exist. `test_activity_client.py` failed because `lotuspond_runtime.activity_client` did not exist. Each later review fix added a test that failed with the fix reverted:
+
 - unstarted children are closed when a root ends;
 - the lease is capped by the reserved active time;
 - reconciliation closes children;
@@ -464,6 +465,7 @@ Same branch, cluster and limits as Task 7. This is local evidence only: not push
     - renewal against E03 `revoke_instance`.
 
 **Reviews.** Both independent reviews required changes, and both approved the final content.
+
 - Specification review, five rounds. Its main findings:
   - children orphaned when a root ended;
   - renewal ignoring the remaining budget;
@@ -482,6 +484,7 @@ Same branch, cluster and limits as Task 7. This is local evidence only: not push
   - the runtime worker (Task 10) must apply and test `validate_lease`.
 
 **For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 9"):
+
 - Lock order for runtime routes: account rows after fleet rows under the workspace lock, and the cursor taken with `NOWAIT` when late.
 - Deliveries:
   - one delivery per attempt, with zero usage when it is never claimed;
@@ -498,5 +501,97 @@ Same branch, cluster and limits as Task 7. This is local evidence only: not push
 - The 64 KiB runtime value bound, at most 1,024 per execution.
 
 **Obligations carried to Task 11:**
+
 - The sweeper calls `lapse_lease`, `expire_delivery` and `expire_reservation`.
 - Spent reservations need a `SweepReport` field or a recorded amendment, and an efficient due query, because v15 has no index for them.
+
+## E04 Task 10: bounded agent and read activities in the runtime, 2026-10-23
+
+Same branch as Tasks 7–9. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is refusing jobs because of an account billing problem. The Linux results below come from local containers, not from hosted CI.
+
+**Red before implementation.** The five new Task 10 test files were run on the Task 9 commit `fccf5bd`, and all five failed at collection because `lotuspond_runtime.agent` did not exist.
+
+The review fixes were checked by mutation: each fix was reverted in a scratch copy of the runtime, and its witness test was run there. All 27 mutations made their witness fail. One at first did not: the anchor-age test was passing through the wall-clock check, and it was corrected. They cover:
+
+- child binding and targeted child polls;
+- lost-claim re-claims, the persisted fence, surviving-group fencing and self-recovery;
+- digest-only model rounds;
+- the connector pin, every pinned secret, request and response bounds, and tool cost;
+- the server-anchored clock, its anchor age and the renewal margin;
+- usage that is never zero, and codes that are never retryable, after a provider may have run;
+- process-group cleanup and the cancel-aware frame;
+- the journal's lock, its non-blocking open and torn-record recovery.
+
+**Green on macOS.** These runs used a dev-only shim that lets the journal accept a 0700 directory off Linux; the shim is never committed.
+
+- The Task 10 files plus `test_activity_client.py`: 81 passed, including a 31 s model round, which no longer hits a fixed child cap. One failed: `test_mounted_secrets_resolve_pins_through_the_operator_mapping` goes through E03's resolver, which refuses macOS by design, like `test_resolver.py`.
+- Backend `test_dispatch.py`, `test_leases.py`, `test_reconciliation.py` and `test_activity_races.py` on the local PostgreSQL cluster: 61 passed. That is Task 9's 60 plus the targeted-poll test.
+- Ruff is clean on both distributions, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).**
+
+Setup:
+
+- Docker Desktop 29.5.2, linux/arm64, with the owner's limits of 4 CPUs and 6 GB; hosted runners are amd64.
+- Image `lotuspond-ci-runner:local`: Debian, Python 3.14.9, uv 0.11.16, non-root user `runner` (uid 1001). Every container ran with `--rm` and `--init`.
+- The code came from a standalone clone of each commit, mounted read-only, so the harness's `git` checks work. Pytest's `--basetemp` stayed inside the container.
+- Dependencies were hash-pinned PyPI wheels installed into a disposable volume, with the fleet harness's exported requirements prewarmed. The suites then ran offline.
+- PostgreSQL 18.6 ran in a container on an internal network, listening only on loopback. The tests joined its network namespace.
+- Cleanup was confirmed after every run. The check fails if the Docker daemon cannot be reached.
+
+Results:
+
+- Runtime suite at `1f564ce`: 706 passed, 0 failed, including the Linux-only state, journal, resolver and mounted-secrets tests. At `c19618e`: 695 passed.
+- Full backend suite at `1f564ce`: 1,150 passed, 97 subtests, 0 failed, 0 skipped, in 16 min 18 s. At `c19618e`: 1,150 passed, 97 subtests, 0 failed, 0 skipped, in 17 min 15 s.
+- The 8 fleet acceptance tests in `tests/fleet/test_acceptance.py` pass in both runs. Every earlier entry recorded them as Linux-only failures on macOS, so this also closes that gap for Tasks 7–9.
+- An earlier run at the checkpoint `32f8600` failed 3 of them for harness reasons, not code:
+  - the worktree's `.git` file pointed outside the mount;
+  - the offline uv cache lacked the harness's requirements.
+- The final source differs from `1f564ce` only in one comment and one sentence of the plan.
+
+**Reviews.** Both independent reviews required changes, and both approved the final content.
+
+- The specification review ran four rounds. Its main findings:
+  - child deliveries not bound to what was invoked;
+  - connection pins, secrets and data-handling limits not enforced;
+  - frozen provider interfaces unused;
+  - resolved context stored as workspace values;
+  - a fenced worker still claiming;
+  - lost claim acknowledgements stranded;
+  - wall-clock trust;
+  - untargeted child polls.
+
+  Later rounds added Minors: the renewal margin, renewal between context reads, an unreported refused child lease, persisting the fence at detection, tool cost, the agent-output code and self-recovery.
+
+- The quality review ran four rounds. Its main findings:
+  - renewal threads clashing with the single-flight control transport;
+  - a 30 s cap on every provider call;
+  - process groups not always stopped;
+  - transient failures turned into reconciliations;
+  - truthful usage on failures;
+  - zero usage after a provider was reached;
+  - nothing re-anchoring the clock;
+  - surviving provider groups after a crash.
+
+**For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 10"):
+
+- Process model: provider children, how they are stopped, and the fence.
+- Providers and connections:
+  - the provider interfaces called inside the child;
+  - connector-pin, secret and limit enforcement;
+  - **destination enforcement deferred** to the change that installs the first real provider.
+- Model rounds: digest-only rounds and remaining limits.
+- Children: binding and targeted polls (a change to Task 9's client and service, with a test).
+- Time and leases: the server-anchored clock with drift allowance and a 10-minute anchor age; main-thread lease keeping with a 13 s margin.
+- Outcomes: the result and usage rules, and the journal phases (`finished` keeps the outcome as evidence).
+- Known limitation: an unverifiable pending delivery blocks its session's polls until it expires (at most 5 minutes).
+
+**Obligations carried to Task 12:**
+
+- Runtime routes and their runtime-side clients:
+  - the pinned records and agent declarations;
+  - fetches of the attempt's input;
+  - context reads under current source access;
+  - the targeted poll's `parent_attempt_id` body field.
+- Re-anchoring of the activity clock from the E03 supervisor's heartbeat loop.
+- One activity worker per process.

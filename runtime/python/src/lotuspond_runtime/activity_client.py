@@ -59,8 +59,16 @@ class ActivityClient:
     def _call(self, route, body: bytes) -> bytes:
         return self.transport.request("POST", route, body, self._token, self._session)
 
-    def poll(self) -> ActivityDelivery | None:
-        content = self._call("/activities/poll", b"{}")
+    def poll(self, parent_attempt_id: str | None = None) -> ActivityDelivery | None:
+        """The next delivery for this session; with a parent, only that parent's children."""
+        body = b"{}"
+        if parent_attempt_id is not None:
+            try:
+                parent = TypeAdapter(CanonicalUUID).validate_python(parent_attempt_id, strict=True)
+            except Exception:
+                raise FleetError("invalid_request") from None
+            body = json.dumps({"parent_attempt_id": parent}, separators=(",", ":")).encode()
+        content = self._call("/activities/poll", body)
         if content == b"null":
             return None
         try:

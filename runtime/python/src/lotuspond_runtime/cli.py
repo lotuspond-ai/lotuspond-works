@@ -49,10 +49,17 @@ def _execute(argv, clients) -> int:
         enroll.add_argument("--token-file", required=True)
         run = commands.add_parser("run")
         run.add_argument("--config", required=True)
+        activity = commands.add_parser("activity-worker")
+        activity.add_argument("--config", required=True)
         args = parser.parse_args(argv)
         config = RuntimeConfig.model_validate_json(
             read_private_file(Path(args.config).absolute(), 65536)
         )
+        if args.command == "activity-worker":
+            # No real read or model provider is installed in this distribution, and
+            # activity records and values come from control-plane routes that are not
+            # yet served. Report unavailable rather than claim work it cannot do.
+            raise FleetError("authority_unavailable")
         # No executable connector is registered in this foundation. Operator
         # declarations cannot invent installed capability; Task7 owns that catalog.
         if config.observation.connectors:
