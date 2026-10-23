@@ -1,0 +1,50 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "failure": null,
+    "node_id": "each",
+    "occurrence_path": "each:1",
+    "type": "RecordPure",
+    "value": 2
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "regions-iteration-item-complete",
+ "now_ms": 1800000000000,
+ "package": "regions",
+ "sources": [],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "index": 1,
+  "input": {
+   "amount": "1.005",
+   "flag": true,
+   "items": [
+    3,
+    1,
+    2
+   ]
+  },
+  "item": 1,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-each:1/double",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": 2
+     }
+    ],
+    "path": "each:1/double"
+   }
+  ],
+  "region_path": "each:1",
+  "requested_state": "running"
+ }
+}

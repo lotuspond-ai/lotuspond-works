@@ -40,6 +40,7 @@ from .contracts import Contract, DeploymentConfig, canonical_value
 from .deployments import _body_steps, _configuration, _pool, _stored_configuration, load_deployment
 from .entitlement import EntitlementGrant, PolicyGrant
 from .errors import ExecutionError, execution_service
+from .program import ProgramError, program_from, resolve_occurrence
 from .publication import _Lookup, current_snapshot, load_publication
 
 MAX_SAFE = 9007199254740991
@@ -301,17 +302,19 @@ class BudgetService:
         db.flush()
 
     def _dependency(self, step, packages, catalog, parent):
-        matches = [
-            (source, node)
-            for source in packages
-            for node in steps(source)
-            if node["id"] == step.node_id
-        ]
-        # Ambiguous occurrence linkage is refused until the interpreter supplies
-        # unambiguous nodes; an arbitrary caller ID cannot select a cheap model.
-        if len(matches) != 1:
+        # The exact persisted occurrence selects the node (Task 8 resolver); an
+        # arbitrary caller ID or a same-named node elsewhere cannot select a model.
+        try:
+            program = program_from(
+                validate_executable_package(packages[0]),
+                dict(enumerate([*packages[1:], *catalog.values()])),
+            )
+            ref = resolve_occurrence(program, step.occurrence_path)
+        except ProgramError:
+            raise ExecutionError("dependency_unavailable") from None
+        if ref.selector is not None or ref.step_id != step.node_id:
             raise ExecutionError("dependency_unavailable")
-        source, node = matches[0]
+        source, node = ref.package.model_dump(mode="json"), ref.step.model_dump(mode="json")
         if node["kind"] == "connector_read":
             ref = next(d["ref"] for d in source["connectors"] if d["id"] == node["connector_ref"])
         elif node["kind"] == "agent":
@@ -607,6 +610,10 @@ class BudgetService:
             or execution.deadline_ms <= database_now_ms(db)
         ):
             raise ExecutionError("forbidden")
+        # Carried Task 6 finding: the wait's own, shorter deadline is checked again
+        # after the provider waits in _final, not only the execution deadline.
+        if wait.deadline_ms <= database_now_ms(db):
+            raise ExecutionError("conflict")
         db.add(
             ExecutionRequest(
                 **actor.scope.model_dump(),
@@ -621,4 +628,93 @@ class BudgetService:
                 raise ExecutionError("conflict")
             capacity.pending -= 1
         execution.state = "waiting"
+        db.flush()
+
+    def _release_rows(self, db, execution_id):
+        """Cursor, workspace, capacity, then the execution: Task 5's order, no actor.
+
+        Releases only shrink counted liability, so they need no customer authority.
+        """
+        self._cursor(db)
+        execution_id = TypeAdapter(CanonicalUUID).validate_python(execution_id, strict=True)
+        hint = db.get(Execution, execution_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope = Scope(
+            workspace_id=hint.workspace_id,
+            project_id=hint.project_id,
+            environment_id=hint.environment_id,
+        )
+        from ..models import Workspace
+
+        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        capacity = lock(db, scoped(ExecutionCapacity, scope))
+        if capacity is None:
+            raise ExecutionError("capacity_unavailable")
+        execution = record(db, Execution, scope, execution_id, locked=True)
+        return scope, capacity, execution
+
+    @execution_service
+    def release_wait(self, db, wait_id):
+        """Return one retained wait slot once its wait closed; repeats are no-ops."""
+        wait_id = TypeAdapter(CanonicalUUID).validate_python(wait_id, strict=True)
+        hint = db.get(ExecutionWait, wait_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope, capacity, execution = self._release_rows(db, hint.execution_id)
+        record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
+        wait = record(db, ExecutionWait, scope, wait_id, locked=True)
+        keys = {
+            row.request_key: row
+            for row in db.scalars(
+                scoped(ExecutionRequest, scope).where(
+                    ExecutionRequest.request_key.in_(
+                        ("capacity.wait:" + wait.id, "capacity.wait-release:" + wait.id)
+                    )
+                )
+            )
+        }
+        if "capacity.wait:" + wait.id not in keys or "capacity.wait-release:" + wait.id in keys:
+            return
+        if wait.state == "open" or wait.execution_id != execution.id:
+            raise ExecutionError("conflict")
+        if capacity.retained_waits < 1:
+            raise ExecutionError("conflict")
+        capacity.retained_waits -= 1
+        db.add(
+            ExecutionRequest(
+                **scope.model_dump(),
+                execution_id=execution.id,
+                request_key="capacity.wait-release:" + wait.id,
+                digest=sha256(
+                    canonical_value({"wait_id": wait.id, "released": wait.state})
+                ).hexdigest(),
+            )
+        )
+        db.flush()
+
+    @execution_service
+    def release_pending(self, db, execution_id):
+        """Return the admission slot of an execution that ends without ever running.
+
+        Keyed by a request row, so a repeat changes nothing even before the caller
+        moves the execution to its terminal state in the same transaction.
+        """
+        scope, capacity, execution = self._release_rows(db, execution_id)
+        key = "capacity.pending-release:" + execution.id
+        if execution.state != "pending" or db.scalar(
+            scoped(ExecutionRequest, scope).where(ExecutionRequest.request_key == key)
+        ):
+            return
+        if capacity.pending < 1:
+            raise ExecutionError("conflict")
+        capacity.pending -= 1
+        db.add(
+            ExecutionRequest(
+                **scope.model_dump(),
+                execution_id=execution.id,
+                request_key=key,
+                digest=sha256(canonical_value({"execution_id": execution.id})).hexdigest(),
+            )
+        )
         db.flush()

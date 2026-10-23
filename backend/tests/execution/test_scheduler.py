@@ -462,3 +462,135 @@ def test_wait_accounting_same_key_cannot_refer_to_other_execution(budget_harness
             h.budgets.retain_wait(db, h.actor, wait.id)
         assert db.scalar(select(ExecutionCapacity.retained_waits)) == 0
         assert execution.state == "pending"
+
+
+def open_wait(h, db, deadline_offset_ms=None):
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import Execution, ExecutionStepInstance, ExecutionWait, new_id
+
+    _, execution_id = h.add(db)
+    execution = db.get(Execution, execution_id)
+    step = db.scalar(
+        select(ExecutionStepInstance).where(ExecutionStepInstance.execution_id == execution_id)
+    )
+    deadline = (
+        execution.deadline_ms
+        if deadline_offset_ms is None
+        else database_now_ms(db) + deadline_offset_ms
+    )
+    wait = ExecutionWait(
+        **h.scope.model_dump(),
+        execution_id=execution_id,
+        step_instance_id=step.id,
+        wait_key=new_id(),
+        deadline_ms=deadline,
+    )
+    db.add(wait)
+    db.flush()
+    return execution_id, wait.id
+
+
+def test_retained_wait_deadline_rechecked_after_provider_waits(budget_harness, monkeypatch):
+    """Carried Task 6 finding: a wait's own deadline can pass during provider waits."""
+    from time import sleep
+
+    import pytest
+
+    from lotuspond.execution.errors import ExecutionError
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import ExecutionWait
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        _, short = open_wait(h, db, deadline_offset_ms=2000)
+        _, long = open_wait(h, db)
+        deadline = db.get(ExecutionWait, short).deadline_ms
+    original = h.budgets._final
+    entered = []
+
+    def slow_providers(db, *args, **kwargs):
+        # The earlier checks passed: the wait was still open in time when the
+        # provider waits began. They then last until its deadline has passed.
+        now = database_now_ms(db)
+        entered.append(now < deadline)
+        sleep(max(deadline - now, 0) / 1000 + 0.2)  # provider latency, not an edited deadline
+        return original(db, *args, **kwargs)
+
+    monkeypatch.setattr(h.budgets, "_final", slow_providers)
+    with Session(h.engine) as db, db.begin(), pytest.raises(ExecutionError, match="conflict"):
+        h.budgets.retain_wait(db, h.actor, short)
+    assert entered == [True]
+    with Session(h.engine) as db, db.begin():
+        assert db.scalar(select(ExecutionCapacity.retained_waits)) == 0
+        h.budgets.retain_wait(db, h.actor, long)  # positive control under the same delay
+        assert db.scalar(select(ExecutionCapacity.retained_waits)) == 1
+
+
+def test_release_wait_and_release_pending_are_idempotent(budget_harness):
+    from lotuspond.models import Execution, ExecutionRequest, ExecutionWait
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        execution_id, wait_id = open_wait(h, db)
+        h.budgets.retain_wait(db, h.actor, wait_id)
+        db.get(ExecutionWait, wait_id).state = "satisfied"
+        db.flush()
+        before = db.scalar(select(ExecutionCapacity.retained_waits))
+        for _ in range(2):
+            h.budgets.release_wait(db, wait_id)
+        assert db.scalar(select(ExecutionCapacity.retained_waits)) == before - 1
+        keys = set(db.scalars(select(ExecutionRequest.request_key)))
+        assert "capacity.wait-release:" + wait_id in keys
+    with Session(h.engine) as db, db.begin():
+        # A second admission that never ran: its admission slot is returned once.
+        _, second = h.add(db)
+        assert db.get(Execution, second).state == "pending"
+        pending = db.scalar(select(ExecutionCapacity.pending))
+        for _ in range(2):
+            h.budgets.release_pending(db, second)
+        assert db.scalar(select(ExecutionCapacity.pending)) == pending - 1
+        # An open wait is never released.
+        _, open_id = open_wait(h, db)
+        h.budgets.retain_wait(db, h.actor, open_id)
+        import pytest
+
+        from lotuspond.execution.errors import ExecutionError
+
+        with pytest.raises(ExecutionError, match="conflict"):
+            h.budgets.release_wait(db, open_id)
+
+
+def test_dependency_resolution_refuses_unresolved_paths(budget_harness):
+    import json
+    from types import SimpleNamespace
+
+    import pytest
+
+    from lotuspond.execution.errors import ExecutionError
+    from lotuspond.models import (
+        ExecutableDependency,
+        ExecutablePublication,
+        ExecutionDeploymentRevision,
+    )
+
+    h = budget_harness
+    with Session(h.engine) as db:
+        revision = db.get(ExecutionDeploymentRevision, h.revision_id)
+        publication = db.get(ExecutablePublication, revision.publication_id)
+        packages = [json.loads(publication.canonical_package)]
+        catalog = {
+            row.package_sha256: json.loads(row.canonical_package)
+            for row in db.scalars(
+                select(ExecutablePublication).join(
+                    ExecutableDependency,
+                    ExecutableDependency.dependency_publication_id == ExecutablePublication.id,
+                )
+            )
+        }
+    step = SimpleNamespace(occurrence_path="generate", node_id="generate")
+    assert h.budgets._dependency(step, packages, catalog, None)  # positive control
+    for path, node in (("nope", "nope"), ("generate#select", "generate"), ("generate", "other")):
+        with pytest.raises(ExecutionError, match="dependency_unavailable"):
+            h.budgets._dependency(
+                SimpleNamespace(occurrence_path=path, node_id=node), packages, catalog, None
+            )

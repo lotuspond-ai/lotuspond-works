@@ -1,0 +1,38 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "failure": null,
+    "node_id": "pick",
+    "occurrence_path": "each:1/pick#select",
+    "type": "RecordPure",
+    "value": {
+     "branch": "else"
+    }
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "decimal-item-above",
+ "now_ms": 1800000000000,
+ "package": "decimal_items",
+ "sources": [],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "index": 1,
+  "input": [
+   "9.50",
+   "10.50"
+  ],
+  "item": "10.50",
+  "occurrences": [],
+  "outer": {
+   "limit": "10.00"
+  },
+  "region_path": "each:1",
+  "requested_state": "running"
+ }
+}

@@ -49,7 +49,7 @@ class FixtureProgression:
         self.stall, self.transitions = stall, transitions
         self.calls, self.capacity_calls, self.locks = [], [], []
 
-    def advance_execution(self, db, worker, execution, *, bound):
+    def advance_execution(self, db, worker, execution, *, bound, epoch=None):
         self.calls.append(
             {
                 "execution_id": execution.id,
@@ -79,7 +79,7 @@ class FixtureProgression:
             reason=self.reason,
         )
 
-    def apply_capacity(self, db, worker, execution_id):
+    def apply_capacity(self, db, worker, execution_id, *, epoch=None):
         self.capacity_calls.append(
             {"execution_id": execution_id, "txid": db.scalar(text("SELECT txid_current()"))}
         )

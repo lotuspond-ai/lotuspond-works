@@ -734,6 +734,11 @@ def test_subworkflow_attempts_share_one_root_reservation_ledger(budget_harness):
         )
         h.revision_id = view.revision_id
         first, execution = h.add(db)
+        # Task 8: an occurrence path names the exact subworkflow call, not a bare node ID.
+        db.get(
+            ExecutionStepInstance, db.get(ExecutionAttempt, first).step_instance_id
+        ).occurrence_path = "sub:call/generate"
+        db.flush()
         h.budgets.reserve_attempt(db, h.actor, first, demand())
         h.stop(db, first, "sub-stop")
         second, _ = h.add(db, execution, ordinal=2)

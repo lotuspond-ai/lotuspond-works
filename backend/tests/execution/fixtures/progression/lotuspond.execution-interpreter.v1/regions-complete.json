@@ -1,0 +1,137 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "type": "Complete",
+    "value": {
+     "both": {
+      "left": "L",
+      "right": "R"
+     },
+     "choose": "high",
+     "each": [
+      6,
+      2,
+      4
+     ],
+     "note": "none",
+     "total": "1.00"
+    }
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "regions-complete",
+ "now_ms": 1800000000000,
+ "package": "regions",
+ "sources": [],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": {
+   "amount": "1.005",
+   "flag": true,
+   "items": [
+    3,
+    1,
+    2
+   ]
+  },
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-total",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": "1.00"
+     }
+    ],
+    "path": "total"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-choose#select",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": {
+       "branch": "then"
+      }
+     }
+    ],
+    "path": "choose#select"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-choose",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": "high"
+     }
+    ],
+    "path": "choose"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-each#items",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": [
+       3,
+       1,
+       2
+      ]
+     }
+    ],
+    "path": "each#items"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-each",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": [
+       6,
+       2,
+       4
+      ]
+     }
+    ],
+    "path": "each"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-both",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": {
+       "left": "L",
+       "right": "R"
+      }
+     }
+    ],
+    "path": "both"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-fallback",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": "none"
+     }
+    ],
+    "path": "fallback"
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

@@ -454,3 +454,22 @@ def test_signal_accepts_declared_number_domain(signals):
     with Session(h.engine) as db:
         assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 3
         assert db.get(ExecutionWait, h.wait_id).state == "open"
+
+
+def test_node_resolution_refuses_unresolved_record_and_mismatched_paths(signals):
+    from types import SimpleNamespace
+
+    h = signals
+    with Session(h.engine) as db, db.begin():
+        execution = db.get(Execution, h.execution_id)
+        package, sources = h.inbox._deployment(db, h.actor, execution.deployment_revision_id)
+    node = SimpleNamespace(occurrence_path="form", node_id="form")
+    assert h.inbox._node(package, sources, node)[1].id == "form"  # positive control
+    for path, node_id in (
+        ("nope", "nope"),
+        ("form#select", "form"),
+        ("form", "other"),
+        ("form:then", "form"),
+    ):
+        with pytest.raises(ExecutionError, match="dependency_unavailable"):
+            h.inbox._node(package, sources, SimpleNamespace(occurrence_path=path, node_id=node_id))

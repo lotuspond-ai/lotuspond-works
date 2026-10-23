@@ -9,7 +9,6 @@ from hashlib import sha256
 
 from lotuspond_sdk.executable.input import project_json
 from lotuspond_sdk.executable.types import validate_value
-from lotuspond_sdk.executable.validation import validate_executable_package
 
 from ..fleet.authority import database_now_ms
 from ..models import (
@@ -24,9 +23,9 @@ from .admission import _current_deployment
 from .artifacts import ArtifactPolicy
 from .authorization import lock, reauthorize, record, scoped
 from .contracts import SignalReceipt, SignalRequest, canonical_value
-from .deployments import _body_steps
 from .errors import ExecutionError, execution_service
 from .orchestrator import mark_runnable
+from .program import ProgramError, program_from, resolve_occurrence
 
 
 class InboxService:
@@ -43,18 +42,15 @@ class InboxService:
 
     @staticmethod
     def _node(package, sources, step):
-        # Task8 supplies the exact occurrence resolver. Until then ambiguous node
-        # IDs across regions/subworkflows are denied, never guessed from caller data.
-        packages = [package]
-        for source in sources.values():
-            if source.get("schema_version") == "lotuspond.workflow-package.v2":
-                packages.append(validate_executable_package(source))
-        matches = [
-            (p, node) for p in packages for node in _body_steps(p.body) if node.id == step.node_id
-        ]
-        if len(matches) != 1:
+        # The exact persisted occurrence path selects one node of one package;
+        # an unresolved path is refused, never guessed from caller data.
+        try:
+            ref = resolve_occurrence(program_from(package, sources), step.occurrence_path)
+        except ProgramError:
+            raise ExecutionError("dependency_unavailable") from None
+        if ref.selector is not None or ref.step_id != step.node_id:
             raise ExecutionError("dependency_unavailable")
-        package, node = matches[0]
+        package, node = ref.package, ref.step
         if node.kind not in {"external_wait", "human_task"}:
             raise ExecutionError("forbidden")
         if node.kind == "human_task" and node.mode != "form":

@@ -1,0 +1,43 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "input": null,
+    "node_id": "think",
+    "occurrence_path": "think",
+    "ordinal": 1,
+    "type": "CreateAttempt"
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "activities-next",
+ "now_ms": 1800000000000,
+ "package": "activities",
+ "sources": [
+  "catalog:0",
+  "catalog:1"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": null,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-read",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": null
+     }
+    ],
+    "path": "read"
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

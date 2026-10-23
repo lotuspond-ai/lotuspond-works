@@ -245,7 +245,7 @@ def test_pure_transition_never_locks_capacity_parents(admission):
 
 
 class CapacityFailure(FixtureProgression):
-    def apply_capacity(self, db, worker, execution_id):
+    def apply_capacity(self, db, worker, execution_id, *, epoch=None):
         super().apply_capacity(db, worker, execution_id)
         raise ExecutionError("capacity_unavailable")
 
@@ -277,8 +277,8 @@ def test_capacity_step_runs_in_its_own_transaction(admission, caplog):
 class StepWriter(FixtureProgression):
     """A representative pure transition: writes an execution child row, no parents."""
 
-    def advance_execution(self, db, worker, execution, *, bound):
-        outcome = super().advance_execution(db, worker, execution, bound=bound)
+    def advance_execution(self, db, worker, execution, *, bound, epoch=None):
+        outcome = super().advance_execution(db, worker, execution, bound=bound, epoch=epoch)
         db.add(
             ExecutionStepInstance(
                 workspace_id=execution.workspace_id,
@@ -526,11 +526,31 @@ def test_blocked_capacity_and_empty_passes_never_spin(admission):
     assert report == ProgressReport(claimed=1, transitions=0, deferred=1)
 
 
+def test_unproductive_capacity_steps_back_off_exponentially(admission):
+    h = admission
+    execution_id = admit(h).id
+    engine = fixture_engine(Unproductive())
+    delays = []
+    for _ in range(4):
+        with Session(h.engine) as db, db.begin():
+            execution = locked(db, execution_id)
+            clear_runnable(db, execution)
+            mark_runnable(db, execution, database_now_ms(db))
+            start = database_now_ms(db)
+        engine.progress(sessions(h), WORKER, limit=1)
+        with Session(h.engine) as db:
+            delays.append(db.get(Execution, execution_id).runnable_at_ms - start)
+    # A capacity step that changes nothing (a retention deferred at quota) counts as
+    # a refusal, so later deferrals double instead of staying at the base delay.
+    assert engine._failures[execution_id] == 4
+    assert delays[0] >= RETRY_MS and delays[2] >= 2 * RETRY_MS and delays[3] >= 4 * RETRY_MS
+
+
 class ProductiveSignal(FixtureProgression):
     """Made progress and is still runnable with a non-capacity reason."""
 
-    def advance_execution(self, db, worker, execution, *, bound):
-        outcome = super().advance_execution(db, worker, execution, bound=bound)
+    def advance_execution(self, db, worker, execution, *, bound, epoch=None):
+        outcome = super().advance_execution(db, worker, execution, bound=bound, epoch=epoch)
         return outcome.model_copy(update={"runnable": True, "reason": "signal", "transitions": 3})
 
 
@@ -538,7 +558,7 @@ class FailingCapacity(FixtureProgression):
     def __init__(self):
         super().__init__(runnable=True, reason="capacity", transitions=1)
 
-    def apply_capacity(self, db, worker, execution_id):
+    def apply_capacity(self, db, worker, execution_id, *, epoch=None):
         super().apply_capacity(db, worker, execution_id)
         raise ExecutionError("forbidden")
 

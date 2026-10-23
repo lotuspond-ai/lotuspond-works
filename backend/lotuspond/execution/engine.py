@@ -138,14 +138,16 @@ class PostgresExecutionEngine:
             reason=row.reason,
         )
 
-    def _advance(self, db, worker, execution):
+    def _advance(self, db, worker, execution, epoch):
         """Apply pure transitions under a savepoint; a refusal keeps the wake-ups pending."""
         try:
             with db.begin_nested():
                 consume_wakeups(db, execution)
                 clear_runnable(db, execution)
                 outcome = AdvanceOutcome.model_validate(
-                    self.progression.advance_execution(db, worker, execution, bound=BOUND)
+                    self.progression.advance_execution(
+                        db, worker, execution, bound=BOUND, epoch=epoch
+                    )
                 )
                 db.flush()
                 if (
@@ -159,10 +161,14 @@ class PostgresExecutionEngine:
                 if outcome.runnable and not capacity and outcome.transitions:
                     # Self-continuation joins the back of the due queue.
                     mark_runnable(db, execution, database_now_ms(db))
+                elif outcome.runnable and capacity:
+                    # The capacity step is retried later and backs off while it keeps
+                    # changing nothing. The marker was cleared above, so an earlier
+                    # wake-up the progression set (a retry back-off) still wins.
+                    mark_runnable(db, execution, database_now_ms(db) + self._delay(execution.id))
                 elif outcome.runnable:
-                    # A capacity step, or a pass that changed nothing, is retried later;
-                    # a capacity step that keeps failing backs off like a refusal.
-                    _defer(db, execution, self._delay(execution.id) if capacity else RETRY_MS)
+                    # A pass that changed nothing is retried later.
+                    _defer(db, execution, RETRY_MS)
         except Exception as error:
             # The savepoint restored the marker and the pending wake-ups.
             logger.warning("Execution transition deferred: %s", _code(error))
@@ -180,9 +186,11 @@ class PostgresExecutionEngine:
         """
         try:
             with sessions() as db, db.begin():
-                self._fence(db)
+                # Fenced before any lock; the progression never calls the authority
+                # while it holds the execution row.
+                epoch = self._fence(db)
                 outcome = AdvanceOutcome.model_validate(
-                    self.progression.apply_capacity(db, worker, execution_id)
+                    self.progression.apply_capacity(db, worker, execution_id, epoch=epoch)
                 )
                 if outcome.execution_id != execution_id:
                     raise ExecutionError("conflict")
@@ -191,6 +199,9 @@ class PostgresExecutionEngine:
                     mark_runnable(db, row, database_now_ms(db))
             if outcome.transitions:
                 self._failures.pop(execution_id, None)
+            else:
+                # No change, for example a retention deferred at quota: a refusal too.
+                self._backoff(execution_id)
         except Exception as error:
             logger.warning("Execution capacity step deferred: %s", _code(error))
             self._backoff(execution_id)
@@ -202,12 +213,12 @@ class PostgresExecutionEngine:
         for _ in range(limit):
             capacity = None
             with sessions() as db, db.begin():
-                self._fence(db)
+                epoch = self._fence(db)
                 execution = claim_runnable(db, worker)
                 if execution is None:
                     break
                 claimed += 1
-                outcome = self._advance(db, worker, execution)
+                outcome = self._advance(db, worker, execution, epoch)
                 if outcome is None:
                     deferred += 1
                 else:

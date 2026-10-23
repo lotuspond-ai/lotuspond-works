@@ -107,11 +107,11 @@ class Progression(Protocol):
     """Task 8. Pure transitions under the held execution row lock; no network call."""
 
     def advance_execution(
-        self, db: object, worker: WorkerIdentity, execution: object, *, bound: int
+        self, db: object, worker: WorkerIdentity, execution: object, *, bound: int, epoch: int
     ) -> AdvanceOutcome: ...
 
     def apply_capacity(
-        self, db: object, worker: WorkerIdentity, execution_id: str
+        self, db: object, worker: WorkerIdentity, execution_id: str, *, epoch: int
     ) -> AdvanceOutcome: ...
 
 

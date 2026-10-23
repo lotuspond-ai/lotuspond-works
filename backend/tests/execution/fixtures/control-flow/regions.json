@@ -1,0 +1,567 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "fields": [
+    {
+     "name": "total",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "total",
+       "kind": "step"
+      }
+     }
+    },
+    {
+     "name": "choose",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "choose",
+       "kind": "step"
+      }
+     }
+    },
+    {
+     "name": "each",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "each",
+       "kind": "step"
+      }
+     }
+    },
+    {
+     "name": "both",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "both",
+       "kind": "step"
+      }
+     }
+    },
+    {
+     "name": "note",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "fallback",
+       "kind": "step"
+      }
+     }
+    }
+   ],
+   "kind": "object"
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "fields": [
+     {
+      "name": "total",
+      "required": true,
+      "schema": {
+       "kind": "decimal",
+       "precision": 38,
+       "scale": 2
+      }
+     },
+     {
+      "name": "choose",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 4
+      }
+     },
+     {
+      "name": "each",
+      "required": true,
+      "schema": {
+       "items": {
+        "kind": "integer"
+       },
+       "kind": "array",
+       "max_items": 5
+      }
+     },
+     {
+      "name": "both",
+      "required": true,
+      "schema": {
+       "fields": [
+        {
+         "name": "left",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 4
+         }
+        },
+        {
+         "name": "right",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 4
+         }
+        }
+       ],
+       "kind": "object"
+      }
+     },
+     {
+      "name": "note",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 20
+      }
+     }
+    ],
+    "kind": "object"
+   }
+  },
+  "steps": [
+   {
+    "id": "total",
+    "kind": "transform",
+    "mapping": {
+     "args": [
+      {
+       "kind": "ref",
+       "pointer": "/amount",
+       "source": {
+        "kind": "package_input"
+       }
+      },
+      {
+       "kind": "literal",
+       "schema": {
+        "kind": "decimal",
+        "precision": 10,
+        "scale": 3
+       },
+       "value": "0.000"
+      }
+     ],
+     "fn": "add",
+     "kind": "call",
+     "rounding": "half_even",
+     "scale": 2
+    },
+    "output_schema": {
+     "kind": "decimal",
+     "precision": 38,
+     "scale": 2
+    }
+   },
+   {
+    "condition": {
+     "kind": "ref",
+     "pointer": "/flag",
+     "source": {
+      "kind": "package_input"
+     }
+    },
+    "else_body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "low",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "kind": "string",
+       "max_length": 4
+      }
+     },
+     "steps": [
+      {
+       "id": "low",
+       "kind": "transform",
+       "mapping": {
+        "kind": "literal",
+        "schema": {
+         "kind": "string",
+         "max_length": 4
+        },
+        "value": "low"
+       },
+       "output_schema": {
+        "kind": "string",
+        "max_length": 4
+       }
+      }
+     ]
+    },
+    "id": "choose",
+    "kind": "decision",
+    "then_body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "high",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "kind": "string",
+       "max_length": 4
+      }
+     },
+     "steps": [
+      {
+       "id": "high",
+       "kind": "transform",
+       "mapping": {
+        "kind": "literal",
+        "schema": {
+         "kind": "string",
+         "max_length": 4
+        },
+        "value": "high"
+       },
+       "output_schema": {
+        "kind": "string",
+        "max_length": 4
+       }
+      }
+     ]
+    }
+   },
+   {
+    "body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "double",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "kind": "integer"
+      }
+     },
+     "steps": [
+      {
+       "id": "double",
+       "kind": "transform",
+       "mapping": {
+        "args": [
+         {
+          "kind": "ref",
+          "pointer": "",
+          "source": {
+           "kind": "iteration_item"
+          }
+         },
+         {
+          "kind": "literal",
+          "schema": {
+           "kind": "integer"
+          },
+          "value": 2
+         }
+        ],
+        "fn": "multiply",
+        "kind": "call"
+       },
+       "output_schema": {
+        "kind": "integer"
+       }
+      }
+     ]
+    },
+    "concurrency": 2,
+    "id": "each",
+    "input": {
+     "kind": "ref",
+     "pointer": "/items",
+     "source": {
+      "kind": "package_input"
+     }
+    },
+    "kind": "iteration",
+    "max_items": 5
+   },
+   {
+    "branches": [
+     {
+      "body": {
+       "result": {
+        "kind": "ref",
+        "pointer": "",
+        "source": {
+         "id": "lval",
+         "kind": "step"
+        }
+       },
+       "result_schema": {
+        "kind": "data",
+        "schema": {
+         "kind": "string",
+         "max_length": 4
+        }
+       },
+       "steps": [
+        {
+         "id": "lval",
+         "kind": "transform",
+         "mapping": {
+          "kind": "literal",
+          "schema": {
+           "kind": "string",
+           "max_length": 4
+          },
+          "value": "L"
+         },
+         "output_schema": {
+          "kind": "string",
+          "max_length": 4
+         }
+        }
+       ]
+      },
+      "id": "left"
+     },
+     {
+      "body": {
+       "result": {
+        "kind": "ref",
+        "pointer": "",
+        "source": {
+         "id": "rval",
+         "kind": "step"
+        }
+       },
+       "result_schema": {
+        "kind": "data",
+        "schema": {
+         "kind": "string",
+         "max_length": 4
+        }
+       },
+       "steps": [
+        {
+         "id": "rval",
+         "kind": "transform",
+         "mapping": {
+          "kind": "literal",
+          "schema": {
+           "kind": "string",
+           "max_length": 4
+          },
+          "value": "R"
+         },
+         "output_schema": {
+          "kind": "string",
+          "max_length": 4
+         }
+        }
+       ]
+      },
+      "id": "right"
+     }
+    ],
+    "id": "both",
+    "join": "all",
+    "kind": "parallel"
+   },
+   {
+    "id": "fallback",
+    "kind": "transform",
+    "mapping": {
+     "args": [
+      {
+       "kind": "ref",
+       "pointer": "/note",
+       "source": {
+        "kind": "package_input"
+       }
+      },
+      {
+       "kind": "literal",
+       "schema": {
+        "kind": "string",
+        "max_length": 20
+       },
+       "value": "none"
+      }
+     ],
+     "fn": "coalesce",
+     "kind": "call"
+    },
+    "output_schema": {
+     "kind": "string",
+     "max_length": 20
+    }
+   }
+  ]
+ },
+ "connectors": [],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "fields": [
+   {
+    "name": "amount",
+    "required": true,
+    "schema": {
+     "kind": "decimal",
+     "precision": 10,
+     "scale": 3
+    }
+   },
+   {
+    "name": "items",
+    "required": true,
+    "schema": {
+     "items": {
+      "kind": "integer",
+      "max": 1000,
+      "min": 0
+     },
+     "kind": "array",
+     "max_items": 5
+    }
+   },
+   {
+    "name": "flag",
+    "required": true,
+    "schema": {
+     "kind": "boolean"
+    }
+   },
+   {
+    "name": "note",
+    "required": false,
+    "schema": {
+     "kind": "string",
+     "max_length": 20
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [],
+ "name": "Synthetic fixture-regions",
+ "output_schema": {
+  "fields": [
+   {
+    "name": "total",
+    "required": true,
+    "schema": {
+     "kind": "decimal",
+     "precision": 38,
+     "scale": 2
+    }
+   },
+   {
+    "name": "choose",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 4
+    }
+   },
+   {
+    "name": "each",
+    "required": true,
+    "schema": {
+     "items": {
+      "kind": "integer"
+     },
+     "kind": "array",
+     "max_items": 5
+    }
+   },
+   {
+    "name": "both",
+    "required": true,
+    "schema": {
+     "fields": [
+      {
+       "name": "left",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 4
+       }
+      },
+      {
+       "name": "right",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 4
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "name": "note",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 20
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "package_id": "fixture-regions",
+ "policies": [],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

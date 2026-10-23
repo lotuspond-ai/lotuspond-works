@@ -373,3 +373,52 @@ Branch `claude/e04-postgresql-impl` from `7b3a0c7` (PR #13's recorded owner appr
 - A new `apply_capacity` interface for Task 8.
 
 **Pre-existing, out of scope.** On unmodified `7b3a0c7`, 7 tests (3 in `test_assurance.py`, 4 in `test_entitlement.py`) fail when the PostgreSQL session time zone is not UTC and pass with UTC. Release-binding evidence compares timestamps serialized in different time zones.
+
+## E04 Task 8: deterministic interpreter v1 as row transitions, 2026-10-23
+
+Same branch, cluster and limits as Task 7. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Red before implementation.** The new tests were copied onto the Task 7 commit `77959d9`. All three modules failed at collection: `lotuspond.execution.expressions` and `lotuspond.execution.program` did not exist. Each later review fix added a test that failed with that fix reverted. Covered: an in-time signal for a wait the sweeper expired; a wait opened beside running compute; retention while paused; back-off of a capacity step that changes nothing; a wait at quota throttling sibling progress; and a sibling retry delayed by the capacity back-off.
+
+**Green:**
+
+- The full backend suite, run from a clean checkout of the final reviewed content (`129948a`, 1,088 tests): 1,080 passed and 8 failed in 821 s. All 8 failures are in `tests/fleet/test_acceptance.py`, which runs only on CI's Linux job (see Task 7).
+- 35 golden progression records for `lotuspond.execution-interpreter.v1` re-derive byte for byte. They cover every admitted step kind and all seven actions and store actions, regions and the wake time. Recording them is an explicit command (`python -m tests.execution.test_progression_fixtures`), never part of a test run.
+- **Derivation bound.** A 1,000-item iteration with eight body steps (9,001 steps, the largest expansion the SDK admits at 1,000 items; the test proves one more body step is refused) ran 1,280 transitions in 20 transactions. Across 3,079 region loads the largest read 278 rows, against 1,280 committed step instances. Root loads stayed within the 1,000 pinned item paths, and item-region loads within 8 rows.
+- **Throughput, a Task 13 follow-up.** Each 64-transition transaction took about 1.5 s on this laptop, with per-transaction decryption and key caches.
+- Ruff is clean. The schema is unchanged at version 15.
+
+**Reviews.** The specification and quality reviews each ran four rounds.
+
+- **Round 1** required changes:
+  - a pending wait retention blocked every release (Critical);
+  - branch IDs could collide with composite records, fixed with the `#` record grammar;
+  - oversized values retried forever;
+  - a late-consumed signal was refused;
+  - provider calls were made under the row lock, fixed by passing the fenced epoch;
+  - item typing failed open, the compiled plan was not checked against a recompilation, and inbox decryption errors were swallowed;
+  - there were gaps in the tests and goldens.
+- **Round 2** found that the fixes had added regressions:
+  - an expired wait no longer loaded its in-time signals;
+  - a retention deferred at quota did not back off;
+  - a wait opened beside running compute was never retained;
+  - paused executions polled for retention.
+- **Round 3** found that a wait stuck at quota throttled sibling progress: a pass stopped by the transition bound reported capacity. The gate now reads committed state (`_capacity_pending`).
+- **Round 4** found that a capacity pass dropped its own retry wake-up.
+
+All of these are fixed. Both reviews approved the final content. The quality review accepted one deliberate Minor: retention defers on `authority_unavailable` and `conflict`, which can hide a database fault or a pending-count underflow. A savepoint rolls back either, and the deferral is logged.
+
+**For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 8"):
+
+- the occurrence-path grammar with `#` records;
+- failure records;
+- wait keys;
+- signal timeliness judged at acceptance;
+- the capacity step order;
+- an unretained wait stays open, so the 10,000 retained-wait ceiling bounds quota, not open waits;
+- the epoch passed in, with the key provider as the only bounded call under the row lock;
+- `pending` held until the first reservation;
+- the 10,000-step target is unreachable at 1,000 items (the maximum is 9,001);
+- the files beyond Task 8's ownership row.
+
+**Obligation carried to Tasks 9 and 11:** every result, lapse, stop confirmation and reconciliation that can complete containment calls `mark_runnable` in the same transaction.

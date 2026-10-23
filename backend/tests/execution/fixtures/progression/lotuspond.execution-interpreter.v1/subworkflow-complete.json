@@ -1,0 +1,50 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "type": "Complete",
+    "value": 15
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "subworkflow-complete",
+ "now_ms": 1800000000000,
+ "package": "subworkflow",
+ "sources": [
+  "subworkflow.child"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": 5,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-invoke#input",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": 5
+     }
+    ],
+    "path": "invoke#input"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-invoke",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": 15
+     }
+    ],
+    "path": "invoke"
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

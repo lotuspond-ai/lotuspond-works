@@ -246,6 +246,68 @@ class ArtifactStore:
         self._current_time(db, policy, source)
         return content
 
+    def _cached_key(self, scope, key_id, keys):
+        """A caller-owned per-transaction cache; never persisted or shared."""
+        if keys is None:
+            return self._key(scope, key_id)
+        slot = (scope.workspace_id, scope.project_id, scope.environment_id, key_id)
+        if slot not in keys:
+            keys[slot] = self._key(scope, key_id)
+        return keys[slot]
+
+    @execution_service
+    def _put_internal(self, db, scope, content, policy, *, keys=None) -> ArtifactHandle:
+        """Orchestrator-only write of an execution's own workspace-policy value.
+
+        No customer actor: the caller holds the execution row lock and records the
+        value on that execution's rows. Source-bound policies are refused; current
+        source ACLs need an authenticated actor (runtime and API paths).
+        """
+        scope = Scope.model_validate(scope)
+        policy = ArtifactPolicy.model_validate(policy)
+        if policy.source_id is not None:
+            raise ExecutionError("forbidden")
+        _json(content)
+        row = ExecutionArtifact(
+            **scope.model_dump(),
+            **policy.model_dump(),
+            id=new_id(),
+            version=1,
+            sha256=sha256(content).hexdigest(),
+            content_bytes=len(content),
+            nonce=os.urandom(12),
+        )
+        key = self._cached_key(scope, policy.key_id, keys)
+        self._current_time(db, policy, None)
+        row.ciphertext = AESGCM(key).encrypt(row.nonce, content, _aad(scope, row))
+        db.add(row)
+        db.flush()
+        return ArtifactHandle(id=row.id, version=row.version, sha256=row.sha256)
+
+    @execution_service
+    def _get_internal(self, db, scope, handle, *, keys=None) -> bytes:
+        """Orchestrator-only read of a workspace-policy value pinned by the caller's rows."""
+        scope = Scope.model_validate(scope)
+        handle = ArtifactHandle.model_validate(handle)
+        row = record(db, ExecutionArtifact, scope, handle.id)
+        if row.version != handle.version or row.sha256 != handle.sha256:
+            raise ExecutionError("not_found")
+        if row.source_id is not None:
+            raise ExecutionError("forbidden")
+        policy = ArtifactPolicy.model_validate(
+            {key: getattr(row, key) for key in ArtifactPolicy.model_fields}
+        )
+        key = self._cached_key(scope, row.key_id, keys)
+        self._current_time(db, policy, None)
+        try:
+            content = AESGCM(key).decrypt(row.nonce, row.ciphertext, _aad(scope, row))
+            if len(content) != row.content_bytes or sha256(content).hexdigest() != row.sha256:
+                raise ValueError
+            _json(content)
+        except Exception:
+            raise ExecutionError("artifact_corrupt") from None
+        return content
+
     def _current_time(self, db, policy, source):
         if source is not None:
             self._source_valid(db, *source)
