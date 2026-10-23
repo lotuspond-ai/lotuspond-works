@@ -596,9 +596,172 @@
   opacity: 0.8;
 }
 
+/* The registry's answer foreseen from the listed versions. */
+.studio-registry-fix {
+  margin: 6px 0 0;
+}
+.studio-same {
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+/* The drafts kept in this browser. */
+.studio-drafts {
+  margin: 0 0 24px;
+}
+.studio-drafts .section-row {
+  margin-bottom: 4px;
+}
+.studio-drafts .table-wrap {
+  margin-bottom: 0;
+}
+/* On a narrow screen the table scrolls inside its frame rather than breaking names apart. */
+.studio-drafts td.primary-cell {
+  min-width: 18ch;
+  overflow-wrap: normal;
+}
+.studio-drafts td.cell-mono {
+  white-space: nowrap;
+}
+.studio-drafts-count {
+  color: var(--muted);
+  font-size: 13px;
+}
+.studio-toolbar-name {
+  overflow: hidden;
+  max-width: 28ch;
+  font-size: 13.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Where a package goes after the canvas: available stages, then planned ones. */
+.studio-stages {
+  margin-top: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.studio-stages h2 {
+  margin-bottom: 14px;
+}
+.studio-stage-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.studio-stage-list li {
+  padding: 12px 0 14px;
+  border-top: 1px solid var(--line-strong);
+}
+.studio-stage-list li[data-state='planned'] {
+  border-top-style: dashed;
+}
+.studio-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.studio-stage-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.studio-stage-number {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.studio-stage-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* Starting a draft: the synthetic patterns from contracts/examples, then a blank workflow. */
+.studio-start {
+  margin: 0 0 24px;
+}
+.studio-start .section-row {
+  margin-bottom: 6px;
+}
+.studio-start h2:focus {
+  outline: none;
+}
+.studio-start h2:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.studio-start-lede {
+  max-width: 72ch;
+  margin: 0 0 12px;
+}
+.studio-patterns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.studio-pattern {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  padding: 14px 16px;
+  border-color: var(--line-strong);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  font-weight: 400;
+  text-align: left;
+}
+.studio-pattern:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.studio-pattern-title {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.studio-pattern-family {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.studio-pattern-summary {
+  margin-top: 6px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.studio-pattern-steps {
+  margin-top: auto;
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.studio-pattern-blank {
+  border-style: dashed;
+  box-shadow: none;
+}
+
 @media (max-width: 1080px) {
   .studio-workbench {
     grid-template-columns: 1fr;
+  }
+  .studio-patterns,
+  .studio-stage-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (max-width: 720px) {
@@ -620,5 +783,9 @@
   }
   .studio-connect {
     grid-template-columns: 1fr;
+  }
+  .studio-patterns,
+  .studio-stage-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

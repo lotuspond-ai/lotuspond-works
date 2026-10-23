@@ -102,6 +102,15 @@ export function StatusBadge({ value }: { value: unknown }) {
     </span>
   );
 }
+// Whether a product capability can be used now, as docs/CAPABILITIES.md records it.
+export function Readiness({ state }: { state: 'available' | 'planned' }) {
+  return (
+    <span className={`badge badge-${state === 'available' ? 'success' : 'neutral'}`}>
+      <span aria-hidden="true" />
+      {state === 'available' ? 'Available' : 'Planned'}
+    </span>
+  );
+}
 export function humanize(value: string): string {
   return value
     .replaceAll('_', ' ')

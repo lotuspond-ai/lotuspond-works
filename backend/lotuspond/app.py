@@ -294,6 +294,27 @@ def create_app(
             "items": [
                 {
                     "version": "0.2.0",
+                    "id": "studio-patterns-and-drafts",
+                    "date": "2026-10-22",
+                    "title": "Studio patterns, named drafts and version help",
+                    "description": "A new Studio draft can start from five synthetic patterns from the package contract (document intake, case approval, knowledge answer, record reconciliation and reviewed action) or a blank workflow. The Studio keeps up to 20 named drafts per workspace and project in your browser, listed with their admission state, and opening a file or a published version adds a draft instead of replacing one. A From draft to production list shows that composing, checking, publishing and agent evaluation are available while deployment and operation are planned. When the project already holds the draft's version, the Studio says whether the content is the same, and if it differs it disables Publish and offers the next free version; the registry still decides. Published versions with the open draft's exact content are marked. Home and the command palette gain New workflow. Drafts never leave the browser until published, and nothing in the Studio runs a workflow.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "console-planned-areas",
+                    "date": "2026-10-22",
+                    "title": "Navigation grouped as Build, Assure, Operate and Administer",
+                    "description": "The console navigation now follows the platform's shape: Build (Projects, Studio, Connections), Assure (scenarios, runners, evaluation runs and release decisions), Operate (Control Room, Human tasks, traces, monitors, incidents and voice sessions) and Administer. Control Room, Connections and Human tasks carry a Planned tag and open a page that says what each will do, what it depends on, what is already built underneath and what to use meanwhile; they show no records and run nothing. A new License page shows the workspace's provisioned trace plan beside the proposed platform editions, services and delegated service access, all labelled as proposals. The console collects no payment.",
+                },
+                {
+                    "version": "0.2.0",
+                    "id": "automation-introduction",
+                    "date": "2026-10-22",
+                    "title": "An introduction for agent automation",
+                    "description": "The signed-out page now introduces Lotuspond as an enterprise agent automation platform with services, under the headline Agents at work, people in charge. The opening scene draws the synthetic reviewed-action workflow package on the water, where a connector reads a case, an agent proposes an update, a person reviews it and the case is written, and a Pause motion control stops the scene. The page explains the three ways to work with Lotuspond, the assessment, implementation, operations and training services, and the workflow families each workflow is qualified against. A register marks each part of the platform as available, in progress or planned, so Control Room and the production runtime are never presented as shipped. The assurance console preview, the human-control rules and the release gate remain. Four more synthetic example packages (document intake, case approval, knowledge answer and record reconciliation) join the contract examples.",
+                },
+                {
+                    "version": "0.2.0",
                     "id": "studio-canvas",
                     "date": "2026-10-15",
                     "title": "The Studio composes workflow packages",

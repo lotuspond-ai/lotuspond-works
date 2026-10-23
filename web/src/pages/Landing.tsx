@@ -1,108 +1,236 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { AgentSignal } from '../components/AgentSignal.js';
-import { Pond } from '../components/Pond.js';
+import { Pond, type PadLayout } from '../components/Pond.js';
 import { InkGlyph } from '../components/InkGlyph.js';
 import { PondPlate } from '../components/PondPlate.js';
+import { PondWorkflow } from '../components/PondWorkflow.js';
 import { ConsolePreview } from '../components/platform/ConsolePreview.js';
 import { RecentlyShipped } from '../components/RecentlyShipped.js';
 import { ThreadedSteps } from '../components/ThreadedSteps.js';
-import { TraceSpecimen } from '../components/TraceSpecimen.js';
 import { Alert, StatusBadge } from '../components/ui.js';
 import { useArrival } from '../lib/useArrival.js';
 
 type AccountChoice = 'individual' | 'organization';
 
-// Reasons are quoted from backend/lotuspond/policy.py; keep them identical.
-const releaseChecks = [
-  ['Coverage', 'Candidate run lacks a conclusive result for every scenario.'],
-  ['Critical scenarios', 'A critical scenario failed or has no conclusive result.'],
-  ['Pass rate', 'Pass rate is below the policy minimum.'],
-  ['Baseline', 'Candidate regresses beyond the permitted baseline threshold.'],
-  ['Latency', 'P95 latency exceeds the policy limit or is unavailable.'],
-  ['Cost', 'Evaluation cost exceeds the policy limit or is unavailable.'],
+// Set at build time for the hosted introduction; an installation built without it shows no
+// contact action rather than an invented address.
+const contactEmail = String(import.meta.env.VITE_LOTUSPOND_CONTACT_EMAIL ?? '').trim();
+
+// The hero keeps the right of the water clear for the drawn workflow.
+const heroPads: PadLayout = [
+  [0.03, 0.82, 0.085],
+  [0.97, 0.94, 0.07],
+];
+
+// The synthetic package in contracts/examples/reviewed-action.v1.json; the instruction is
+// quoted from it and the limits are its declared values.
+const packageNodes = [
+  ['read', 'connector', 'Reads the case through synthetic-case-system 1.0.0.', ''],
+  [
+    'propose',
+    'agent',
+    'Propose a synthetic case update for a person to review.',
+    '5 steps · 60 s · 4,000 input and 1,000 output tokens · cost ceiling',
+  ],
+  ['review', 'human review', 'A person reviews the proposal before anything is written.', ''],
+  ['write', 'connector', 'Writes the case through the same connector.', ''],
 ] as const;
 
-const outcomes = [
-  ['passed', 'The agent met the scenario’s expected outcome.', 'Counts toward the pass rate.'],
-  [
-    'failed',
-    'The expected outcome was not met.',
-    'Lowers the pass rate. Blocks the release when the scenario is critical.',
-  ],
-  ['unknown', 'A timeout, crash, or malformed or incomplete evidence.', 'Blocks the release.'],
-  ['missing', 'No result arrived for a scenario in the frozen snapshot.', 'Blocks the release.'],
+// Quoted from ERROR_MESSAGES in sdk/python/src/lotuspond_sdk/contract.py; keep them identical.
+const packageRejections = [
+  'An agent references an undeclared model.',
+  'A node operation is not declared by its connector.',
+  'The package graph must be acyclic.',
 ] as const;
 
-const steps = [
+const engagements = [
   [
-    'Define scenarios',
-    'Write a concrete input, the outcome you expect, and whether a failure must block the release. Scenarios cover text, voice, tool-using, and multimodal agents.',
-    'The scenario snapshot, frozen for each run',
+    'solo',
+    'On your own',
+    'Install Lotuspond on your infrastructure and build with your own engineers. Nothing in the product needs our consultants to operate it.',
   ],
   [
-    'Run them on your side',
-    'Your runner claims a leased run, calls your agent, and submits measured results. Agent endpoints and credentials stay with your runner.',
-    'Outcome, latency, and reported cost per scenario',
+    'together',
+    'With our team',
+    'We assess your processes, implement the first automations alongside your people, and can operate them for you afterward.',
   ],
   [
-    'Decide the release',
-    'Compare the candidate with a baseline that ran the same snapshot, then apply an immutable policy. When approval is required, a different administrator gives it.',
-    'Verdict, reasons, and an evidence digest',
-  ],
-  [
-    'Watch production',
-    'Send traces over OTLP or the API. Monitors sample them for assessment, and failures or unavailable assessments open incidents you resolve with evidence.',
-    'Traces, assessments, and incident history',
-  ],
-] as const;
-
-const agentKinds = [
-  [
-    'http',
-    'HTTP agents',
-    'Send plain input or OpenAI-style chat to your endpoint and assert on an explicit response path. A completed response is not, by itself, a pass.',
-  ],
-  [
-    'mcp · a2a',
-    'Tools and agent protocols',
-    'Execute an explicitly configured MCP tool, or send an A2A message where only a completed task is judged. Tool discovery stays read-only.',
-  ],
-  [
-    'voice',
-    'Voice agents',
-    'Ingest partial and final transcript revisions. Final segments never change, and every assessment names its criteria, model, and provenance.',
-  ],
-  [
-    'gym-anything',
-    'Software tasks',
-    'Run pinned Gym-Anything tasks in isolated containers with bounded actions, hard deadlines, and verified cleanup.',
+    'relay',
+    'Through a partner',
+    'We train and equip the implementation partner you choose, so they deliver on the same platform and methods we use.',
   ],
 ] as const;
 
-const guarantees = [
+const services = [
+  [
+    'Readiness assessment',
+    'We inventory your processes, rank them by value and risk, and check data, documents, systems and permissions to decide where rules, an agent, a person or a mix belongs.',
+    'Readiness scorecard, opportunity backlog, process maps and a phased plan',
+  ],
+  [
+    'Implementation',
+    'We design the process, build its connections and workflow package, test it with recorded evidence, deploy it, and hand it over with named owners.',
+    'Process design, connections, package, test evidence and handover',
+  ],
+  [
+    'Managed operations',
+    'We watch automations in production, respond to incidents, manage capacity, and turn exceptions into tested improvements under agreed change control.',
+    'Monitoring, incident response, approved changes and improvement reviews',
+  ],
+  [
+    'Training and enablement',
+    'We train your administrators, developers and reviewers, and give implementation partners the guides and methods we work by.',
+    'Trained teams and a repeatable implementation method',
+  ],
+] as const;
+const serviceGlyphs = ['survey', 'package', 'pulse', 'handover'] as const;
+
+const readiness = [
+  'Choose where rules, an agent, a person, or a combination belongs.',
+  'Name process owners, inputs, decision rules and exception routes.',
+  'Assess data quality, documents, identity, APIs, permissions and auditability.',
+  'Build permitted integrations, typed tool contracts and governed knowledge.',
+  'Introduce human review, incident handling and release practice.',
+  'Train people, then measure adoption, outcomes and running costs.',
+] as const;
+
+type Readiness = 'available' | 'in-progress' | 'planned';
+const readinessLabel: Record<Readiness, string> = {
+  available: 'Available',
+  'in-progress': 'In progress',
+  planned: 'Planned',
+};
+
+// Each status traces to docs/CAPABILITIES.md; move a row only when that register moves it.
+const register = [
+  [
+    'Build',
+    [
+      [
+        'Workflow packages',
+        'in-progress',
+        'A strict, versioned declaration of connectors, agents and human review steps. The SDK validates and signs it locally, and each workspace keeps published versions in an immutable registry.',
+      ],
+      [
+        'Studio',
+        'in-progress',
+        'Compose a package on a canvas, check it in the browser against the same rules as the SDK, and publish it to the registry. Authoring executable workflows is planned.',
+      ],
+      [
+        'Connections and knowledge',
+        'in-progress',
+        'Connection configurations and secret references, managed by owners and administrators through an opt-in API. Using them in running workflows, and versioned knowledge sources, are planned.',
+      ],
+    ],
+  ],
+  [
+    'Operate',
+    [
+      [
+        'Control Room',
+        'planned',
+        'Publish versions and manage environments, deployments, workers, queues and schedules.',
+      ],
+      [
+        'Execution',
+        'planned',
+        'Durable runs that combine agent steps, deterministic actions and waits for people, on workers you control.',
+      ],
+      [
+        'Business operations',
+        'planned',
+        'Cases, exceptions and human tasks, with each outcome linked to the version that produced it.',
+      ],
+    ],
+  ],
+  [
+    'Assure',
+    [
+      [
+        'Assurance',
+        'available',
+        'Frozen scenarios, immutable release policies, independent approval, production traces and incidents, for HTTP, MCP, A2A, voice and software-task agents.',
+      ],
+    ],
+  ],
+  [
+    'Administer',
+    [
+      [
+        'Identity and access',
+        'available',
+        'Personal and organization workspaces, roles, invitations, scoped API keys, authenticator MFA and audit records. Licensing and delegated service access are planned.',
+      ],
+    ],
+  ],
+] as const satisfies readonly (readonly [
+  string,
+  readonly (readonly [string, Readiness, string])[],
+])[];
+
+const controls = [
   [
     'Model judgments are advisory.',
     'An assessment can inform a decision. It never approves a release or authorizes a tool.',
-  ],
-  [
-    'Policies are immutable.',
-    'Change a rule by creating a new policy. Earlier decisions keep the rule they were made under.',
   ],
   [
     'Approval takes two people.',
     'The administrator who approves a release must be someone other than the one who asked.',
   ],
   [
+    'A missing result is not a pass.',
+    'A timeout, a crash, malformed evidence or a result that never arrives is recorded as unknown, and unknown blocks the release.',
+  ],
+  [
+    'Policies are immutable.',
+    'Change a rule by creating a new policy. Earlier decisions keep the rule they were made under.',
+  ],
+  [
     'Registered is not connected.',
     'An integration stays unverified until its connection is independently proven.',
   ],
   [
-    'Unmeasured cost stays unknown.',
-    'A cost that was never reported is recorded as unavailable, never as zero.',
-  ],
-  [
     'Evidence leaves with its digest.',
     'Release evidence exports as canonical JSON with a SHA-256 digest anyone can recompute.',
+  ],
+] as const;
+
+// The workflow families in docs/plans/2026-10-13-platform-master-plan.md, section 6.
+const families = [
+  [
+    'documents',
+    'Document intake and validation',
+    'Orders, invoices, forms and claims intake.',
+    'Extraction and validation accuracy, source references and exception outcomes.',
+  ],
+  [
+    'knowledge',
+    'Knowledge and assistance',
+    'Internal support and guided operations.',
+    'Access-correct retrieval, source freshness and answer quality.',
+  ],
+  [
+    'transactions',
+    'Business-system transactions',
+    'CRM and ERP updates, reconciliations and service requests.',
+    'Authorization, deduplication, downstream confirmation and recovery.',
+  ],
+  [
+    'cases',
+    'Case and approval processes',
+    'Procurement, onboarding and referral administration.',
+    'Long-running state, escalation, deadlines and independent review.',
+  ],
+  [
+    'voice',
+    'Voice and conversation',
+    'Scheduling, intake and support.',
+    'Real audio, provider and channel tests, and handoff to a person.',
+  ],
+  [
+    'legacy',
+    'Browser, desktop and legacy systems',
+    'Authorized systems that have no suitable API.',
+    'Isolated sessions, credential handling and recovery from interface changes.',
   ],
 ] as const;
 
@@ -132,23 +260,21 @@ const gateExample = [
   ['output', '2'],
 ] as const;
 
-const stepGlyphs = ['snapshot', 'trace', 'seal', 'pulse'] as const;
-const agentSignals = ['http', 'protocol', 'voice', 'software'] as const;
 const deploymentGlyphs = ['network', 'enclosure', 'sealed'] as const;
 const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
 // Page order drives the contents list, the section numbers, and the header links.
 const sections = [
-  ['platform', 'Platform', '4 views'],
-  ['outcomes', 'Outcomes', '4 states'],
-  ['workflow', 'Workflow', '4 steps'],
-  ['agents', 'Agents', '4 kinds'],
-  ['guarantees', 'Guarantees', '6 rules'],
+  ['engage', 'Engagement', '3 paths'],
+  ['services', 'Services', '4 services'],
+  ['platform', 'Platform', '8 parts'],
+  ['control', 'Human control', '6 rules'],
+  ['workflows', 'Workflows', '6 families'],
   ['deployment', 'Deployment', '3 modes'],
   ['accounts', 'Accounts', '2 paths'],
 ] as const;
 type SectionId = (typeof sections)[number][0];
-const headerLinks: SectionId[] = ['platform', 'outcomes', 'workflow', 'deployment'];
+const headerLinks: SectionId[] = ['services', 'platform', 'workflows', 'deployment'];
 
 function jumpTo(event: MouseEvent<HTMLAnchorElement>, id: string) {
   const target = document.getElementById(id);
@@ -180,6 +306,7 @@ export function Landing({
   onSignIn: () => void;
 }) {
   const [header, setHeader] = useState({ scrolled: false, overPond: true });
+  const [moving, setMoving] = useState(true);
   const surfacing = useRef<HTMLElement>(null);
   const record = useRef<HTMLElement>(null);
   const [stampTarget, stamped] = useArrival<HTMLElement>(0.5);
@@ -200,7 +327,7 @@ export function Landing({
           ? current
           : { scrolled, overPond },
       );
-      // The policy record rises out of the water as the reader arrives at it.
+      // The package record rises out of the water as the reader arrives at it.
       const section = surfacing.current;
       const card = record.current;
       if (section && card) {
@@ -257,39 +384,72 @@ export function Landing({
         <Pond
           as="h1"
           id="landing-title"
-          title="Release agents on the record"
+          title="Agents at work, people in charge"
           className="pond-hero"
-          eyebrow={<p className="pond-eyebrow">Agent release assurance</p>}
+          pads={heroPads}
+          paused={!moving}
+          eyebrow={<p className="pond-eyebrow">Enterprise agent automation</p>}
         >
-          {error && <Alert>{error}</Alert>}
-          <p className="pond-lede">
-            Lotuspond evaluates every candidate against frozen scenarios, compares it with a
-            baseline, and applies a policy no one can quietly edit. Missing or unknown results block
-            the release.
-          </p>
-          <div className="landing-actions">
-            <button onClick={() => onCreateAccount()}>
-              Create account <span aria-hidden="true">→</span>
-            </button>
-            <button className="secondary" onClick={onSignIn}>
-              Sign in
-            </button>
+          <div className="pond-copy">
+            {error && <Alert>{error}</Alert>}
+            <p className="pond-lede">
+              Lotuspond helps companies put AI agents to work in real business processes: rules
+              where rules suffice, agents where judgment helps, and people where accountability
+              belongs. Use our platform yourself, work with our team, or bring a partner.
+            </p>
+            <div className="landing-actions">
+              <button onClick={() => onCreateAccount()}>
+                Create account <span aria-hidden="true">→</span>
+              </button>
+              <a
+                className="button-link"
+                href="#services"
+                onClick={(event) => jumpTo(event, 'services')}
+              >
+                Work with our team
+              </a>
+            </div>
+            <dl className="pond-status">
+              <div data-state="available">
+                <dt>Available now</dt>
+                <dd>
+                  Agent testing, release decisions, production evidence and a Studio for workflow
+                  packages
+                </dd>
+              </div>
+              <div data-state="planned">
+                <dt>Planned</dt>
+                <dd>Control Room and the production runtime</dd>
+              </div>
+            </dl>
           </div>
-          <p className="pond-note">
-            For text, voice, and tool-using agents. Self-hosted, including air-gapped networks.
-          </p>
+          <figure className="pond-flow-figure">
+            <PondWorkflow paused={!moving} />
+            <figcaption>
+              <span>One workflow package, drawn on the water</span>
+              <button
+                type="button"
+                className="text-button pond-motion"
+                aria-pressed={!moving}
+                onClick={() => setMoving((current) => !current)}
+              >
+                {moving ? 'Pause motion' : 'Play motion'}
+              </button>
+            </figcaption>
+          </figure>
         </Pond>
 
-        <section ref={surfacing} className="surfacing" aria-labelledby="decision-title">
+        <section ref={surfacing} className="surfacing" aria-labelledby="package-title">
           <div className="landing-container surfacing-inner">
             <div className="surfacing-copy">
-              <p className="eyebrow">How a release is decided</p>
-              <h2 id="decision-title" className="section-title" tabIndex={-1}>
-                Every verdict carries its reasons.
+              <p className="eyebrow">How an automation is declared</p>
+              <h2 id="package-title" className="section-title" tabIndex={-1}>
+                One process, three kinds of work.
               </h2>
               <p className="section-lede">
-                A release passes only when every configured check clears. Otherwise Lotuspond blocks
-                it, or holds it for an independent administrator, and records exactly why.
+                Systems do what rules can. An agent reasons where judgment helps, within limits you
+                set. A person decides where accountability belongs. A Lotuspond workflow package
+                declares all three, so what an automation may touch is known before it runs.
               </p>
               <nav className="contents" aria-labelledby="contents-title">
                 <p id="contents-title">On this page</p>
@@ -314,109 +474,183 @@ export function Landing({
                 stampTarget.current = element;
               }}
               className="decision-record surfacing-record"
-              aria-labelledby="decision-record-title"
+              aria-labelledby="package-record-title"
             >
               <div className="decision-record-head">
                 <div>
-                  <p className="decision-record-kicker">Release policy</p>
-                  <h3 id="decision-record-title">Every check a candidate must clear</h3>
+                  <p className="decision-record-kicker">
+                    Workflow package ·{' '}
+                    <span className="kicker-id">lotuspond.workflow-package.v1</span>
+                  </p>
+                  <h3 id="package-record-title">Synthetic reviewed action</h3>
                 </div>
                 <span className="record-stamp" data-stamped={stamped}>
-                  Immutable
+                  Validated
                 </span>
               </div>
-              <ul className="decision-checks" aria-label="Checks that block a release">
-                {releaseChecks.map(([name, reason]) => (
-                  <li key={name}>
-                    <span className="check-name">{name}</span>
+              <ol className="decision-checks package-nodes" aria-label="Steps in order">
+                {packageNodes.map(([id, kind, text, limits]) => (
+                  <li key={id}>
+                    <span className="check-name">
+                      <code>{id}</code>
+                    </span>
+                    <span className="check-reason">
+                      {text}
+                      {limits && <span className="package-limits">{limits}</span>}
+                    </span>
+                    <span className="kind-tag" data-kind={kind.replace(' ', '-')}>
+                      {kind}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <ul
+                className="decision-checks decision-verdicts"
+                aria-label="Declarations the validator rejects"
+              >
+                {packageRejections.map((reason) => (
+                  <li key={reason}>
+                    <span className="check-name">Rejects</span>
                     <span className="check-reason">{reason}</span>
-                    <StatusBadge value="block" />
+                    <StatusBadge value="rejected" />
                   </li>
                 ))}
               </ul>
-              <ul className="decision-checks decision-verdicts" aria-label="Remaining verdicts">
-                <li>
-                  <span className="check-name">Approval</span>
-                  <span className="check-reason">
-                    An independent administrator must approve this release.
-                  </span>
-                  <StatusBadge value="approval_required" />
-                </li>
-                <li>
-                  <span className="check-name">Otherwise</span>
-                  <span className="check-reason">All configured release checks passed.</span>
-                  <StatusBadge value="pass" />
-                </li>
-              </ul>
               <figcaption>
-                Reasons appear exactly as Lotuspond records them. Latency and cost apply when the
-                policy sets a limit.
+                The synthetic example from the package contract, as the local validator accepts it.
+                Validation checks the declaration and records a content digest; it does not run or
+                approve the workflow.
               </figcaption>
             </figure>
           </div>
         </section>
 
         <div className="landing-container">
-          <section id="platform" className="landing-section" aria-labelledby="platform-title">
-            <Rail id="platform" />
+          <section id="engage" className="landing-section" aria-labelledby="engage-title">
+            <Rail id="engage" />
             <div>
-              <h2 id="platform-title" className="section-title" tabIndex={-1}>
-                The console, deciding in front of you.
+              <h2 id="engage-title" className="section-title" tabIndex={-1}>
+                Use it yourself, with our team, or through a partner.
               </h2>
               <p className="section-lede">
-                A sample workspace running Lotuspond’s release rules in your browser. Change an
-                outcome or the policy and the verdict follows, with the same reasons the server
-                records.
+                The platform is built to run without our consultants, and each service is scoped to
+                stand on its own. Combine them in whatever way suits how your company builds.
               </p>
-              <ConsolePreview />
-            </div>
-          </section>
-
-          <section id="outcomes" className="landing-section" aria-labelledby="outcomes-title">
-            <Rail id="outcomes" />
-            <div>
-              <h2 id="outcomes-title" className="section-title section-statement" tabIndex={-1}>
-                A result you don’t have is not a pass.
-              </h2>
-              <p className="section-lede">
-                Agents time out, crash, return malformed evidence, or never report back. Lotuspond
-                records each of those as unknown, and an unknown outcome blocks the release
-                outright.
-              </p>
-              <ul className="specimens" aria-label="Scenario outcomes">
-                {outcomes.map(([status, meaning, effect]) => (
-                  <li key={status}>
-                    <TraceSpecimen outcome={status} />
-                    <div className="specimen-text">
-                      <StatusBadge value={status} />
-                      <p>{meaning}</p>
-                      <p
-                        className={
-                          status === 'passed'
-                            ? 'specimen-effect'
-                            : 'specimen-effect specimen-blocks'
-                        }
-                      >
-                        {effect}
-                      </p>
+              <ul className="panel-grid">
+                {engagements.map(([glyph, title, copy]) => (
+                  <li key={title}>
+                    <div className="panel-glyph">
+                      <InkGlyph name={glyph} />
                     </div>
+                    <h3>{title}</h3>
+                    <p>{copy}</p>
                   </li>
                 ))}
               </ul>
             </div>
           </section>
 
-          <section id="workflow" className="landing-section" aria-labelledby="workflow-title">
-            <Rail id="workflow" />
+          <section id="services" className="landing-section" aria-labelledby="services-title">
+            <Rail id="services" />
             <div>
-              <h2 id="workflow-title" className="section-title" tabIndex={-1}>
-                From scenario to signed-off release.
+              <h2 id="services-title" className="section-title" tabIndex={-1}>
+                From first assessment to steady operation.
               </h2>
               <p className="section-lede">
-                One record runs from the first scenario to production. Each step keeps what the next
-                one needs to explain a decision.
+                Start with an assessment and stop there if that is all you need, or carry on into
+                implementation and operations. Each service has its own scope and deliverables.
               </p>
-              <ThreadedSteps steps={steps} glyphs={stepGlyphs} />
+              <ThreadedSteps steps={services} glyphs={serviceGlyphs} retainedLabel="You receive" />
+              <div className="gate readiness">
+                <div>
+                  <h3>What we mean by agent-ready.</h3>
+                  <p>
+                    Not a model added to a process. A company is ready when each automated process
+                    has an owner, dependable inputs, permitted integrations, a review path and a way
+                    to recover. A readiness score is a planning aid, not a compliance certification.
+                  </p>
+                  {contactEmail && (
+                    <a className="button-link readiness-contact" href={`mailto:${contactEmail}`}>
+                      Talk to our team <span aria-hidden="true">→</span>
+                    </a>
+                  )}
+                </div>
+                <ol className="readiness-list">
+                  {readiness.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ol>
+              </div>
+            </div>
+          </section>
+
+          <section id="platform" className="landing-section" aria-labelledby="platform-title">
+            <Rail id="platform" />
+            <div>
+              <h2 id="platform-title" className="section-title" tabIndex={-1}>
+                One product to build, run and assure automations.
+              </h2>
+              <p className="section-lede">
+                Studio, Control Room, execution and assurance are parts of one product with one
+                record, not separate tools. Assurance is available today, Studio and workflow
+                packages are arriving in stages, and the rest is being built on them. The register
+                says which is which.
+              </p>
+              <div className="register">
+                {register.map(([group, rows]) => (
+                  <div key={group} className="register-group">
+                    <h3 className="register-heading">{group}</h3>
+                    <dl>
+                      {rows.map(([name, state, copy]) => (
+                        <div key={name} className="register-row">
+                          <dt>{name}</dt>
+                          <dd>{copy}</dd>
+                          <dd className="register-state">
+                            <span className="readiness-tag" data-state={state}>
+                              {readinessLabel[state]}
+                            </span>
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+              </div>
+              <div className="platform-today">
+                <h3>Available today: the assurance console, deciding in front of you.</h3>
+                <p>
+                  A sample workspace running Lotuspond’s release rules in your browser. Change an
+                  outcome or the policy and the verdict follows, with the same reasons the server
+                  records.
+                </p>
+              </div>
+              <ConsolePreview />
+            </div>
+          </section>
+
+          <section id="control" className="landing-section" aria-labelledby="control-title">
+            <Rail id="control" />
+            <div>
+              <h2 id="control-title" className="section-title" tabIndex={-1}>
+                People stay in charge, and the API enforces it.
+              </h2>
+              <p className="section-lede">
+                These rules hold today in the API, not only in the console, and every workspace
+                change records who made it and when. The production runtime is being designed to the
+                same standard: no package, model output or cached approval can authorize an action
+                on its own.
+              </p>
+              <ol className="charter">
+                {controls.map(([title, copy], index) => (
+                  <li key={title}>
+                    <span className="charter-numeral" aria-hidden="true">
+                      {numerals[index]}
+                    </span>
+                    <h3>{title}</h3>
+                    <p>{copy}</p>
+                  </li>
+                ))}
+              </ol>
               <div className="gate">
                 <div>
                   <h3>Make the pipeline obey the decision.</h3>
@@ -446,52 +680,35 @@ export function Landing({
             </div>
           </section>
 
-          <section id="agents" className="landing-section" aria-labelledby="agents-title">
-            <Rail id="agents" />
+          <section id="workflows" className="landing-section" aria-labelledby="workflows-title">
+            <Rail id="workflows" />
             <div>
-              <h2 id="agents-title" className="section-title" tabIndex={-1}>
-                Text, voice, tools, and real software.
+              <h2 id="workflows-title" className="section-title" tabIndex={-1}>
+                Shared capabilities, qualified one workflow at a time.
               </h2>
               <p className="section-lede">
-                Adapters are configured explicitly by an operator. Each one reports what it
-                observed, and anything it could not observe remains unknown.
+                Most business automation falls into a handful of families. Lotuspond builds each
+                capability once, packages industry knowledge on top, and proves every workflow with
+                its own evidence before calling it supported.
               </p>
-              <ul className="rule-grid rule-grid-two">
-                {agentKinds.map(([tag, title, copy], index) => (
+              <ul className="rule-grid rule-grid-three">
+                {families.map(([tag, title, examples, evidence]) => (
                   <li key={title}>
-                    <div className="agent-head">
-                      <AgentSignal kind={agentSignals[index] ?? 'http'} />
-                      <span className="rule-tag">{tag}</span>
-                    </div>
+                    <span className="rule-tag">{tag}</span>
                     <h3>{title}</h3>
-                    <p>{copy}</p>
+                    <p>{examples}</p>
+                    <dl className="family-evidence">
+                      <dt>Evidence before support</dt>
+                      <dd>{evidence}</dd>
+                    </dl>
                   </li>
                 ))}
               </ul>
-            </div>
-          </section>
-
-          <section id="guarantees" className="landing-section" aria-labelledby="guarantees-title">
-            <Rail id="guarantees" />
-            <div>
-              <h2 id="guarantees-title" className="section-title" tabIndex={-1}>
-                Designed to be audited.
-              </h2>
-              <p className="section-lede">
-                These rules hold in the API, not only in the console, and every workspace change
-                records who made it and when.
+              <p className="landing-aside">
+                Healthcare starts with administrative work such as referral intake and appointment
+                operations. Diagnostic, treatment and clinical decision support functions need a
+                separate validation program with clinical experts and regulatory review.
               </p>
-              <ol className="charter">
-                {guarantees.map(([title, copy], index) => (
-                  <li key={title}>
-                    <span className="charter-numeral" aria-hidden="true">
-                      {numerals[index]}
-                    </span>
-                    <h3>{title}</h3>
-                    <p>{copy}</p>
-                  </li>
-                ))}
-              </ol>
             </div>
           </section>
 
@@ -499,11 +716,12 @@ export function Landing({
             <Rail id="deployment" />
             <div>
               <h2 id="deployment-title" className="section-title" tabIndex={-1}>
-                Runs where your agents run.
+                Runs on infrastructure you control.
               </h2>
               <p className="section-lede">
-                Install the control plane on infrastructure you operate, from a connected network to
-                one with no route out.
+                Install Lotuspond where your systems are, from a connected network to one with no
+                route out. These modes are proven for today’s assurance platform; the production
+                runtime will be qualified for each topology as it ships.
               </p>
               <ul className="panel-grid">
                 {deployments.map(([title, copy], index) => (
@@ -536,7 +754,7 @@ export function Landing({
               <ul className="panel-grid panel-grid-two account-choices">
                 <li>
                   <PondPlate scene="individual" className="plate-wide" />
-                  <p className="eyebrow">Individual developer</p>
+                  <p className="eyebrow">Individual</p>
                   <h3>A personal workspace</h3>
                   <p>
                     Your projects, runners, and keys in one place. It stays yours when you later
@@ -565,11 +783,7 @@ export function Landing({
           <RecentlyShipped />
         </div>
 
-        <Pond
-          id="closing-title"
-          title="Put your next agent release on the record"
-          className="pond-closing"
-        >
+        <Pond id="closing-title" title="Start with one process" className="pond-closing">
           <div className="landing-actions">
             <button onClick={() => onCreateAccount()}>
               Create account <span aria-hidden="true">→</span>
@@ -587,7 +801,7 @@ export function Landing({
             Lotuspond
             <span className="wordmark-dot" />
           </span>
-          <span>Release decisions grounded in evidence.</span>
+          <span>Business automation with people in charge.</span>
         </div>
       </footer>
     </div>

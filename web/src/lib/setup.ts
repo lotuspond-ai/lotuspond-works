@@ -97,10 +97,13 @@ export function useSetupProgress(workspace: string): SetupProgress {
 }
 
 // A one-shot request, made from Home or the command palette, to open a page's create form.
+// A page that mounts takes it then; a page already open hears CREATE_REQUESTED at once.
+export const CREATE_REQUESTED = 'lotuspond:create-requested';
 let pendingCreate: string | null = null;
 export function requestCreate(page: string) {
   pendingCreate = page;
   location.hash = page;
+  window.dispatchEvent(new Event(CREATE_REQUESTED));
 }
 export function takeCreateRequest(page: string) {
   if (pendingCreate !== page) return false;

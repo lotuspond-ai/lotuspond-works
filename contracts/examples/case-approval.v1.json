@@ -1,0 +1,109 @@
+{
+  "schema_version": "lotuspond.workflow-package.v1",
+  "package_id": "case-approval",
+  "version": "1.0.0",
+  "name": "Synthetic case approval pattern",
+  "entry_node": "start",
+  "models": [
+    {
+      "id": "reasoner",
+      "profile": "primary-model",
+      "revision": "2026-10-15"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "case-system",
+      "connector": "synthetic-case-system",
+      "version": "1.0.0",
+      "secret_ref": "case-credential",
+      "operations": ["read-case", "record-decision"]
+    },
+    {
+      "id": "messaging",
+      "connector": "synthetic-messaging",
+      "version": "1.0.0",
+      "secret_ref": "messaging-credential",
+      "operations": ["send-message"]
+    }
+  ],
+  "secret_refs": [
+    {
+      "id": "case-credential"
+    },
+    {
+      "id": "messaging-credential"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "start"
+    },
+    {
+      "id": "read",
+      "kind": "connector",
+      "connector_ref": "case-system",
+      "operation": "read-case"
+    },
+    {
+      "id": "recommend",
+      "kind": "agent",
+      "model_ref": "reasoner",
+      "instructions": "Summarize the synthetic request against the stated approval criteria and recommend approve, decline or ask for more information, naming the criterion behind each point.",
+      "limits": {
+        "max_steps": 6,
+        "timeout_seconds": 120,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 1500,
+        "max_cost_microusd": 200000
+      }
+    },
+    {
+      "id": "decide",
+      "kind": "human_review"
+    },
+    {
+      "id": "record",
+      "kind": "connector",
+      "connector_ref": "case-system",
+      "operation": "record-decision"
+    },
+    {
+      "id": "notify",
+      "kind": "connector",
+      "connector_ref": "messaging",
+      "operation": "send-message"
+    },
+    {
+      "id": "end",
+      "kind": "end"
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "read"
+    },
+    {
+      "source": "read",
+      "target": "recommend"
+    },
+    {
+      "source": "recommend",
+      "target": "decide"
+    },
+    {
+      "source": "decide",
+      "target": "record"
+    },
+    {
+      "source": "record",
+      "target": "notify"
+    },
+    {
+      "source": "notify",
+      "target": "end"
+    }
+  ]
+}

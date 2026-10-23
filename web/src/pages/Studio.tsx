@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { api, ApiError, type FieldProblem } from '../api.js';
-import { Alert, EmptyState, RelativeTime, SectionHeader } from '../components/ui.js';
+import { Alert, RelativeTime, SectionHeader } from '../components/ui.js';
 import { StudioCanvas, type Selection } from '../components/studio/StudioCanvas.js';
 import { StudioInspector } from '../components/studio/StudioInspector.js';
+import { PatternChooser } from '../components/studio/PatternChooser.js';
+import { StudioStages } from '../components/studio/StudioStages.js';
 import {
   jsonBoundsProblem,
   readPackage,
@@ -18,7 +20,6 @@ import {
   autoLayout,
   checkDraft,
   draftFromPackage,
-  emptyDraft,
   moveNode,
   nextNodeId,
   parseDraft,
@@ -26,13 +27,29 @@ import {
   removeEdge,
   removeNode,
   renameNode,
-  serializeDraft,
   updateNode,
   updatePackage,
   type Draft,
   type Position,
 } from '../lib/studio.js';
-import example from '../../../contracts/examples/reviewed-action.v1.json';
+import {
+  MAX_DRAFTS,
+  addDraft,
+  canAddDraft,
+  draftLabel,
+  openDraft,
+  readShelf,
+  removeDraft,
+  restoreDraft,
+  serializeShelf,
+  shelfKey,
+  singleDraftKey,
+  updateDraft,
+  type DraftShelf,
+  type StoredDraft,
+} from '../lib/studioDrafts.js';
+import { nextFreeVersion, publication, sameContent } from '../lib/studioVersions.js';
+import { CREATE_REQUESTED, takeCreateRequest } from '../lib/setup.js';
 
 type PackageVersion = {
   id: string;
@@ -46,15 +63,10 @@ type PackageVersion = {
   content_bytes: number;
   publisher_kind: string;
 };
-type Notice = { tone: 'success' | 'neutral'; text: string; undo?: Draft };
+type Notice = { tone: 'success' | 'neutral'; text: string; undo?: StoredDraft };
 
-const storageKey = (workspace: string, projectId: string) =>
-  `lotuspond.studio.${workspace}.${projectId || 'workspace'}`;
-
-function exampleDraft(): Draft {
-  const read = readPackage(example);
-  return read.package ? draftFromPackage(read.package) : emptyDraft();
-}
+const now = () => new Date().toISOString();
+const fullNote = `This browser keeps up to ${MAX_DRAFTS} drafts here. Delete one to start another.`;
 
 export function Studio({
   workspace,
@@ -67,7 +79,8 @@ export function Studio({
   projectName: string;
   role: string;
 }) {
-  const [draft, setDraft] = useState<Draft | null | undefined>(undefined);
+  const [shelf, setShelf] = useState<DraftShelf | undefined>(undefined);
+  const [storageProblem, setStorageProblem] = useState('');
   const [selection, setSelection] = useState<Selection>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [digest, setDigest] = useState('');
@@ -79,6 +92,8 @@ export function Studio({
   const [publishError, setPublishError] = useState<{
     text: string;
     problems: FieldProblem[];
+    // A free version to offer when the registry already holds this one with other content.
+    suggestion?: string;
   } | null>(null);
   const [versions, setVersions] = useState<PackageVersion[]>([]);
   const [versionsNext, setVersionsNext] = useState<string | null>(null);
@@ -87,21 +102,44 @@ export function Studio({
   const [versionsRefresh, setVersionsRefresh] = useState(0);
   const publishKey = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const startHeading = useRef<HTMLHeadingElement>(null);
+  // "New workflow" from Home or the palette opens the list at the pattern chooser.
+  const [startRequested, setStartRequested] = useState(() => takeCreateRequest('studio'));
   const canWrite = role !== 'viewer';
+  const openEntry = shelf?.open ? shelf.drafts.find((entry) => entry.id === shelf.open) : undefined;
+  const draft = shelf === undefined ? undefined : (openEntry?.draft ?? null);
+  const full = shelf ? !canAddDraft(shelf) : false;
 
-  // The draft lives in this browser only, per workspace and project.
+  // Drafts live in this browser only, per workspace and project. A draft kept under the
+  // earlier single-draft key joins the shelf, and that key is cleared once the shelf is saved.
   useEffect(() => {
-    setDraft(parseDraft(localStorage.getItem(storageKey(workspace, projectId))));
+    let stored: string | null = null;
+    let single: string | null = null;
+    try {
+      stored = localStorage.getItem(shelfKey(workspace, projectId));
+      single = localStorage.getItem(singleDraftKey(workspace, projectId));
+    } catch {
+      setStorageProblem(
+        'This browser does not let the Studio keep drafts. Export a draft as JSON to keep it.',
+      );
+    }
+    setShelf(readShelf(stored, parseDraft(single), now(), () => crypto.randomUUID()));
   }, [workspace, projectId]);
   useEffect(() => {
-    if (draft === undefined) return;
-    const key = storageKey(workspace, projectId);
+    if (shelf === undefined) return;
     const timer = setTimeout(() => {
-      if (draft) localStorage.setItem(key, serializeDraft(draft));
-      else localStorage.removeItem(key);
+      try {
+        localStorage.setItem(shelfKey(workspace, projectId), serializeShelf(shelf));
+        localStorage.removeItem(singleDraftKey(workspace, projectId));
+        setStorageProblem('');
+      } catch {
+        setStorageProblem(
+          'This browser could not save the drafts. Export the open draft as JSON before you leave.',
+        );
+      }
     }, 250);
     return () => clearTimeout(timer);
-  }, [draft, workspace, projectId]);
+  }, [shelf, workspace, projectId]);
 
   const validation = useMemo(() => (draft ? checkDraft(draft.package) : null), [draft?.package]);
   const canonical = validation?.ok ? validation.canonical : '';
@@ -120,6 +158,10 @@ export function Studio({
     };
   }, [canonical]);
   const problems = validation?.problems ?? [];
+  // What the listed versions say the registry will answer; it still decides on publishing.
+  const registry = draft
+    ? publication(versions, draft.package, digest)
+    : ({ state: 'unknown' } as const);
   const flagged = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const problem of problems)
@@ -165,8 +207,30 @@ export function Studio({
     return () => controller.abort();
   }, [loadVersions, versionsRefresh]);
 
+  useEffect(() => {
+    const hear = () => {
+      if (takeCreateRequest('studio')) setStartRequested(true);
+    };
+    window.addEventListener(CREATE_REQUESTED, hear);
+    return () => window.removeEventListener(CREATE_REQUESTED, hear);
+  }, []);
+  useEffect(() => {
+    if (!startRequested || shelf === undefined) return;
+    if (shelf.open) {
+      showDraft(null);
+      return;
+    }
+    startHeading.current?.focus();
+    setStartRequested(false);
+  }, [startRequested, shelf]);
+
   const change = (update: (current: Draft) => Draft) =>
-    setDraft((current) => (current ? update(current) : current));
+    setShelf((current) => {
+      const entry = current?.drafts.find((item) => item.id === current.open);
+      return current && entry
+        ? updateDraft(current, entry.id, update(entry.draft), now())
+        : current;
+    });
   const select = useCallback((next: Selection) => setSelection(next), []);
   const startConnect = useCallback((id: string | null) => setConnecting(id), []);
 
@@ -176,13 +240,35 @@ export function Studio({
     else change((current) => removeEdge(current, target.edge));
     setSelection(null);
   }
-  function replaceDraft(next: Draft, text: string) {
-    setNotice({ tone: 'neutral', text, undo: draft ?? undefined });
-    setDraft(next);
+  function resetEditor() {
     setSelection(null);
     setConnecting(null);
     setImportError(null);
     setPublishError(null);
+  }
+  // Opening a pattern, a file or a published version always adds a draft, so none is replaced.
+  function startDraft(next: Draft, text: string) {
+    if (full) {
+      setNotice({ tone: 'neutral', text: fullNote });
+      return;
+    }
+    setShelf((current) => current && addDraft(current, next, now(), crypto.randomUUID()));
+    setNotice({ tone: 'neutral', text });
+    resetEditor();
+  }
+  function showDraft(id: string | null) {
+    setShelf((current) => current && openDraft(current, id));
+    setNotice(null);
+    resetEditor();
+  }
+  function deleteDraft(entry: StoredDraft) {
+    setShelf((current) => current && removeDraft(current, entry.id));
+    setNotice({
+      tone: 'neutral',
+      text: `Deleted the draft ${draftLabel(entry.draft)}.`,
+      undo: entry,
+    });
+    resetEditor();
   }
 
   async function publish() {
@@ -216,13 +302,30 @@ export function Studio({
       setVersionsRefresh((value) => value + 1);
     } catch (reason) {
       const error = reason as ApiError;
+      const conflict = error instanceof ApiError && error.status === 409;
       setPublishError({
         text: error.message,
         problems: error instanceof ApiError ? error.problems : [],
+        suggestion: conflict
+          ? nextFreeVersion(
+              versions
+                .filter((item) => item.package_id === draft.package.package_id)
+                .map((item) => item.version),
+              draft.package.version,
+            )
+          : undefined,
       });
+      // The list may predate another publication, so it is read again.
+      if (conflict) setVersionsRefresh((value) => value + 1);
     } finally {
       setPublishing(false);
     }
+  }
+
+  function adoptVersion(version: string) {
+    change((current) => updatePackage(current, { version }));
+    setPublishError(null);
+    setNotice({ tone: 'neutral', text: `Changed the draft’s version to ${version}.` });
   }
 
   function importFile(event: ChangeEvent<HTMLInputElement>) {
@@ -250,7 +353,7 @@ export function Studio({
         });
         return;
       }
-      replaceDraft(draftFromPackage(read.package), `Opened ${file.name} as the draft.`);
+      startDraft(draftFromPackage(read.package), `Opened ${file.name} as a new draft.`);
     });
   }
   function exportJson() {
@@ -279,7 +382,7 @@ export function Studio({
       );
       const read = readPackage(content);
       if (!read.package) throw new Error('The stored content does not match the local contract.');
-      replaceDraft(
+      startDraft(
         draftFromPackage(read.package),
         `Opened ${version.package_id} ${version.version} as a new draft. A published version is immutable: changes need a new version number.`,
       );
@@ -302,7 +405,13 @@ export function Studio({
             </button>
             <button
               type="button"
-              disabled={!validation?.ok || !projectId || !canWrite || publishing}
+              disabled={
+                !validation?.ok ||
+                !projectId ||
+                !canWrite ||
+                publishing ||
+                registry.state === 'conflict'
+              }
               title={
                 !canWrite
                   ? 'Publishing needs editor access.'
@@ -310,7 +419,9 @@ export function Studio({
                     ? 'Choose a project in the breadcrumb to publish.'
                     : !validation?.ok
                       ? 'Resolve the admission problems first.'
-                      : undefined
+                      : registry.state === 'conflict'
+                        ? 'This version is already published with different content.'
+                        : undefined
               }
               onClick={() => void publish()}
             >
@@ -332,12 +443,12 @@ export function Studio({
             type="button"
             className="text-button"
             onClick={() => {
-              setDraft(notice.undo ?? null);
+              const entry = notice.undo;
+              if (entry) setShelf((current) => current && restoreDraft(current, entry));
               setNotice(null);
-              setSelection(null);
             }}
           >
-            Restore the previous draft
+            Restore it
           </button>
         </>
       )}
@@ -364,27 +475,21 @@ export function Studio({
       <>
         {header}
         {noticeElement}
-        <EmptyState
-          glyph="network"
-          title="Compose a workflow package"
-          description="Start from the reviewed-action example — a connector read, an agent proposal, a human review and a connector write — or from a blank start and end."
-          action={
-            <div className="button-row">
-              <button type="button" onClick={() => setDraft(exampleDraft())}>
-                Start from the example
-              </button>
-              <button type="button" className="secondary" onClick={() => setDraft(emptyDraft())}>
-                Start blank
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => fileInput.current?.click()}
-              >
-                Open JSON…
-              </button>
-            </div>
-          }
+        {storageProblem && <Alert>{storageProblem}</Alert>}
+        {importError && <ImportAlert error={importError} onDismiss={() => setImportError(null)} />}
+        {shelf && shelf.drafts.length > 0 && (
+          <DraftsSection
+            drafts={shelf.drafts}
+            scope={projectName ? `the ${projectName} project` : 'this workspace'}
+            onOpen={(entry) => showDraft(entry.id)}
+            onDelete={deleteDraft}
+          />
+        )}
+        <PatternChooser
+          headingRef={startHeading}
+          fullNote={full ? fullNote : ''}
+          onStart={(next, label) => startDraft(next, `Started a draft from ${label}.`)}
+          onOpenFile={() => fileInput.current?.click()}
         />
         <input
           ref={fileInput}
@@ -395,7 +500,7 @@ export function Studio({
           aria-hidden="true"
           onChange={importFile}
         />
-        {importError && <ImportAlert error={importError} onDismiss={() => setImportError(null)} />}
+        <StudioStages />
         <VersionsSection
           projectId={projectId}
           projectName={projectName}
@@ -406,6 +511,7 @@ export function Studio({
           onRetry={() => setVersionsRefresh((value) => value + 1)}
           onMore={() => void loadVersions(new AbortController().signal, versionsNext ?? undefined)}
           onOpen={(version) => void openVersion(version)}
+          digest=""
         />
       </>
     );
@@ -415,6 +521,7 @@ export function Studio({
     <>
       {header}
       {noticeElement}
+      {storageProblem && <Alert>{storageProblem}</Alert>}
       {importError && <ImportAlert error={importError} onDismiss={() => setImportError(null)} />}
       {publishError && (
         <Alert>
@@ -431,9 +538,45 @@ export function Studio({
               ))}
             </ul>
           )}
+          {publishError.suggestion && (
+            <p className="studio-registry-fix">
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => adoptVersion(publishError.suggestion ?? '')}
+              >
+                Use version {publishError.suggestion}
+              </button>
+            </p>
+          )}
         </Alert>
       )}
+      {registry.state === 'conflict' && !publishError && (
+        <p className="notice" role="status">
+          {draft.package.package_id} {draft.package.version} is already published in{' '}
+          {projectName || 'this project'} with different content, and a published version never
+          changes.{' '}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => adoptVersion(registry.suggestion)}
+          >
+            Use version {registry.suggestion}
+          </button>
+        </p>
+      )}
+      {registry.state === 'same' && (
+        <p className="notice" role="status">
+          {draft.package.package_id} {draft.package.version} is already published in{' '}
+          {projectName || 'this project'} with this exact content. Publishing it again changes
+          nothing.
+        </p>
+      )}
       <div className="studio-toolbar">
+        <button type="button" className="secondary" onClick={() => showDraft(null)}>
+          All drafts
+        </button>
+        <span className="studio-toolbar-name">{draftLabel(draft)}</span>
         <button
           type="button"
           className="secondary"
@@ -455,24 +598,10 @@ export function Studio({
         />
         <button
           type="button"
-          className="secondary"
-          onClick={() =>
-            replaceDraft(exampleDraft(), 'Replaced the draft with the reviewed-action example.')
-          }
-        >
-          Use the example
-        </button>
-        <button
-          type="button"
           className="text-button danger"
-          onClick={() => {
-            setNotice({ tone: 'neutral', text: 'Discarded the draft.', undo: draft });
-            setDraft(null);
-            setSelection(null);
-            setConnecting(null);
-          }}
+          onClick={() => openEntry && deleteDraft(openEntry)}
         >
-          Discard draft
+          Delete draft
         </button>
         <span className="studio-toolbar-note">{publishNote}</span>
       </div>
@@ -591,8 +720,99 @@ export function Studio({
         onRetry={() => setVersionsRefresh((value) => value + 1)}
         onMore={() => void loadVersions(new AbortController().signal, versionsNext ?? undefined)}
         onOpen={(version) => void openVersion(version)}
+        digest={digest}
       />
     </>
+  );
+}
+
+// The drafts kept in this browser, most recently changed first, each with its own check.
+function DraftsSection({
+  drafts,
+  scope,
+  onOpen,
+  onDelete,
+}: {
+  drafts: StoredDraft[];
+  scope: string;
+  onOpen: (entry: StoredDraft) => void;
+  onDelete: (entry: StoredDraft) => void;
+}) {
+  return (
+    <section className="studio-drafts" aria-labelledby="studio-drafts-heading">
+      <div className="section-row">
+        <div>
+          <p className="eyebrow">Drafts</p>
+          <h2 id="studio-drafts-heading">Drafts in this browser</h2>
+        </div>
+        <span className="studio-drafts-count">
+          {drafts.length} of {MAX_DRAFTS}
+        </span>
+      </div>
+      <p className="hint">
+        Kept in this browser for {scope} until you delete them. Publishing stores a copy in the
+        registry; the draft stays here.
+      </p>
+      <div className="table-wrap">
+        <table>
+          <caption className="sr-only">Drafts in this browser</caption>
+          <thead>
+            <tr>
+              <th scope="col">Draft</th>
+              <th scope="col">Package</th>
+              <th scope="col">Admission check</th>
+              <th scope="col">Changed</th>
+              <th className="actions">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {drafts.map((entry) => {
+              const label = draftLabel(entry.draft);
+              const { package_id: packageId, version } = entry.draft.package;
+              const check = checkDraft(entry.draft.package);
+              const count = check.ok ? 0 : check.problems.length;
+              const named = `${label}${version ? ` ${version}` : ''}`;
+              return (
+                <tr key={entry.id}>
+                  <td className="primary-cell">{label}</td>
+                  <td className="cell-mono">
+                    {packageId || 'No identifier'} {version}
+                  </td>
+                  <td>
+                    <span className={`badge badge-${check.ok ? 'success' : 'warning'}`}>
+                      <span aria-hidden="true" />
+                      {check.ok ? 'Admissible' : `${count} ${count === 1 ? 'problem' : 'problems'}`}
+                    </span>
+                  </td>
+                  <td>
+                    <RelativeTime value={entry.updatedAt} />
+                  </td>
+                  <td className="actions">
+                    <button
+                      type="button"
+                      aria-label={`Open the draft ${named}`}
+                      onClick={() => onOpen(entry)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      aria-label={`Delete the draft ${named}`}
+                      onClick={() => onDelete(entry)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -636,6 +856,7 @@ function VersionsSection({
   onRetry,
   onMore,
   onOpen,
+  digest,
 }: {
   projectId: string;
   projectName: string;
@@ -646,6 +867,8 @@ function VersionsSection({
   onRetry: () => void;
   onMore: () => void;
   onOpen: (version: PackageVersion) => void;
+  // The open draft's digest, to mark a version that holds exactly its content.
+  digest: string;
 }) {
   return (
     <section className="studio-versions" aria-labelledby="studio-versions-heading">
@@ -701,7 +924,15 @@ function VersionsSection({
               <tbody>
                 {versions.map((version) => (
                   <tr key={version.id}>
-                    <td className="primary-cell">{version.package_id}</td>
+                    <td className="primary-cell">
+                      {version.package_id}
+                      {sameContent(version, digest) && (
+                        <span className="badge badge-success studio-same">
+                          <span aria-hidden="true" />
+                          Same content as this draft
+                        </span>
+                      )}
+                    </td>
                     <td className="cell-mono">{version.version}</td>
                     <td className="cell-mono" title={version.sha256}>
                       {version.sha256.slice(0, 12)}…

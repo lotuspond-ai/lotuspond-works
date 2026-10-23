@@ -278,6 +278,33 @@ class PackageContractTests(unittest.TestCase):
             "305efc96011ba5fc2f527cefbe416890b0265269e18e3402354ffbfed40251d3",
         )
 
+    def test_every_example_package_is_valid_and_synthetic(self):
+        # Every package in contracts/examples is named after its file and declares only
+        # synthetic connectors: a shape shared across industries, never a qualified integration.
+        root = Path(__file__).resolve().parents[2]
+        packages = {}
+        for path in sorted((root / "contracts/examples").glob("*.v1.json")):
+            raw = json.loads(path.read_text())
+            if raw.get("schema_version") == "lotuspond.workflow-package.v1":
+                packages[path.name] = raw
+        self.assertEqual(
+            sorted(packages),
+            [
+                "case-approval.v1.json",
+                "document-intake.v1.json",
+                "knowledge-answer.v1.json",
+                "record-reconciliation.v1.json",
+                "reviewed-action.v1.json",
+            ],
+        )
+        for name, raw in packages.items():
+            with self.subTest(name):
+                package = self.contract().validate_package(raw)
+                self.assertEqual(f"{package.package_id}.v1.json", name)
+                self.assertTrue(package.name.startswith("Synthetic"))
+                for connector in package.connectors:
+                    self.assertTrue(connector.connector.startswith("synthetic-"))
+
 
 if __name__ == "__main__":
     unittest.main()
