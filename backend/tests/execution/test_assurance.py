@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from datetime import timedelta
 from hashlib import sha256
 from threading import Event
 from time import monotonic
@@ -139,6 +140,12 @@ class FixtureAssurance:
 
     def binding(self, scope, package_sha256, configuration_sha256, release_id):
         return deepcopy(self.proof)
+
+
+def session_time_zone(db, zone):
+    """Pin this transaction's PostgreSQL TimeZone whatever the ambient (CI: UTC) zone is."""
+    db.execute(text("SELECT set_config('TimeZone', :zone, true)"), {"zone": zone})
+    assert db.scalar(text("SHOW TimeZone")) == zone
 
 
 def test_evaluation_id_is_not_release_authority(harness):
@@ -320,3 +327,62 @@ def test_deployment_assurance_capture_preserves_existing_return_contracts(harnes
             )
         finally:
             deps.close()
+
+
+def test_serialized_timestamps_name_instants_in_every_session_time_zone(harness):
+    h = harness
+    with Session(h.engine) as db, db.begin():
+        policy = Policy(workspace_id=h.scope.workspace_id, name="release")
+        db.add(policy)
+        db.flush()
+        policy_id, written = policy.id, serialize(policy)["created_at"]
+    views = []
+    for zone in ("UTC", "Asia/Kolkata", "America/St_Johns"):
+        with Session(h.engine) as db, db.begin():
+            session_time_zone(db, zone)
+            views.append(serialize(db.get(Policy, policy_id)))
+    assert written.endswith("+00:00")
+    assert [view["created_at"] for view in views] == [written] * 3
+    assert views[1:] == views[:1] * 2
+
+
+@pytest.mark.parametrize(
+    ("evaluated_in", "checked_in"),
+    [("Asia/Kolkata", "Asia/Kolkata"), ("Asia/Kolkata", "America/St_Johns")],
+)
+def test_release_binding_compares_instants_across_session_time_zones(
+    harness, evaluated_in, checked_in
+):
+    """The same instants bind in any session zone; a different instant still fails closed."""
+    h = harness
+    with Session(h.engine) as db, db.begin():
+        session_time_zone(db, evaluated_in)
+        p = h.publish(db)
+        release, _, proof = release_records(db, h, p, deployment_request(h, p.id))
+        publication_id, release_id = p.id, release.id
+    deps = ExecutionDependencies(
+        authority=h.authority, assurance=FixtureAssurance(proof), test_mode=True
+    )
+
+    def check():
+        with Session(h.engine) as db, db.begin():
+            session_time_zone(db, checked_in)
+            actor = authorize_execution(db, h.principal, h.scope, "manage")
+            check_release_binding(
+                db,
+                actor,
+                publication_id,
+                release_id,
+                configuration_sha256=proof["configuration_sha256"],
+                dependencies=deps,
+            )
+
+    try:
+        check()
+        with Session(h.engine) as db, db.begin():
+            approval = db.scalar(select(Approval).where(Approval.release_id == release_id))
+            approval.decided_at += timedelta(microseconds=1)
+        with pytest.raises(ExecutionError, match="assurance_unavailable"):
+            check()
+    finally:
+        deps.close()
