@@ -15,8 +15,8 @@ import importlib.metadata as m, importlib.util, sys
 from pathlib import Path
 import lotuspond_runtime, lotuspond_runtime.protocol, lotuspond_sdk
 assert m.version('lotuspond-runtime') == '0.1.0'
-assert m.version('lotuspond-sdk') == '0.2.0'
-assert set(m.requires('lotuspond-runtime')) == {'lotuspond-sdk==0.2.0', 'pydantic<3,>=2.12', 'rfc8785==0.1.4'}
+assert m.version('lotuspond-sdk') == '0.3.0'
+assert set(m.requires('lotuspond-runtime')) == {'lotuspond-sdk==0.3.0', 'pydantic<3,>=2.12', 'rfc8785==0.1.4'}
 assert set(m.requires('lotuspond-sdk')) == {'cryptography<51,>=50', 'pydantic<3,>=2.12', 'rfc8785==0.1.4'}
 for module in (lotuspond_runtime, lotuspond_sdk):
  assert Path(module.__file__).is_relative_to(Path(sys.prefix))

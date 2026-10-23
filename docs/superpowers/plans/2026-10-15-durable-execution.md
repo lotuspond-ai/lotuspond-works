@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13/3.14, SQLAlchemy/PostgreSQL, FastAPI, existing Pydantic/rfc8785/cryptography contracts, Temporal server 1.32.1 and Python SDK 1.34.0 in a separate orchestrator distribution.
 
-**Spec:** [Approved E04 specification](../specs/2026-10-15-durable-execution-design.md). Read it with this plan. Source baseline: E03 `462ba12d8c9d4933ab0359f8699b6f27f68c3381`. Prepared 15 October 2026 (Asia/Calcutta); implementation awaits owner plan review. The owner's selected subagent execution with independent specification and quality review after each task remains in force.
+**Spec:** [Approved E04 specification](../specs/2026-10-15-durable-execution-design.md). Read it with this plan. Source baseline: E03 `462ba12d8c9d4933ab0359f8699b6f27f68c3381`. Prepared 15 October 2026 (Asia/Calcutta); owner approved the plan and implementation on 15 October 2026. The owner's selected subagent execution with independent specification and quality review after each task remains in force.
 
 ## Global Constraints
 
@@ -446,4 +446,4 @@ Self-review corrections: shared engine DTOs live in the backend without a revers
 
 Author checks: all five Review Focus cases have named tests; shared types have owners and identical consumers; activity vectors/lifetimes precede integration; plan bodies prescribe interfaces and assertions rather than implementing them; no effect or production entitlement is invented. One integrated plan is appropriate because admission, authority, engine progression and runtime leases must work together to produce the approved durable workflow. The first complete customer action-taking workflow still requires the retained downstream stages and customer qualification.
 
-The actual first customer, systems, permitted autonomy, data placement and acceptance owner remain open inputs for later customer/provider/UI qualification. They do not block these synthetic local engineering tasks or authorize scope removal. Owner plan review is the next gate; the previously selected subagent method is preserved.
+The actual first customer, systems, permitted autonomy, data placement and acceptance owner remain open inputs for later customer/provider/UI qualification. They do not block these synthetic local engineering tasks or authorize scope removal. Owner plan review is complete; implementation proceeds with the previously selected subagent method.

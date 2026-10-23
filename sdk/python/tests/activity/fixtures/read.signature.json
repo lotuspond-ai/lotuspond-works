@@ -1,0 +1,10 @@
+{
+  "format_version": 1,
+  "algorithm": "ed25519",
+  "context": "lotuspond-runtime-activity-signature-v1",
+  "schema_version": "lotuspond.runtime-activity.v1",
+  "canonicalization": "lotuspond.runtime-activity.jcs.v1",
+  "key_id": "21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9",
+  "sha256": "06abd378a53efb058bf9b880d97f1952d23db32a50b8ffd15d8a658fc06e2203",
+  "signature": "c67f75cdd0794a433183c5afe18cdd4e699504e89f2efd2c3f01410b6eec5bf3dbaa7c88d8925f2fa203f36d8295782140dd992625bed07cdc8bae9f0bf74608"
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": "lotuspond.runtime-activity.v1",
+  "installation_id": "fixture-installation",
+  "recovery_epoch": 1,
+  "workspace_id": "00000000-0000-4000-8000-000000000001",
+  "project_id": "00000000-0000-4000-8000-000000000002",
+  "environment_id": "00000000-0000-4000-8000-000000000003",
+  "execution_id": "00000000-0000-4000-8000-000000000004",
+  "step_instance_id": "00000000-0000-4000-8000-000000000005",
+  "attempt_id": "00000000-0000-4000-8000-000000000006",
+  "deployment_revision_id": "00000000-0000-4000-8000-000000000007",
+  "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "configuration_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "input": {
+    "id": "00000000-0000-4000-8000-000000000008",
+    "version": 1,
+    "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "kind": "connector_read",
+  "dependency": {
+    "kind": "connector",
+    "name": "fixture-reader",
+    "version": "1.0.0",
+    "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "operation": "inspect",
+  "pool_id": "00000000-0000-4000-8000-000000000009",
+  "instance_id": "00000000-0000-4000-8000-000000000010",
+  "generation": 1,
+  "delivery_id": "00000000-0000-4000-8000-000000000011",
+  "replay_id": "00000000-0000-4000-8000-000000000012",
+  "issued_at_ms": 1800000000000,
+  "expires_at_ms": 1800000300000
+}

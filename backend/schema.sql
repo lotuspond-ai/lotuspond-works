@@ -10,6 +10,19 @@ SELECT pg_advisory_xact_lock(736183);
 
 DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE') THEN RAISE EXCEPTION 'Schema is not empty; initialization refused'; END IF; END $$;
 
+CREATE TABLE execution_scheduler_cursors (
+	installation_id VARCHAR(128) NOT NULL,
+	cursor BIGINT NOT NULL,
+	active INTEGER NOT NULL,
+	active_limit INTEGER NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CHECK (cursor BETWEEN 0 AND 9007199254740991),
+	CHECK (active_limit BETWEEN 0 AND 25 AND active BETWEEN 0 AND active_limit),
+	UNIQUE (installation_id)
+);
+
 CREATE TABLE schema_version (
 	version SERIAL NOT NULL,
 	installed_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -128,6 +141,7 @@ CREATE TABLE api_keys (
 	id VARCHAR(36) NOT NULL,
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 	PRIMARY KEY (id),
+	CONSTRAINT api_keys_execution_scope_unique UNIQUE (workspace_id, id),
 	UNIQUE (token_hash),
 	FOREIGN KEY(created_by_user_id) REFERENCES users (id),
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
@@ -533,6 +547,104 @@ CREATE TABLE evaluation_jobs (
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
+CREATE TABLE executable_publications (
+	kind VARCHAR(20) NOT NULL,
+	name VARCHAR(128) NOT NULL,
+	version VARCHAR(100) NOT NULL,
+	canonical_package BYTEA NOT NULL,
+	canonical_plan BYTEA,
+	canonical_signature BYTEA,
+	package_sha256 VARCHAR(64) NOT NULL,
+	plan_sha256 VARCHAR(64),
+	validator_id VARCHAR(128) NOT NULL,
+	compiler_id VARCHAR(128),
+	publisher_user_id VARCHAR(36) NOT NULL,
+	publisher_api_key_id VARCHAR(36),
+	status VARCHAR(20) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, publisher_api_key_id) REFERENCES api_keys (workspace_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, kind, name, version),
+	UNIQUE (workspace_id, project_id, environment_id, id, package_sha256),
+	CHECK (status IN ('active','revoked')),
+	CHECK (kind IN ('workflow','connector','model','agent','evaluation','policy','knowledge','artifact')),
+	CHECK (length(canonical_package) BETWEEN 1 AND 1048576),
+	CHECK (length(canonical_plan) BETWEEN 1 AND 1048576),
+	CHECK (length(canonical_signature) BETWEEN 1 AND 65536),
+	CHECK ((kind = 'workflow') = (canonical_signature IS NOT NULL)),
+	CHECK ((canonical_plan IS NULL) = (plan_sha256 IS NULL)),
+	CHECK ((canonical_plan IS NULL) = (compiler_id IS NULL)),
+	CHECK ((kind = 'workflow') = (canonical_plan IS NOT NULL)),
+	CHECK (length(package_sha256) = 64),
+	CHECK (length(plan_sha256) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(publisher_user_id) REFERENCES users (id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_capacities (
+	active INTEGER NOT NULL,
+	pending INTEGER NOT NULL,
+	retained_waits INTEGER NOT NULL,
+	next_admission_sequence BIGINT NOT NULL,
+	active_limit INTEGER NOT NULL,
+	pending_limit INTEGER NOT NULL,
+	wait_limit INTEGER NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (workspace_id, project_id, environment_id),
+	CHECK (next_admission_sequence BETWEEN 1 AND 9007199254740991),
+	CHECK (active_limit BETWEEN 0 AND 5 AND active BETWEEN 0 AND active_limit),
+	CHECK (pending_limit BETWEEN 0 AND 1000 AND pending BETWEEN 0 AND pending_limit),
+	CHECK (wait_limit BETWEEN 0 AND 10000 AND retained_waits BETWEEN 0 AND wait_limit),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_context_sources (
+	status VARCHAR(20) NOT NULL,
+	access_policy_id VARCHAR(128) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CHECK (status IN ('active','revoked','deleted')),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_deployments (
+	status VARCHAR(20) NOT NULL,
+	active_revision_id VARCHAR(36),
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CHECK (status IN ('active','disabled','revoked')),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
 CREATE TABLE fleet_mutation_requests (
 	operation VARCHAR(128) NOT NULL,
 	request_key VARCHAR(128) NOT NULL,
@@ -588,6 +700,7 @@ CREATE TABLE runs (
 	FOREIGN KEY(workspace_id, environment_id) REFERENCES environments (workspace_id, id),
 	FOREIGN KEY(workspace_id, runner_id) REFERENCES runners (workspace_id, id),
 	CHECK (status IN ('queued','running','completed','failed','cancelled')),
+	CONSTRAINT runs_execution_scope_unique UNIQUE (workspace_id, project_id, environment_id, id),
 	UNIQUE (workspace_id, id),
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
@@ -672,6 +785,95 @@ CREATE TABLE connection_versions (
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
+CREATE TABLE executable_dependencies (
+	publication_id VARCHAR(36) NOT NULL,
+	dependency_publication_id VARCHAR(36) NOT NULL,
+	dependency_sha256 VARCHAR(64) NOT NULL,
+	canonical_dependency BYTEA NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, publication_id) REFERENCES executable_publications (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, dependency_publication_id, dependency_sha256) REFERENCES executable_publications (workspace_id, project_id, environment_id, id, package_sha256),
+	UNIQUE (workspace_id, project_id, environment_id, publication_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, publication_id, dependency_publication_id),
+	CHECK (length(canonical_dependency) BETWEEN 1 AND 65536),
+	CHECK (length(dependency_sha256) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_context_versions (
+	source_id VARCHAR(36) NOT NULL,
+	version INTEGER NOT NULL,
+	classification VARCHAR(64) NOT NULL,
+	observed_at_ms BIGINT NOT NULL,
+	expires_at_ms BIGINT NOT NULL,
+	access_policy_id VARCHAR(128) NOT NULL,
+	content_artifact_id VARCHAR(36),
+	content_artifact_version INTEGER,
+	content_sha256 VARCHAR(64),
+	citation_artifact_id VARCHAR(36),
+	citation_artifact_version INTEGER,
+	citation_sha256 VARCHAR(64),
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, source_id) REFERENCES execution_context_sources (workspace_id, project_id, environment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, source_id, version),
+	CHECK (version BETWEEN 1 AND 2147483647),
+	CHECK (observed_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (expires_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (expires_at_ms >= observed_at_ms),
+	CHECK (length(classification) BETWEEN 1 AND 64),
+	CHECK ((content_artifact_id IS NULL) = (content_artifact_version IS NULL)),
+	CHECK ((content_artifact_id IS NULL) = (content_sha256 IS NULL)),
+	CHECK ((citation_artifact_id IS NULL) = (citation_artifact_version IS NULL)),
+	CHECK ((citation_artifact_id IS NULL) = (citation_sha256 IS NULL)),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_deployment_revisions (
+	deployment_id VARCHAR(36) NOT NULL,
+	publication_id VARCHAR(36) NOT NULL,
+	pool_id VARCHAR(36) NOT NULL,
+	revision INTEGER NOT NULL,
+	canonical_configuration BYTEA NOT NULL,
+	configuration_sha256 VARCHAR(64) NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, deployment_id) REFERENCES execution_deployments (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, publication_id) REFERENCES executable_publications (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, pool_id) REFERENCES runtime_pools (workspace_id, project_id, environment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, deployment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, id, publication_id),
+	UNIQUE (workspace_id, project_id, environment_id, deployment_id, revision),
+	CHECK (revision BETWEEN 1 AND 2147483647),
+	CHECK (status IN ('active','disabled','revoked')),
+	CHECK (length(canonical_configuration) BETWEEN 1 AND 1048576),
+	CHECK (length(configuration_sha256) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
 CREATE TABLE incidents (
 	project_id VARCHAR(36),
 	trace_id VARCHAR(36),
@@ -720,6 +922,7 @@ CREATE TABLE releases (
 	FOREIGN KEY(workspace_id, candidate_run_id) REFERENCES runs (workspace_id, id),
 	FOREIGN KEY(workspace_id, baseline_run_id) REFERENCES runs (workspace_id, id),
 	FOREIGN KEY(workspace_id, policy_id) REFERENCES policies (workspace_id, id),
+	CONSTRAINT releases_execution_candidate_unique UNIQUE (workspace_id, project_id, id, candidate_run_id),
 	UNIQUE (workspace_id, id),
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
@@ -831,6 +1034,88 @@ CREATE TABLE connection_version_secrets (
 	UNIQUE (workspace_id, project_id, environment_id, connection_id, connection_version, secret_reference_id, secret_version),
 	CHECK (connection_version BETWEEN 1 AND 2147483647),
 	CHECK (secret_version BETWEEN 1 AND 2147483647),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE deployment_assurance_bindings (
+	deployment_revision_id VARCHAR(36) NOT NULL,
+	release_id VARCHAR(36) NOT NULL,
+	candidate_run_id VARCHAR(36) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, deployment_revision_id) REFERENCES execution_deployment_revisions (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id, release_id, candidate_run_id) REFERENCES releases (workspace_id, project_id, id, candidate_run_id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, candidate_run_id) REFERENCES runs (workspace_id, project_id, environment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, deployment_revision_id),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE deployment_bindings (
+	deployment_revision_id VARCHAR(36) NOT NULL,
+	publication_id VARCHAR(36) NOT NULL,
+	dependency_id VARCHAR(36) NOT NULL,
+	connection_id VARCHAR(36),
+	connection_version INTEGER,
+	source_id VARCHAR(36),
+	source_version INTEGER,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, deployment_revision_id, publication_id) REFERENCES execution_deployment_revisions (workspace_id, project_id, environment_id, id, publication_id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, publication_id, dependency_id) REFERENCES executable_dependencies (workspace_id, project_id, environment_id, publication_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, connection_id, connection_version) REFERENCES connection_versions (workspace_id, project_id, environment_id, connection_id, version),
+	FOREIGN KEY(workspace_id, project_id, environment_id, source_id, source_version) REFERENCES execution_context_versions (workspace_id, project_id, environment_id, source_id, version),
+	CHECK ((connection_id IS NULL) = (connection_version IS NULL)),
+	CHECK ((source_id IS NULL) = (source_version IS NULL)),
+	UNIQUE (workspace_id, project_id, environment_id, deployment_revision_id, dependency_id),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_artifacts (
+	version INTEGER NOT NULL,
+	sha256 VARCHAR(64) NOT NULL,
+	ciphertext BYTEA NOT NULL,
+	nonce BYTEA NOT NULL,
+	content_bytes INTEGER NOT NULL,
+	classification VARCHAR(64) NOT NULL,
+	source_id VARCHAR(36),
+	source_version INTEGER,
+	access_policy_id VARCHAR(128) NOT NULL,
+	key_id VARCHAR(128) NOT NULL,
+	retain_until_ms BIGINT NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (workspace_id, project_id, environment_id, id, version, sha256),
+	UNIQUE (workspace_id, project_id, environment_id, source_id, source_version, id, version, sha256),
+	FOREIGN KEY(workspace_id, project_id, environment_id, source_id, source_version) REFERENCES execution_context_versions (workspace_id, project_id, environment_id, source_id, version),
+	CHECK ((source_id IS NULL) = (source_version IS NULL)),
+	CHECK (version BETWEEN 1 AND 2147483647),
+	CHECK (content_bytes BETWEEN 1 AND 1048576),
+	CHECK (length(ciphertext) = content_bytes + 16),
+	CHECK (length(nonce) = 12),
+	CHECK (length(classification) BETWEEN 1 AND 64),
+	CHECK (length(sha256) = 64),
+	CHECK (retain_until_ms BETWEEN 0 AND 9007199254740991),
 	UNIQUE (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
 	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
@@ -994,6 +1279,56 @@ CREATE TABLE alert_deliveries (
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
+CREATE TABLE executions (
+	admission_sequence BIGINT NOT NULL,
+	deployment_revision_id VARCHAR(36) NOT NULL,
+	interpreter_id VARCHAR(128) NOT NULL,
+	engine_identity VARCHAR(128) NOT NULL,
+	input_artifact_id VARCHAR(36) NOT NULL,
+	input_artifact_version INTEGER NOT NULL,
+	input_sha256 VARCHAR(64) NOT NULL,
+	result_artifact_id VARCHAR(36),
+	result_artifact_version INTEGER,
+	result_sha256 VARCHAR(64),
+	initiating_user_id VARCHAR(36) NOT NULL,
+	initiating_api_key_id VARCHAR(36),
+	admitted_at_ms BIGINT NOT NULL,
+	deadline_ms BIGINT NOT NULL,
+	admission_digest VARCHAR(64) NOT NULL,
+	state VARCHAR(30) NOT NULL,
+	requested_state VARCHAR(20) NOT NULL,
+	reason VARCHAR(40),
+	next_event_sequence BIGINT NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, deployment_revision_id) REFERENCES execution_deployment_revisions (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, initiating_api_key_id) REFERENCES api_keys (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, input_artifact_id, input_artifact_version, input_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	FOREIGN KEY(workspace_id, project_id, environment_id, result_artifact_id, result_artifact_version, result_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	CHECK ((result_artifact_id IS NULL) = (result_artifact_version IS NULL)),
+	CHECK ((result_artifact_id IS NULL) = (result_sha256 IS NULL)),
+	CHECK (state IN ('pending','running','waiting','paused','cancelled','succeeded','failed','reconciliation_required')),
+	CHECK (requested_state IN ('running','paused','cancelled')),
+	CHECK (reason IN ('capacity','budget','entitlement_unavailable','authority_revoked','deadline_exceeded','signal','control','provider_unavailable','uncertain','completed','invalid_result')),
+	CHECK (deadline_ms > admitted_at_ms),
+	CHECK (next_event_sequence BETWEEN 1 AND 9007199254740991),
+	CHECK (admitted_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (deadline_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (length(admission_digest) = 64),
+	CHECK (admission_sequence BETWEEN 1 AND 9007199254740991),
+	UNIQUE (workspace_id, project_id, environment_id, admission_sequence),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	UNIQUE (engine_identity),
+	FOREIGN KEY(initiating_user_id) REFERENCES users (id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
 CREATE TABLE runtime_command_admissions (
 	instance_id VARCHAR(36) NOT NULL,
 	session_id VARCHAR(36) NOT NULL,
@@ -1092,9 +1427,439 @@ CREATE TABLE runtime_credentials (
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
+CREATE TABLE execution_control_requests (
+	execution_id VARCHAR(36) NOT NULL,
+	request_id VARCHAR(128) NOT NULL,
+	action VARCHAR(20) NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	initiating_user_id VARCHAR(36) NOT NULL,
+	initiating_api_key_id VARCHAR(36),
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, initiating_api_key_id) REFERENCES api_keys (workspace_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, request_id),
+	CHECK (action IN ('pause','resume','cancel')),
+	CHECK (length(digest) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(initiating_user_id) REFERENCES users (id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_requests (
+	execution_id VARCHAR(36) NOT NULL,
+	request_key VARCHAR(128) NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, request_key),
+	CHECK (length(request_key) BETWEEN 1 AND 128),
+	CHECK (length(digest) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_step_instances (
+	execution_id VARCHAR(36) NOT NULL,
+	occurrence_path VARCHAR(1024) NOT NULL,
+	node_id VARCHAR(128) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, occurrence_path),
+	CHECK (length(occurrence_path) BETWEEN 1 AND 1024),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_attempts (
+	execution_id VARCHAR(36) NOT NULL,
+	step_instance_id VARCHAR(36) NOT NULL,
+	ordinal INTEGER NOT NULL,
+	parent_attempt_id VARCHAR(36),
+	child_request_id VARCHAR(128),
+	child_request_digest VARCHAR(64),
+	input_artifact_id VARCHAR(36) NOT NULL,
+	input_artifact_version INTEGER NOT NULL,
+	input_sha256 VARCHAR(64) NOT NULL,
+	result_artifact_id VARCHAR(36),
+	result_artifact_version INTEGER,
+	result_sha256 VARCHAR(64),
+	state VARCHAR(20) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, step_instance_id) REFERENCES execution_step_instances (workspace_id, project_id, environment_id, execution_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, parent_attempt_id) REFERENCES execution_attempts (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, step_instance_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, step_instance_id, ordinal),
+	UNIQUE (workspace_id, project_id, environment_id, parent_attempt_id, child_request_id),
+	CHECK ((parent_attempt_id IS NULL) = (child_request_id IS NULL)),
+	CHECK ((parent_attempt_id IS NULL) = (child_request_digest IS NULL)),
+	CHECK (parent_attempt_id IS NULL OR parent_attempt_id <> id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, input_artifact_id, input_artifact_version, input_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	FOREIGN KEY(workspace_id, project_id, environment_id, result_artifact_id, result_artifact_version, result_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	CHECK ((result_artifact_id IS NULL) = (result_artifact_version IS NULL)),
+	CHECK ((result_artifact_id IS NULL) = (result_sha256 IS NULL)),
+	CHECK (state IN ('reserved','dispatched','claimed','succeeded','failed','uncertain','cancelled')),
+	CHECK (ordinal BETWEEN 1 AND 2147483647),
+	CHECK (length(child_request_digest) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_waits (
+	execution_id VARCHAR(36) NOT NULL,
+	step_instance_id VARCHAR(36) NOT NULL,
+	wait_key VARCHAR(128) NOT NULL,
+	deadline_ms BIGINT NOT NULL,
+	state VARCHAR(20) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, step_instance_id) REFERENCES execution_step_instances (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, wait_key),
+	CHECK (state IN ('open','satisfied','expired','cancelled')),
+	CHECK (deadline_ms BETWEEN 0 AND 9007199254740991),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_activity_deliveries (
+	execution_id VARCHAR(36) NOT NULL,
+	attempt_id VARCHAR(36) NOT NULL,
+	instance_id VARCHAR(36) NOT NULL,
+	session_id VARCHAR(36) NOT NULL,
+	generation BIGINT NOT NULL,
+	replay_id VARCHAR(36) NOT NULL,
+	canonical_envelope BYTEA NOT NULL,
+	canonical_signature BYTEA NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	issued_at_ms BIGINT NOT NULL,
+	expires_at_ms BIGINT NOT NULL,
+	retain_until_ms BIGINT NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	pool_id VARCHAR(36) NOT NULL,
+	installation_id VARCHAR(128) NOT NULL,
+	recovery_epoch BIGINT NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, attempt_id) REFERENCES execution_attempts (workspace_id, project_id, environment_id, execution_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, pool_id, installation_id, recovery_epoch, instance_id, session_id, generation) REFERENCES runtime_sessions (workspace_id, project_id, environment_id, pool_id, installation_id, recovery_epoch, instance_id, id, generation),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, attempt_id, id),
+	UNIQUE (installation_id, recovery_epoch, workspace_id, replay_id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, attempt_id),
+	CHECK (status IN ('pending','leased','delivered','conflict')),
+	CHECK (length(canonical_envelope) > 0 AND length(canonical_signature) > 0 AND length(canonical_envelope) + length(canonical_signature) <= 65536),
+	CHECK (generation BETWEEN 1 AND 9007199254740991),
+	CHECK (length(digest) = 64),
+	CHECK (recovery_epoch BETWEEN 0 AND 9007199254740991),
+	CHECK (issued_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (expires_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (retain_until_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (expires_at_ms > issued_at_ms AND expires_at_ms <= issued_at_ms + 300000),
+	CHECK (retain_until_ms >= expires_at_ms + 30000),
+	FOREIGN KEY(workspace_id, project_id, environment_id, pool_id) REFERENCES runtime_pools (workspace_id, project_id, environment_id, id),
+	CHECK (recovery_epoch BETWEEN 0 AND 9007199254740991),
+	CHECK (length(installation_id) BETWEEN 1 AND 128),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_events (
+	execution_id VARCHAR(36) NOT NULL,
+	attempt_id VARCHAR(36),
+	sequence BIGINT NOT NULL,
+	family VARCHAR(24) NOT NULL,
+	format_version INTEGER NOT NULL,
+	installation_id VARCHAR(128) NOT NULL,
+	recovery_epoch BIGINT NOT NULL,
+	source_id VARCHAR(128) NOT NULL,
+	source_generation BIGINT NOT NULL,
+	source_sequence BIGINT NOT NULL,
+	event_id VARCHAR(128) NOT NULL,
+	event_artifact_id VARCHAR(36) NOT NULL,
+	event_artifact_version INTEGER NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	code VARCHAR(40) NOT NULL,
+	occurred_at_ms BIGINT NOT NULL,
+	application_state VARCHAR(16) NOT NULL,
+	gap_slot INTEGER,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, attempt_id) REFERENCES execution_attempts (workspace_id, project_id, environment_id, execution_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, event_artifact_id, event_artifact_version, digest) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, sequence),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, source_id, source_generation, source_sequence),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, source_id, event_id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, gap_slot),
+	CHECK (sequence BETWEEN 1 AND 9007199254740991),
+	CHECK (format_version = 1),
+	CHECK (length(installation_id) BETWEEN 1 AND 128),
+	CHECK (length(source_id) BETWEEN 1 AND 128),
+	CHECK (length(event_id) BETWEEN 1 AND 128),
+	CHECK (event_artifact_version > 0),
+	CHECK (application_state IN ('pending','applied','conflict')),
+	CHECK (gap_slot BETWEEN 1 AND 100),
+	CHECK ((application_state = 'pending') = (gap_slot IS NOT NULL)),
+	CHECK ((family = 'sdk_runtime_event' AND code IN ('admission','step_started','step_result','step_failed','wait_started','signal_received','timer_elapsed','intent_created','decision_recorded','action_dispatched','action_receipt','dispatch_timeout','reconciliation_observed','outcome_recorded','execution_completed','cancellation_requested','execution_failed')) OR (family = 'execution_control' AND code IN ('admitted','started','attempt_reserved','attempt_dispatched','attempt_claimed','attempt_succeeded','attempt_failed','attempt_uncertain','waiting','signal_received','signal_conflict','paused','resumed','cancelled','succeeded','failed','reconciliation_required','capacity_refused','budget_refused','authority_revoked','deadline_exceeded','reconciled'))),
+	CHECK (recovery_epoch BETWEEN 0 AND 9007199254740991),
+	CHECK (source_generation BETWEEN 0 AND 9007199254740991),
+	CHECK (source_sequence BETWEEN 0 AND 9007199254740991),
+	CHECK (occurred_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (length(digest) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_inbox (
+	wait_id VARCHAR(36) NOT NULL,
+	signal_id VARCHAR(128) NOT NULL,
+	payload_artifact_id VARCHAR(36) NOT NULL,
+	payload_artifact_version INTEGER NOT NULL,
+	payload_sha256 VARCHAR(64) NOT NULL,
+	expires_at_ms BIGINT NOT NULL,
+	execution_id VARCHAR(36) NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	available_at_ms BIGINT NOT NULL,
+	lease_token_digest VARCHAR(64),
+	leased_at_ms BIGINT,
+	lease_expires_at_ms BIGINT,
+	delivery_count INTEGER NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, wait_id) REFERENCES execution_waits (workspace_id, project_id, environment_id, execution_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, payload_artifact_id, payload_artifact_version, payload_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, signal_id),
+	CHECK (expires_at_ms BETWEEN 0 AND 9007199254740991),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	CHECK (status IN ('pending','leased','delivered','conflict')),
+	CHECK (length(digest) = 64),
+	CHECK (length(lease_token_digest) = 64),
+	CHECK (available_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (leased_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (lease_expires_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (delivery_count BETWEEN 0 AND 2147483647),
+	CHECK ((leased_at_ms IS NULL) = (lease_expires_at_ms IS NULL)),
+	CHECK ((leased_at_ms IS NULL) = (lease_token_digest IS NULL)),
+	CHECK (status <> 'leased' OR leased_at_ms IS NOT NULL),
+	CHECK (lease_expires_at_ms > leased_at_ms AND lease_expires_at_ms <= leased_at_ms + 60000),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_outbox (
+	message_id VARCHAR(128) NOT NULL,
+	kind VARCHAR(20) NOT NULL,
+	attempt_id VARCHAR(36),
+	execution_id VARCHAR(36) NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	available_at_ms BIGINT NOT NULL,
+	lease_token_digest VARCHAR(64),
+	leased_at_ms BIGINT,
+	lease_expires_at_ms BIGINT,
+	delivery_count INTEGER NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, attempt_id) REFERENCES execution_attempts (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, message_id),
+	CHECK (kind IN ('engine_start','engine_signal','activity','control')),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	CHECK (status IN ('pending','leased','delivered','conflict')),
+	CHECK (length(digest) = 64),
+	CHECK (length(lease_token_digest) = 64),
+	CHECK (available_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (leased_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (lease_expires_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (delivery_count BETWEEN 0 AND 2147483647),
+	CHECK ((leased_at_ms IS NULL) = (lease_expires_at_ms IS NULL)),
+	CHECK ((leased_at_ms IS NULL) = (lease_token_digest IS NULL)),
+	CHECK (status <> 'leased' OR leased_at_ms IS NOT NULL),
+	CHECK (lease_expires_at_ms > leased_at_ms AND lease_expires_at_ms <= leased_at_ms + 60000),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_reconciliation_observations (
+	execution_id VARCHAR(36) NOT NULL,
+	attempt_id VARCHAR(36) NOT NULL,
+	source_id VARCHAR(128) NOT NULL,
+	observation_id VARCHAR(128) NOT NULL,
+	digest VARCHAR(64) NOT NULL,
+	code VARCHAR(30) NOT NULL,
+	observed_at_ms BIGINT NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, attempt_id) REFERENCES execution_attempts (workspace_id, project_id, environment_id, execution_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, attempt_id, source_id, observation_id),
+	CHECK (code IN ('compute_stopped','compute_running','outcome_unknown','usage_known','authority_revoked','engine_missing','identity_conflict')),
+	CHECK (length(digest) = 64),
+	CHECK (observed_at_ms BETWEEN 0 AND 9007199254740991),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_usage_reservations (
+	execution_id VARCHAR(36) NOT NULL,
+	step_instance_id VARCHAR(36) NOT NULL,
+	attempt_id VARCHAR(36) NOT NULL,
+	state VARCHAR(20) NOT NULL,
+	input_tokens BIGINT NOT NULL,
+	output_tokens BIGINT NOT NULL,
+	cost_microusd BIGINT NOT NULL,
+	active_ms BIGINT NOT NULL,
+	observed_input_tokens BIGINT,
+	observed_output_tokens BIGINT,
+	observed_cost_microusd BIGINT,
+	completed_at_ms BIGINT,
+	compute_stopped_at_ms BIGINT,
+	settlement_digest VARCHAR(64),
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, step_instance_id, attempt_id) REFERENCES execution_attempts (workspace_id, project_id, environment_id, execution_id, step_instance_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, attempt_id),
+	CHECK (state IN ('reserved','settled','uncertain','released')),
+	CHECK (input_tokens BETWEEN 0 AND 9007199254740991),
+	CHECK (output_tokens BETWEEN 0 AND 9007199254740991),
+	CHECK (cost_microusd BETWEEN 0 AND 9007199254740991),
+	CHECK (active_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (observed_input_tokens BETWEEN 0 AND 9007199254740991),
+	CHECK (observed_output_tokens BETWEEN 0 AND 9007199254740991),
+	CHECK (observed_cost_microusd BETWEEN 0 AND 9007199254740991),
+	CHECK (completed_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (compute_stopped_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (length(settlement_digest) = 64),
+	CHECK (state <> 'settled' OR (observed_input_tokens IS NOT NULL AND observed_output_tokens IS NOT NULL AND observed_cost_microusd IS NOT NULL AND completed_at_ms IS NOT NULL AND settlement_digest IS NOT NULL)),
+	CHECK (state <> 'released' OR compute_stopped_at_ms IS NOT NULL),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_leases (
+	execution_id VARCHAR(36) NOT NULL,
+	attempt_id VARCHAR(36) NOT NULL,
+	delivery_id VARCHAR(36) NOT NULL,
+	token_digest VARCHAR(64) NOT NULL,
+	claimed_at_ms BIGINT NOT NULL,
+	renewed_at_ms BIGINT NOT NULL,
+	expires_at_ms BIGINT NOT NULL,
+	status VARCHAR(20) NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id, attempt_id, delivery_id) REFERENCES execution_activity_deliveries (workspace_id, project_id, environment_id, execution_id, attempt_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id, attempt_id),
+	CHECK (status IN ('active','stopped','uncertain')),
+	CHECK (length(token_digest) = 64),
+	CHECK (claimed_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (renewed_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (expires_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (renewed_at_ms >= claimed_at_ms AND expires_at_ms > renewed_at_ms AND expires_at_ms <= renewed_at_ms + 60000),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+ALTER TABLE execution_context_versions ADD CONSTRAINT execution_context_citation_fk FOREIGN KEY(workspace_id, project_id, environment_id, source_id, version, citation_artifact_id, citation_artifact_version, citation_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, source_id, source_version, id, version, sha256);
+
+ALTER TABLE execution_context_versions ADD CONSTRAINT execution_context_content_fk FOREIGN KEY(workspace_id, project_id, environment_id, source_id, version, content_artifact_id, content_artifact_version, content_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, source_id, source_version, id, version, sha256);
+
+ALTER TABLE execution_deployments ADD CONSTRAINT execution_deployment_active_revision_fk FOREIGN KEY(workspace_id, project_id, environment_id, id, active_revision_id) REFERENCES execution_deployment_revisions (workspace_id, project_id, environment_id, deployment_id, id);
+
 ALTER TABLE runtime_pools ADD CONSTRAINT runtime_pools_current_policy_fk FOREIGN KEY(workspace_id, project_id, environment_id, id, current_policy_version) REFERENCES runtime_pool_policies (workspace_id, project_id, environment_id, pool_id, version);
 
 CREATE INDEX connection_versions_inventory_idx ON connection_versions (workspace_id, project_id, environment_id, connection_id, id);
+
+CREATE INDEX execution_artifact_retention_idx ON execution_artifacts (workspace_id, project_id, environment_id, retain_until_ms, id);
+
+CREATE INDEX execution_deadline_idx ON executions (state, deadline_ms, id);
+
+CREATE INDEX execution_delivery_retention_idx ON execution_activity_deliveries (workspace_id, project_id, environment_id, retain_until_ms, id);
+
+CREATE INDEX execution_inbox_queue_idx ON execution_inbox (workspace_id, project_id, environment_id, status, available_at_ms, id);
+
+CREATE INDEX execution_lease_expiry_idx ON execution_leases (workspace_id, project_id, environment_id, status, expires_at_ms, id);
+
+CREATE INDEX execution_outbox_queue_idx ON execution_outbox (workspace_id, project_id, environment_id, status, available_at_ms, id);
+
+CREATE INDEX execution_queue_idx ON executions (workspace_id, project_id, environment_id, state, admission_sequence, id);
+
+CREATE INDEX execution_wait_deadline_idx ON execution_waits (workspace_id, project_id, environment_id, state, deadline_ms, id);
 
 CREATE INDEX gateway_usage_workspace_created ON gateway_usage (workspace_id, created_at);
 
@@ -1118,9 +1883,55 @@ CREATE INDEX ix_connection_versions_workspace_id ON connection_versions (workspa
 
 CREATE INDEX ix_connections_workspace_id ON connections (workspace_id);
 
+CREATE INDEX ix_deployment_assurance_bindings_workspace_id ON deployment_assurance_bindings (workspace_id);
+
+CREATE INDEX ix_deployment_bindings_workspace_id ON deployment_bindings (workspace_id);
+
 CREATE INDEX ix_environments_workspace_id ON environments (workspace_id);
 
 CREATE INDEX ix_evaluation_jobs_workspace_id ON evaluation_jobs (workspace_id);
+
+CREATE INDEX ix_executable_dependencies_workspace_id ON executable_dependencies (workspace_id);
+
+CREATE INDEX ix_executable_publications_workspace_id ON executable_publications (workspace_id);
+
+CREATE INDEX ix_execution_activity_deliveries_workspace_id ON execution_activity_deliveries (workspace_id);
+
+CREATE INDEX ix_execution_artifacts_workspace_id ON execution_artifacts (workspace_id);
+
+CREATE INDEX ix_execution_attempts_workspace_id ON execution_attempts (workspace_id);
+
+CREATE INDEX ix_execution_capacities_workspace_id ON execution_capacities (workspace_id);
+
+CREATE INDEX ix_execution_context_sources_workspace_id ON execution_context_sources (workspace_id);
+
+CREATE INDEX ix_execution_context_versions_workspace_id ON execution_context_versions (workspace_id);
+
+CREATE INDEX ix_execution_control_requests_workspace_id ON execution_control_requests (workspace_id);
+
+CREATE INDEX ix_execution_deployment_revisions_workspace_id ON execution_deployment_revisions (workspace_id);
+
+CREATE INDEX ix_execution_deployments_workspace_id ON execution_deployments (workspace_id);
+
+CREATE INDEX ix_execution_events_workspace_id ON execution_events (workspace_id);
+
+CREATE INDEX ix_execution_inbox_workspace_id ON execution_inbox (workspace_id);
+
+CREATE INDEX ix_execution_leases_workspace_id ON execution_leases (workspace_id);
+
+CREATE INDEX ix_execution_outbox_workspace_id ON execution_outbox (workspace_id);
+
+CREATE INDEX ix_execution_reconciliation_observations_workspace_id ON execution_reconciliation_observations (workspace_id);
+
+CREATE INDEX ix_execution_requests_workspace_id ON execution_requests (workspace_id);
+
+CREATE INDEX ix_execution_step_instances_workspace_id ON execution_step_instances (workspace_id);
+
+CREATE INDEX ix_execution_usage_reservations_workspace_id ON execution_usage_reservations (workspace_id);
+
+CREATE INDEX ix_execution_waits_workspace_id ON execution_waits (workspace_id);
+
+CREATE INDEX ix_executions_workspace_id ON executions (workspace_id);
 
 CREATE INDEX ix_fleet_mutation_requests_workspace_id ON fleet_mutation_requests (workspace_id);
 
@@ -1248,6 +2059,6 @@ CREATE INDEX runtime_pool_policies_inventory_idx ON runtime_pool_policies (works
 
 CREATE INDEX sessions_mfa_factor_idx ON sessions (user_id, mfa_factor_id, mfa_factor_version);
 
-INSERT INTO schema_version (version, installed_at) VALUES (13, CURRENT_TIMESTAMP);
+INSERT INTO schema_version (version, installed_at) VALUES (14, CURRENT_TIMESTAMP);
 
 COMMIT;

@@ -1,6 +1,6 @@
 [project]
 name = "lotuspond-sdk"
-version = "0.2.0"
+version = "0.3.0"
 description = "Bounded local v1 tooling and executable-v2 compilation and runtime contracts"
 readme = "README.md"
 requires-python = ">=3.13"

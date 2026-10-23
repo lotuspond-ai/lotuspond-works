@@ -21,7 +21,7 @@ assert Path(lotuspond_sdk.__file__).with_name('py.typed').is_file()
 for forbidden in ('fastapi', 'sqlalchemy', 'psycopg', 'redis', 'httpx', 'lotuspond', 'jsonschema'):
     assert importlib.util.find_spec(forbidden) is None, forbidden
 assert not any(name.split('.')[0] in ('fastapi', 'sqlalchemy', 'psycopg', 'redis', 'httpx', 'lotuspond', 'jsonschema') for name in sys.modules)
-assert importlib.metadata.version('lotuspond-sdk') == '0.2.0'
+assert importlib.metadata.version('lotuspond-sdk') == '0.3.0'
 print(json.dumps({'module': lotuspond_sdk.__file__}))
 """,
         ],
@@ -233,3 +233,42 @@ assert main(['v2', 'canonicalize', sys.argv[1], '--output', sys.argv[2]]) == 2
     assert "PRIVATE_SENTINEL" not in probe.stdout
     assert json.loads(probe.stdout)["errors"][0]["code"] == "output_incomplete"
     assert partial.is_file() and partial.stat().st_size > 0
+
+
+def test_installed_activity_literal_and_inert_import(installed_sdk, tmp_path):
+    from pathlib import Path
+
+    venv, env = installed_sdk
+    fixture_dir = Path(__file__).with_name("activity") / "fixtures"
+    for name in ("read.json", "read.canonical.json", "read.signature.json"):
+        (tmp_path / name).write_bytes((fixture_dir / name).read_bytes())
+    artifact_run([
+        str(venv / "bin/python"), "-I", "-c", """
+import importlib.metadata, importlib.util, json, socket, sys
+from pathlib import Path
+def refuse(*args, **kwargs): raise AssertionError('import attempted I/O')
+socket.socket = refuse
+import lotuspond_sdk.activity as activity
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+assert Path(activity.__file__).is_relative_to(Path(sys.prefix))
+assert importlib.metadata.version('lotuspond-sdk') == '0.3.0'
+for forbidden in ('temporalio', 'fastapi', 'sqlalchemy', 'psycopg', 'redis', 'httpx',
+                  'lotuspond', 'lotuspond_runtime', 'lotuspond_orchestrator', 'jsonschema'):
+    assert importlib.util.find_spec(forbidden) is None, forbidden
+    assert forbidden not in sys.modules
+raw = json.loads(Path('read.json').read_bytes())
+literal = json.loads(Path('read.signature.json').read_bytes())
+assert activity.canonical_activity_json(raw) == Path('read.canonical.json').read_bytes()
+assert activity.activity_digest(raw) == '06abd378a53efb058bf9b880d97f1952d23db32a50b8ffd15d8a658fc06e2203'
+key = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(
+    '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60'))
+assert activity.sign_activity(raw, key).model_dump() == literal
+trust = {'format_version':1,'keys':[{'key_id':literal['key_id'],
+         'public_key':key.public_key().public_bytes_raw().hex(),'state':'allowed'}]}
+report = activity.verify_activity(raw, literal, trust)
+assert report.valid and report.authority_granted is False
+delivery = json.dumps({'envelope':json.dumps(raw),'signature':json.dumps(literal)}).encode()
+assert activity.decode_activity_delivery(delivery)[0].model_dump() == raw
+assert activity.activity_schema()['$schema'].endswith('/2020-12/schema')
+print(json.dumps({'module':activity.__file__, 'version':importlib.metadata.version('lotuspond-sdk')}))
+"""], tmp_path, env)

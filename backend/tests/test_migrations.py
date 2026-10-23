@@ -43,8 +43,12 @@ def rewind_identity_v5(connection):
 
 def rewind_fleet_v13(connection):
     from lotuspond.fleet.migration import FLEET_TABLES
-    from lotuspond.models import Base
+    from lotuspond.models import EXECUTION_TABLES, Base
 
+    Base.metadata.drop_all(connection, tables=[Base.metadata.tables[name] for name in EXECUTION_TABLES])
+    connection.execute(text("ALTER TABLE api_keys DROP CONSTRAINT api_keys_execution_scope_unique"))
+    connection.execute(text("ALTER TABLE runs DROP CONSTRAINT runs_execution_scope_unique"))
+    connection.execute(text("ALTER TABLE releases DROP CONSTRAINT releases_execution_candidate_unique"))
     Base.metadata.drop_all(connection, tables=[Base.metadata.tables[name] for name in FLEET_TABLES])
     connection.execute(text("ALTER TABLE environments DROP CONSTRAINT environments_fleet_scope_unique"))
 

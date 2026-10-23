@@ -9,7 +9,7 @@ Build and install from this repository:
 
 ```sh
 uv build --project sdk/python
-python -m pip install sdk/python/dist/lotuspond_sdk-0.2.0-py3-none-any.whl
+python -m pip install sdk/python/dist/lotuspond_sdk-0.3.0-py3-none-any.whl
 lotuspond-package validate contracts/examples/reviewed-action.v1.json
 python -m lotuspond_sdk validate contracts/examples/reviewed-action.v1.json
 ```
@@ -652,3 +652,51 @@ source/license/hash provenance is in
 The installed SDK runtime needs none of these test tools, an API, database or
 provider. The registry remains v1-only; engine, Studio, authenticated runtime
 admission, commercial licensing and production qualification remain separate.
+
+
+## Read and model activity contract (SDK 0.3.0)
+
+`lotuspond_sdk.activity` adds a separate, pure `ActivityEnvelope` declaration,
+`ArtifactHandle`, `ActivityDelivery`, `ActivitySignature`,
+`ActivityVerificationReport` and `UsageObservation`. It imports no engine or
+Temporal client and performs no network, key discovery or execution. Existing
+v1/v2 APIs, CLI selection, schemas and signed bytes retain their contracts.
+
+Use `validate_activity(raw)`, `canonical_activity_json(raw)` and
+`activity_digest(raw)` at admission boundaries. They reproject known models and
+revalidate all required fields, including constructed or mutated instances.
+Activities pin complete scope, attempt, deployment, input, dependency and exact
+recipient identities. Connector reads require a connector pin and named operation;
+model activities require a model pin and explicit null operation. UUIDs use
+canonical lowercase spelling, installation IDs retain the SDK opaque-ID grammar,
+and timestamps/epochs/generations use exact safe integers. Activity lifetime is
+positive and at most 300,000 milliseconds.
+
+`decode_activity_delivery(content)` accepts an outer JSON object with exactly
+`envelope` and `signature` string fields carrying the original UTF-8 JSON
+documents. Their combined unescaped UTF-8 length is at most 65,536 bytes;
+the complete outer body is at most 131,072 bytes. Duplicate keys, invalid Unicode,
+nonfinite numbers, depth above 32 and more than 10,000 items are refused.
+
+`sign_activity(raw, key)` and `verify_activity(raw, signature, trust)` use a distinct
+Ed25519 signature context, complete header and captured JCS content. Trust must
+come independently through the root SDK `TrustSet`; sender-supplied keys are
+refused. Current revocation wins over content integrity. Verification reports
+always retain `binding_status="not_checked"` and `authority_granted=false`.
+Structural admission and signatures do not check current time, persisted attempt
+deadlines, replay uniqueness, pinned artifacts, runtime bindings or authority.
+Authenticated runtime consumers must load and enforce those facts independently.
+
+`activity_schema()` exports a fresh Draft 2020-12 structural envelope schema,
+committed separately as `contracts/runtime-activity.v1.schema.json`. It describes
+kind/dependency/operation correlation but cannot enforce lifetime arithmetic,
+combined transport bounds or trust. Use public admission helpers for those checks.
+New activity models are frozen; the reused SDK `ArtifactRef` retains its existing
+API and is revalidated with the complete envelope at every helper boundary.
+`UsageObservation` requires explicit nullable input/output token and cost fields;
+unknown usage is distinct from measured zero and grants no authority.
+
+Activity shape failures use the existing value-free `ExecutableError` family
+(`invalid_wire` for model admission, `invalid_envelope` for signature admission,
+and existing JSON bound/domain codes). JSON decoding retains `PackageReadError`;
+invalid independent trust and signing keys retain root `SdkError` behavior.
