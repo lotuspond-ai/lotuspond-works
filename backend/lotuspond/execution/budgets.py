@@ -17,7 +17,7 @@ from lotuspond_sdk.activity import UsageObservation
 from lotuspond_sdk.executable import validate_executable_package
 from lotuspond_sdk.executable.package import ArtifactRef
 from pydantic import TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select
 
 from ..fleet.authority import RecoverySnapshot, database_now_ms
 from ..models import (
@@ -44,6 +44,7 @@ from .program import ProgramError, program_from, resolve_occurrence
 from .publication import _Lookup, current_snapshot, load_publication
 
 MAX_SAFE = 9007199254740991
+SHARED = "capacity.shared:"
 
 
 class BudgetDemand(Contract):
@@ -341,8 +342,17 @@ class BudgetService:
         return [ArtifactRef.model_validate(ref) for ref in references]
 
     @execution_service
-    def reserve_attempt(self, db, actor, attempt_id, demand):
+    def reserve_attempt(self, db, actor, attempt_id, demand, *, shared=False):
+        """Reserve one attempt under the root execution budget.
+
+        `shared` (Task 9) admits an agent's child attempt into its parent's running
+        compute: the shared budget still applies, but no compute slot is taken. A
+        `capacity.shared:` request row records this, so stopping that child returns
+        no slot. Without it a child takes its own slot like any attempt.
+        """
         demand = BudgetDemand.model_validate(demand)
+        if type(shared) is not bool:
+            raise ExecutionError("invalid_request")
         hint = record(db, ExecutionAttempt, actor.scope, attempt_id)
         execution_hint = record(db, Execution, actor.scope, hint.execution_id)
         cursor, capacity, revision, pool = self._parents(
@@ -370,6 +380,18 @@ class BudgetService:
             return view(existing)
         if attempt.state != "reserved":
             raise ExecutionError("conflict")
+        if shared:
+            parent = (
+                db.scalar(
+                    scoped(ExecutionUsageReservation, actor.scope).where(
+                        ExecutionUsageReservation.attempt_id == attempt.parent_attempt_id
+                    )
+                )
+                if attempt.parent_attempt_id is not None
+                else None
+            )
+            if parent is None or parent.compute_stopped_at_ms is not None:
+                raise ExecutionError("conflict")
         bounded = []
         for dependency in self._dependency(step, packages, catalog, attempt.parent_attempt_id):
             try:
@@ -428,9 +450,18 @@ class BudgetService:
                 ExecutionUsageReservation.environment_id == actor.scope.environment_id,
                 ExecutionDeploymentRevision.pool_id == revision.pool_id,
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),
+                ~select(ExecutionRequest.id)
+                .where(
+                    ExecutionRequest.workspace_id == actor.scope.workspace_id,
+                    ExecutionRequest.project_id == actor.scope.project_id,
+                    ExecutionRequest.environment_id == actor.scope.environment_id,
+                    ExecutionRequest.request_key
+                    == literal(SHARED) + ExecutionUsageReservation.attempt_id,
+                )
+                .exists(),
             )
         )
-        if (
+        if not shared and (
             cursor.active >= cursor.active_limit
             or capacity.active >= min(capacity.active_limit, limits["active_capacity"])
             or pool_active >= pool.max_concurrent_invocations
@@ -445,6 +476,17 @@ class BudgetService:
             **demand.model_dump(),
         )
         db.add(row)
+        if shared:
+            db.add(
+                ExecutionRequest(
+                    **actor.scope.model_dump(),
+                    execution_id=execution.id,
+                    request_key=SHARED + attempt.id,
+                    digest=sha256((SHARED + attempt.id).encode()).hexdigest(),
+                )
+            )
+            db.flush()
+            return view(row)
         cursor.active += 1
         capacity.active += 1
         if execution.state == "pending":
@@ -549,11 +591,17 @@ class BudgetService:
         ):
             raise ExecutionError("conflict")
         if row.compute_stopped_at_ms is None:
-            cursor = self._cursor(db)  # already held from _settlement_rows
-            if cursor.active < 1 or capacity is None or capacity.active < 1:
-                raise ExecutionError("conflict")
-            cursor.active -= 1
-            capacity.active -= 1
+            shared = db.scalar(
+                scoped(ExecutionRequest, scope).where(
+                    ExecutionRequest.request_key == SHARED + attempt_id
+                )
+            )
+            if shared is None:  # a shared child took no compute slot
+                cursor = self._cursor(db)  # already held from _settlement_rows
+                if cursor.active < 1 or capacity is None or capacity.active < 1:
+                    raise ExecutionError("conflict")
+                cursor.active -= 1
+                capacity.active -= 1
             row.compute_stopped_at_ms = observation.observed_at_ms
             row.active_ms = active_liability(row, observation.observed_at_ms)
         db.flush()

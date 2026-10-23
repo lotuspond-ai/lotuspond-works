@@ -422,3 +422,81 @@ All of these are fixed. Both reviews approved the final content. The quality rev
 - the files beyond Task 8's ownership row.
 
 **Obligation carried to Tasks 9 and 11:** every result, lapse, stop confirmation and reconciliation that can complete containment calls `mark_runnable` in the same transaction.
+
+## E04 Task 9: signed activity dispatch, leases and reconciliation, 2026-10-23
+
+Same branch, cluster and limits as Task 7. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is currently refusing jobs because of an account billing problem. The runtime distribution is now 0.2.0.
+
+**Red before implementation.** The new tests were copied onto the Task 8 commit `8326b39`. `test_dispatch.py` failed at collection because `lotuspond_runtime.activity_protocol` did not exist. `test_activity_client.py` failed because `lotuspond_runtime.activity_client` did not exist. Each later review fix added a test that failed with the fix reverted:
+- unstarted children are closed when a root ends;
+- the lease is capped by the reserved active time;
+- reconciliation closes children;
+- a child's renewal needs its parent's live lease.
+
+**Green:**
+
+- The Task 9 backend tests (`test_dispatch.py`, `test_leases.py`, `test_reconciliation.py`, `test_activity_races.py`): 60 passed; with `test_budgets.py`, 92 passed.
+- Runtime `test_activity_client.py`: 11 passed. The whole runtime suite has the same 121 failures as a clean Task 8 checkout, 85 of them `unsafe_storage`: the runtime's private-storage check refuses macOS by design, and CI's Linux job runs them.
+- `tests/execution` with `tests/fleet`, after the first review round (E03 command, authentication, rotation and management tests; the Linux-only acceptance module excluded): 786 passed, 0 failed.
+- The full backend suite at the reviewed code: `3fcdcf6`, 1,145 tests: 1,137 passed and 8 failed in 805 s (the final commit only adds the pinned race variants, run in the line above). The only failures are the 8 tests in `tests/fleet/test_acceptance.py`, which run only on CI's Linux job.
+- Ruff is clean on both distributions. Runtime 0.2.0 metadata, both lock files, CI and the acceptance harness agree.
+- Covered:
+  - **Pins:** every persisted pin and envelope field (23 variants, each re-signed with trusted keys and refused with `conflict`).
+  - **Claims:** claim once with a lost acknowledgement; expiry and revocation while a claim waits on a lock; refusal on cancellation and instance revocation.
+  - **Leases:** renewal bounded by the attempt deadline, by 60 s and by the reserved active time.
+  - **Retirement:** unclaimed-delivery expiry, and retirement of a spent reservation, each allowing only a new ordinal; a lapse requiring reconciliation.
+  - **Results:** result and runnable marker committing together; output-schema and unknown-usage refusals; a lost result response repeatable only by its own session.
+  - **Children:**
+    - undeclared, wrong-kind, unregistered and mistyped arguments refused;
+    - equal and conflicting repeats;
+    - another session refused;
+    - a parent's end closing its unstarted children and waiting for running ones;
+    - a child's lease needing its parent's live lease.
+  - **Polling:** a refused head never blocking a pool; a paused execution's delivery not served again.
+  - **Bounds:** a stuck trust provider bounded at 5 s; a narrowed pool policy; another pool refused before any provider call; the value cap.
+  - **Credentials:** sentinel runtime credentials absent from envelopes, stored rows and decrypted artifacts.
+  - **Races:** real PostgreSQL races, each with both outcomes pinned:
+    - claim against claim;
+    - renewal against result;
+    - child request against parent result;
+    - claim against delivery expiry;
+    - result against lease lapse;
+    - renewal against E03 `revoke_instance`.
+
+**Reviews.** Both independent reviews required changes, and both approved the final content.
+- Specification review, five rounds. Its main findings:
+  - children orphaned when a root ended;
+  - renewal ignoring the remaining budget;
+  - a timing-fragile child-lease test;
+  - a spent reservation stuck until its deadline.
+- Quality review, four rounds. Its main findings:
+  - the root slot returned while a shared child still ran;
+  - a refused head blocking the pool;
+  - no recheck after child-admission provider waits;
+  - a flaky race test;
+  - missing race tests.
+- An execution and fleet run before the reviews also caught two Task 5 regressions in child slots. Sharing a parent's slot is now an explicit opt-in.
+- Accepted as Minor and carried:
+  - no per-transaction keys cache in the activity paths;
+  - event rows keep `source_id="orchestrator"`, with the origin recorded only in the encrypted content;
+  - the runtime worker (Task 10) must apply and test `validate_lease`.
+
+**For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 9"):
+- Lock order for runtime routes: account rows after fleet rows under the workspace lock, and the cursor taken with `NOWAIT` when late.
+- Deliveries:
+  - one delivery per attempt, with zero usage when it is never claimed;
+  - leases and deliveries bounded by the reserved active time, with spent reservations retired by the sweeper.
+- Leases: the derived lease revision and the session-bound token digest.
+- Outcomes:
+  - a lapse not marked runnable;
+  - unknown result usage leading to reconciliation;
+  - results and values accepted without the initiator's current `execute`;
+  - reconciliation never producing success.
+- Children: they share their parent's step instance, ordinals above 10 and the parent's compute slot; a parent cannot stop while a child may run.
+- Tool naming.
+- Polling order and bounds.
+- The 64 KiB runtime value bound, at most 1,024 per execution.
+
+**Obligations carried to Task 11:**
+- The sweeper calls `lapse_lease`, `expire_delivery` and `expire_reservation`.
+- Spent reservations need a `SweepReport` field or a recorded amendment, and an efficient due query, because v15 has no index for them.

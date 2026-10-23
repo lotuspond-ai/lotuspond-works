@@ -1,0 +1,44 @@
+{
+ "definition": {
+  "configuration_revision": "1",
+  "configuration_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "input_schema": {
+   "kind": "null"
+  },
+  "limits": {
+   "max_cost_microusd": 100000,
+   "max_input_tokens": 1000,
+   "max_output_tokens": 1000,
+   "max_steps": 10,
+   "timeout_seconds": 30
+  },
+  "output_schema": {
+   "kind": "null"
+  },
+  "profile": "synthetic",
+  "read_tools": [
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "connector-fixture",
+     "sha256": "478fde8e7f65a29046477b92f4110126d77aff896e45e5686213e47f720ce76d",
+     "version": "1.0.0"
+    },
+    "operation": "read",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "model",
+ "name": "model-tools-fixture",
+ "schemas": [],
+ "version": "1.0.0"
+}

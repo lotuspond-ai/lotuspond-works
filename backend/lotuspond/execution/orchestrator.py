@@ -60,7 +60,8 @@ def mark_runnable(db, execution: Execution, at_ms: int) -> None:
 
     The only setter of `executions.runnable_at_ms`. Its caller already holds the
     execution row lock (admission, signal acceptance, controls, activity results,
-    lapsed leases, expired deliveries, the sweeper and self-continuation).
+    expired deliveries, reconciliation, the sweeper and self-continuation). A lapsed
+    lease does not call it: only reconciliation can decide what happened.
     """
     at_ms = _instant(at_ms)
     _held(db, execution)

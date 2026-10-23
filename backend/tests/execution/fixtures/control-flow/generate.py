@@ -782,3 +782,76 @@ retrying["body"]["steps"][0]["branches"][0]["body"]["steps"][0]["retry"] = {
 compile_package(retrying, dependencies=[], catalog={"documents": [model, policy]})
 (OUT / "parallel_retry.json").write_text(json.dumps(retrying, indent=1, sort_keys=True) + "\n")
 print("parallel retry fixture compiled")
+
+# Task 9: one connector read with a 2 s attempt timeout, so lease and delivery
+# expiry is observed in real database time without editing any deadline column.
+FAST = {
+    "max_attempts": 3,
+    "timeout_seconds": 2,
+    "backoff_seconds": 0,
+    "retry_codes": ["unavailable", "timeout_before_dispatch"],
+}
+activity_read = package(
+    "fixture-activity-read",
+    NULL,
+    NULL,
+    [
+        {
+            "id": "read",
+            "kind": "connector_read",
+            "connector_ref": "source",
+            "operation": "read",
+            "target": lit(None, NULL),
+            "input": lit(None, NULL),
+            "retry": FAST,
+        }
+    ],
+    step_ref("read"),
+    data(NULL),
+    connectors=[{"id": "source", "ref": ref_of(connector)}],
+)
+compile_package(activity_read, dependencies=[], catalog={"documents": [connector]})
+(OUT / "activity_read.json").write_text(json.dumps(activity_read, indent=1, sort_keys=True) + "\n")
+
+# Task 9: an agent whose model declares one read tool, exposed by the step.
+model_tools = copy.deepcopy(model)
+model_tools["name"] = "model-tools-fixture"  # model-fixture 1.0.0 is published elsewhere
+model_tools["definition"]["read_tools"] = [
+    {"connector_ref": ref_of(connector), "operation": "read", "retry": RETRY}
+]
+agent_tools = package(
+    "fixture-agent-tools",
+    NULL,
+    NULL,
+    [
+        {
+            "id": "think",
+            "kind": "agent",
+            "model_ref": "model",
+            "input": lit(None, NULL),
+            "instructions": "Synthetic typed input only",
+            "output_schema": NULL,
+            "read_tools": [{"connector_ref": "source", "operation": "read", "retry": RETRY}],
+            "limits": AGENT_LIMITS,
+            "retry": NO_RETRY,
+        }
+    ],
+    step_ref("think"),
+    data(NULL),
+    connectors=[{"id": "source", "ref": ref_of(connector)}],
+    models=[{"id": "model", "ref": ref_of(model_tools)}],
+)
+compile_package(agent_tools, dependencies=[], catalog={"documents": [connector, model_tools]})
+(OUT / "agent_tools.json").write_text(json.dumps(agent_tools, indent=1, sort_keys=True) + "\n")
+(OUT / "agent_tools.model.json").write_text(
+    json.dumps(model_tools, indent=1, sort_keys=True) + "\n"
+)
+print("activity fixtures compiled")
+
+# Task 9: a connector read with a 120 s timeout, so the 60 s lease cap is what binds.
+activity_slow = copy.deepcopy(activity_read)
+activity_slow["package_id"] = "fixture-activity-slow"
+activity_slow["body"]["steps"][0]["retry"] = {**FAST, "timeout_seconds": 120}
+compile_package(activity_slow, dependencies=[], catalog={"documents": [connector]})
+(OUT / "activity_slow.json").write_text(json.dumps(activity_slow, indent=1, sort_keys=True) + "\n")
+print("slow activity fixture compiled")

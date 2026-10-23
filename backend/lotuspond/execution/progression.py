@@ -943,6 +943,67 @@ def _package_steps(body):
                 yield from _package_steps(branch.body)
 
 
+def record_event(
+    db,
+    artifacts,
+    policy,
+    installation_id,
+    execution,
+    epoch,
+    code,
+    *,
+    path=None,
+    attempt_id=None,
+    detail=None,
+    keys=None,
+    origin="orchestrator",
+):
+    """Gap-free control event under the held execution row lock: codes and references only.
+
+    The orchestrator and the activity services (Task 9) share this one sequence of
+    control-plane events; `origin` records which of them caused the event.
+    """
+    sequence = execution.next_event_sequence
+    content = {
+        "format": "lotuspond.execution-event.v1",
+        "execution_id": execution.id,
+        "sequence": sequence,
+        "code": code,
+        "occurrence_path": path,
+        "attempt_id": attempt_id,
+        "detail": detail,
+        "origin": origin,
+    }
+    handle = artifacts._put_internal(
+        db, _scope(execution), canonical_value(content), policy, keys=keys
+    )
+    db.add(
+        ExecutionEvent(
+            **_scope(execution).model_dump(),
+            execution_id=execution.id,
+            attempt_id=attempt_id,
+            sequence=sequence,
+            family="execution_control",
+            format_version=1,
+            installation_id=installation_id,
+            recovery_epoch=epoch,
+            source_id="orchestrator",
+            source_generation=1,
+            source_sequence=sequence,
+            event_id=f"orchestrator:{sequence}",
+            event_artifact_id=handle.id,
+            event_artifact_version=handle.version,
+            digest=handle.sha256,
+            code=code,
+            occurred_at_ms=database_now_ms(db),
+            application_state="applied",
+            gap_slot=None,
+        )
+    )
+    execution.next_event_sequence = sequence + 1
+    db.flush()
+
+
 class InterpreterV1:
     """Progression for `lotuspond.execution-interpreter.v1`; explicitly constructed."""
 
@@ -1258,45 +1319,19 @@ class InterpreterV1:
             raise
 
     def _event(self, db, execution, epoch, code, *, path=None, attempt_id=None, detail=None):
-        """Gap-free orchestrator event under the held row lock: codes and references only."""
-        sequence = execution.next_event_sequence
-        content = {
-            "format": "lotuspond.execution-event.v1",
-            "execution_id": execution.id,
-            "sequence": sequence,
-            "code": code,
-            "occurrence_path": path,
-            "attempt_id": attempt_id,
-            "detail": detail,
-        }
-        handle = self.artifacts._put_internal(
-            db, _scope(execution), canonical_value(content), self.policy, keys=self._keys()
+        record_event(
+            db,
+            self.artifacts,
+            self.policy,
+            self.installation_id,
+            execution,
+            epoch,
+            code,
+            path=path,
+            attempt_id=attempt_id,
+            detail=detail,
+            keys=self._keys(),
         )
-        db.add(
-            ExecutionEvent(
-                **_scope(execution).model_dump(),
-                execution_id=execution.id,
-                attempt_id=attempt_id,
-                sequence=sequence,
-                family="execution_control",
-                format_version=1,
-                installation_id=self.installation_id,
-                recovery_epoch=epoch,
-                source_id="orchestrator",
-                source_generation=1,
-                source_sequence=sequence,
-                event_id=f"orchestrator:{sequence}",
-                event_artifact_id=handle.id,
-                event_artifact_version=handle.version,
-                digest=handle.sha256,
-                code=code,
-                occurred_at_ms=database_now_ms(db),
-                application_state="applied",
-                gap_slot=None,
-            )
-        )
-        execution.next_event_sequence = sequence + 1
-        db.flush()
 
     def _instance(self, db, execution, path, node_id):
         row = db.scalar(

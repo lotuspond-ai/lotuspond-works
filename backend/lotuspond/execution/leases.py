@@ -1,0 +1,286 @@
+"""Activity lease renewal and the sweeper's lapse and expiry transitions (E04).
+
+A lease is at most 60 seconds and never outlives the attempt's deadline. Expiry
+records lost authority: it never makes an attempt reclaimable. A lapsed lease
+leaves the attempt uncertain and the execution in `reconciliation_required` with
+its liability kept; an unclaimed delivery that expires, or a reserved attempt whose
+reserved active time ran out before dispatch, fails its attempt, which only a new
+ordinal can retry. Task 11's sweeper calls the three sweeper transitions.
+
+Lock order: see `activity_records`. The sweeper paths take no runtime identity:
+expiry enters at the installation cursor because it returns a compute slot; a lapse
+changes no counter and enters at the workspace.
+"""
+
+from hashlib import sha256
+
+from lotuspond_runtime.activity_protocol import MAX_LEASE_MS, ActivityLease
+from lotuspond_sdk.activity import UsageObservation
+from sqlalchemy import select
+
+from ..fleet.authority import RecoverySnapshot, database_now_ms
+from ..models import (
+    Execution,
+    ExecutionActivityDelivery,
+    ExecutionAttempt,
+    ExecutionCapacity,
+    ExecutionLease,
+    ExecutionReconciliationObservation,
+    ExecutionStepInstance,
+    ExecutionUsageReservation,
+    Workspace,
+)
+from .activity_records import lease_revision, lease_view, reserved_until, scope_of
+from .authorization import lock, record, scoped
+from .dispatch import activity_service, failure_content
+from .errors import ExecutionError
+from .orchestrator import TERMINAL, mark_runnable
+from .progression import record_event
+
+
+class LeaseService:
+    def __init__(self, activities):
+        if activities is None:
+            raise ValueError("Activity service required")
+        self.activities = activities
+        self.budgets = activities.budgets
+
+    def _epoch(self, epoch):
+        """Fenced before any lock: the recovery authority is never called under rows."""
+        if epoch is not None:
+            if type(epoch) is not int or epoch < 0:
+                raise ExecutionError("recovery_unavailable")
+            return epoch
+        try:
+            snapshot = self.budgets._call(
+                "recovery", "current", (self.budgets.installation_id,), "recovery_unavailable"
+            )
+            if (
+                type(snapshot) is not RecoverySnapshot
+                or not snapshot.active
+                or snapshot.installation_id != self.budgets.installation_id
+            ):
+                raise ValueError
+            return snapshot.epoch
+        except Exception:
+            raise ExecutionError("recovery_unavailable") from None
+
+    def _event(self, db, execution, epoch, code, attempt_id, detail=None):
+        a = self.activities
+        record_event(
+            db,
+            a.artifacts,
+            a.policy,
+            a.installation_id,
+            execution,
+            epoch,
+            code,
+            path=None,
+            attempt_id=attempt_id,
+            detail=detail,
+            origin="sweeper",
+        )
+
+    @activity_service
+    def renew_activity(self, db, principal, lease: ActivityLease) -> ActivityLease:
+        """Extend a live lease under current identity, authority, budget and deadline."""
+        a = self.activities
+        lease = ActivityLease.model_validate(lease)
+        rows = a._locked(db, principal, lease.attempt_id)
+        execution, attempt = rows["execution"], rows["attempt"]
+        now = a._finish(db, rows["locked"])
+        row, delivery = a._held(rows, attempt, principal, now)
+        if (
+            lease.generation != delivery.generation
+            or lease.lease_revision > lease_revision(row)
+            or attempt.state != "claimed"
+        ):
+            raise ExecutionError("conflict")
+        # Cancellation is reported by refusing renewal; the runtime then stops.
+        if execution.requested_state == "cancelled" or execution.state in TERMINAL:
+            raise ExecutionError("forbidden")
+        if rows["parent"] is not None:
+            # A child runs only inside its parent's live lease.
+            a._held(rows, rows["parent"], principal, now)
+        reservation = rows["reservations"].get(attempt.id)
+        if reservation is None or reservation.compute_stopped_at_ms is not None:
+            raise ExecutionError("conflict")
+        records = a.records.load(db, attempt.id)
+        grant, tenant, recovery = self.budgets._grants(db, scope_of(execution))
+        self.budgets._final(db, rows["actor"], rows["revision"], grant, tenant, recovery)
+        if recovery.epoch != delivery.recovery_epoch:
+            raise ExecutionError("recovery_unavailable")
+        a._verify(delivery, a._trust(scope_of(execution), now))
+        # Authority and provider lookups may have outlasted the lease itself.
+        now = a._finish(db, rows["locked"])
+        if now >= row.expires_at_ms:
+            raise ExecutionError("conflict")
+        if rows["parent"] is not None:
+            a._held(rows, rows["parent"], principal, now)
+        # Never past the attempt's deadline or its remaining reserved active time.
+        until = reserved_until(reservation)
+        if until <= now:
+            raise ExecutionError("budget_exceeded")
+        expires = min(now + MAX_LEASE_MS, records.deadline_ms, until)
+        if expires <= now:
+            raise ExecutionError("forbidden")
+        if now > row.renewed_at_ms:
+            row.renewed_at_ms = now
+            row.expires_at_ms = max(row.expires_at_ms, expires)
+            db.flush()
+        return lease_view(row, delivery, records.deadline_ms)
+
+    def _rows(self, db, scope, attempt_id, *, cursor):
+        if cursor:
+            self.budgets._cursor(db)
+        hint = record(db, ExecutionAttempt, scope, attempt_id)
+        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        if cursor:
+            lock(db, scoped(ExecutionCapacity, scope))
+        execution = record(db, Execution, scope, hint.execution_id, locked=True)
+        record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
+        attempt = record(db, ExecutionAttempt, scope, attempt_id, locked=True)
+        reservation = lock(
+            db,
+            scoped(ExecutionUsageReservation, scope).where(
+                ExecutionUsageReservation.attempt_id == attempt_id
+            ),
+        )
+        delivery = lock(
+            db,
+            scoped(ExecutionActivityDelivery, scope).where(
+                ExecutionActivityDelivery.attempt_id == attempt_id
+            ),
+        )
+        lease = lock(
+            db, scoped(ExecutionLease, scope).where(ExecutionLease.attempt_id == attempt_id)
+        )
+        return execution, attempt, reservation, delivery, lease
+
+    @activity_service
+    def lapse_lease(self, db, lease_id: str, *, epoch=None) -> None:
+        """A lease past its expiry: the attempt is uncertain until reconciled.
+
+        The liability stays reserved, and the execution is not marked runnable:
+        only reconciliation can decide what happened.
+        """
+        epoch = self._epoch(epoch)
+        hint = db.get(ExecutionLease, lease_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope = scope_of(hint)
+        execution, attempt, reservation, delivery, lease = self._rows(
+            db, scope, hint.attempt_id, cursor=False
+        )
+        now = database_now_ms(db)
+        if lease is None or lease.status != "active" or now < lease.expires_at_ms:
+            return
+        lease.status = "uncertain"
+        if attempt.state == "claimed":
+            attempt.state = "uncertain"
+        if reservation is not None and reservation.state == "reserved":
+            reservation.state = "uncertain"  # unknown usage: reserved, never zero
+        db.flush()
+        self._event(db, execution, epoch, "attempt_uncertain", attempt.id)
+        if execution.state not in TERMINAL and execution.state != "reconciliation_required":
+            execution.state = "reconciliation_required"
+            execution.reason = "uncertain"
+            db.flush()
+            self._event(db, execution, epoch, "reconciliation_required", attempt.id)
+
+    @activity_service
+    def expire_delivery(self, db, delivery_id: str, *, epoch=None) -> None:
+        """An unclaimed delivery past its expiry fails its attempt and frees its slot.
+
+        Its usage is settled as zero: a runtime invokes nothing before a durable
+        claim, so an unclaimed delivery never started. The attempt never gets a
+        second delivery; a retry is a new ordinal decided by progression.
+        """
+        epoch = self._epoch(epoch)
+        hint = db.get(ExecutionActivityDelivery, delivery_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope = scope_of(hint)
+        execution, attempt, reservation, delivery, _ = self._rows(
+            db, scope, hint.attempt_id, cursor=True
+        )
+        now = database_now_ms(db)
+        if delivery.status != "pending" or now < delivery.expires_at_ms:
+            return
+        delivery.status = "conflict"
+        db.flush()
+        if attempt.state != "dispatched":
+            return
+        self._fail_unstarted(
+            db, scope, execution, attempt, reservation, "expired:" + delivery.id, now, epoch
+        )
+
+    def _fail_unstarted(self, db, scope, execution, attempt, reservation, identifier, now, epoch):
+        """Fail an attempt that never started; zero usage, compute stop, due again.
+
+        The caller holds the cursor, workspace, capacity, execution and attempt rows.
+        """
+        a = self.activities
+        handle = a.artifacts._put_internal(
+            db, scope, failure_content("timeout_before_dispatch", now), a.policy
+        )
+        attempt.result_artifact_id = handle.id
+        attempt.result_artifact_version = handle.version
+        attempt.result_sha256 = handle.sha256
+        attempt.state = "failed"
+        db.flush()
+        if reservation is not None and reservation.compute_stopped_at_ms is None:
+            self.budgets.settle_attempt(
+                db,
+                attempt.id,
+                identifier,
+                UsageObservation(
+                    input_tokens=0, output_tokens=0, cost_microusd=0, completed_at_ms=now
+                ),
+            )
+            observation = ExecutionReconciliationObservation(
+                **scope.model_dump(),
+                execution_id=execution.id,
+                attempt_id=attempt.id,
+                source_id="sweeper",
+                observation_id=identifier,
+                digest=sha256(identifier.encode()).hexdigest(),
+                code="compute_stopped",
+                observed_at_ms=now,
+            )
+            db.add(observation)
+            db.flush()
+            self.budgets.confirm_stopped(db, attempt.id, observation.id)
+        self._event(
+            db, execution, epoch, "attempt_failed", attempt.id, detail="timeout_before_dispatch"
+        )
+        if execution.state not in TERMINAL:
+            mark_runnable(db, execution, now)
+
+    @activity_service
+    def expire_reservation(self, db, attempt_id: str, *, epoch=None) -> None:
+        """A reserved attempt whose reserved active time ran out before any dispatch.
+
+        Dispatch refuses it (`budget_exceeded`), so without this it would hold its
+        compute slot until the execution deadline. It never started: it fails with
+        `timeout_before_dispatch` and zero usage, its compute stop is confirmed, and
+        progression may retry with a new ordinal. Task 11's sweeper calls this.
+        """
+        epoch = self._epoch(epoch)
+        hint = db.get(ExecutionAttempt, attempt_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope = scope_of(hint)
+        execution, attempt, reservation, delivery, _ = self._rows(db, scope, hint.id, cursor=True)
+        now = database_now_ms(db)
+        if (
+            attempt.state != "reserved"
+            or delivery is not None
+            or reservation is None
+            or reservation.compute_stopped_at_ms is not None
+            or reserved_until(reservation) > now
+        ):
+            return
+        self._fail_unstarted(
+            db, scope, execution, attempt, reservation, "spent:" + attempt.id, now, epoch
+        )

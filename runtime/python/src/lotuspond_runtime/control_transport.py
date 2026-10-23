@@ -34,6 +34,17 @@ _ROUTES = {
     "/credentials/cancel",
     "/commands/poll",
 }
+# Activity routes (E04): all POST, all require the runtime session.
+_ACTIVITY_ROUTES = {
+    "/activities/poll",
+    "/activities/claim",
+    "/activities/renew",
+    "/activities/children",
+    "/activities/results",
+}
+_ACTIVITY_VALUE = re.compile(
+    r"/activities/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/values"
+)
 _DNS_PROGRAM = """import json, socket, sys
 rows = socket.getaddrinfo(sys.argv[1], int(sys.argv[2]), type=socket.SOCK_STREAM)
 print(json.dumps([(af, list(addr)) for af, kind, proto, name, addr in rows[:64]]))
@@ -209,8 +220,11 @@ class ControlTransport:
             and re.fullmatch(r"/commands/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/claim", route)
             is not None
         )
+        activity = type(route) is str and (
+            route in _ACTIVITY_ROUTES or _ACTIVITY_VALUE.fullmatch(route) is not None
+        )
         if (
-            (route not in _ROUTES and not command_claim)
+            (route not in _ROUTES and not command_claim and not activity)
             or method != ("GET" if route == "/self" else "POST")
             or (route == "/self" and body is not None)
             or (route != "/self" and type(body) is not bytes)
@@ -227,6 +241,7 @@ class ControlTransport:
                 route
                 in ("/heartbeat", "/credentials/prepare", "/credentials/cancel", "/commands/poll")
                 or command_claim
+                or activity
             )
         ):
             raise FleetError("invalid_request")
