@@ -32,10 +32,16 @@ from ..models import (
 )
 from .authorization import lock, reauthorize, record, scoped
 from .contracts import canonical_value
-from .dispatch import activity_service, close_children, cursor_nowait, failure_content
+from .dispatch import (
+    activity_service,
+    close_children,
+    cursor_nowait,
+    failure_content,
+    keep_interrupted,
+)
 from .errors import ExecutionError
 from .orchestrator import TERMINAL, mark_runnable
-from .progression import record_event
+from .progression import INTERRUPTED, record_event
 
 SOURCE = "historical"
 
@@ -150,16 +156,18 @@ class ReconciliationService:
         if reservation.compute_stopped_at_ms is None:
             self.budgets.confirm_stopped(db, attempt.id, evidence.id)
         a = self.activities
-        handle = a.artifacts._put_internal(db, scope, failure_content("uncertain", now), a.policy)
-        attempt.result_artifact_id = handle.id
-        attempt.result_artifact_version = handle.version
-        attempt.result_sha256 = handle.sha256
-        attempt.state = "failed"
-        db.flush()
-        events = [
-            ("reconciled", attempt.id, {"actor_user_id": actor.user_id}),
-            ("attempt_failed", attempt.id, "uncertain"),
-        ]
+        if keep_interrupted(a.artifacts, db, scope, attempt):
+            ended = ("cancelled", attempt.id, INTERRUPTED)  # a pause stopped it (Task 11)
+        else:
+            content = failure_content("uncertain", now)
+            handle = a.artifacts._put_internal(db, scope, content, a.policy)
+            attempt.result_artifact_id = handle.id
+            attempt.result_artifact_version = handle.version
+            attempt.result_sha256 = handle.sha256
+            attempt.state = "failed"
+            db.flush()
+            ended = ("attempt_failed", attempt.id, "uncertain")
+        events = [("reconciled", attempt.id, {"actor_user_id": actor.user_id}), ended]
         events += [("cancelled", child, "parent_ended") for child in closed]
         for code, attempt_id, detail in events:
             record_event(
@@ -186,8 +194,9 @@ class ReconciliationService:
         )
         if remaining is None and execution.state == "reconciliation_required":
             # Back to what was requested; progression and controls take it from there.
-            execution.state = "paused" if execution.requested_state == "paused" else "running"
-            execution.reason = None
+            from .control import resumed_state
+
+            execution.state, execution.reason = resumed_state(db, execution), None
             db.flush()
         if execution.state not in TERMINAL and remaining is None:
             # Progression decides what the failed attempt means for its step.

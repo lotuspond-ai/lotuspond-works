@@ -57,10 +57,10 @@ def test_read_activity_runs_once_and_reports_typed_output(tmp_path):
 
 
 def test_lost_lease_stops_child_and_retains_unknown_usage(tmp_path, monkeypatch):
-    # The provider would run 30 s; the control plane refuses the first renewal.
+    # The provider would run 30 s; the first renewal finds the lease gone.
     env = build(tmp_path, read_script={"read": {"sleep_s": 30, "value": None}})
-    env.server.refuse_renewal = True
     attempt = env.server.root("connector_read")
+    env.server.lose_renewal_ids = {attempt.id}
     outcomes = observe(monkeypatch)
     started = time.monotonic()
     assert ActivityWorker(env.deps).run_once() == "lost"
@@ -76,6 +76,39 @@ def test_lost_lease_stops_child_and_retains_unknown_usage(tmp_path, monkeypatch)
     assert env.server.results == []  # no outcome is invented: the server lapses it
     assert env.journal.get(attempt.id)["phase"] == "abandoned"
     assert not invocation.fenced()
+
+
+def test_a_refused_renewal_stops_the_provider_and_reports_cancelled(tmp_path, monkeypatch):
+    # A pause or a cancellation refuses the renewal (`forbidden`) of a live lease:
+    # the provider stops at once and the outcome is reported under that lease.
+    env = build(tmp_path, read_script={"read": {"sleep_s": 30, "value": None}})
+    env.server.refuse_renewal = True
+    attempt = env.server.root("connector_read")
+    outcomes = observe(monkeypatch)
+    started = time.monotonic()
+    assert ActivityWorker(env.deps).run_once() == "cancelled"
+    assert time.monotonic() - started < 5
+    (outcome,) = outcomes
+    assert outcome.cleanup.confirmed is True and outcome.code == "cancelled"
+    (result,) = env.server.results
+    assert (result.attempt_id, result.code, result.result) == (attempt.id, "cancelled", None)
+    # The provider was reached and stopped: what it cost stays unknown, never zero.
+    assert result.usage.cost_microusd is None
+    assert calls(env.counter) == 1
+    assert env.journal.get(attempt.id)["phase"] == "recorded"
+
+
+def test_a_stop_before_the_provider_starts_reports_zero_usage(tmp_path, monkeypatch):
+    env = build(tmp_path)
+    env.server.refuse_renewal = True
+    attempt = env.server.root("connector_read")
+    # The first renewal is due before the call: the refusal comes first.
+    monkeypatch.setattr(worker.LeaseKeeper, "_next", lambda self: 0)
+    assert ActivityWorker(env.deps).run_once() == "cancelled"
+    (result,) = env.server.results
+    assert (result.attempt_id, result.code) == (attempt.id, "cancelled")
+    assert result.usage.cost_microusd == 0  # nothing was reached: zero is known
+    assert calls(env.counter) == 0
 
 
 def test_a_provider_that_ran_without_reporting_usage_keeps_it_unknown(tmp_path):

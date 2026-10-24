@@ -538,6 +538,19 @@ def operation_fixture(source, operation="read"):
     return raw, documents
 
 
+def within(request, package):
+    """The request's limits, no wider than the package's own (a short-deadline fixture)."""
+    limits = request.configuration.limits
+    narrowed = limits.model_copy(
+        update={
+            name: min(getattr(limits, name), value) for name, value in package["limits"].items()
+        }
+    )
+    return request.model_copy(
+        update={"configuration": request.configuration.model_copy(update={"limits": narrowed})}
+    )
+
+
 def connection_request(db, h, publication, documents, workflow_refs=()):
     from lotuspond_runtime.protocol import (
         ConnectionConfig,

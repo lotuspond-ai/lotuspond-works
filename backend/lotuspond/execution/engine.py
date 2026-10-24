@@ -8,7 +8,9 @@ production wiring refuses to start without the real implementations.
 Liveness: work that made no progress (a refused transition, a pending capacity
 step, or a pass with no transitions) is re-marked for later, never "now", so a
 blocked execution cannot spin a worker. Only `mark_runnable` sets the marker;
-deferral clears it and marks the later time while the row lock is held.
+deferral clears it and marks the later time while the row lock is held. A
+transition refused because the stored program or rows fail verification would
+fail alike forever: it fences the execution for reconciliation instead (Task 11).
 """
 
 import logging
@@ -29,6 +31,7 @@ from .engine_contracts import (
     WorkerIdentity,
 )
 from .errors import ExecutionError, execution_service
+from .interpreters import REGISTERED
 from .orchestrator import (
     TERMINAL,
     claim_runnable,
@@ -36,6 +39,7 @@ from .orchestrator import (
     consume_wakeups,
     mark_runnable,
 )
+from .program import ProgramError
 
 logger = logging.getLogger("lotuspond.execution")
 
@@ -49,7 +53,7 @@ _FAILURES = 1024
 
 def _code(error):
     """Fixed codes only: database, provider and caller text never reach logs."""
-    return error.code if isinstance(error, ExecutionError) else "unexpected"
+    return error.code if isinstance(error, (ExecutionError, ProgramError)) else "unexpected"
 
 
 @execution_service
@@ -71,6 +75,8 @@ class PostgresExecutionEngine:
         self.interpreter_ids = frozenset(
             TypeAdapter(OpaqueId).validate_python(value, strict=True) for value in identifiers
         )
+        if not self.interpreter_ids <= REGISTERED:
+            raise ValueError("Unregistered interpreter version")
         if any(item is None for item in (progression, sweeper, recovery)):
             raise ValueError("Progression, sweeper and recovery fence are required")
         if not test_mode and any(
@@ -171,12 +177,34 @@ class PostgresExecutionEngine:
                     _defer(db, execution, RETRY_MS)
         except Exception as error:
             # The savepoint restored the marker and the pending wake-ups.
+            if isinstance(error, ProgramError) and self._fence_failing(db, execution, error, epoch):
+                return None
             logger.warning("Execution transition deferred: %s", _code(error))
             _defer(db, execution, self._backoff(execution.id))
             return None
         if outcome.reason != "capacity":
             self._failures.pop(execution.id, None)
         return outcome
+
+    def _fence_failing(self, db, execution, error, epoch):
+        """A program or row that fails verification fails alike on every retry.
+
+        Fenced for reconciliation in its own savepoint, under the held row lock,
+        instead of being retried until the deadline. False when it was not fenced.
+        """
+        fence = getattr(self.progression, "fence_execution", None)
+        if fence is None:
+            return False
+        try:
+            with db.begin_nested():
+                fenced = fence(db, execution, error.code, epoch=epoch)
+        except Exception as failure:
+            logger.warning("Execution fence deferred: %s", _code(failure))
+            return False
+        if fenced:
+            logger.warning("Execution fenced for reconciliation: %s", error.code)
+            self._failures.pop(execution.id, None)
+        return fenced
 
     def _capacity(self, sessions, worker, execution_id):
         """Capacity counters change only in a separate transaction in Task 5's order.

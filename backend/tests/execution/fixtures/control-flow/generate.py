@@ -855,3 +855,49 @@ activity_slow["body"]["steps"][0]["retry"] = {**FAST, "timeout_seconds": 120}
 compile_package(activity_slow, dependencies=[], catalog={"documents": [connector]})
 (OUT / "activity_slow.json").write_text(json.dumps(activity_slow, indent=1, sort_keys=True) + "\n")
 print("slow activity fixture compiled")
+
+# Task 11: the waits package with a 2 s timer and a 3 s external-wait expiry, and
+# one whose 5 s execution deadline passes while its 60 s timer waits. The sweeper's
+# due waits and deadlines then come in real database time, never by column edits.
+waits_fast = copy.deepcopy(waits)
+waits_fast["package_id"] = "fixture-waits-fast"
+waits_fast["body"]["steps"][0]["delay_seconds"] = 2
+waits_fast["body"]["steps"][1]["expiry_seconds"] = 3
+compile_package(waits_fast, dependencies=[], catalog={"documents": [policy]})
+(OUT / "waits_fast.json").write_text(json.dumps(waits_fast, indent=1, sort_keys=True) + "\n")
+waits_deadline = copy.deepcopy(waits)
+waits_deadline["package_id"] = "fixture-waits-deadline"
+waits_deadline["limits"] = {**waits["limits"], "elapsed_seconds": 5}
+compile_package(waits_deadline, dependencies=[], catalog={"documents": [policy]})
+(OUT / "waits_deadline.json").write_text(
+    json.dumps(waits_deadline, indent=1, sort_keys=True) + "\n"
+)
+print("fast wait fixtures compiled")
+
+# Task 11: the connector read with a 4 s execution deadline, and one whose retry
+# back-off (an hour) lies far beyond that deadline.
+activity_deadline = copy.deepcopy(activity_read)
+activity_deadline["package_id"] = "fixture-activity-deadline"
+activity_deadline["limits"] = {**activity_read["limits"], "elapsed_seconds": 4}
+compile_package(activity_deadline, dependencies=[], catalog={"documents": [connector]})
+(OUT / "activity_deadline.json").write_text(
+    json.dumps(activity_deadline, indent=1, sort_keys=True) + "\n"
+)
+activity_backoff = copy.deepcopy(activity_deadline)
+activity_backoff["package_id"] = "fixture-activity-backoff"
+activity_backoff["body"]["steps"][0]["retry"] = {**FAST, "backoff_seconds": 3600}
+compile_package(activity_backoff, dependencies=[], catalog={"documents": [connector]})
+(OUT / "activity_backoff.json").write_text(
+    json.dumps(activity_backoff, indent=1, sort_keys=True) + "\n"
+)
+print("deadline activity fixtures compiled")
+
+# Task 11: the connector read with a 10 microdollar budget, spent by one reservation.
+activity_budget = copy.deepcopy(activity_read)
+activity_budget["package_id"] = "fixture-activity-budget"
+activity_budget["limits"] = {**activity_read["limits"], "max_cost_microusd": 10}
+compile_package(activity_budget, dependencies=[], catalog={"documents": [connector]})
+(OUT / "activity_budget.json").write_text(
+    json.dumps(activity_budget, indent=1, sort_keys=True) + "\n"
+)
+print("budget activity fixture compiled")

@@ -20,10 +20,11 @@ from pydantic import Field, SecretStr, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from .execution.engine_contracts import ProgressReport, SweepReport, WorkerIdentity
 from .execution.errors import ExecutionError
+from .execution.interpreters import unsupported_pins
 from .schema_version import SCHEMA_VERSION
 
 logger = logging.getLogger("lotuspond.execution")
@@ -137,6 +138,12 @@ def _verify_session(database, settings):
                 )
                 if value != getattr(settings, field):
                     raise WorkerRefused("timeouts_unavailable")
+            # A registered version stays installed while a non-terminal execution
+            # pins it, with its compiler: a build that lacks either never starts
+            # over those executions.
+            with Session(bind=connection) as db:
+                if unsupported_pins(db):
+                    raise WorkerRefused("unsupported_interpreter")
     except WorkerRefused:
         raise
     except Exception:

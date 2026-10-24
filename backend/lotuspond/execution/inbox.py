@@ -117,9 +117,11 @@ class InboxService:
             if current_actor.role not in {"owner", "admin"}:
                 raise ExecutionError("forbidden")
             now = database_now_ms(db)
+            # A paused execution still accepts signals; progression consumes them on
+            # resume, judged by their acceptance time (Task 11).
             if (
-                execution.requested_state != "running"
-                or execution.state not in {"running", "waiting"}
+                execution.requested_state == "cancelled"
+                or execution.state not in {"running", "waiting", "paused"}
                 or wait.state != "open"
                 or min(wait.deadline_ms, execution.deadline_ms) <= now
             ):

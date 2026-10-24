@@ -44,7 +44,7 @@ from lotuspond.models import (
 from .engine_fixtures import FixtureFence, FixtureSweeper
 from .test_admission import admission as admission
 from .test_budgets import budget_harness as budget_harness
-from .test_deployments import deployment_request
+from .test_deployments import deployment_request, within
 from .test_publication import harness as harness
 
 FLOW = Path(__file__).parent / "fixtures/control-flow"
@@ -443,7 +443,7 @@ def flows(admission):
             for family in ("models", "connectors", "policies", "subworkflows", "agents"):
                 refs.extend(d["ref"] for d in package[family])
             publication = h.publish(db, package, tuple(p.id for p in published), request_key=name)
-            request = deployment_request(h, publication.id)
+            request = within(deployment_request(h, publication.id), package)
             request = request.model_copy(
                 update={
                     "configuration": request.configuration.model_copy(

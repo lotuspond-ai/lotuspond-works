@@ -15,6 +15,10 @@ Persisted conventions shared with Tasks 9-11:
   attempt whose result artifact is `{"failure": code, "failed_at_ms": ms}`.
 - An activity attempt (connector read, agent) starts `reserved` with its input
   artifact; Task 9 records success (result value) or the failure record above.
+- A `cancelled` activity attempt whose result artifact is the failure record with
+  `interrupted` was stopped by a pause (Task 11): its step gets a new attempt on
+  resume, and it never counts toward `max_attempts`. A step still has at most 10
+  root attempts in all; past that it fails `retries_exhausted`.
 - Wait keys are `w:` + SHA-256 of the occurrence path.
 """
 
@@ -50,6 +54,7 @@ from ..models import (
     ExecutionCapacity,
     ExecutionEvent,
     ExecutionInbox,
+    ExecutionLease,
     ExecutionReconciliationObservation,
     ExecutionRequest,
     ExecutionStepInstance,
@@ -122,6 +127,17 @@ FAILURES = frozenset(
 
 def _failure(code):
     return code if code in FAILURES else "invalid_result"
+
+
+# The record of a `cancelled` activity attempt that a pause released before it
+# started, or that stopped when its lease renewal was refused short of a
+# cancellation (Task 11). It is never a step's outcome: on resume the step gets a
+# new attempt, and an interrupted attempt never counts toward `max_attempts`.
+INTERRUPTED = "interrupted"
+# Root attempts of a step keep ordinals 1..10, interrupted ones included: an agent's
+# children take the ordinals above (`activity_records.CHILD_ORDINAL_BASE`). That
+# also bounds how often a pause can restart a step.
+ROOT_ATTEMPTS = 10
 
 
 # ---------------------------------------------------------------- pure state
@@ -406,13 +422,26 @@ class _Region:
             return "done", last.value
         if last.state in ACTIVE or last.state == "uncertain":
             return "pending", Derivation()
+        if last.state == "cancelled" and last.failure == INTERRUPTED:
+            # Interrupted by a pause: a new attempt, never counted as a retry.
+            if last.ordinal >= ROOT_ATTEMPTS:
+                return "failed", "retries_exhausted"
+            try:
+                value = self.activity_input(step)
+            except ExpressionError as error:
+                return "failed", error.code
+            return "pending", Derivation(
+                actions=(CreateAttempt(path, step.id, last.ordinal + 1, value),)
+            )
+        # Ordinals run 1, 2, ... with no gaps: the last one counts every attempt.
+        spent = last.ordinal - sum(
+            1 for a in attempts if a.state == "cancelled" and a.failure == INTERRUPTED
+        )
         code = "cancelled" if last.state == "cancelled" else (last.failure or "provider_failed")
         retry = step.retry
-        if (
-            last.state == "failed"
-            and code in retry.retry_codes
-            and last.ordinal < retry.max_attempts
-        ):
+        if last.state == "failed" and code in retry.retry_codes and spent < retry.max_attempts:
+            if last.ordinal >= ROOT_ATTEMPTS:
+                return "failed", "retries_exhausted"  # interruptions took the rest
             due = (last.failed_at_ms or 0) + retry.backoff_seconds * 1000
             if due > self.now_ms:
                 return "pending", Derivation(wake_at_ms=due)
@@ -639,8 +668,11 @@ class _Region:
         state = self.state
         if state.region_path == "" and self.now_ms >= state.deadline_ms:
             return Derivation(actions=(CancelUndispatched(""), Fail("deadline_exceeded")))
+        if state.region_path == "" and state.requested_state == "cancelled":
+            # Undispatched work ends now; the terminal state waits for containment.
+            return Derivation(actions=(CancelUndispatched(""), Fail("cancelled")))
         if state.requested_state != "running":
-            # Pause stops new dispatch and waits; Task 11 owns cancellation.
+            # Pause stops new dispatch and waits; deadlines keep running.
             return Derivation()
         wake = None
         for step in self.body.steps:
@@ -807,6 +839,26 @@ def _scope(execution):
         project_id=execution.project_id,
         environment_id=execution.environment_id,
     )
+
+
+def _unclaimed():
+    """No runtime ever claimed the attempt: no lease exists, so nothing of it started."""
+    return ~(
+        select(ExecutionLease.id)
+        .where(
+            ExecutionLease.workspace_id == ExecutionAttempt.workspace_id,
+            ExecutionLease.project_id == ExecutionAttempt.project_id,
+            ExecutionLease.environment_id == ExecutionAttempt.environment_id,
+            ExecutionLease.execution_id == ExecutionAttempt.execution_id,
+            ExecutionLease.attempt_id == ExecutionAttempt.id,
+        )
+        .exists()
+    )
+
+
+def _progressing(execution):
+    """Whether new work may be derived: running is requested, and no fence holds it."""
+    return execution.requested_state == "running" and execution.state != "reconciliation_required"
 
 
 def _scoped(model, execution):
@@ -1050,7 +1102,7 @@ class InterpreterV1:
 
     def _attempt(self, db, execution, row, *, values):
         value, failure, failed_at = MISSING, None, None
-        if row.result_artifact_id is not None and (values or row.state == "failed"):
+        if row.result_artifact_id is not None and (values or row.state in ("failed", "cancelled")):
             content = self._value(
                 db,
                 execution,
@@ -1062,6 +1114,10 @@ class InterpreterV1:
                 if type(content) is dict:
                     failure = _failure(content.get("failure"))
                     failed_at = content.get("failed_at_ms")
+            elif row.state == "cancelled":
+                # Only an interrupted record means anything for a cancelled attempt.
+                if type(content) is dict and content.get("failure") == INTERRUPTED:
+                    failure = INTERRUPTED
             else:
                 value = content
         return AttemptRecord(row.id, row.ordinal, row.state, value, failure, failed_at)
@@ -1594,6 +1650,53 @@ class InterpreterV1:
             )
         return bool(attempts or waits)
 
+    def _release_paused(self, db, execution, epoch, limit):
+        """A pause releases the root attempts that have not started (Task 11).
+
+        Reserved attempts, and dispatched ones no runtime has claimed (no lease), end
+        `cancelled` with the interrupted record; a pending delivery can no longer be
+        claimed. The capacity step confirms their stop and frees their reservations,
+        so a long pause neither holds compute slots nor spends an attempt: resuming
+        creates each anew. Claimed attempts stop when their renewal is refused.
+        """
+        attempts = list(
+            db.scalars(
+                _scoped(ExecutionAttempt, execution)
+                .where(
+                    ExecutionAttempt.execution_id == execution.id,
+                    ExecutionAttempt.parent_attempt_id.is_(None),
+                    ExecutionAttempt.state.in_(("reserved", "dispatched")),
+                    _unclaimed(),
+                )
+                .order_by(ExecutionAttempt.id)
+                .limit(limit)
+                .with_for_update()
+            )
+        )
+        if not attempts:
+            return 0
+        for delivery in db.scalars(
+            _scoped(ExecutionActivityDelivery, execution)
+            .where(ExecutionActivityDelivery.attempt_id.in_([a.id for a in attempts]))
+            .order_by(ExecutionActivityDelivery.id)
+            .with_for_update()
+        ):
+            if delivery.status == "pending":
+                delivery.status = "conflict"
+        record = {"failure": INTERRUPTED, "failed_at_ms": database_now_ms(db)}
+        for attempt in attempts:
+            handle = self._put(db, execution, record)
+            attempt.result_artifact_id = handle.id
+            attempt.result_artifact_version = handle.version
+            attempt.result_sha256 = handle.sha256
+            attempt.state = "cancelled"
+        db.flush()
+        for attempt in attempts:
+            self._event(
+                db, execution, epoch, "cancelled", attempt_id=attempt.id, detail=INTERRUPTED
+            )
+        return len(attempts)
+
     def _apply(self, db, execution, epoch, action) -> bool:
         """Apply one pure action; False when its effect already exists."""
         if isinstance(action, RecordPure):
@@ -1625,7 +1728,15 @@ class InterpreterV1:
             if region == "" and now >= execution.deadline_ms:
                 # Checked before any load, so even unreadable inputs end at the deadline.
                 derivation = Derivation(actions=(CancelUndispatched(""), Fail("deadline_exceeded")))
+            elif region == "" and execution.requested_state == "cancelled":
+                # Likewise a cancellation ends work whatever the inputs hold.
+                derivation = Derivation(actions=(CancelUndispatched(""), Fail("cancelled")))
+            elif region == "" and not _progressing(execution):
+                # Paused, or fenced for reconciliation: nothing new, and nothing loaded.
+                derivation = Derivation()
             else:
+                if program is None:
+                    program = load_program(db, _scope(execution), execution)
                 state = self.load_progression(db, execution, region, program=program)
                 derivation = derive(program, state, now)
             if derivation.wake_at_ms is not None:
@@ -1668,7 +1779,7 @@ class InterpreterV1:
         """Indexed probes of committed state: could a capacity step change anything?
 
         An open wait without its `capacity.wait:` row (while running), a closed wait
-        retained but not released, or a cancelled undelivered attempt whose
+        retained but not released, or a cancelled, never claimed attempt whose
         reservation is not yet stopped. Bounded passes skip the capacity step, so
         this reads state rather than trusting what the last pass applied.
         """
@@ -1714,9 +1825,7 @@ class InterpreterV1:
                 ExecutionAttempt.execution_id == execution.id,
                 ExecutionAttempt.state == "cancelled",
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),
-                ~select(ExecutionActivityDelivery.id)
-                .where(ExecutionActivityDelivery.attempt_id == ExecutionAttempt.id)
-                .exists(),
+                _unclaimed(),
             )
             .exists(),
         ]
@@ -1735,11 +1844,6 @@ class InterpreterV1:
                 ExecutionAttempt.state.in_(("reserved", "dispatched", "claimed", "uncertain")),
             )
         )
-        undelivered = (
-            ~select(ExecutionActivityDelivery.id)
-            .where(ExecutionActivityDelivery.attempt_id == ExecutionAttempt.id)
-            .exists()
-        )
         unstopped = (
             select(func.count())
             .select_from(ExecutionUsageReservation)
@@ -1750,8 +1854,8 @@ class InterpreterV1:
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),
             )
         )
-        # Cancelled before delivery: the capacity step confirms that stop itself.
-        stoppable = db.scalar(unstopped.where(ExecutionAttempt.state == "cancelled", undelivered))
+        # Cancelled before any claim: the capacity step confirms that stop itself.
+        stoppable = db.scalar(unstopped.where(ExecutionAttempt.state == "cancelled", _unclaimed()))
         running = db.scalar(unstopped) - stoppable
         retained = set(
             db.scalars(
@@ -1786,10 +1890,26 @@ class InterpreterV1:
         if type(bound) is not int or not 1 <= bound <= BOUND:
             raise ExecutionError("invalid_request")
         epoch = self._epoch(db, epoch)
-        program = load_program(db, _scope(execution), execution)
         if execution.next_event_sequence == 1:
             self._event(db, execution, epoch, "started")
-        transitions, wake, terminal, touched = 0, None, None, False
+        from .control import observe_control
+
+        # A requested pause or resume becomes the observed state (Task 11).
+        observed = observe_control(
+            db, execution, lambda code: self._event(db, execution, epoch, code)
+        )
+        released = (
+            self._release_paused(db, execution, epoch, bound) if execution.state == "paused" else 0
+        )
+        # The deadline, a cancellation, a pause and a reconciliation fence need only
+        # the execution row: a program that cannot be loaded never holds them up.
+        program = (
+            load_program(db, _scope(execution), execution)
+            if _progressing(execution) and database_now_ms(db) < execution.deadline_ms
+            else None
+        )
+        transitions, wake, terminal = int(observed) + released, None, None
+        touched = bool(released)
         while transitions < bound:
             applied, terminal, round_wake, round_touched = self._round(
                 db, execution, program, epoch, bound - transitions
@@ -1816,9 +1936,10 @@ class InterpreterV1:
             retain, release, contained, stoppable = self._capacity_work(db, execution)
             capacity = bool(retain or release or stoppable or (terminal is not None and contained))
         # A capacity pass keeps its own wake-up (say a sibling's retry back-off): the
-        # engine adds the capacity deferral and the earliest time wins.
+        # engine adds the capacity deferral and the earliest time wins. No wake-up is
+        # later than the deadline, which ends the work wherever it stands.
         if wake is not None and not more:
-            mark_runnable(db, execution, wake)
+            mark_runnable(db, execution, min(wake, execution.deadline_ms))
         db.flush()
         return AdvanceOutcome(
             execution_id=execution.id,
@@ -1827,6 +1948,25 @@ class InterpreterV1:
             runnable=capacity or more,
             reason="capacity" if capacity else None,
         )
+
+    def fence_execution(self, db, execution, code, *, epoch=None) -> bool:
+        """Fence a started execution whose stored program or rows fail verification.
+
+        `integrity` and `occurrence_unresolved` repeat on every try, so the engine
+        fences instead of retrying until the deadline: `reconciliation_required`,
+        reason `uncertain`, with the code as event detail. Progression then derives
+        nothing new; cancellation and the deadline still end it. An execution still
+        `pending` keeps its admission slot and is left to its deadline. True when
+        the state changed.
+        """
+        epoch = self._epoch(db, epoch)
+        if execution.state in TERMINAL or execution.state in ("pending", "reconciliation_required"):
+            return False
+        execution.state, execution.reason = "reconciliation_required", "uncertain"
+        clear_runnable(db, execution)
+        db.flush()
+        self._event(db, execution, epoch, "reconciliation_required", detail=code)
+        return True
 
     # ---------------------------------------------------------- capacity
 
@@ -1845,7 +1985,7 @@ class InterpreterV1:
             return None
 
     def _stop_cancelled(self, db, execution):
-        """Confirm compute stop for cancelled attempts that were never delivered."""
+        """Confirm compute stop for cancelled attempts that no runtime ever claimed."""
         rows = db.execute(
             select(ExecutionAttempt.id)
             .join(
@@ -1857,9 +1997,7 @@ class InterpreterV1:
                 ExecutionAttempt.execution_id == execution.id,
                 ExecutionAttempt.state == "cancelled",
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),
-                ~select(ExecutionActivityDelivery.id)
-                .where(ExecutionActivityDelivery.attempt_id == ExecutionAttempt.id)
-                .exists(),
+                _unclaimed(),
             )
             .order_by(ExecutionAttempt.id)
         ).scalars()
@@ -1878,6 +2016,8 @@ class InterpreterV1:
             db.add(observation)
             db.flush()
             self.budgets.confirm_stopped(db, attempt_id, observation.id)
+            # Never claimed, so nothing ran: its reservation charges nothing (Task 11).
+            self.budgets.release_unstarted(db, attempt_id)
             stopped += 1
         return stopped
 
@@ -1895,6 +2035,9 @@ class InterpreterV1:
         if isinstance(action, Complete):
             execution.state, execution.reason = "succeeded", "completed"
             self._event(db, execution, epoch, "succeeded")
+        elif action.code == "cancelled" and execution.requested_state == "cancelled":
+            execution.state, execution.reason = "cancelled", "control"
+            self._event(db, execution, epoch, "cancelled")
         else:
             code = _failure(action.code)
             execution.state = "failed"
@@ -1961,10 +2104,15 @@ class InterpreterV1:
         if execution.state in TERMINAL:
             return self._outcome(execution, 0)
         changes = 0
-        program = load_program(db, scope, execution)
+        program = None
         if database_now_ms(db) >= execution.deadline_ms:
             derivation = Derivation(actions=(CancelUndispatched(""), Fail("deadline_exceeded")))
+        elif execution.requested_state == "cancelled":
+            derivation = Derivation(actions=(CancelUndispatched(""), Fail("cancelled")))
+        elif not _progressing(execution):
+            derivation = Derivation()  # paused or fenced: no terminal action to find
         else:
+            program = load_program(db, scope, execution)
             state = self.load_progression(db, execution, "", program=program)
             derivation = derive(program, state, database_now_ms(db))
         terminal = next((a for a in derivation.actions if isinstance(a, (Complete, Fail))), None)

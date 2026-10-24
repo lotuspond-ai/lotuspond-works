@@ -86,7 +86,7 @@ from .deployments import load_deployment
 from .errors import ExecutionError
 from .expressions import ExpressionError, typed_schema
 from .orchestrator import mark_runnable
-from .progression import record_event
+from .progression import INTERRUPTED, record_event
 from .publication import _Lookup
 
 VALUE_LIMITS = JsonLimits(MAX_VALUE_BYTES, 32, 10000)
@@ -138,6 +138,97 @@ def cursor_nowait(db, installation_id):
 
 def failure_content(code, at_ms) -> bytes:
     return canonical_value({"failure": code, "failed_at_ms": at_ms})
+
+
+# Written under the execution lock when a pause is requested, one per root attempt
+# then claimed (Task 11). Its `cancelled` report is then an interruption; any other
+# `cancelled` report short of a cancellation (say, after a revoked initiator's
+# refused renewal) is a failure the step's policy counts.
+PAUSE_PREFIX = "activity.pause:"
+
+
+def mark_pause_stops(db, scope, execution) -> int:
+    """Record that each claimed root attempt is being stopped by a pause."""
+    claimed = list(
+        db.scalars(
+            scoped(ExecutionAttempt, scope)
+            .where(
+                ExecutionAttempt.execution_id == execution.id,
+                ExecutionAttempt.parent_attempt_id.is_(None),
+                ExecutionAttempt.state == "claimed",
+            )
+            .order_by(ExecutionAttempt.id)
+            .with_for_update()
+        )
+    )
+    keys = {PAUSE_PREFIX + attempt.id for attempt in claimed}
+    known = set(
+        db.scalars(
+            select(ExecutionRequest.request_key).where(
+                ExecutionRequest.workspace_id == scope.workspace_id,
+                ExecutionRequest.project_id == scope.project_id,
+                ExecutionRequest.environment_id == scope.environment_id,
+                ExecutionRequest.request_key.in_(sorted(keys)),
+            )
+        )
+    )
+    for attempt in claimed:
+        key = PAUSE_PREFIX + attempt.id
+        if key not in known:
+            db.add(
+                ExecutionRequest(
+                    **scope.model_dump(),
+                    execution_id=execution.id,
+                    request_key=key,
+                    digest=sha256(canonical_value({"attempt_id": attempt.id})).hexdigest(),
+                )
+            )
+    db.flush()
+    return len(keys - known)
+
+
+def paused_stop(db, scope, attempt) -> bool:
+    return (
+        db.scalar(
+            scoped(ExecutionRequest, scope).where(
+                ExecutionRequest.request_key == PAUSE_PREFIX + attempt.id
+            )
+        )
+        is not None
+    )
+
+
+def interrupted(artifacts, db, scope, attempt) -> bool:
+    """Whether the attempt carries the interrupted record (Task 11)."""
+    if attempt.result_artifact_id is None:
+        return False
+    content = artifacts._get_internal(
+        db,
+        scope,
+        ArtifactHandle(
+            id=attempt.result_artifact_id,
+            version=attempt.result_artifact_version,
+            sha256=attempt.result_sha256,
+        ),
+    )
+    try:
+        return json.loads(content).get("failure") == INTERRUPTED
+    except Exception:
+        return False
+
+
+def keep_interrupted(artifacts, db, scope, attempt) -> bool:
+    """Reconciliation of an uncertain attempt that a pause stopped: cancelled, not failed.
+
+    Its outcome is known (stopped on a refused renewal, nothing returned) while its
+    usage stays uncertain liability; the step resumes with a new attempt. True when
+    the attempt was ended this way.
+    """
+    if not interrupted(artifacts, db, scope, attempt):
+        return False
+    attempt.state = "cancelled"
+    db.flush()
+    return True
 
 
 def close_children(db, budgets, scope, parent, now):
@@ -973,6 +1064,16 @@ class ActivityService:
                 outcome = "succeeded"
             except ExpressionError:
                 content = failure_content("invalid_result", now)
+        elif (
+            result.code == "cancelled"
+            and execution.requested_state != "cancelled"
+            and paused_stop(db, scope, attempt)
+        ):
+            # Stopped because a pause refused its renewal: the step gets a new
+            # attempt on resume, and this one is never counted.
+            if result.result is not None:
+                raise ExecutionError("invalid_request")
+            outcome, content = "cancelled", failure_content(INTERRUPTED, now)
         else:
             if result.result is not None:
                 raise ExecutionError("invalid_request")
@@ -1005,6 +1106,12 @@ class ActivityService:
         lease.status = "stopped"
         delivery.status = "delivered"
         if attempt.state == "uncertain":
+            if outcome == "cancelled":
+                # Known outcome, unknown usage: reconciliation keeps this record.
+                handle = self.artifacts._put_internal(db, scope, content, self.policy)
+                attempt.result_artifact_id = handle.id
+                attempt.result_artifact_version = handle.version
+                attempt.result_sha256 = handle.sha256
             execution.state = "reconciliation_required"
             execution.reason = "uncertain"
             db.flush()
@@ -1025,7 +1132,9 @@ class ActivityService:
             db,
             execution,
             principal.identity.recovery_epoch,
-            "attempt_succeeded" if outcome == "succeeded" else "attempt_failed",
+            {"succeeded": "attempt_succeeded", "cancelled": "cancelled"}.get(
+                outcome, "attempt_failed"
+            ),
             attempt_id=attempt.id,
             detail=None if outcome == "succeeded" else json.loads(content)["failure"],
         )

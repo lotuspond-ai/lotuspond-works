@@ -105,8 +105,9 @@ class LeaseService:
             or attempt.state != "claimed"
         ):
             raise ExecutionError("conflict")
-        # Cancellation is reported by refusing renewal; the runtime then stops.
-        if execution.requested_state == "cancelled" or execution.state in TERMINAL:
+        # A pause or a cancellation is reported by refusing renewal: the runtime then
+        # stops the provider and reports `cancelled` with what it observed.
+        if execution.requested_state != "running" or execution.state in TERMINAL:
             raise ExecutionError("forbidden")
         if rows["parent"] is not None:
             # A child runs only inside its parent's live lease.
@@ -167,11 +168,11 @@ class LeaseService:
         return execution, attempt, reservation, delivery, lease
 
     @activity_service
-    def lapse_lease(self, db, lease_id: str, *, epoch=None) -> None:
+    def lapse_lease(self, db, lease_id: str, *, epoch=None) -> bool:
         """A lease past its expiry: the attempt is uncertain until reconciled.
 
         The liability stays reserved, and the execution is not marked runnable:
-        only reconciliation can decide what happened.
+        only reconciliation can decide what happened. True when it changed.
         """
         epoch = self._epoch(epoch)
         hint = db.get(ExecutionLease, lease_id)
@@ -183,7 +184,7 @@ class LeaseService:
         )
         now = database_now_ms(db)
         if lease is None or lease.status != "active" or now < lease.expires_at_ms:
-            return
+            return False
         lease.status = "uncertain"
         if attempt.state == "claimed":
             attempt.state = "uncertain"
@@ -196,14 +197,17 @@ class LeaseService:
             execution.reason = "uncertain"
             db.flush()
             self._event(db, execution, epoch, "reconciliation_required", attempt.id)
+        return True
 
     @activity_service
-    def expire_delivery(self, db, delivery_id: str, *, epoch=None) -> None:
+    def expire_delivery(self, db, delivery_id: str, *, epoch=None) -> bool:
         """An unclaimed delivery past its expiry fails its attempt and frees its slot.
 
         Its usage is settled as zero: a runtime invokes nothing before a durable
         claim, so an unclaimed delivery never started. The attempt never gets a
-        second delivery; a retry is a new ordinal decided by progression.
+        second delivery; a retry is a new ordinal decided by progression. A delivery
+        signed under an older epoch is left to the restore fence (`recovery`): after
+        a restore, "unclaimed" in a restored row proves nothing. True when it changed.
         """
         epoch = self._epoch(epoch)
         hint = db.get(ExecutionActivityDelivery, delivery_id)
@@ -214,15 +218,20 @@ class LeaseService:
             db, scope, hint.attempt_id, cursor=True
         )
         now = database_now_ms(db)
-        if delivery.status != "pending" or now < delivery.expires_at_ms:
-            return
+        if (
+            delivery.status != "pending"
+            or now < delivery.expires_at_ms
+            or delivery.recovery_epoch != epoch
+        ):
+            return False
         delivery.status = "conflict"
         db.flush()
         if attempt.state != "dispatched":
-            return
+            return True
         self._fail_unstarted(
             db, scope, execution, attempt, reservation, "expired:" + delivery.id, now, epoch
         )
+        return True
 
     def _fail_unstarted(
         self,
@@ -343,7 +352,7 @@ class LeaseService:
         )
 
     @activity_service
-    def expire_reservation(self, db, attempt_id: str, *, epoch=None) -> None:
+    def expire_reservation(self, db, attempt_id: str, *, epoch=None) -> bool:
         """A reserved attempt whose reserved active time ran out before any dispatch.
 
         Dispatch refuses it (`budget_exceeded`), so without this it would hold its
@@ -365,7 +374,8 @@ class LeaseService:
             or reservation.compute_stopped_at_ms is not None
             or reserved_until(reservation) > now
         ):
-            return
+            return False
         self._fail_unstarted(
             db, scope, execution, attempt, reservation, "spent:" + attempt.id, now, epoch
         )
+        return True

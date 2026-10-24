@@ -187,7 +187,7 @@ def test_a_tool_read_resolves_its_connections_secrets(tmp_path):
 def test_losing_the_parents_lease_cancels_its_running_child(tmp_path):
     env = build(tmp_path, model_script={"rounds": [{"sleep_s": 30, "output": None}]})
     root = env.server.root("model")
-    env.server.refuse_renewal_ids = {root.id}  # only the root's renewal is refused
+    env.server.lose_renewal_ids = {root.id}  # only the root's lease is lost
     started = time.monotonic()
     assert ActivityWorker(env.deps).run_once() == "lost"
     assert time.monotonic() - started < 6
@@ -196,6 +196,43 @@ def test_losing_the_parents_lease_cancels_its_running_child(tmp_path):
     assert env.journal.get(root.id)["phase"] == "abandoned"
     assert env.journal.get(model_round.id)["phase"] == "abandoned"
     assert env.server.results == []  # both lapse to reconciliation; nothing invented
+
+
+def test_a_stopping_root_stops_its_running_child_and_both_report(tmp_path):
+    # A pause or a cancellation refuses the root's renewal while a round runs.
+    env = build(tmp_path, model_script={"rounds": [{"sleep_s": 30, "output": None}]})
+    root = env.server.root("model")
+    env.server.refuse_renewal_ids = {root.id}
+    started = time.monotonic()
+    assert ActivityWorker(env.deps).run_once() == "cancelled"
+    assert time.monotonic() - started < 6
+    (model_round,) = children(env)
+    assert calls(env.counter) == 1
+    # The round stopped and reported what it knows (unknown cost); the root follows.
+    assert model_round.result.code == "cancelled"
+    assert model_round.result.usage.cost_microusd is None
+    assert root_result(env).code == "cancelled"
+    assert root_result(env).usage.cost_microusd == 0  # the root itself called nothing
+    assert env.journal.get(root.id)["phase"] == "recorded"
+
+
+def test_a_child_refused_by_a_stop_ends_the_agent_as_cancelled(tmp_path):
+    env = build(tmp_path, model_script={"rounds": [{"output": None}]})
+    root = env.server.root("model")
+    # Paused before the first round: the child is refused, and so is the renewal.
+    env.server.refuse_children_ids = env.server.refuse_renewal_ids = {root.id}
+    assert ActivityWorker(env.deps).run_once() == "cancelled"
+    assert children(env) == [] and calls(env.counter) == 0
+    assert root_result(env).code == "cancelled"
+    assert root_result(env).usage.cost_microusd == 0
+
+
+def test_a_child_refused_for_another_reason_still_fails_the_agent(tmp_path):
+    env = build(tmp_path, model_script={"rounds": [{"output": None}]})
+    root = env.server.root("model")
+    env.server.refuse_children_ids = {root.id}  # refused, but the root may go on
+    assert ActivityWorker(env.deps).run_once() == "provider_failed"
+    assert root_result(env).code == "provider_failed"
 
 
 def test_an_unrelated_pending_delivery_is_never_handed_to_an_agent(tmp_path):

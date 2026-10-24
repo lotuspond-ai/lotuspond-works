@@ -647,3 +647,91 @@ After both approvals, the quality reviewer's last suggestion was applied: count 
 - A decline fails its attempt exactly as an expiry does (`timeout_before_dispatch`, zero usage).
 - It requires the dispatched session and the delivery's exact digest, but not the initiator's current `execute`.
 - **Trade-off:** a runtime with stale trust declines nothing, and its delivery still expires within 5 minutes.
+
+## E04 Task 11: sweeper, controls, interpreter pins and recovery fences, 2026-10-23
+
+Same branch as Tasks 7–10. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is still refusing jobs because of the account billing problem, so the Linux results below come from local containers, not from hosted CI.
+
+**Red before implementation.** The five new Task 11 test files were run on `3682c39`, the commit before Task 11, and all five failed at collection. `lotuspond.execution` had no `sweeper`, `control`, `interpreters` or `projections` module.
+
+**Time and concurrency in the tests.**
+
+- No Task 11 test edits a deadline, lease or expiry column. Due work comes in real database time from five short-time fixtures:
+  - `waits_fast`: a 2 s timer and a 3 s external wait;
+  - `waits_deadline`: a 5 s deadline;
+  - `activity_deadline`: a 4 s deadline;
+  - `activity_backoff`: a one-hour retry back-off under a 4 s deadline;
+  - `activity_budget`: a 10 microdollar budget.
+- Race tests cover concurrent sweepers, the sweeper against the orchestrator, a pause against a claim, a signal against its wait's expiry, and concurrent runtime events. Each racing thread gets its own bounded fleet lookup, as a separate worker process would.
+
+**Mutations.** All 44 reverted fixes made their witness test fail. The worker-pin mutation at first hung rather than failed: with the startup check reverted, the worker ran until stopped. Its test now stops a wrongly started worker after 5 s, so it fails, and the harness has a 10-minute timeout reported apart from caught mutations.
+
+- **Runtime (2):** a refused renewal treated as loss, and a stop treated as a failure. Both were run in the Linux container.
+- **Backend (42):** each reverts one fix in a scratch copy and runs its witness test on the local PostgreSQL cluster. They cover:
+  - item independence and timers;
+  - the deadline pass and its back-off rule;
+  - the per-item lock timeout;
+  - the restore fence and closing an inconsistent candidate;
+  - controls under the execution lock, roles, cancellation finality, and the resume checks (deadline, budget, deployment, an equal repeat without grants);
+  - pause release and unstarted reservations charging nothing;
+  - interrupted attempts not counted, the 10 root attempts, and pause markers;
+  - renewal refused while paused, and an interrupted report kept through reconciliation;
+  - signals accepted while paused;
+  - the program never loaded before controls, the integrity fence, waits held while fenced, and the resumed state;
+  - event gaps, the gap bound, live work, and late abandoned events;
+  - reconciliation's authority;
+  - interpreter, compiler and worker pins.
+
+**Green on macOS.**
+
+- Backend `tests/execution` on the local PostgreSQL cluster (`PGTZ=UTC`) at the round 2 checkpoint: 476 passed, 1 failed. The failure was the stale budget test fixed in round 3.
+- The five Task 11 files at the final source: 37 passed, `test_control.py` 18 of 18.
+- Ruff is clean on both distributions, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).** Same container setup as the Task 10 entry: a standalone clone of the commit mounted read-only, hash-pinned PyPI wheels, and PostgreSQL 18.6 on an internal network.
+
+- Runtime suite at `cccd2cc`: 722 passed, 0 failed. The runtime is unchanged after it.
+- Full backend suite at `8b5626b`: 1,193 passed, 97 subtests, 0 failed, 0 skipped, in 24 min 56 s, including all 8 fleet acceptance tests. Cleanup was confirmed.
+- The final source differs from `8b5626b` only in this entry and one plan sentence: the owner's confirmation of the refund.
+
+**Reviews.** Both independent reviews required changes for three rounds and approved the fourth.
+
+- **Round 1** (both reviews):
+  - executions whose program could not be loaded were never fenced, and blocked cancellation and the deadline;
+  - the compiler-revision rule was missing from the registry;
+  - pause failed in-flight work and burned reservations;
+  - cancellation of claimed work always ended in reconciliation;
+  - wake-ups could outlast the deadline;
+  - the spent-reservation scan read every attempt;
+  - tests edited time columns and had no race tests;
+  - Minors: lock waits, event sources, resume checks, depths, restore candidates.
+- **Round 2:**
+  - repeated pauses pushed root ordinals into an agent's child range;
+  - any `cancelled` report counted as a free restart;
+  - never-run reservations were charged on every pause.
+- **Round 3:** one stale test, plus Minors recorded for the owner: the pause marker is never cleared, the cap counts releases of never-started work, and Task 9's never-started failures keep their reserved active time.
+
+**Owner decisions** (2026-10-23, "OK to all three, proceed"), recorded in the plan's Task 11 conventions:
+
+1. A paused read or agent starts over on resume, and spent usage stays charged.
+2. A provider stopped mid-call has unknown usage, so it needs one owner reconciliation before resume.
+3. Signals are accepted while paused, and one accepted before its wait's deadline counts.
+
+On 2026-10-24 ("OK, keep the refund"), the owner also confirmed the reservation refund. A reservation whose attempt no runtime ever claimed is released at zero once its stop is confirmed. That applies to every cancelled, unclaimed attempt the capacity step stops, not just pauses.
+
+**Also for the owner's acknowledgement** (plan, "Conventions fixed by Task 11"):
+
+- Pause now stops claimed work cooperatively, following the spec. Unstarted work is released, and its reservation is refunded (owner-confirmed above).
+- A step has at most 10 root attempts, interrupted ones included, so 10 pauses of a queued step fail it although nothing ran.
+- A pause marker counts a stop as an interruption only after a pause, and it is never cleared.
+- Programs that fail verification are fenced to `reconciliation_required`. The deadline, cancellation and pause need only the execution row.
+- Each interpreter version pins the compiler revision whose plans it interprets.
+- The sweeper waits at most 500 ms for an item's locks, and never cuts the engine's back-off short.
+- Runtime events require live work. Taking a `RuntimePrincipal` is an obligation for the first task that serves them.
+- `SweepReport` gains `retired_reservations` and `restored_attempts`.
+
+**Obligations carried to Task 12 and later:**
+
+- The single-call fleet lookup refuses concurrent callers, so the API's wiring must account for it.
+- Runtime-event routes, if any, take a `RuntimePrincipal`.
+- Task 13 measures the spent-reservation scan, and repeats the restore and kill cases with real processes.

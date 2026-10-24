@@ -191,6 +191,8 @@ class FakeControlPlane:
         self.claims, self.renewals, self.results, self.calls = [], [], [], []
         self.declines = []
         self.faults, self.child_override, self.refuse_renewal_ids = {}, None, set()
+        # Lost (`conflict`) rather than refused: the lease ended under the runtime.
+        self.lose_renewal_ids, self.refuse_children_ids = set(), set()
         self.children = self.overlaps = 0
         self._busy = False
         self.execution_id, self.step_id, self.revision_id = uid(), uid(), uid()
@@ -437,7 +439,9 @@ class FakeControlPlane:
             attempt = self.attempts[lease.attempt_id]
             now = self.now_ms()
             if self.refuse_renewal or lease.attempt_id in self.refuse_renewal_ids:
-                raise FleetError("forbidden")  # cancelled: reported by refusing renewal
+                raise FleetError("forbidden")  # paused or cancelled: asked to stop
+            if lease.attempt_id in self.lose_renewal_ids:
+                raise FleetError("conflict")  # the lease is gone
             if not self._live(attempt, now) or (
                 attempt.parent is not None and not self._live(self.attempts[attempt.parent], now)
             ):
@@ -456,6 +460,8 @@ class FakeControlPlane:
             now = self.now_ms()
             if parent.parent is not None or not self._live(parent, now):
                 raise FleetError("conflict")
+            if parent.id in self.refuse_children_ids:
+                raise FleetError("forbidden")  # paused or cancelled: no new child
             digest = rfc8785.dumps(request.model_dump(mode="json"))
             known = self.child_requests.get((parent.id, request.request_id))
             if known is not None:

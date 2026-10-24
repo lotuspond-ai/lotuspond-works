@@ -9,9 +9,11 @@ the control plane's: confirmed server time plus elapsed monotonic time.
 The control transport carries one request at a time, so leases are renewed on the
 worker's own thread, where it already waits: inside the provider loop and before
 each control call. Losing the lease cancels the provider child at once and leaves
-the outcome uncertain. Once a lease is held, every other ending is reported: an
-outcome nobody could have caused (nothing reached a provider) with zero usage, a
-known one with the usage observed.
+the outcome uncertain. A renewal refused while the lease still holds is a request
+to stop (a pause or a cancellation): the provider child is cancelled just as fast,
+and the outcome is reported as `cancelled`. Once a lease is held, every other
+ending is reported: an outcome nobody could have caused (nothing reached a
+provider) with zero usage, a known one with the usage observed.
 """
 
 from __future__ import annotations
@@ -228,15 +230,20 @@ class LeaseLost(Exception):
 class LeaseKeeper:
     """Keeps one lease live from the worker's own thread.
 
-    `tick()` renews when due and reports whether the lease (and its parent's, for a
-    child) is still held. A refusal ends it at once; a transient failure is retried
-    until too little of the lease is left to stop the provider in time. `is_set()`
-    is its cancellation view for `call_provider`, which polls it every 50 ms.
+    `tick()` renews when due and reports whether the provider may go on: the lease
+    (and its parent's, for a child) is held and nothing asked it to stop. A transient
+    failure is retried until too little of the lease is left to stop the provider in
+    time; any other refusal ends the lease at once (`lost`). The exception is a
+    `forbidden` renewal while the lease is still live: the control plane asks the
+    attempt to stop (a pause or a cancellation), so it is `cancelled`. The provider
+    stops and the outcome is reported with what was observed, under the lease that
+    still holds. `held()` is whether the lease still holds for reporting. `is_set()`
+    is the cancellation view for `call_provider`, which polls it every 50 ms.
     """
 
     def __init__(self, deps: ActivityDependencies, lease: ActivityLease, parent=None):
         self.deps, self.lease, self.parent = deps, lease, parent
-        self.lost = False
+        self.lost = self.cancelled = False
         self._due = self._next()
 
     def _next(self):
@@ -264,32 +271,52 @@ class LeaseKeeper:
                 now = self.deps.clock.now_ms()
             except FleetError:
                 now = None
-            if (
-                error.code in TRANSIENT
-                and now is not None
-                and now < self.lease.expires_at_ms - RENEW_MARGIN_MS
-            ):
+            live = now is not None and now < self.lease.expires_at_ms - RENEW_MARGIN_MS
+            if error.code in TRANSIENT and live:
                 self._due = now + 500
+                return
+            if error.code == "forbidden" and live:
+                self.cancelled = True  # asked to stop: report, under the live lease
                 return
             self.lost = True
         except Exception:
             self.lost = True  # anything unexpected ends the lease: fail closed
 
-    def tick(self) -> bool:
+    def tick(self, *, now=False) -> bool:
+        """Renew when due (`now`: at once); True while the provider may go on."""
         if self.parent is not None and not self.parent.tick():
-            self.lost = True
-        if not self.lost:
+            # A parent asked to stop stops its child too; a lost one loses it.
+            if self.parent.lost:
+                self.lost = True
+            else:
+                self.cancelled = True
+        if not (self.lost or self.cancelled):
+            if now:
+                self._due = 0
             self._renew()
+        return not (self.lost or self.cancelled)
+
+    def held(self) -> bool:
+        """Whether the lease still holds for control calls and reporting."""
+        self.tick()
         return not self.lost
 
     def is_set(self) -> bool:
         return not self.tick()
 
 
+def running(keeper):
+    """Go on only while the provider may: LeaseLost, or `cancelled` with nothing started."""
+    if not keeper.tick():
+        if keeper.lost:
+            raise LeaseLost
+        raise ActivityFailure("cancelled", reached=False)
+
+
 def retry(call, deps, keeper=None, attempts=3):
     """Repeat an idempotent control call on transient failures while the lease holds."""
     for attempt in range(attempts):
-        if keeper is not None and not keeper.tick():
+        if keeper is not None and not keeper.held():
             raise LeaseLost
         try:
             return call()
@@ -641,8 +668,7 @@ def run_activity(delivery, lease, deps: ActivityDependencies, *, verified=None) 
     usage, reached = nothing, False
     try:
         value = _fetch_input(deps, envelope, records)
-        if not keeper.tick():
-            raise LeaseLost
+        running(keeper)
         deadline = min(records.deadline_ms, keeper.lease.deadline_ms)
         if envelope.kind == "connector_read":
             arguments = read_arguments(value, records)
@@ -654,8 +680,7 @@ def run_activity(delivery, lease, deps: ActivityDependencies, *, verified=None) 
             from .agent import AgentRequest, ProposalRefused, run_agent
 
             agent = AgentRequest.from_records(deps, envelope, records, value)
-            if not keeper.tick():
-                raise LeaseLost
+            running(keeper)
             try:
                 result = run_agent(agent, deps, keeper)
             except ProposalRefused:

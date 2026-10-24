@@ -30,6 +30,7 @@ from .authorization import lock, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
 from .deployments import _configuration, _pool, _stored_configuration, load_deployment
 from .errors import ExecutionError, execution_service
+from .interpreters import require_interpreter
 from .orchestrator import mark_runnable
 from .publication import current_snapshot, load_publication
 
@@ -98,6 +99,11 @@ class AdmissionService:
         if self.policy.source_id is not None:
             raise ValueError("Admission requires workspace response policy")
         self.interpreter_id = TypeAdapter(OpaqueId).validate_python(interpreter_id, strict=True)
+        # Admission pins only a version this build registers (Task 11).
+        try:
+            require_interpreter(self.interpreter_id)
+        except ExecutionError:
+            raise ValueError("Unregistered interpreter version") from None
 
     @execution_service
     def admit_execution(

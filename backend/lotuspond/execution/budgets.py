@@ -27,6 +27,7 @@ from ..models import (
     ExecutionAttempt,
     ExecutionCapacity,
     ExecutionDeploymentRevision,
+    ExecutionLease,
     ExecutionReconciliationObservation,
     ExecutionRequest,
     ExecutionSchedulerCursor,
@@ -81,6 +82,8 @@ def active_liability(row, now_ms):
 
 
 def liability(row, field, now_ms):
+    if row.state == "released":
+        return 0  # stopped before any claim: nothing ran, so nothing is charged
     if field == "active_ms":
         return active_liability(row, now_ms)
     observed = getattr(row, "observed_" + field)
@@ -605,6 +608,31 @@ class BudgetService:
             row.compute_stopped_at_ms = observation.observed_at_ms
             row.active_ms = active_liability(row, observation.observed_at_ms)
         db.flush()
+        return view(row)
+
+    @execution_service
+    def release_unstarted(self, db, attempt_id):
+        """Free a stopped reservation whose attempt no runtime ever claimed (Task 11).
+
+        Nothing ran, so zero is known, as a runtime reports an outcome no provider
+        could have caused; a pause that releases work it never started then charges
+        nothing for it. Only a confirmed stop of a cancelled attempt without a lease
+        is released; anything claimed stays charged as observed.
+        """
+        scope, _, _, attempt, row = self._settlement_rows(db, attempt_id)
+        claimed = db.scalar(
+            scoped(ExecutionLease, scope).where(ExecutionLease.attempt_id == attempt_id)
+        )
+        if (
+            row is None
+            or row.compute_stopped_at_ms is None
+            or attempt.state != "cancelled"
+            or claimed is not None
+        ):
+            raise ExecutionError("conflict")
+        if row.state == "reserved":
+            row.state = "released"
+            db.flush()
         return view(row)
 
     @execution_service

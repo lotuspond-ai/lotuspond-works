@@ -178,11 +178,24 @@ class _Children:
         self.count = 0
         self.started = False  # whether any child may have reached a provider
 
+    def _stopping(self, error) -> bool:
+        """A `forbidden` refusal from a pause or a cancellation: renewing at once tells."""
+        keeper = self.keeper
+        return error.code == "forbidden" and not keeper.tick(now=True) and not keeper.lost
+
     def _receive(self, kind, name, stored, dependency, operation):
         """Admit a child and take its delivery, bound to exactly what was asked."""
-        from .activity_worker import _canonical, declinable, decline, retry, verify_delivery
+        from .activity_worker import (
+            _canonical,
+            declinable,
+            decline,
+            retry,
+            running,
+            verify_delivery,
+        )
 
         deps, root, keeper = self.deps, self.request.attempt_id, self.keeper
+        running(keeper)  # no new child once the root is asked to stop
         content = _canonical(stored)
         handle = retry(lambda: deps.client.store(root, content), deps, keeper)
         self.count += 1
@@ -197,8 +210,11 @@ class _Children:
             child_id = retry(lambda: deps.client.request_child(request), deps, keeper)
             # Only this parent's children: an unrelated delivery is never handed over here.
             delivery = retry(lambda: deps.client.poll(parent_attempt_id=root), deps, keeper)
-        except FleetError:
-            # Refused (shared budget spent, authority gone): nothing was invoked.
+        except FleetError as error:
+            # Refused (shared budget spent, authority gone): nothing was invoked. A
+            # pause or a cancellation refuses children too.
+            if self._stopping(error):
+                raise ActivityFailure("cancelled", reached=False) from None
             raise ActivityFailure("provider_failed", reached=False) from None
         if delivery is None:
             # Not dispatched (too close to the deadline, for example): the root's
@@ -260,6 +276,8 @@ class _Children:
                 # from reporting: both are left to the lapse and reconciliation.
                 deps.journal.advance(child_id, "abandoned")
                 raise LeaseLost from None
+            if self._stopping(error):
+                raise ActivityFailure("cancelled", reached=False) from None
             raise ActivityFailure("provider_failed", reached=False) from None
         try:
             lease = checked_lease(granted, envelope, deps)
@@ -351,13 +369,13 @@ def run_agent(request: AgentRequest, deps, keeper) -> ProviderResult:
 
 def _run(request: AgentRequest, deps, keeper, children) -> ProviderResult:
     from .activity_worker import (
-        LeaseLost,
         _typed,
         bounded_response,
         invoke_model,
         invoke_read,
         observed_usage,
         read_arguments,
+        running,
         zero,
     )
 
@@ -368,8 +386,7 @@ def _run(request: AgentRequest, deps, keeper, children) -> ProviderResult:
     # The lease is kept live between reads.
     reader, context = ContextReader(deps.context, request.attempt_id), []
     for ref in records.context:
-        if not keeper.tick():
-            raise LeaseLost
+        running(keeper)
         context.extend(reader.read_all((ref,)))
     context = tuple(context)
     limits = _Limits(records)

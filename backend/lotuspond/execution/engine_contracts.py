@@ -70,6 +70,11 @@ class SweepReport(Contract):
     deadlines: Count
     lapsed_leases: Count
     expired_deliveries: Count
+    # Amendment in Task 11, for the owner's acknowledgement: reserved attempts whose
+    # reserved active time ran out before dispatch (Task 9), and attempts in flight
+    # under an older recovery epoch after a restore.
+    retired_reservations: Count = 0
+    restored_attempts: Count = 0
 
 
 class EngineObservation(Contract):

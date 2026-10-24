@@ -717,6 +717,108 @@ assert resumed_wait.deadline_ms == original_deadline_ms
 - [ ] **Step 4:** Repeat Step 2. Require PASS including gaps beyond the bound (with a fixed reconciliation reason), repeated controls, cancellation during a lock wait, lost grants during resume and a sweeper killed mid-batch. Task 13 repeats these with real process kills, an immediate PostgreSQL restart and a restore from an older backup.
 - [ ] **Step 5:** Commit Task 11 files as `feat: sweep due execution work and preserve controls and recovery fences`.
 
+**Conventions fixed by Task 11, for the owner's acknowledgement:**
+
+- **Controls.** `request_control` is the only writer, and it runs under the execution row lock.
+  - It records the request and a `control` outbox row, sets the requested state and marks the execution due. Dispatch, claims and renewals therefore see a committed pause or cancellation before any later dispatch.
+  - The orchestrator applies it in its next transaction:
+    - pause turns `running` or `waiting` into `paused`. An execution still `pending` stays `pending`, because it still holds its admission slot and the slot is returned only from that state;
+    - resume returns to `waiting` when a retained open wait exists, otherwise to `running`;
+    - cancel cancels reserved attempts and open waits at once. The terminal `cancelled` (reason `control`) waits until nothing the execution started may still run.
+  - Cancellation is final. An equal request under the same ID changes nothing, and returns even once the authority it needed is gone. A different request under that ID conflicts. A control that changes nothing (a second pause) is recorded but adds no wake-up.
+  - Owners and admins control any execution in scope, and editors only their own.
+  - Resume also needs all of:
+    - the initiator's current `execute` permission;
+    - a deployment revision that may still run (`load_deployment`);
+    - current entitlement and tenant grants;
+    - the remaining deadline;
+    - budget left. It is refused (`budget_exceeded`) when any limit is already spent by the execution's reservations; the next reservation still checks its own demand.
+  - Deadlines, budgets and wait deadlines keep running while paused, and none is reset.
+- **Pause stops work, as the spec's "cooperative cancellation and bounded containment" says.**
+  - At the first orchestrator pass after a pause, root attempts that have not started are released: reserved ones, and dispatched ones that no runtime has claimed (no lease). Each ends `cancelled` with the _interrupted_ record, a pending delivery can no longer be claimed, and the capacity step confirms the stop and frees the compute slot. A long pause therefore neither holds slots nor lets the sweeper retire reservations.
+  - A reservation whose attempt no runtime ever claimed, once the capacity step confirms its stop, moves to the schema's `released` state (`BudgetService.release_unstarted`), which counts as no liability. Nothing ran, so nothing is charged, and repeated pauses never spend the budget. This applies to every never-claimed cancelled attempt that the capacity step stops: a pause release, a cancellation, a deadline, a parallel failure. Anything claimed stays charged as observed (owner decision 1). **Owner-confirmed on 2026-10-24** ("OK, keep the refund"). A never-started attempt that ends some other way is unchanged from Task 9: delivery expiry, reservation retirement or a decline are counted failures. Their tokens and cost are settled at zero, but they keep their reserved active time as liability. That charge is bounded by `max_attempts`.
+  - A claimed attempt's renewal is refused (`forbidden`), for a pause exactly as for a cancellation, and also when the initiator lost `execute`. Task 10's runtime now treats a `forbidden` renewal of a still-live lease as a request to stop: it cancels the provider child and reports `cancelled` with the usage it observed.
+  - When a pause is requested, `request_control` records a pause marker (`activity.pause:` request row) for each root attempt then claimed, under the execution lock. A `cancelled` report from an attempt with that marker, short of a requested cancellation, is recorded as interrupted, even if a resume came first. The marker is never cleared. A marked attempt that renews after the resume, and later stops for another reason, is still recorded as interrupted. The other reason could be a revoked initiator or a stop of its own. The 10 root attempts bound that. Any other `cancelled` report (a revoked initiator, a runtime stopping on its own) is a failure the step's policy counts.
+  - An interrupted attempt never counts toward its step's `max_attempts`. On resume, progression creates the step's next ordinal with a fresh reservation. A step still has at most 10 root attempts in all, interrupted ones included, because an agent's children take the ordinals above 10 on the same step instance. Past that the step fails `retries_exhausted`, which also bounds how often pauses can restart it. The bound counts releases of work that never started too: a step reserved and queued through 10 pauses fails, although nothing of it ran or was charged.
+  - **Owner-confirmed on 2026-10-23** ("OK to all three, proceed"):
+    1. a paused agent or read starts over on resume; what the stopped attempt already spent stays charged;
+    2. a provider stopped mid-call has unknown usage. Its attempt becomes uncertain liability and the execution goes to `reconciliation_required`, so it needs one owner reconciliation before resume. The runtime's report already confirmed the compute stop, so the owner can reconcile at once, and the attempt stays interrupted rather than failing its step;
+    3. signals are accepted while paused, and progression consumes them on resume. A signal accepted before its wait's deadline still counts, even if the sweeper expired the wait during the pause. A cancellation still refuses signals.
+  - A child request or claim refused by a pause or cancellation ends the agent as `cancelled`, never `provider_failed`: the runtime renews at once to tell a stop from another refusal.
+- **Failing transitions and the deadline.**
+  - The deadline, a cancellation, a pause and a reconciliation fence need only the execution row. They are evaluated before the pinned program is loaded, in the pure and in the capacity transaction, so a program that cannot be loaded never holds them up.
+  - A transition refused because the stored program or rows fail verification (`ProgramError`: `integrity`, `occurrence_unresolved`) would fail alike on every retry. The engine fences the execution instead (Task 7's "Task 11 fences executions that keep failing"): `reconciliation_required`, reason `uncertain`, event detail the code, marker cleared. A `pending` execution is left to its deadline, so that its admission slot is returned. A sweeper wait whose program cannot be loaded marks the execution due, so it is fenced the same way.
+  - Other refusals (lock timeouts, provider outages) keep the engine's back-off of at most 60 s, bounded by the deadline.
+  - `reconciliation_required` halts progression: nothing new is derived and nothing is loaded, and the sweeper leaves its due waits until it resumes. Cancellation and the deadline still end it.
+  - Progression caps every wake-up it sets at the execution's deadline, so a step's retry back-off (up to 3600 s) cannot outlast it.
+  - Reconciliation, of either kind (owner `reconcile_execution` or Task 9's evidence-based one), returns to `paused`, `waiting` (a retained open wait) or `running`.
+- **Sweeper.** `ExecutionSweeper(leases, recovery).sweep(sessions, worker, limit)` handles each item in its own transaction, fenced by the current epoch, so a failed or interrupted item never affects another.
+  - Each item's transaction waits at most 500 ms for a row lock (`SET LOCAL lock_timeout`). A blocked item is deferred to a later pass, so one tenant's long transaction cannot stall a pass.
+  - Order of a pass:
+    1. attempts in flight under an older epoch (restore);
+    2. lapsed leases;
+    3. expired unclaimed deliveries;
+    4. spent reservations;
+    5. due waits: a timer is satisfied, an external or form wait expires;
+    6. overdue executions with no marker, or one more than the engine's longest back-off (60 s) away.
+  - Execution rows are taken `SKIP LOCKED`, as the orchestrator's claim takes them. The engine's back-off is never cut short.
+  - v15 has no state index on attempts or reservations. The spent-reservation scan is driven from capacity rows with active work, then that environment's non-terminal executions (`execution_queue_idx`), then each one's attempts and reservation by `(scope, execution_id)`. It is bounded by live executions and their attempts, never by retained history. Task 13's load runs must still measure it, against the Task 9 obligation.
+  - Queue depths are logged as fixed-key JSON after each pass and kept on the sweeper (`depths`) for the worker's metrics, bounded at 10,000. A count that cannot be read is `null`, never zero. The keys are due executions, spent reservations, due waits, overdue executions, restored attempts, lapsing leases and expiring deliveries.
+- **`SweepReport` amendment:** `retired_reservations` and `restored_attempts` are added, both defaulting to 0.
+- **Recovery.**
+  - `RecoveryFence(fleet).current(db)` asks the independent authority through the bounded fleet lookup and never reads rows. It carries the authority's `test_only`.
+  - After a restore, pending deliveries and active leases signed under an older epoch make their attempt `uncertain`, its reservation uncertain liability, and the execution `reconciliation_required`. Both are found through the v15 pending-delivery and active-lease indexes. `expire_delivery` leaves such deliveries alone, so an old epoch's "unclaimed" never becomes "never started". A pending old-epoch delivery whose attempt is no longer in flight (an inconsistent restore) is closed (`conflict`), so it is never selected again.
+  - **Residual, for Task 13's restore tests:** attempts and reservations carry no epoch. A restored row that still shows an attempt `reserved`, which was in fact dispatched after the backup, cannot be told apart.
+- **Runtime-reported events.** `EventProjection.apply_event(db, source_identity, event)` accepts the SDK's admitted `RuntimeEvent`. It requires all of:
+  - the current epoch and this installation;
+  - a source that equals the authenticated identity;
+  - a source holding the execution's live work: a pending delivery or an active lease, under the current epoch and the event's generation.
+
+  Rules:
+  - Each `(source, generation)` starts at sequence 1.
+  - An event beyond the next expected sequence is buffered in one of at most 100 gap slots per execution.
+  - Another event under a known ID, an event at a taken or stale sequence, or a gap beyond the bound fences the execution: `reconciliation_required`, reason `uncertain`, with event detail `event_conflict` or `event_gap`.
+  - Action-review and outcome kinds are refused. No runtime event moves an execution.
+  - Reconciliation abandons buffered events (`conflict`), and the source continues after the highest sequence seen. A late event behind the abandoned range is refused (`conflict`) and never fences again.
+  - No E04 component produces runtime events, and Task 12's listed routes serve none. **Obligation for whichever task first serves one:** `apply_event` takes a `RuntimePrincipal` and rechecks the runtime's current credential and session under the locks, as Task 9's services do.
+
+- **Reconciliation.** `ControlService.reconcile_execution(db, actor, execution_id)` needs:
+  - an owner or admin;
+  - the current epoch;
+  - an execution in `reconciliation_required`;
+  - for every uncertain attempt, a `compute_stopped` observation and a confirmed stop.
+
+  It fails those attempts as `uncertain`, except an interrupted one, which stays interrupted. It keeps their unverifiable usage as uncertain liability. It returns the execution to the requested state and marks it due, and progression then retries or fails under the step's policy. In E04 a compute stop is confirmed by a runtime's report, by Task 9's historical reconciliation, or by a separately authorized observation.
+
+- **Interpreters.**
+  - `COMPILERS` maps each interpreter version to the SDK compiler revision whose plans it interprets (v1 → `lotuspond.workflow-compiler.v2.1`). `REGISTERED` holds the versions whose compiler this build's SDK compiles. The SDK carries one compiler revision, so a build whose compiler changed registers no v1: its workers refuse to start until no non-terminal execution pins v1, and new work needs a new version that pins the new compiler.
+  - `require_interpreter` returns only registered versions, otherwise raising the new code `unsupported_interpreter`. Admission services and engines cannot be built for an unregistered version.
+  - `load_program` refuses (`integrity`) a publication compiled by another revision than the one its version pins.
+  - The worker refuses to start (`unsupported_interpreter`) while a non-terminal execution pins a version this build does not register, or a plan of a compiler its version does not pin (`unsupported_pins`).
+- **Projections.** Read models over committed rows: `project_execution` (read permission) shows the observed and the requested state separately. Events are an append-only log, and not every observed change emits one: a first reservation moving `pending` to `running`, and a last wait closing from `waiting` to `running`, emit none. Task 13's ENG-5 replay check must allow for that or add those events.
+- **Note for Task 12's wiring.** The fleet lookup (`FleetDependencies.current`) admits one call at a time and refuses the others. The race tests therefore give each concurrent caller its own (`own_fence`). An API process that shares one `FleetDependencies` across concurrent requests would refuse concurrent controls, events and results with `authority_unavailable` under load, so Task 12 must account for it.
+- **Production wiring.** `production_engine` still refuses (`engine_unavailable`). The interpreter, sweeper and fence now exist, but no qualified production providers do: artifact keys, entitlement, the recovery authority, activity trust and signing. Task 14's operations procedure wires them.
+- **Files beyond Task 11's row,** each necessary:
+  - `execution/progression.py`: controls observed, pause release, interrupted attempts, the load-free deadline, cancel, pause and fence paths, the wake-up cap, `fence_execution`, the `cancelled` terminal state;
+  - `execution/engine.py`: the fence for failing transitions, and the registry check;
+  - `execution/program.py`: the pinned compiler check;
+  - `execution/dispatch.py`: pause markers, an interrupted report recorded, and kept through reconciliation;
+  - `execution/leases.py`: renewal refused while paused, change flags and the old-epoch guard;
+  - `execution/inbox.py`: signals accepted while paused;
+  - `execution/reconciliation.py`: the resumed state, and interrupted attempts kept;
+  - `execution/admission.py`: the registry check;
+  - `execution/budgets.py`: a never-claimed stopped reservation released, with no liability;
+  - `execution/engine_contracts.py`: the `SweepReport` amendment;
+  - `execution/errors.py`: the new code;
+  - `execution_worker.py`: the pin check at startup;
+  - `runtime/python/src/lotuspond_runtime/{activity_worker,agent}.py`: a refused renewal is a stop, not a loss;
+  - tests:
+    - `control_fixtures.py`;
+    - `activity_fixtures.py` (a settable recovery epoch, limits within the package's);
+    - `test_deployments.py` and `test_progression.py` (the same limit clamp);
+    - five short-time fixtures in `fixtures/control-flow`;
+    - the runtime fake's lost-versus-refused renewal and refused children, with the runtime tests that drive them.
+
 ## Task 12: Expose explicit execution APIs with current authorization
 
 **Files:** Ownership-table Task 12 files; `backend/tests/execution/{test_routes.py,test_runtime_routes.py,test_boundary.py}`. Modify `schemas.py` to add `execute`, `execution_signal` API-key scopes; do not reinterpret `run`. Add scoped changelog entry in `app.py` only for implemented capability.

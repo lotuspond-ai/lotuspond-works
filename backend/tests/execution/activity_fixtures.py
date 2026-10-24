@@ -36,7 +36,7 @@ from lotuspond.models import (
 )
 from lotuspond.security import RateLimiter
 
-from .test_deployments import catalog_ref, connection_request
+from .test_deployments import catalog_ref, connection_request, within
 
 FLOW = Path(__file__).parent / "fixtures/control-flow"
 CATALOG = Path(__file__).resolve().parents[3] / "contracts/examples/executable-v2/catalog.json"
@@ -90,12 +90,12 @@ class Recovery:
     test_only = True
 
     def __init__(self):
-        self.available = True
+        self.available, self.epoch = True, 1
 
     def current(self, installation_id):
         if not self.available:
             raise RuntimeError("PRIVATE_RECOVERY_OUTAGE")
-        return RecoverySnapshot(installation_id, 1, True)
+        return RecoverySnapshot(installation_id, self.epoch, True)
 
 
 def documents():
@@ -159,7 +159,7 @@ def deploy(h, name, *, model=None, capacity=1):
             docs.append(model)
         package = json.loads((FLOW / f"{name}.json").read_text())
         publication = h.publish(db, package, tuple(ids), request_key=name)
-        request = connection_request(db, h, publication, docs)
+        request = within(connection_request(db, h, publication, docs), package)
         if capacity > 1:
             request = widen(db, h, request, capacity)
         view = create_deployment(db, h.actor, request, name, dependencies=h.dependencies)

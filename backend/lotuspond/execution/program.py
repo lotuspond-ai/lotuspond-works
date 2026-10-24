@@ -38,6 +38,7 @@ from lotuspond_sdk.executable.plan import CompiledPlan, canonical_plan_json
 
 from ..models import ExecutableDependency, ExecutablePublication, ExecutionDeploymentRevision
 from .authorization import record, scoped
+from .interpreters import COMPILERS
 
 MAX_PATH = 1024
 RECORDS = frozenset({"#select", "#items", "#input"})
@@ -129,6 +130,8 @@ def load_program(db, scope: Scope, execution) -> Program:
     if (
         publication.kind != "workflow"
         or publication.canonical_plan is None
+        # The interpreter version pins the compiler whose plans it interprets (Task 11).
+        or publication.compiler_id != COMPILERS.get(execution.interpreter_id)
         or sha256(publication.canonical_package).hexdigest() != publication.package_sha256
         or sha256(publication.canonical_plan).hexdigest() != publication.plan_sha256
         or any(sha256(row.canonical_package).hexdigest() != row.package_sha256 for row in rows)
