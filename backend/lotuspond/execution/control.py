@@ -53,7 +53,7 @@ from ..models import (
 from .activity_records import initiator, scope_of
 from .admission import execution_view
 from .artifacts import ArtifactPolicy
-from .authorization import lock, reauthorize, record, scoped
+from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .budgets import liability
 from .contracts import ControlRequest, ExecutionView, canonical_value
 from .deployments import load_deployment
@@ -183,6 +183,7 @@ class ControlService:
         if actor.role not in ("owner", "admin") and execution.initiating_user_id != actor.user_id:
             raise ExecutionError("forbidden")
         if self._recorded(db, scope, execution, request, digest):
+            mark_replay(db)
             return execution_view(execution)  # an equal repeat changes nothing
         target = TARGET[request.action]
         if execution.state in TERMINAL or (

@@ -23,7 +23,7 @@ from pydantic import BeforeValidator, Field
 
 from ..fleet.authority import database_now_ms
 from ..models import ExecutableDependency, ExecutablePublication, FleetMutationRequest
-from .authorization import reauthorize, record, scoped
+from .authorization import mark_replay, reauthorize, record, scoped
 from .contracts import Contract, PublicationRequest, PublicationView, array, canonical_value
 from .errors import ExecutionError, execution_service
 
@@ -312,6 +312,8 @@ def mutation_replay(db, actor, operation, key, content, view):
         "execution.publish",
         "execution.deployment.create",
         "execution.deployment.status",
+        "execution.context.register",
+        "execution.context.version",
     }:
         raise ExecutionError("invalid_request")
     if (
@@ -331,6 +333,7 @@ def mutation_replay(db, actor, operation, key, content, view):
     if row:
         if row.request_digest != digest:
             raise ExecutionError("conflict")
+        mark_replay(db)
         try:
             return digest, view.model_validate(row.result)
         except Exception:

@@ -26,7 +26,7 @@ from ..models import (
 )
 from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
-from .authorization import lock, reauthorize, record, scoped
+from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
 from .deployments import _configuration, _pool, _stored_configuration, load_deployment
 from .errors import ExecutionError, execution_service
@@ -140,6 +140,7 @@ class AdmissionService:
             row = record(db, Execution, actor.scope, existing.execution_id, locked=True)
             if row.admission_digest != digest or row.deployment_revision_id != revision.id:
                 raise ExecutionError("conflict")
+            mark_replay(db)
             return execution_view(row)
         deployment = record(
             db, ExecutionDeployment, actor.scope, revision.deployment_id, locked=True

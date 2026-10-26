@@ -735,3 +735,102 @@ On 2026-10-24 ("OK, keep the refund"), the owner also confirmed the reservation 
 - The single-call fleet lookup refuses concurrent callers, so the API's wiring must account for it.
 - Runtime-event routes, if any, take a `RuntimePrincipal`.
 - Task 13 measures the spent-reservation scan, and repeats the restore and kill cases with real processes.
+
+## E04 Task 12: scoped execution APIs and runtime activity routes, 2026-10-26
+
+Same branch as Tasks 7–11. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions still refuses jobs because of the account billing problem, so the Linux results below come from local containers, not hosted CI.
+
+**Red before implementation.** The three new Task 12 test files (`test_routes.py`, `test_runtime_routes.py`, `test_boundary.py`) were run on `62856ec`, the commit before Task 12. All three failed at collection, because `lotuspond.execution` had no `boundary` module.
+
+**What it serves.** Every route is part of the opt-in fleet API. With it off, every route answers 404.
+
+- Customer routes under `/api/v1/projects/{project}/environments/{environment}`:
+  - executable packages and their exact content;
+  - deployments and their status;
+  - production executions: start, list, detail, events, waits, signals, control and reconciliation;
+  - context sources;
+  - execution artifacts.
+- Runtime routes:
+  - Task 9's fixed `/api/v1/runtime/activities/...` paths, including `/decline`;
+  - the worker reads under `/activity-artifacts`: the pinned records, an agent's declarations, the held attempt's input, and its pinned context.
+- The runtime client's `records`, `agent`, `input` and `context` reads, and the supervisor's re-anchoring of the activity clock.
+
+**Mutations.**
+
+- **Backend (28):** each reverts one fix or guard in a scratch copy and runs its witness test on the local PostgreSQL cluster. All were rerun at the final source. Their subjects:
+  - the request boundary: duplicated headers, the runtime session header, the declared and streamed body bounds, pages, opt-in, idempotency keys;
+  - test-only service injection and audit on start;
+  - the worker reads: digest, input and pinned context;
+  - one pooled connection per request;
+  - lock-free reads, and a write's pre-check holding no lock;
+  - the runtime pre-check before the cursor, including the session check;
+  - closed quota and outage codes, and separate read and write allowances;
+  - the replay marker in each service and in audit;
+  - serialized context registration;
+  - the oversize delivery code.
+- **Equivalent mutation (1):** checking `publish` instead of `manage` when creating a deployment. `create_deployment` reauthorizes `manage` itself, so editors still get 403.
+- **Runtime (5), run in the Linux container:**
+  - read routes missing from the transport;
+  - records trusting the answer's text;
+  - an unchecked input digest;
+  - an unclamped agent step limit;
+  - a supervisor that never re-anchors.
+- **Harness errors, caught and corrected:**
+  - one mutation was itself equivalent (`not x` became `None is x`);
+  - one left an empty `if` block, which is a collection error, not a valid kill.
+
+  Both were rewritten and are caught.
+
+**Green on macOS.**
+
+- Backend `tests/execution` on the local PostgreSQL cluster (`PGTZ=UTC`) at the round 1 fixes: 503 passed.
+- Every Task 12 file at the final source: 27 (`test_routes`, `test_runtime_routes`, `test_boundary`, `test_api_concurrency`) passed.
+- Ruff is clean on both distributions, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).** The same container setup as the Task 10 entry: a standalone clone of the commit mounted read-only, hash-pinned PyPI wheels, and PostgreSQL 18.6 on an internal network.
+
+- Runtime suite at `c9e14cc`: 727 passed, 0 failed, as the non-root `runner` user.
+- Full backend suite at `c9e14cc`: 1,219 passed, 97 subtests, 1 failed, in 28 min 54 s. That includes all 8 fleet acceptance tests, and cleanup was confirmed.
+  - The failure was in Task 11's `test_sweeper_items_are_independent_and_idempotent`: 2 due timers instead of 1. The test assumed a paused execution's 5 s deadline was still ahead at the first sweep. This run shared the machine with the runtime container and the mutation runs, so it was not.
+  - Rerun alone five times on Linux, `test_sweeper.py` passed 9 of 9 each time.
+  - The next commit removes the timing assumption from the test.
+- The final source differs from `c9e14cc` only in this entry and in the plan's list of files beyond Task 12's row.
+
+**Reviews.** Code quality required changes twice and approved round 3. The specification review approved every round, with Minors fixed or recorded.
+
+- **Round 1, quality (Important):**
+  - every request held two pooled connections, so concurrent requests could exhaust the pool;
+  - unauthenticated runtime requests queued on the installation cursor;
+  - reads locked the workspace row `FOR UPDATE`, so they serialized with writers and made the orchestrator skip the tenant.
+
+  Fixes:
+  - authorization in a route is a lock-free pre-check in the request's own session;
+  - reads are always authorized without locks;
+  - a lock-free credential and session check comes before the cursor.
+
+- **Round 1, Minors:**
+  - closed codes for quota and outage refusals;
+  - an oversize delivery got a 500;
+  - replays were audited twice;
+  - the waits page read every step instance;
+  - one allowance served both reads and writes;
+  - context registration raced its replay check;
+  - revocation's key was unused.
+
+  All fixed.
+
+- **Round 2, quality (Important):** the audit replay check searched the workspace's audit history under the service's locks. Services now mark a replay on their session instead, and nothing is looked up.
+- **Round 3:** both reviews approved. Nit: `db.info` is not transactional, so a future replay check inside a savepoint must clear the marker on rollback.
+
+**For the owner's acknowledgement** (plan, "Conventions fixed by Task 12"), including its "Open for the owner" list:
+
+- Package publication follows Task 3's rule: editors and `write` keys publish, and only owners and admins deploy.
+- A revoked knowledge source answers the runtime 503, so its agent attempt ends `unavailable`, which is retryable. The withdrawn deployment dispatches nothing new.
+- Reconciliation takes no key: it is idempotent by state.
+- `ExecutionServices` are injected only in test mode. Without them, routes that need a service answer 503, and database-only reads still answer.
+
+**Obligations carried to Tasks 13 and 14:**
+
+- Task 14's production wiring must resolve the single-call fleet lookup before the API serves real load.
+- Task 13 should measure `ArtifactStore.get`'s row lock on reads.
+- Runtime-reported events still have no route. Whichever task serves them takes a `RuntimePrincipal`.

@@ -841,6 +841,91 @@ assert execution_detail.headers["cache-control"] == "no-store"
 - [ ] **Step 4:** Repeat Step 2 and existing identity/registry/fleet route tests; PASS with production-deny startup defaults. OpenAPI names distinguish evaluation runs, production executions and waits; no endpoint implies verified effects or unimplemented Studio screens.
 - [ ] **Step 5:** Commit Task 12 files as `feat: expose scoped durable execution and runtime activity APIs`.
 
+**Conventions fixed by Task 12, for the owner's acknowledgement:**
+
+- **Opt-in and deny by default.**
+  - Every execution route, customer and runtime, is part of the opt-in fleet API: with `fleet_enabled` off it answers 404, as E03's routes do.
+  - `create_app(..., execution_services=ExecutionServices(...))` takes constructed services only in test mode, as `fleet_dependencies` does. Production builds none yet, so a route that needs a service answers 503 `authority_unavailable`.
+  - Database-only reads still answer without any service or worker: packages and their exact content, deployments, execution detail, events and waits. A stopped orchestrator or sweeper therefore never blocks evidence. Withdrawing a deployment (`disabled`, `revoked`) also needs no provider.
+  - Task 14 builds `ExecutionServices` from qualified providers.
+- **Authorization.**
+  - A route authenticates the session or `lp_` key (`security.authenticate`), then pre-checks the operation with `authorize_execution(..., locked=False)`: the same rules, read from current committed rows without locks, in the request's own session. A request therefore holds one pooled connection, and the route holds no lock that a service must take earlier.
+  - Every service then reauthorizes in the request's transaction under its own lock order: the installation cursor and provider lookups come before account rows.
+  - Reads (`read`) are always authorized without locks, by services too (`project_execution`, artifact and context reads). A read fences no write, so readers never queue behind a writer or each other on the workspace row, and the orchestrator and sweeper never skip a tenant because someone is reading. Writes keep their locks, so a revocation cannot commit between a write's check and the write.
+  - Shared refusals keep closed codes: 401 `unauthenticated`, 429 `rate_limited`, any 5xx (an MFA or quota-store outage) `authority_unavailable`, anything else `forbidden`.
+  - Each workspace has separate per-minute allowances for execution reads and execution writes (1,000 each), so polling never spends a write's allowance.
+- **Roles.**
+  - Package publication follows Task 3's tested rule: owners, admins and editors, and `write` keys.
+  - The spec's "owner/admin publishes" concerns deployment revisions (`manage`): only owners and admins create, enable, disable or revoke deployments, register context or reconcile.
+  - Editors start enabled work and control their own executions; owners and admins control any execution in scope; viewers read.
+  - Platform administration grants nothing here.
+- **Keys.**
+  - `KeyInput` offers `execute` and `execution_signal`, with up to 7 scopes.
+  - Keys need `read` to read, `write` to publish, `execute` to start or control, and `execution_signal` to signal.
+  - `run` grants nothing here.
+  - Keys never manage, submit human forms or reconcile, and a key carries its creator's current role.
+- **Runtime paths.**
+  - Task 9's fixed paths supersede the plan's `/{delivery_id}/claim` and `/leases/renew`. Task 10's client already calls them: `POST /api/v1/runtime/activities/{poll,claim,renew,children,results,decline}` and `/activities/{attempt_id}/values`.
+  - `/decline` and its changelog item ship here.
+  - Results, declines and child requests take the installation cursor before runtime authentication, in Task 5's order. A lock-free look-up comes first: an unknown or inactive credential or session is refused (401) before the cursor, so unauthenticated traffic never queues on it. The locked authentication after the cursor still decides.
+  - Every runtime route authenticates before it validates the body.
+- **Worker reads**, under `/api/v1/runtime/activity-artifacts` (`ActivityReads`, in `activity_reads.py`):
+  - `/records` returns the pinned records of a delivery dispatched to this session, named by its exact digest: pending and unexpired, or leased under this session's live lease.
+  - `/agent` returns the declarations of a root agent attempt this session holds: model, instructions, tools, the pinned knowledge sources and the limits.
+  - `/{attempt}/input` returns exactly the held attempt's input.
+  - `/{attempt}/context` returns one knowledge source the held agent step pinned, bound at deployment. It is resolved for the execution's initiator under current source access, with the declaration's freshness and classifications.
+
+  Nothing else is served: there is no generic artifact capability.
+  - Records and input grant nothing, so, like results, they skip the initiator's current `execute`; context reads require it.
+  - A delivery this session will not be served gets `forbidden`, `not_found` or `conflict`, which the runtime may decline; an outage gets 503, which it does not.
+  - A revoked context source withdraws the deployment that pins it (Task 3's check), so its read answers 503 `dependency_unavailable`, before any source access.
+
+- **Errors.** Closed codes, `{"error": code, "message": code}`, always `no-store`:
+  - 400: `invalid_request`, `unsupported_step`, `unsupported_policy`;
+  - 401: `unauthenticated`;
+  - 403: `forbidden`;
+  - 404: `not_found`;
+  - 409: `conflict`, `budget_exceeded`;
+  - 413: `input_limit`;
+  - 429: `capacity_unavailable`, `rate_limited`;
+  - 503: every `*_unavailable` code, plus `artifact_corrupt` and `unsupported_interpreter`.
+
+  Validation errors are 400 and never echo fields.
+
+- **Boundary.** `ExecutionRequestBoundary` covers the customer execution paths; it is outermost, so its codes come first.
+  - It refuses a duplicated `authorization`, `cookie`, `x-lotuspond-workspace`, `idempotency-key`, `content-type`, `content-length` or `content-encoding` header (400).
+  - It refuses any runtime session header (401).
+  - Headers are capped at 32 KiB. Mutations need uncompressed `application/json`, with strict decoding (no duplicate keys or nonfinite numbers). Bodies are capped at 1 MiB.
+  - Runtime paths keep E03's `FleetRequestBoundary`: 64 KiB bodies, the transport's bound. A delivery's wire form is at most 131,072 bytes.
+- **Mutations** require an `Idempotency-Key` (OpaqueId), except signals (`signal_id`), controls (`request_id`) and reconciliation, which is idempotent by state.
+  - Context registration replays through `mutation_replay`, which gains `execution.context.register` and `execution.context.version`. It takes the account locks first, as `register` does, so two equal concurrent requests serialize and the second replays the first. A new source's ID is chosen after the replay check.
+  - Each mutation writes an `AuditEvent` with fixed identifiers and states only: `executions.packages.published`, `.deployments.created`, `.deployments.status`, `executions.started`, `.signalled` (on the wait), `.controlled`, `.reconciled`, `.context.registered`, `.context.revoked`. It records the request's own identifier (`request_id`: the idempotency key, control request ID or signal ID). An equal retry, which the service answers by replaying the first answer, is not audited again: the service marks the replay on its session (`mark_replay`: `mutation_replay`, admission, control, the inbox, and revoking a revoked source), so the audit trail is never searched under the service's locks.
+  - Reconciliation takes no key: it is idempotent by state, so a retry after a lost answer gets 409 `conflict` once the first succeeded, and is never applied twice.
+- **Reads.**
+  - Pages are keyset: `after_id` and `limit` 1..100, default 50, with no counts. Unknown or repeated parameters are refused, and a cursor from another collection is `not_found`.
+  - Events page by `after_sequence` and show metadata only: sequence, family, code, time, attempt and application state. Their encrypted contents are not served.
+  - Waits show the occurrence path, state and deadline; a page reads only its own waits' step instances.
+  - Package content is the exact admitted bytes, digest-checked.
+- **OpenAPI** names the operations `*_production_execution*` and `*_production_execution_wait*`, under tags for production executions, waits, deployments, executable packages, context sources and execution artifacts. Nothing is named for evaluation runs.
+- **Runtime 0.2.0, unreleased.**
+  - `ActivityClient` gains `records`, `agent`, `input` and `context`. `ControlPlaneSources` serves Task 10's `ActivityRecordSource`, `ValueSource` and `ContextClient` from them.
+  - A malformed control-plane answer raises `transport_failed`, never a declinable code, and the input's digest is checked.
+  - The runtime runs at most 64 model rounds, whatever an agent step declares (up to 1,000).
+  - The control transport allows the four read routes, session-only. Response bounds: poll 131,072 bytes, reads 1 MiB, everything else 64 KiB.
+  - `RuntimeSupervisor(..., activity_clock=ServerClock)` re-anchors the worker's clock from every E03 session and heartbeat response, on its own transport. It refuses a clock on another monotonic source.
+- **Known limitation, for Tasks 13 and 14.** The API shares one `FleetDependencies`, whose recovery lookup admits one call at a time. A concurrent caller gets 503 `authority_unavailable`, which the runtime retries as transient. Customer requests that hit it should be retried too; it is not changed here. Task 14's production wiring must resolve it before the API serves real load. Separately, `ArtifactStore.get` still locks the artifact row it reads (Task 2), so concurrent reads of one artifact serialize; Task 13's load measurement should cover it.
+- **Open for the owner.**
+  - Package publication follows Task 3's rule (editors and `write` keys publish) rather than the step's "owner/admin sessions manage/publish". Publishing activates nothing; only owners and admins deploy.
+  - A revoked knowledge source answers the runtime 503 (the withdrawn deployment), so the agent attempt ends `unavailable`, a retryable class, not `provider_failed`. Retries stay bounded: the withdrawn deployment dispatches nothing new.
+- **Not served.** Runtime-reported events (`EventProjection.apply_event`) still have no route. Task 11's obligation stands: whichever task serves them takes a `RuntimePrincipal`.
+- **Files beyond Task 12's row,** each necessary:
+  - backend `execution/activity_reads.py` (the worker reads);
+  - backend `execution/publication.py` (two replay operations, and the replay marker);
+  - backend `execution/authorization.py` (lock-free reads and pre-checks, and `mark_replay`);
+  - backend `execution/admission.py`, `control.py`, `inbox.py` and `context.py` (each marks an equal repeat, so it is audited once);
+  - runtime `activity_client.py`, `control_transport.py` and `supervisor.py`;
+  - tests: `api_fixtures.py`, `test_api_concurrency.py`, and runtime `test_activity_client.py` and `test_supervisor.py`.
+
 ## Task 13: Qualify the engine with a conformance suite and real failures
 
 **Files:** Ownership-table Task 13 files:

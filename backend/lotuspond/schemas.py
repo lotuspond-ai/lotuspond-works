@@ -245,9 +245,9 @@ class MemberInput(Input):
 
 class KeyInput(Input):
     name: Name
-    scopes: list[Literal["read", "write", "run", "ingest", "gateway"]] = Field(
-        min_length=1, max_length=5
-    )
+    scopes: list[
+        Literal["read", "write", "run", "ingest", "gateway", "execute", "execution_signal"]
+    ] = Field(min_length=1, max_length=7)
     days: int = Field(default=90, ge=1, le=365)
 
 

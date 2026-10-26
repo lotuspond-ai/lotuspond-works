@@ -21,7 +21,7 @@ from ..models import (
 )
 from .admission import _current_deployment
 from .artifacts import ArtifactPolicy
-from .authorization import lock, reauthorize, record, scoped
+from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .contracts import SignalReceipt, SignalRequest, canonical_value
 from .errors import ExecutionError, execution_service
 from .orchestrator import mark_runnable
@@ -143,6 +143,7 @@ class InboxService:
             if existing.digest != digest or existing.wait_id != wait.id:
                 raise ExecutionError("conflict")
             current()
+            mark_replay(db)
             return SignalReceipt(id=existing.id, status=existing.status)
         current()
         handle = self.artifacts._put_signal(

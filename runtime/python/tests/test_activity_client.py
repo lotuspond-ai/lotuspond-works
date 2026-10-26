@@ -258,3 +258,175 @@ def test_a_decline_names_the_exact_delivery_and_nothing_else():
     transport.responses["/activities/decline"] = {"declined": True}
     with pytest.raises(FleetError, match="command_rejected"):
         client.decline(delivery)  # anything but the empty acknowledgement
+
+
+class Answers:
+    """A fake control plane answering by exact route; an exception is a refusal."""
+
+    def __init__(self, answers):
+        self.answers, self.calls = dict(answers), []
+
+    def request(self, method, route, body, token, session=None):
+        self.calls.append((method, route, body, token, session))
+        answer = self.answers[route]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer if type(answer) is bytes else json.dumps(answer).encode()
+
+    def close(self):
+        pass
+
+
+READ = json.loads((VECTORS / "read.json").read_text())
+CONNECTOR = dict(kind="connector", name="connector-fixture", version="1.0.0", sha256="a" * 64)
+MODEL = dict(kind="model", name="model-fixture", version="1.0.0", sha256="b" * 64)
+
+
+def records_answer(**changes):
+    from lotuspond_sdk.activity import canonical_activity_json
+
+    return {
+        "envelope": canonical_activity_json(READ).decode(),
+        "connection": None,
+        "dependency": READ["dependency"],
+        "deadline_ms": READ["expires_at_ms"],
+        "input_schema": {"schema": None, "definitions": []},
+        "output_schema": {"schema": None, "definitions": []},
+        "request_sha256": READ["input"]["sha256"],
+        **changes,
+    }
+
+
+def agent_answer(**changes):
+    return {
+        "model": MODEL,
+        "model_name": "model-fixture",
+        "instructions": "Synthetic",
+        "tools": [
+            {
+                "name": "connector-fixture-read",
+                "dependency": CONNECTOR,
+                "operation": "read",
+                "input_schema": {"target": None, "input": None, "definitions": []},
+                "output_schema": {"schema": None, "definitions": []},
+            }
+        ],
+        "context": [{"source_id": ATTEMPT, "version": 2}],
+        "max_steps": 10,
+        "max_input_tokens": 1000,
+        "max_output_tokens": 1000,
+        "max_cost_microusd": 100000,
+        **changes,
+    }
+
+
+def test_records_name_the_exact_delivery_and_are_checked():
+    from lotuspond_sdk.activity import canonical_activity_json, validate_activity
+
+    module = client_module()
+    envelope = validate_activity(READ)
+    transport = Answers({"/activity-artifacts/records": records_answer()})
+    client = module.ActivityClient(transport, TOKEN, SESSION)
+    records = client.records(envelope)
+    assert records.envelope == envelope and records.request_sha256 == READ["input"]["sha256"]
+    method, route, body, token, session = transport.calls[0]
+    assert (method, token, session) == ("POST", TOKEN, SESSION)
+    digest = hashlib.sha256(canonical_activity_json(envelope)).hexdigest()
+    assert json.loads(body) == {"delivery_id": READ["delivery_id"], "delivery_sha256": digest}
+    # A malformed answer is the control plane's fault, never a reason to decline.
+    for changes in (
+        {"extra": 1},
+        {"request_sha256": "X" * 64},
+        {"deadline_ms": -1},
+        {"envelope": json.dumps(READ)},  # not its canonical bytes
+        {"input_schema": []},
+    ):
+        transport.answers["/activity-artifacts/records"] = records_answer(**changes)
+        with pytest.raises(FleetError, match="transport_failed"):
+            client.records(envelope)
+    # A refusal passes through, so the worker can tell a bad delivery from an outage.
+    transport.answers["/activity-artifacts/records"] = FleetError("not_found")
+    with pytest.raises(FleetError, match="not_found"):
+        client.records(envelope)
+
+
+def test_agent_declarations_are_typed_and_rounds_bounded_by_the_runtime():
+    from lotuspond_sdk.activity import validate_activity
+
+    from lotuspond_runtime.context import ContextRef
+
+    module = client_module()
+    transport = Answers({"/activity-artifacts/agent": agent_answer(max_steps=1000)})
+    client = module.ActivityClient(transport, TOKEN, SESSION)
+    agent = client.agent(validate_activity(READ))
+    assert agent.model.name == "model-fixture" and agent.context == (ContextRef(ATTEMPT, 2),)
+    assert [tool.name for tool in agent.tools] == ["connector-fixture-read"]
+    assert agent.max_steps == 64  # this runtime never runs more rounds, whatever is declared
+    for changes in (
+        {"tools": [{**agent_answer()["tools"][0], "name": "another-name"}]},
+        {"context": [{"source_id": "not-a-uuid", "version": 1}]},
+        {"context": [{"source_id": ATTEMPT, "version": 0}]},
+        {"max_steps": 0},
+        {"model": CONNECTOR},
+        {"unexpected": True},
+    ):
+        transport.answers["/activity-artifacts/agent"] = agent_answer(**changes)
+        with pytest.raises(FleetError, match="transport_failed"):
+            client.agent(validate_activity(READ))
+
+
+def test_input_and_context_are_read_for_one_held_attempt():
+    from lotuspond_runtime.context import ContextRef
+
+    module = client_module()
+    content = b'{"input":null,"target":null}'
+    handle = dict(HANDLE, sha256=hashlib.sha256(content).hexdigest())
+    transport = Answers(
+        {
+            f"/activity-artifacts/{ATTEMPT}/input": content,
+            f"/activity-artifacts/{ATTEMPT}/context": b'{"fact":"synthetic"}',
+        }
+    )
+    client = module.ActivityClient(transport, TOKEN, SESSION)
+    sources = module.ControlPlaneSources(client)
+    assert sources.fetch(ATTEMPT, handle) == content
+    assert json.loads(transport.calls[0][2]) == handle
+    assert sources.read(ATTEMPT, ContextRef(ATTEMPT, 3)) == {"fact": "synthetic"}
+    assert json.loads(transport.calls[1][2]) == {"source_id": ATTEMPT, "version": 3}
+    # Bytes that are not the named input are never returned.
+    with pytest.raises(FleetError, match="transport_failed"):
+        client.input(ATTEMPT, dict(handle, sha256="c" * 64))
+    for call in (
+        lambda: client.input("not-a-uuid", handle),
+        lambda: client.context(ATTEMPT, ("source", 1)),
+    ):
+        with pytest.raises(FleetError, match="invalid_request"):
+            call()
+
+
+def test_transport_serves_the_worker_reads_with_their_own_bounds(tmp_path):
+    transport = importlib.import_module("lotuspond_runtime.control_transport")
+    reads = (
+        "/activity-artifacts/records",
+        "/activity-artifacts/agent",
+        f"/activity-artifacts/{ATTEMPT}/input",
+        f"/activity-artifacts/{ATTEMPT}/context",
+    )
+    assert transport.response_bound("/activities/poll") == 131072
+    assert {transport.response_bound(route) for route in reads} == {1048576}
+    assert transport.response_bound("/activities/claim") == 65536
+    response = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nnull"
+    with tls_server(tmp_path, response) as (origin, ca, _):
+        t = transport.ControlTransport(origin, ca)
+        for route in reads:
+            with pytest.raises(FleetError, match="invalid_request"):
+                t.request("POST", route, b"{}", TOKEN)  # no session
+        for route in (
+            "/activity-artifacts/other",
+            "/activity-artifacts/ABC/input",
+            f"/activity-artifacts/{ATTEMPT}/values",
+            f"/activity-artifacts/{ATTEMPT}/input/extra",
+        ):
+            with pytest.raises(FleetError, match="invalid_request"):
+                t.request("POST", route, b"{}", TOKEN, SESSION)
+        assert t.request("POST", reads[0], b"{}", TOKEN, SESSION) == b"null"

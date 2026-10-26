@@ -37,6 +37,7 @@ class RuntimeSupervisor:
         jitter_ms=lambda: secrets.randbelow(30001),
         wait=lambda stop, seconds: stop.wait(seconds),
         checkpoint=lambda point: None,
+        activity_clock=None,
     ):
         from .commands import DenyRuntimeRecordSource, _RecordLookup
         from .trust import UnavailableCommandTrustAuthority
@@ -56,6 +57,18 @@ class RuntimeSupervisor:
         self._identity = None
         self._attempt = 0
         self._server_anchor = self._mono_anchor = self._wall_anchor = None
+        # The activity worker's server-anchored clock (Task 12). Lease responses carry
+        # no server time, and a worker can sit in one provider call for longer than
+        # the clock's anchor age, so it is re-anchored from here, on this loop's own
+        # transport, by every session and heartbeat response. Both use one monotonic
+        # source, so `sent` and `received` mean the same instants to it.
+        if activity_clock is not None and (
+            not callable(getattr(activity_clock, "anchor", None))
+            # Equal, not identical: each access to a bound method makes a new object.
+            or getattr(activity_clock, "_monotonic", None) != monotonic
+        ):
+            raise ValueError("The activity clock must share the supervisor's monotonic source")
+        self._activity_clock = activity_clock
 
     def _remote(self, method, state, model, *args):
         started = self._monotonic()
@@ -86,6 +99,9 @@ class RuntimeSupervisor:
         # against confirmed server time plus elapsed monotonic time, never wall skew.
         self._server_anchor = value.server_time_ms + math.ceil(elapsed * 1000)
         self._mono_anchor, self._wall_anchor = finished, self._wall()
+        if self._activity_clock is not None:
+            # `anchor` replaces one tuple, so the worker's thread always reads a whole one.
+            self._activity_clock.anchor(value.server_time_ms, sent=started, received=finished)
         return value
 
     def _now(self):
