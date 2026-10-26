@@ -24,12 +24,12 @@ from lotuspond.models import (
     ExecutionUsageReservation,
 )
 
-from .activity_fixtures import FLOW, attempt_at, runtime
+from .activity_fixtures import FLOW, Demand, attempt_at, runtime
 from .activity_fixtures import activity as activity
 from .test_admission import admission as admission
 from .test_budgets import budget_harness as budget_harness
-from .test_dispatch import poll, race, request_child
-from .test_leases import until
+from .test_dispatch import poll, race, released, request_child
+from .test_leases import charged, until
 from .test_progression import flows as flows
 from .test_publication import harness as harness
 
@@ -75,14 +75,15 @@ def test_a_declined_delivery_stops_heading_its_sessions_polls(activity):
         reservation = db.scalar(
             select(ExecutionUsageReservation).where(ExecutionUsageReservation.attempt_id == stuck)
         )
-        # Exactly an expiry, now: never started, zero usage, compute stopped.
+        # Exactly an expiry, now: never started, compute stopped, released at zero.
         assert attempt.state == "failed"
         assert failure(h, db, attempt)["failure"] == "timeout_before_dispatch"
         assert db.get(
             ExecutionActivityDelivery, json.loads(head.envelope)["delivery_id"]
         ).status == ("conflict")
-        assert (reservation.state, reservation.observed_cost_microusd) == ("settled", 0)
+        assert (reservation.state, reservation.observed_cost_microusd) == ("released", None)
         assert reservation.compute_stopped_at_ms is not None
+        assert charged(db, reservation) == {0}
         assert db.scalar(select(ExecutionCapacity.active)) == 1  # only the served one
         assert db.get(Execution, execution_id).runnable_at_ms is not None
         assert "attempt_failed" in set(
@@ -157,10 +158,17 @@ def test_a_declined_child_fails_and_its_parent_can_still_report(activity):
         assert attempt.state == "failed"
         assert failure(h, db, attempt)["failure"] == "timeout_before_dispatch"
         assert db.get(ExecutionAttempt, parent).state == "claimed"  # the parent runs on
+        assert released(db, child)  # never claimed: nothing of it is charged
     # Nothing of the parent's is still running: its own result is accepted.
     h.result(parent, parent_lease, value=None)
     with Session(h.engine) as db:
         assert db.get(ExecutionAttempt, parent).state == "succeeded"
+        parent_reservation = db.scalar(
+            select(ExecutionUsageReservation).where(ExecutionUsageReservation.attempt_id == parent)
+        )
+        # The claimed parent may have run: it stays charged as observed.
+        assert parent_reservation.state == "settled"
+        assert charged(db, parent_reservation) != {0}
 
 
 def failures(h, execution_id, attempt_id):
@@ -193,6 +201,10 @@ def test_decline_and_expiry_end_an_attempt_once_in_either_order(activity):
     assert decline(h, declined) is None  # its own repeat is still a no-op
     assert failures(h, second_execution, second) == 1
     assert failures(h, first_execution, first) == 1
+    with Session(h.engine) as db:
+        # Either way it ended once, released at zero, with its slot returned once.
+        assert released(db, first) and released(db, second)
+        assert db.scalar(select(ExecutionCapacity.active)) == 0
 
 
 def test_a_decline_racing_a_claim_has_one_winner(activity):
@@ -202,11 +214,19 @@ def test_a_decline_racing_a_claim_has_one_winner(activity):
     claimed, declined = race(lambda: h.claim(delivery), lambda: decline(h, delivery))
     with Session(h.engine) as db:
         state = db.get(ExecutionAttempt, attempt_id).state
-    # Exactly one wins: claimed with a live lease, or failed as never started.
-    if state == "claimed":
-        assert not isinstance(claimed, Exception) and isinstance(declined, ExecutionError)
-    else:
-        assert state == "failed" and declined is None and isinstance(claimed, ExecutionError)
+        reservation = db.scalar(
+            select(ExecutionUsageReservation).where(
+                ExecutionUsageReservation.attempt_id == attempt_id
+            )
+        )
+        # Exactly one wins: claimed with a live lease and its reservation held, or
+        # failed as never started and released at zero.
+        if state == "claimed":
+            assert not isinstance(claimed, Exception) and isinstance(declined, ExecutionError)
+            assert reservation.state == "reserved"
+        else:
+            assert state == "failed" and declined is None and isinstance(claimed, ExecutionError)
+            assert released(db, attempt_id)
 
 
 def test_a_runtime_declines_at_most_its_allowance_per_minute(activity, monkeypatch):
@@ -221,3 +241,37 @@ def test_a_runtime_declines_at_most_its_allowance_per_minute(activity, monkeypat
         decline(h, h.dispatch(second))
     with Session(h.engine) as db:
         assert db.get(ExecutionAttempt, second).state == "dispatched"  # nothing changed
+
+
+def test_refunded_declines_still_end_at_the_steps_attempts(activity):
+    """Declines charge nothing, so the step's attempts, not the budget, end the churn.
+
+    This pins one execution's bound. Across executions a declining runtime is bounded
+    by `DECLINES_PER_MINUTE` (`test_a_runtime_declines_at_most_its_allowance_per_minute`)
+    and by the runtime's three declines in a row (runtime `test_activity_worker.py`).
+    """
+    from lotuspond.execution.leases import LeaseService
+
+    h = activity
+    execution_id, attempt_id = h.ready("activity_read")
+    for ordinal in (1, 2, 3):  # the step's max_attempts
+        if ordinal > 1:
+            attempt_id = attempt_at(h, execution_id, "read", ordinal=ordinal)
+            with Session(h.engine) as db, db.begin():  # as the scheduler would
+                h.budgets.reserve_attempt(db, h.actor, attempt_id, Demand(10000).demand(attempt_id))
+        decline(h, h.dispatch(attempt_id))
+        h.drive()
+    assert attempt_at(h, execution_id, "read", ordinal=4) is None
+    with Session(h.engine) as db:
+        assert db.get(Execution, execution_id).state == "failed"
+        rows = list(
+            db.scalars(
+                select(ExecutionUsageReservation).where(
+                    ExecutionUsageReservation.execution_id == execution_id
+                )
+            )
+        )
+        assert [row.state for row in rows] == ["released"] * 3
+        assert set().union(*(charged(db, row) for row in rows)) == {0}
+        assert db.scalar(select(ExecutionCapacity.active)) == 0
+    assert LeaseService.DECLINES_PER_MINUTE == 6

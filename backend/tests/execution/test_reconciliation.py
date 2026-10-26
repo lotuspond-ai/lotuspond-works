@@ -24,6 +24,7 @@ from lotuspond.models import (
 from .activity_fixtures import activity as activity
 from .test_admission import admission as admission
 from .test_budgets import budget_harness as budget_harness
+from .test_dispatch import released
 from .test_leases import until
 from .test_progression import flows as flows
 from .test_publication import harness as harness
@@ -219,5 +220,6 @@ def test_reconciling_a_root_closes_its_unstarted_children(activity):
                 ExecutionUsageReservation.attempt_id == child
             )
         )
+        assert released(db, child)  # never claimed: nothing of it is charged
         assert db.scalar(select(ExecutionCapacity.active)) == 0
         assert db.get(Execution, execution_id).runnable_at_ms is not None

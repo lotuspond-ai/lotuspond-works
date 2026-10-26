@@ -129,7 +129,7 @@ class ReconciliationService:
         # A root's unstarted children can never run now. A child that may still run
         # (claimed, or uncertain and unstopped) is reconciled first: refused here.
         closed = (
-            close_children(db, self.budgets, scope, attempt, now)
+            close_children(db, self.budgets, scope, attempt, now, recovery.epoch)
             if attempt.parent_attempt_id is None
             else []
         )

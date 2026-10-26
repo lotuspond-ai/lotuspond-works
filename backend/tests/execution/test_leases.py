@@ -38,6 +38,17 @@ def renew(h, lease, principal=None):
         return h.leases.renew_activity(db, principal or h.principal_runtime, lease)
 
 
+def charged(db, reservation):
+    """Every liability the reservation still counts, now."""
+    from lotuspond.execution.budgets import liability
+
+    now = database_now_ms(db)
+    return {
+        liability(reservation, field, now)
+        for field in ("input_tokens", "output_tokens", "cost_microusd", "active_ms")
+    }
+
+
 def until(h, at_ms):
     """Wait in real time until database time passes `at_ms`."""
     while True:
@@ -120,9 +131,11 @@ def test_unclaimed_delivery_expiry_allows_only_a_new_ordinal(activity):
         )
         assert attempt.state == "failed" and failure["failure"] == "timeout_before_dispatch"
         assert db.get(ExecutionActivityDelivery, envelope["delivery_id"]).status == "conflict"
-        # Never claimed, so never started: zero usage, compute stopped, slot returned.
-        assert (reservation.state, reservation.observed_cost_microusd) == ("settled", 0)
+        # Never claimed, so never started: compute stopped, slot returned, and the
+        # reservation released at zero, active time too (owner decision, 2026-10-26).
+        assert (reservation.state, reservation.observed_cost_microusd) == ("released", None)
         assert reservation.compute_stopped_at_ms is not None
+        assert charged(db, reservation) == {0}
         assert db.scalar(select(ExecutionCapacity.active)) == 0
         assert db.get(Execution, execution_id).runnable_at_ms is not None
         codes = set(
@@ -252,11 +265,93 @@ def test_spent_active_time_refuses_dispatch_and_the_sweeper_retires_it(activity)
             )
         )
         assert db.get(ExecutionAttempt, attempt_id).state == "failed"
-        assert (reservation.state, reservation.observed_cost_microusd) == ("settled", 0)
+        # Its reserved active time ran out unused: nothing ran, so nothing is charged.
+        assert (reservation.state, reservation.observed_cost_microusd) == ("released", None)
         assert reservation.compute_stopped_at_ms is not None
+        assert charged(db, reservation) == {0}
         assert db.scalar(select(ExecutionCapacity.active)) == 0  # the slot is returned
         assert db.get(Execution, execution_id).runnable_at_ms is not None
     h.drive()
     retry = attempt_at(h, execution_id, "read", ordinal=2)
     with Session(h.engine) as db:
         assert retry is not None and db.get(ExecutionAttempt, retry).state == "reserved"
+
+
+def test_only_a_stopped_never_claimed_attempt_is_released(activity):
+    """The refund's guard: a confirmed stop, no lease ever, and a cancelled or failed end."""
+    from lotuspond.models import ExecutionReconciliationObservation
+
+    h = activity
+    _, reserved = h.ready("activity_read", capacity=3)
+    _, claimed = h.ready("activity_read", capacity=3)
+    lease = h.claim(h.dispatch(claimed))
+    h.result(claimed, lease, code="unavailable")
+
+    def release(attempt_id):
+        with Session(h.engine) as db, db.begin():
+            h.budgets.release_unstarted(db, attempt_id, h.principal_runtime.identity.recovery_epoch)
+
+    # Claimed, so it may have run: it stays charged as observed, failed or not.
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, claimed).state == "failed"
+    with pytest.raises(ExecutionError, match="conflict"):
+        release(claimed)
+    # Never claimed but not stopped: its reservation still holds the compute slot,
+    # whatever the attempt's state says.
+    for state in ("reserved", "failed"):
+        with Session(h.engine) as db, db.begin():
+            db.get(ExecutionAttempt, reserved).state = state
+        with pytest.raises(ExecutionError, match="conflict"):
+            release(reserved)
+    with Session(h.engine) as db, db.begin():
+        attempt = db.get(ExecutionAttempt, reserved)
+        observation = ExecutionReconciliationObservation(
+            workspace_id=attempt.workspace_id,
+            project_id=attempt.project_id,
+            environment_id=attempt.environment_id,
+            execution_id=attempt.execution_id,
+            attempt_id=reserved,
+            source_id="test",
+            observation_id="stopped",
+            digest="0" * 64,
+            code="compute_stopped",
+            observed_at_ms=database_now_ms(db),
+        )
+        db.add(observation)
+        db.flush()
+        h.budgets.confirm_stopped(db, reserved, observation.id)
+    # Stopped and never claimed, but neither cancelled nor failed: an uncertain or
+    # still reserved attempt keeps its liability (a restore's "unclaimed" proves nothing).
+    for state in ("reserved", "uncertain"):
+        with Session(h.engine) as db, db.begin():
+            db.get(ExecutionAttempt, reserved).state = state
+        with pytest.raises(ExecutionError, match="conflict"):
+            release(reserved)
+
+    # Only a `reserved` reservation changes: an uncertain one keeps its liability.
+    def reservation_state(db, state=None):
+        row = db.scalar(
+            select(ExecutionUsageReservation).where(
+                ExecutionUsageReservation.attempt_id == reserved
+            )
+        )
+        if state is not None:
+            row.state = state
+        return row.state
+
+    with Session(h.engine) as db, db.begin():
+        db.get(ExecutionAttempt, reserved).state = "failed"
+        reservation_state(db, "uncertain")
+    release(reserved)
+    with Session(h.engine) as db, db.begin():
+        assert reservation_state(db) == "uncertain"  # left as it is
+        reservation_state(db, "reserved")
+    release(reserved)
+    release(reserved)  # a repeat changes nothing
+    with Session(h.engine) as db:
+        reservation = db.scalar(
+            select(ExecutionUsageReservation).where(
+                ExecutionUsageReservation.attempt_id == reserved
+            )
+        )
+        assert reservation.state == "released" and charged(db, reservation) == {0}

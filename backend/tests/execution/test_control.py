@@ -701,3 +701,32 @@ def test_repeated_pauses_never_spend_the_budget(controlled):
     h.result(last, h.claim(h.dispatch(last)))
     h.run()
     assert execution(h, execution_id).state == "succeeded"
+
+
+def test_a_pause_with_a_queued_child_spends_nothing_of_it(controlled):
+    """An agent paused while its tool child is queued: the child never ran, so its
+    reservation is released at zero (owner decision, 2026-10-26)."""
+    from lotuspond_runtime.activity_protocol import tool_name
+
+    from .test_dispatch import released, request_child, tools_ready
+
+    h = controlled
+    execution_id, parent, lease = tools_ready(h)
+    arguments = h.store_value(parent, {"target": None, "input": None})
+    tool = request_child(
+        h, parent, "tool-1", "connector_read", tool_name("connector-fixture", "read"), arguments
+    )
+    h.control(execution_id, "pause")
+    h.run()
+    with Session(h.engine) as db:
+        now = database_now_ms(db)
+    usage = dict(input_tokens=1, output_tokens=1, cost_microusd=1, completed_at_ms=now - 1)
+    h.result(parent, lease, code="cancelled", usage=usage)  # stopped by the pause
+    h.run()
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, tool).state == "cancelled"
+        assert released(db, tool)
+        parent_reservation = db.scalar(
+            select(ExecutionUsageReservation).where(ExecutionUsageReservation.attempt_id == parent)
+        )
+        assert parent_reservation.state == "settled"  # it ran: charged as observed

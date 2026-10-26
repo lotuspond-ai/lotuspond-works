@@ -111,13 +111,13 @@ def test_claim_racing_delivery_expiry_ends_in_exactly_one_outcome(activity, rele
     state, lease, reservation, active = states(h, attempt_id)
     assert {"before": lease is not None, "after": lease is None}.get(release, True)
     if lease is not None:
-        # The claim won before expiry: a live lease, never a zero settlement.
+        # The claim won before expiry: a live lease, never a release at zero.
         assert (state, lease) == ("claimed", "active") and reservation.state == "reserved"
         assert not isinstance(outcomes[0], Exception)  # the claim returned the lease
     else:
-        # Expiry won: never claimed, so zero usage, stopped and returned.
+        # Expiry won: never claimed, so stopped, returned and released at zero.
         assert state == "failed"
-        assert (reservation.state, reservation.observed_cost_microusd) == ("settled", 0)
+        assert (reservation.state, reservation.observed_cost_microusd) == ("released", None)
         assert reservation.compute_stopped_at_ms is not None and active == 0
         assert isinstance(outcomes[0], ExecutionError) and outcomes[0].code == "conflict"
     with Session(h.engine) as db:

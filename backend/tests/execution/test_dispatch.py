@@ -531,6 +531,16 @@ def request_child(h, parent, request_id, kind, name, arguments, principal=None):
         )
 
 
+def released(db, attempt_id):
+    """The attempt's reservation is released and charges nothing in any field."""
+    from .test_leases import charged
+
+    row = db.scalar(
+        select(ExecutionUsageReservation).where(ExecutionUsageReservation.attempt_id == attempt_id)
+    )
+    return row.state == "released" and charged(db, row) == {0}
+
+
 def test_root_result_closes_unstarted_children_and_waits_for_running_ones(activity):
     from lotuspond_runtime.activity_protocol import tool_name
 
@@ -560,9 +570,11 @@ def test_root_result_closes_unstarted_children_and_waits_for_running_ones(activi
                 ExecutionUsageReservation.attempt_id == unstarted
             )
         )
-        # The unstarted child can never run now: cancelled, its compute stop confirmed.
+        # The unstarted child can never run now: cancelled, its compute stop confirmed,
+        # and, never claimed, its reservation released at zero.
         assert db.get(ExecutionAttempt, unstarted).state == "cancelled"
         assert stopped is not None
+        assert released(db, unstarted)
         assert db.scalar(select(ExecutionCapacity.active)) == 0
         assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
         assert "cancelled" in set(

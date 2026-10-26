@@ -24,6 +24,7 @@ from ..models import (
     ExecutableDependency,
     ExecutablePublication,
     Execution,
+    ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionCapacity,
     ExecutionDeploymentRevision,
@@ -611,13 +612,21 @@ class BudgetService:
         return view(row)
 
     @execution_service
-    def release_unstarted(self, db, attempt_id):
-        """Free a stopped reservation whose attempt no runtime ever claimed (Task 11).
+    def release_unstarted(self, db, attempt_id, epoch):
+        """Free a stopped reservation whose attempt no runtime ever claimed.
 
         Nothing ran, so zero is known, as a runtime reports an outcome no provider
-        could have caused; a pause that releases work it never started then charges
-        nothing for it. Only a confirmed stop of a cancelled attempt without a lease
-        is released; anything claimed stays charged as observed.
+        could have caused; work that ends before it started charges nothing. That is
+        a cancellation the capacity step stops (Task 11), and a delivery expiry, a
+        reservation retirement or a decline (owner decision, 2026-10-26). Only a
+        confirmed stop of a cancelled or failed attempt without a lease is released;
+        anything claimed stays charged as observed, and an uncertain attempt (a
+        restore's "unclaimed" proves nothing) keeps its uncertain liability. Only a
+        `reserved` reservation changes: an `uncertain` or `settled` one, such as a
+        restore-fenced attempt that reconciliation failed, is left as it is. So is one
+        whose delivery was signed under another recovery epoch than the caller's
+        current `epoch`: after a restore, its "unclaimed" proves nothing, so it keeps
+        its reserved liability even when the fence has not reached it yet.
         """
         scope, _, _, attempt, row = self._settlement_rows(db, attempt_id)
         claimed = db.scalar(
@@ -626,11 +635,17 @@ class BudgetService:
         if (
             row is None
             or row.compute_stopped_at_ms is None
-            or attempt.state != "cancelled"
+            or attempt.state not in {"cancelled", "failed"}
             or claimed is not None
         ):
             raise ExecutionError("conflict")
-        if row.state == "reserved":
+        stale = db.scalar(
+            scoped(ExecutionActivityDelivery, scope).where(
+                ExecutionActivityDelivery.attempt_id == attempt_id,
+                ExecutionActivityDelivery.recovery_epoch != epoch,
+            )
+        )
+        if row.state == "reserved" and stale is None:
             row.state = "released"
             db.flush()
         return view(row)

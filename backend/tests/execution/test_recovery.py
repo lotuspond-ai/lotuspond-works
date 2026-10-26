@@ -193,3 +193,103 @@ def test_a_restored_delivery_its_attempt_disowns_is_closed_once(controlled):
         assert db.get(ExecutionAttempt, attempt_id).state == "cancelled"
     with Session(h.engine) as db, db.begin():
         assert queue_depths(db, 2).restored_attempts == 0
+
+
+def test_a_reconciled_restored_attempt_is_never_released(controlled):
+    """After a restore, "unclaimed" proves nothing: even once reconciliation fails the
+    attempt and confirms its stop, its uncertain reservation keeps its liability."""
+    from .test_leases import charged
+
+    h = controlled
+    execution_id, delivered = h.ready("activity_read")
+    h.dispatch(delivered)
+    h.fleet_recovery.epoch = 2
+    h.budgets.recovery = Restored(2)
+    assert h.sweep().restored_attempts == 1
+    confirm_stopped(h, delivered)
+    with Session(h.engine) as db, db.begin():
+        h.controls.reconcile_execution(db, h.actor, execution_id)
+    with Session(h.engine) as db, db.begin():
+        assert db.get(ExecutionAttempt, delivered).state == "failed"
+        h.budgets.release_unstarted(db, delivered, 2)  # never claimed, failed, stopped
+    with Session(h.engine) as db:
+        reservation = db.scalar(
+            select(ExecutionUsageReservation).where(
+                ExecutionUsageReservation.attempt_id == delivered
+            )
+        )
+        assert reservation.state == "uncertain" and charged(db, reservation) != {0}
+
+
+def test_an_unfenced_old_epoch_child_closed_by_reconciliation_stays_charged(controlled):
+    """A child dispatched before the restore may have run after the backup. If its
+    parent is reconciled before the fence reaches the child, the child is closed but
+    keeps its reserved liability: its "unclaimed" proves nothing."""
+    from lotuspond_runtime.activity_protocol import HistoricalObservation, tool_name
+
+    from lotuspond.execution.recovery import fence_restored
+
+    from .test_dispatch import request_child, tools_ready
+    from .test_leases import charged
+
+    h = controlled
+    execution_id, parent, _ = tools_ready(h)
+    arguments = h.store_value(parent, {"target": None, "input": None})
+    child = request_child(
+        h, parent, "tool-1", "connector_read", tool_name("connector-fixture", "read"), arguments
+    )
+    with Session(h.engine) as db, db.begin():
+        h.activities.poll_activity(db, h.principal_runtime, parent_attempt_id=parent)
+    h.fleet_recovery.epoch = 2
+    h.budgets.recovery = Restored(2)
+    with Session(h.engine) as db:
+        parent_delivery = db.scalar(
+            select(ExecutionActivityDelivery).where(ExecutionActivityDelivery.attempt_id == parent)
+        )
+        digest, parent_delivery_id = parent_delivery.digest, parent_delivery.id
+    # The sweeper fenced the parent's item; the child's item comes later.
+    with Session(h.engine) as db, db.begin():
+        assert fence_restored(h.leases, db, parent_delivery_id, epoch=2)
+        now = database_now_ms(db)
+    with Session(h.engine) as db, db.begin():
+        h.reconciliation.reconcile_activity(
+            db,
+            h.actor,
+            HistoricalObservation(
+                observation_id="journal-root",
+                attempt_id=parent,
+                delivery_sha256=digest,
+                result=None,
+                code="provider_failed",
+                usage=dict(input_tokens=1, output_tokens=1, cost_microusd=1, completed_at_ms=now),
+            ),
+        )
+    with Session(h.engine) as db:
+        reservation = db.scalar(
+            select(ExecutionUsageReservation).where(ExecutionUsageReservation.attempt_id == child)
+        )
+        assert db.get(ExecutionAttempt, child).state == "cancelled"
+        assert reservation.state == "reserved" and charged(db, reservation) != {0}
+
+
+def test_an_unfenced_old_epoch_root_released_by_a_pause_stays_charged(controlled):
+    """The same for a dispatched root that a pause releases before the fence."""
+    from .test_leases import charged
+
+    h = controlled
+    execution_id, attempt_id = h.ready("activity_read")
+    h.dispatch(attempt_id)
+    h.control(execution_id, "pause")
+    h.fleet_recovery.epoch = 2
+    h.budgets.recovery = Restored(2)
+    h.run()
+    with Session(h.engine) as db:
+        reservation = db.scalar(
+            select(ExecutionUsageReservation).where(
+                ExecutionUsageReservation.attempt_id == attempt_id
+            )
+        )
+        # The pause did release it, and its stop is confirmed, yet it stays charged.
+        assert db.get(ExecutionAttempt, attempt_id).state == "cancelled"
+        assert reservation.compute_stopped_at_ms is not None
+        assert reservation.state != "released" and charged(db, reservation) != {0}

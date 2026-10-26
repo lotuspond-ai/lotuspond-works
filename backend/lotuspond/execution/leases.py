@@ -16,7 +16,6 @@ from hashlib import sha256
 
 from lotuspond_runtime.activity_protocol import MAX_LEASE_MS, ActivityLease
 from lotuspond_runtime.errors import FleetError
-from lotuspond_sdk.activity import UsageObservation
 from sqlalchemy import select
 
 from ..fleet.authority import RecoverySnapshot, database_now_ms
@@ -203,9 +202,9 @@ class LeaseService:
     def expire_delivery(self, db, delivery_id: str, *, epoch=None) -> bool:
         """An unclaimed delivery past its expiry fails its attempt and frees its slot.
 
-        Its usage is settled as zero: a runtime invokes nothing before a durable
-        claim, so an unclaimed delivery never started. The attempt never gets a
-        second delivery; a retry is a new ordinal decided by progression. A delivery
+        Its reservation is released at zero: a runtime invokes nothing before a
+        durable claim, so an unclaimed delivery never started. The attempt never gets
+        a second delivery; a retry is a new ordinal decided by progression. A delivery
         signed under an older epoch is left to the restore fence (`recovery`): after
         a restore, "unclaimed" in a restored row proves nothing. True when it changed.
         """
@@ -248,9 +247,11 @@ class LeaseService:
         detail="timeout_before_dispatch",
         source="sweeper",
     ):
-        """Fail an attempt that never started; zero usage, compute stop, due again.
+        """Fail an attempt that never started; compute stop, no charge, due again.
 
-        The caller holds the cursor, workspace, capacity, execution and attempt rows.
+        No runtime ever claimed it, so its reservation is released at zero once the
+        stop is confirmed (owner decision, 2026-10-26), as a cancelled one's is. The
+        caller holds the cursor, workspace, capacity, execution and attempt rows.
         """
         a = self.activities
         handle = a.artifacts._put_internal(db, scope, failure_content(code, now), a.policy)
@@ -260,14 +261,6 @@ class LeaseService:
         attempt.state = "failed"
         db.flush()
         if reservation is not None and reservation.compute_stopped_at_ms is None:
-            self.budgets.settle_attempt(
-                db,
-                attempt.id,
-                identifier,
-                UsageObservation(
-                    input_tokens=0, output_tokens=0, cost_microusd=0, completed_at_ms=now
-                ),
-            )
             observation = ExecutionReconciliationObservation(
                 **scope.model_dump(),
                 execution_id=execution.id,
@@ -281,6 +274,7 @@ class LeaseService:
             db.add(observation)
             db.flush()
             self.budgets.confirm_stopped(db, attempt.id, observation.id)
+            self.budgets.release_unstarted(db, attempt.id, epoch)
         self._event(db, execution, epoch, "attempt_failed", attempt.id, detail, origin=source)
         if execution.state not in TERMINAL:
             mark_runnable(db, execution, now)
@@ -294,13 +288,15 @@ class LeaseService:
         it is pending and unclaimed: an altered or forged envelope declines nothing,
         and a claimed attempt is reported or reconciled, never declined. The attempt
         fails exactly as if its delivery had expired now (`timeout_before_dispatch`,
-        zero usage, compute stop confirmed, due again; only the event detail says
-        `declined`), so the step's retry classes apply unchanged. An equal repeat
-        changes nothing. Like a result it grants nothing, so the initiator's current
-        `execute` permission is not required; the runtime's current identity, session
-        and recovery epoch are. A runtime may decline at most `DECLINES_PER_MINUTE`
-        deliveries a minute. Routes call `ActivityService.lock_cursor` first, as for
-        results.
+        compute stop confirmed, reservation released at zero, due again; only the
+        event detail says `declined`), so the step's retry classes apply unchanged.
+        Churn stays bounded without a charge: the step's `max_attempts` (at most 10
+        root attempts), this allowance and the runtime's three declines in a row.
+        An equal repeat changes nothing. Like a result it grants nothing, so the
+        initiator's current `execute` permission is not required; the runtime's
+        current identity, session and recovery epoch are. A runtime may decline at
+        most `DECLINES_PER_MINUTE` deliveries a minute. Routes call
+        `ActivityService.lock_cursor` first, as for results.
         """
         a = self.activities
         identity = principal.identity
@@ -357,8 +353,9 @@ class LeaseService:
 
         Dispatch refuses it (`budget_exceeded`), so without this it would hold its
         compute slot until the execution deadline. It never started: it fails with
-        `timeout_before_dispatch` and zero usage, its compute stop is confirmed, and
-        progression may retry with a new ordinal. Task 11's sweeper calls this.
+        `timeout_before_dispatch`, its compute stop is confirmed and its reservation
+        released at zero, and progression may retry with a new ordinal. Task 11's
+        sweeper calls this.
         """
         epoch = self._epoch(epoch)
         hint = db.get(ExecutionAttempt, attempt_id)

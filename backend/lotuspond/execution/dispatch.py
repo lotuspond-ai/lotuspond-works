@@ -231,13 +231,15 @@ def keep_interrupted(artifacts, db, scope, attempt) -> bool:
     return True
 
 
-def close_children(db, budgets, scope, parent, now):
+def close_children(db, budgets, scope, parent, now, epoch):
     """End the never-started children of a root attempt whose own work is over.
 
     The caller holds the execution row (every activity transaction locks it before
     any attempt row) and the installation cursor. A reserved or dispatched child
     never started: it is cancelled, its delivery can no longer be claimed, and its
-    compute stop is confirmed so containment can complete. A claimed child, or an
+    compute stop is confirmed so containment can complete; its reservation is then
+    released at zero, unless its delivery was signed under another epoch than the
+    caller's current `epoch` (`BudgetService.release_unstarted`). A claimed child, or an
     uncertain one not yet confirmed stopped, may still run inside the parent's
     compute slot: the parent's stop is refused (`conflict`) until that child reports
     or is reconciled. Returns the cancelled child IDs.
@@ -303,6 +305,8 @@ def close_children(db, budgets, scope, parent, now):
         db.add(observation)
         db.flush()
         budgets.confirm_stopped(db, child.id, observation.id)
+        # Never claimed: released at zero (owner decision, 2026-10-26), unless restored.
+        budgets.release_unstarted(db, child.id, epoch)
     return [child.id for child in closed]
 
 
@@ -1046,7 +1050,9 @@ class ActivityService:
         closed = []
         if attempt.parent_attempt_id is None:
             # A root's work is over: its children report first, unstarted ones end.
-            closed = close_children(db, self.budgets, scope, attempt, now)
+            closed = close_children(
+                db, self.budgets, scope, attempt, now, principal.identity.recovery_epoch
+            )
         records = self.records.load(db, attempt.id)
         if result.usage.completed_at_ms > now:
             raise ExecutionError("invalid_request")

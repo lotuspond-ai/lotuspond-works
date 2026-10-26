@@ -841,3 +841,67 @@ Test-only. Task 12's full Linux run showed `test_sweeper_items_are_independent_a
 
 - On macOS, with a 6 s stall injected before the first sweep, the reordered test passes.
 - Local Linux (not hosted CI), at this commit in the same container setup: `test_sweeper.py` was run five times and passed 9 of 9 each time. Cleanup was confirmed.
+
+## Owner-approved change: release every never-claimed reservation at zero, 2026-10-26
+
+Same branch, as its own commit after Task 12. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Owner decision** (2026-10-26, "yes, refund those too and proceed"): any attempt that was never claimed has its reservation released at zero once its end is confirmed, whether that end is a cancellation, a delivery expiry, a reservation retirement or a decline. Anything that may have run stays charged, and so does unknown usage after a mid-call stop. It is recorded in the plan as **Owner-confirmed on 2026-10-26**.
+
+**What changed.**
+
+- `LeaseService._fail_unstarted` (expiry, retirement and decline) confirms the stop and releases the reservation; it no longer settles a zero usage observation first.
+- `dispatch.close_children` releases each never-claimed child it closes. This covers a parent's result, its reconciliation, and a pause that stops it.
+- `BudgetService.release_unstarted(db, attempt_id, epoch)` also accepts failed attempts, still only with a confirmed stop and no lease row.
+- A reservation that is not `reserved` is left as it is, and so is one whose attempt has a delivery signed under another recovery epoch than the caller's current one. Such an attempt may have run after a backup, so it stays charged.
+
+**Superseded.** These historical entries describe the old charge and are not edited:
+
+- the Task 9 entry's zero usage for never-started attempts;
+- the decline entry's "zero usage";
+- the Task 11 entry's Round 3 Minor, under which Task 9's never-started failures kept their reserved active time.
+
+**Red before implementation.** The 7 new or updated tests failed against the pre-refund source (`5e1ccd1`): the expiry, retirement and decline tests, the guard test, the churn test, and two runs of the claim-and-expiry race.
+
+**Decline safeguards hold.** A decline now charges nothing, so the budget no longer slows a declining runtime. What bounds it:
+
+- the step's `max_attempts`, pinned with zero charge by `test_refunded_declines_still_end_at_the_steps_attempts`;
+- 6 declines a minute per instance, `test_a_runtime_declines_at_most_its_allowance_per_minute`;
+- the runtime's breaker after 3 declines in a row, `test_a_broken_runtime_declines_at_most_three_in_a_row` and `test_the_decline_breaker_survives_new_workers_and_restarts` (runtime unchanged; part of the 727 Linux runtime tests above);
+- released reservations still counting toward `max_steps`.
+
+**Mutations (19), all caught:** each reverts one rule in a scratch copy and runs its witness test on the local PostgreSQL cluster.
+
+- the charge kept on each ending: expiry, retirement, decline, the claim race, either order, a declined child, and children closed by a result, a reconciliation or a pause;
+- the pause release removed;
+- the guard: any attempt state, a claimed attempt, an unstopped one, cancelled only, any reservation state, and a stale epoch for a child and for a root;
+- the decline allowance removed.
+
+**Green on macOS.**
+
+- On the local cluster (`PGTZ=UTC`) at round 3: 163 passed across leases, declines, races, control, budgets, the sweeper, recovery, reconciliation, dispatch and progression.
+- The full `tests/execution` suite, run by the reviewers on their copies: 506, 508 and 510 passed at rounds 1, 2 and 3.
+- Ruff is clean, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).** Same container setup as above.
+
+- Full backend suite at `44fbcad`: 1,226 passed, 97 subtests, 0 failed, 0 skipped, in 26 min 56 s. That includes all 8 fleet acceptance tests and the reordered sweeper test, and cleanup was confirmed.
+- The final source differs from `44fbcad` only in this entry.
+- The runtime is unchanged by this commit.
+
+**Reviews.** Both independent reviews required changes for two rounds and approved round 3.
+
+- **Round 1 (both):** never-claimed children closed with their parent were still fully charged, so a pause while an agent waited on a queued tool child spent budget. `close_children` now releases them.
+- **Round 1 Minors:**
+  - the reservation-state guard and the declined child were untested;
+  - the decline tests asserted no reservations;
+  - the guard test did not isolate the stop check;
+  - the restore residual was undocumented;
+  - the owner-confirmation marker was missing.
+- **Round 2 (both):** that fix released an unfenced old-epoch child at zero when its parent was reconciled, and a pause did the same to an old-epoch root. Both may have run after a backup. `release_unstarted` now takes the caller's current epoch and keeps such a reservation charged.
+- **Round 3:** both approved. The wording Minors and a stronger assertion in the pause-restore test were applied.
+
+**Open for the owner** (plan, "Residual, open for the owner"):
+
+- An attempt restored as `reserved` with no delivery carries no epoch. It is treated as never started, so its cancellation (since 2026-10-24) or retirement (now) releases it at zero, although it may have run after the backup.
+- An old-epoch child closed by its parent's reconciliation, or an old-epoch root released by a pause, before the fence reaches it, stays charged at its reserved bound. It is recorded `cancelled` rather than `uncertain`, so it is never reconciled. This status bypass predates the change; Task 13's restore tests should cover it.

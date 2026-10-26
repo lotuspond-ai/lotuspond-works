@@ -1984,7 +1984,7 @@ class InterpreterV1:
         except ExecutionError:
             return None
 
-    def _stop_cancelled(self, db, execution):
+    def _stop_cancelled(self, db, execution, epoch):
         """Confirm compute stop for cancelled attempts that no runtime ever claimed."""
         rows = db.execute(
             select(ExecutionAttempt.id)
@@ -2016,8 +2016,8 @@ class InterpreterV1:
             db.add(observation)
             db.flush()
             self.budgets.confirm_stopped(db, attempt_id, observation.id)
-            # Never claimed, so nothing ran: its reservation charges nothing (Task 11).
-            self.budgets.release_unstarted(db, attempt_id)
+            # Never claimed: released at zero (Task 11), unless delivered before a restore.
+            self.budgets.release_unstarted(db, attempt_id, epoch)
             stopped += 1
         return stopped
 
@@ -2120,7 +2120,7 @@ class InterpreterV1:
             for action in derivation.actions:
                 if isinstance(action, CancelUndispatched):
                     changes += self._cancel(db, execution, epoch, action)
-        changes += self._stop_cancelled(db, execution)
+        changes += self._stop_cancelled(db, execution, epoch)
         retain, release, contained, _ = self._capacity_work(db, execution)
         for wait_id in release:
             self.budgets.release_wait(db, wait_id)
