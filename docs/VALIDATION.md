@@ -834,3 +834,10 @@ Same branch as Tasks 7–11. This is local evidence only: not pushed, with no ho
 - Task 14's production wiring must resolve the single-call fleet lookup before the API serves real load.
 - Task 13 should measure `ArtifactStore.get`'s row lock on reads.
 - Runtime-reported events still have no route. Whichever task serves them takes a `RuntimePrincipal`.
+
+## Sweeper test made independent of machine load, 2026-10-26
+
+Test-only. Task 12's full Linux run showed `test_sweeper_items_are_independent_and_idempotent` assuming that a paused execution's 5 s deadline was still ahead at the first sweep. The test now starts that execution after the first sweep, so its deadline cannot fall due early, and the later pass still sweeps its timer while paused.
+
+- On macOS, with a 6 s stall injected before the first sweep, the reordered test passes.
+- Local Linux (not hosted CI), at this commit in the same container setup: `test_sweeper.py` was run five times and passed 9 of 9 each time. Cleanup was confirmed.

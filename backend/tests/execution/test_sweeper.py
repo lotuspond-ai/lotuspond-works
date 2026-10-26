@@ -94,19 +94,20 @@ def recorded(h, execution_id, path):
 
 def test_sweeper_items_are_independent_and_idempotent(controlled, monkeypatch):
     h = controlled
-    # Paused, with its 5 s deadline (and so its timer) still running.
+    # `expired` moves on to its external wait: its timer through the sweeper itself.
+    expired = h.start("waits_fast", None, "waits.policy", key="expired")
+    h.run()
+    until(h, wait_of(h, expired, "pause").deadline_ms)
+    assert h.sweep().timers == 1
+    h.run()
+    assert wait_of(h, expired, "callback").state == "open"
+    # Paused, with its 5 s deadline (and so its timer) still running. Started only
+    # now, so however slow the machine, its deadline cannot fall due before this.
     late = h.start("waits_deadline", None, "waits.policy", key="late")
     h.run()
     h.control(late, "pause")
     h.run()
     assert execution(h, late).state == "paused"
-    # `expired` moves on to its external wait: its timer through the sweeper itself.
-    expired = h.start("waits_fast", None, "waits.policy", key="expired")
-    h.run()
-    until(h, wait_of(h, expired, "pause").deadline_ms)
-    assert h.sweep().timers == 1  # not yet `late`'s: its timer waits for its deadline
-    h.run()
-    assert wait_of(h, expired, "callback").state == "open"
     # One of each due kind, each due by its own clock.
     timer = h.start("waits_fast", None, "waits.policy", key="timer")
     h.run()
