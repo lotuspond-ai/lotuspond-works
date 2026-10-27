@@ -71,6 +71,9 @@ class ReportVerifierTests(unittest.TestCase):
                 max_provider_calls_per_attempt=2
             ),
             "cleanup": lambda r: r.update(cleanup_receipt={"confirmed": False}),
+            "journey cleanup": lambda r: r["journeys"][0].update(
+                cleanup_confirmed=None
+            ),
             "outcome": lambda r: r.update(outcome="failed"),
         }
         for name, edit in cases.items():

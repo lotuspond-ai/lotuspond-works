@@ -21,6 +21,11 @@ dependencies = [
   "cryptography>=50,<51",
 ]
 
+[project.scripts]
+# The orchestrator and sweeper run from the API image, started explicitly by an
+# operator; importing the API never starts one.
+execution-worker = "lotuspond.execution_worker:main"
+
 [dependency-groups]
 dev = ["pytest>=9,<10", "pytest-asyncio>=1,<2", "ruff>=0.14,<1", "pip-audit>=2.9,<3"]
 

@@ -58,6 +58,22 @@ _RECEIPTS = None
 _SEQUENCE = 0
 
 
+class EvidenceError(Exception):
+    """A qualification report that cannot be relied on; a fixed code only."""
+
+    def __init__(self, code: str, problems=()):
+        self.code, self.problems = code, tuple(problems)
+        super().__init__(code)
+
+
+def require_report(report: dict) -> dict:
+    """The report when it qualifies; `missing_required_evidence` otherwise."""
+    problems = verify_report(report)
+    if problems:
+        raise EvidenceError("missing_required_evidence", problems)
+    return report
+
+
 def verify_report(report: dict) -> list[str]:
     """Every reason a report does not qualify; empty when it does."""
     problems = []
@@ -82,6 +98,9 @@ def verify_report(report: dict) -> list[str]:
             problems.append(
                 f"{item.get('artifact_variant')}: max_provider_calls_per_attempt"
             )
+        # Each journey's own receipt, not only the outer summary of them.
+        if item.get("cleanup_confirmed") is not True:
+            problems.append(f"{item.get('artifact_variant')}: cleanup_confirmed")
     if (report.get("cleanup_receipt") or {}).get("confirmed") is not True:
         problems.append("cleanup_receipt")
     if report.get("outcome") != "passed":

@@ -696,6 +696,11 @@ API and is revalidated with the complete envelope at every helper boundary.
 `UsageObservation` requires explicit nullable input/output token and cost fields;
 unknown usage is distinct from measured zero and grants no authority.
 
+API 0.3.0 signs these envelopes and runtime 0.2.0 verifies them; both pin
+`lotuspond-sdk==0.3.0`. E04's installed acceptance builds this wheel outside the
+checkout and runs a complete durable execution against it over TLS. No public
+package release is implied.
+
 Activity shape failures use the existing value-free `ExecutableError` family
 (`invalid_wire` for model admission, `invalid_envelope` for signature admission,
 and existing JSON bound/domain codes). JSON decoding retains `PackageReadError`;

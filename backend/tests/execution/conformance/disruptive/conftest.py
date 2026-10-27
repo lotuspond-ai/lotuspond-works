@@ -5,16 +5,22 @@ Opt-in with `LOTUSPOND_DISRUPTIVE_EXECUTION_TESTS=1`. Each case starts a fresh
 55439 or a development database), stops it with `pg_ctl -m immediate`, backs it up
 and restores it, then removes it and confirms the removal. Cluster-wide roles exist
 only inside that container (owner decision, 2026-10-26).
+
+With `--basetemp`, the session writes `execution-report.json` there in the shape of
+Task 13's report: each case as a scenario, required skips, the cleanup receipt and
+the outcome.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import random
 import shutil
 import socket
 import subprocess
 import time
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -26,6 +32,9 @@ IMAGE = "postgres:18.6"
 DATA = "/var/lib/postgresql/18/docker"
 REFUSED_PORTS = {5432, 55439}
 LABEL = "com.lotuspond.conformance=disruptive"
+REPORT_FORMAT = "lotuspond.execution-disruptive-report.v1"
+_SCENARIOS: dict = {}
+_REMOVALS: list = []
 
 
 def _docker(*args, input=None, timeout=120, check=True):
@@ -208,7 +217,9 @@ def cluster():
         owned.start()
         yield owned
     finally:
-        assert owned.remove(), "disposable cluster removal unconfirmed"
+        removed = owned.remove()
+        _REMOVALS.append(removed)
+        assert removed, "disposable cluster removal unconfirmed"
 
 
 @pytest.fixture
@@ -217,3 +228,44 @@ def world(engine_name, tmp_path, cluster):
     with owned_world(cluster.url, tmp_path / "world") as created:
         created.cluster = cluster
         yield created
+
+
+def pytest_runtest_logreport(report):
+    """Each tier 2 case's outcome over all its phases (setup, call, teardown)."""
+    if "disruptive" not in report.nodeid:
+        return
+    item = _SCENARIOS.setdefault(report.nodeid, {"name": report.nodeid, "passed": True})
+    if report.failed:
+        item["passed"] = False
+    if report.skipped:
+        item["passed"], item["skipped"] = False, True
+
+
+def pytest_sessionfinish(session, exitstatus):
+    basetemp = session.config.getoption("basetemp", None)
+    if not basetemp or not _SCENARIOS:
+        return
+    left = _docker(
+        "ps", "--all", "--quiet", "--filter", "label=com.lotuspond.conformance", check=False
+    )
+    census = left.returncode == 0 and not left.stdout.strip()
+    scenarios = sorted(_SCENARIOS.values(), key=lambda item: item["name"])
+    confirmed = bool(_REMOVALS) and all(_REMOVALS) and census
+    report = {
+        "format": REPORT_FORMAT,
+        "scenarios": scenarios,
+        "required_integration_skips": sum(1 for item in scenarios if item.get("skipped")),
+        "cleanup_receipt": {
+            "clusters": len(_REMOVALS),
+            "clusters_removed": sum(1 for removed in _REMOVALS if removed),
+            "labelled_containers_left": census is False,
+            "confirmed": confirmed,
+        },
+        "outcome": "passed"
+        if scenarios and all(item["passed"] for item in scenarios) and confirmed
+        else "failed",
+    }
+    path = Path(basetemp) / "execution-report.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2) + "\n")
+    os.chmod(path, 0o600)

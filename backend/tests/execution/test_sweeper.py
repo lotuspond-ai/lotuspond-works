@@ -441,3 +441,42 @@ def test_an_idle_scheduling_pass_takes_no_cursor_lock(controlled, caplog):
             assert h.sweep(sweeper=scheduling).scheduled_attempts == 0
         assert time.monotonic() - started < 5  # it never waited behind the holder
         assert "scheduling deferred" not in caplog.text  # nor tried for the lock at all
+
+
+@pytest.mark.parametrize(
+    ("configured", "effective"), [("200ms", "200ms"), ("15s", "500ms"), ("0", "500ms")]
+)
+def test_a_sweep_item_only_ever_lowers_the_worker_lock_timeout(
+    controlled, monkeypatch, configured, effective
+):
+    """Whole-branch review: an operator's lower lock timeout is never raised."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    from .control_fixtures import SWEEPER
+
+    h = controlled
+    with Session(h.engine) as db:
+        schema = db.scalar(text("SELECT current_schema()"))
+    # A worker's connections carry its configured timeout as a session setting.
+    worker = create_engine(
+        h.engine.url,
+        connect_args={"options": f"-c search_path={schema} -c lock_timeout={configured}"},
+        hide_parameters=True,
+    )
+    seen = []
+
+    def item(self, kind, db, identifier, epoch):
+        seen.append(db.scalar(text("SHOW lock_timeout")))
+
+    monkeypatch.setattr(
+        ExecutionSweeper, "_candidates", lambda self, sessions, limit: {"waits": ["probe"]}
+    )
+    monkeypatch.setattr(ExecutionSweeper, "_item", item)
+    try:
+        h.sweeper.sweep(sessionmaker(worker), SWEEPER, limit=100)
+        with worker.connect() as connection:  # positive control: the session's own value
+            assert connection.scalar(text("SHOW lock_timeout")) == configured
+    finally:
+        worker.dispose()
+    assert seen == [effective]

@@ -1019,3 +1019,92 @@ Same branch, as its own commit after Task 13. This is local evidence only: not p
   - **The red above** was rerun with this final case, and still fails where it should (`task13/hold-red.txt`).
 - **Checks.** The schema export check passes, and Ruff is clean on every changed file.
 - **Final runs.** Task 14's final runs repeat tier 1, tier 2 and the full backend suite at the final head.
+
+## E04 Task 14: packaging, CI jobs, operator documentation and final review, 2026-10-27
+
+Same branch. This is local evidence only: not pushed, with no hosted CI (GitHub Actions still refuses jobs) and no deployment.
+
+**What it adds.**
+
+- **`execution-worker`.** It is the API image's explicit worker command, a `[project.scripts]` entry: `execution-worker --role orchestrator|sweeper`. There is no separate engine image or server, and importing the API starts no worker. With a complete configuration it still refuses to start (`engine_unavailable`), because no qualified production provider ships.
+- **CI:**
+  - a `conformance` job, tier 1 plus installed acceptance, required, with a 90-minute hang bound from the measured 38 minutes;
+  - a `disruptive` job, tier 2 with its own clusters, 20 minutes, exporting `execution-report.json`;
+  - a manual `load` job for tier 3.
+  - The broad PostgreSQL suite leaves the conformance tiers out by name, so nothing hides as a skip.
+  - The validate job checks the packaging against the built image, and asserts API 0.3.0 next to SDK 0.3.0 and runtime 0.2.0.
+- **`scripts/checks/test_execution_packaging.py`:**
+  - the image ships no engine client or server, and no Temporal;
+  - the worker refuses to start without a role or a configuration;
+  - a configured but unqualified engine refuses, and fixture providers cannot be selected outside test mode;
+  - every required scenario and cleanup receipt is required (`missing_required_evidence`).
+- **Operator documentation:**
+  - `docs/operations/durable-execution.md`: topology, trust boundaries, the worker grants (measured, then completed for the paths tier 1 never ran), provisioning SQL, autovacuum, thresholds, restore, interpreter coexistence, runbooks and what remains open;
+  - `deploy/execution/execution-worker.env.example`;
+  - updates to the READMEs, the operator site, `CAPABILITIES.md`, the product rationale, and the E04 progress record.
+- **Proven grants.** Tier 2's ENG-4 now applies the operations guide's grants, read from the guide itself, to unique orchestrator and sweeper roles on its own cluster. It runs both workers as those roles.
+- **The carried Minor, resolved.** The standalone `check_release_binding` now ends with the final publisher-snapshot expiry check. A red test, `test_standalone_release_check_rechecks_the_snapshot_after_its_provider`, failed before the fix and passes after it, with the assurance and deployment tests: 42 passed.
+
+**Whole-branch review** (independent, over `origin/main..` the Task 14 head). It found no Critical issue and confirmed:
+
+- no Temporal code or dependency;
+- the fixed lock order on every path it traced;
+- additive migrations;
+- deny-by-default production wiring;
+- the carried Minor's fix.
+
+What it found, and what was done:
+
+- **The worker grants missed paths tier 1 never ran (Important, fixed).** These are a capacity step that stops a reserved, unclaimed attempt after a pause or a cancellation, and authorizing an execution an API key started or one in an MFA workspace.
+  - The guide now grants them.
+  - ENG-4 now runs the first two under exactly those grants: an API key's execution, then a pause and a cancellation of reserved attempts, whose reservations the capacity step frees.
+  - Applying the grant blocks to a schema at the current version also found an error the review had not: `memberships` has no `id` column, so `GRANT UPDATE (id)` failed. It is now `UPDATE (workspace_id)`.
+  - The guide's diagnostic is corrected: a missing grant logs `authority_unavailable` or `unexpected`, and stops scheduling installation-wide (recorded for the owner in the validation record).
+- **No path reconciles a lapsed or restore-fenced attempt (Important, open for the owner).**
+  - No route or runtime report carries the journal's evidence of stop and usage, so `POST /executions/{id}/reconciliation` refuses with 409.
+  - The guide's lapsed-lease runbook and restore step 5 had said otherwise. They now say what happens: the execution keeps its slot and liability. The gap is listed under Still open.
+- **One tenant's due work could hide another's from claims (Important, fixed).**
+  - A claim read only the 25 earliest due candidates. A workspace held `FOR UPDATE`, even by another orchestrator advancing one of its executions, skipped all of them.
+  - A claim now reads past each skipped workspace and execution, for at most 4 rounds.
+  - `test_a_locked_tenant_filling_the_candidate_window_hides_no_other_tenant` failed before the fix. All 19 orchestrator tests pass after it.
+- **Minor, fixed:**
+  - **Sweeper lock timeout.** A sweep item's 500 ms lock bound could raise an operator's lower lock timeout. It now only lowers it. `test_a_sweep_item_only_ever_lowers_the_worker_lock_timeout` failed for 200 ms before the fix. All 14 sweeper tests pass after it.
+  - **API version.** The API reported 0.2.0 in its OpenAPI document and `/api/v1/health`, and labelled E04's two changelog items 0.2.0. All now say 0.3.0, the distribution's version.
+  - **Worker healthcheck.** Worker containers inherit the image's API healthcheck, so the guide and the env example now pass `--no-healthcheck`.
+  - **Load job trigger.** Tier 3's `load` job runs only on a manual dispatch that sets its `load` input, never on a re-run. The packaging test asserts this.
+  - **Wording.** Wait retention is the orchestrator's capacity step, not the sweeper's, and the shutdown bound is above 0.
+- **Agreed with the recorded owner items,** with two notes. RESTORE-1 kept the required `disruptive` job red by design until the owner decided; the owner has since chosen to hold every restored execution (28 October), and RESTORE-1 is green with it. The cursor finding is at least as severe as recorded; the owner's diagnosis then showed the cursor itself, not the API process, is the bound.
+
+Those unit runs used a disposable PostgreSQL 14 cluster on this Mac (private port, UTC), removed afterwards. The final Linux runs below are on PostgreSQL 18.6.
+
+**Red before implementation.** `test_execution_packaging.py` failed 2 of 4 before the changes:
+
+- `execution-worker` was not installed;
+- `verify_report` accepted a report whose journey reported unconfirmed cleanup. That was a real gap in the verifier, now fixed.
+
+**Final runs, local Linux** (not hosted CI). These ran at `0ca6ef0`, on a clean standalone clone. Each `ci.yml` job ran alone, one after another, in the local runner image, through `e04-evidence/ci-local.py`: a non-root `runner` user, `--init`, and the job's PostgreSQL 18.6 service on a private loopback port mapped to its 5432. The final source differs from `0ca6ef0` only in documents, and in the stall evidence that one tier 2 case now records.
+
+- **`validate`:** every step passed, in 53 min.
+  - `npm run check`, in 20 min. That includes the SQLite Python suite (1,097 passed; its 195 PostgreSQL-only cases skip there by design, and run in the required suite below), the SDK suite (1,514) and the runtime suite (733).
+  - **The required PostgreSQL suite**, with installed fleet acceptance and the supervised runner: 1,238 passed, 97 subtests, 0 failed, 0 skipped, in 31 min.
+  - The API image build and its metadata check; the packaging tests against the built image (4 passed); schema parity; and the strict docs build.
+  - The first attempt stopped before any test ran, because of the local driver, not the code. The driver had run the PostgreSQL service on the host network at the private port. So the workflow's identity check, `docker exec … psql` on the default socket, could not reach the database. The driver now maps the private port to the service's 5432, as GitHub does.
+- **`conformance`** (tier 1 and installed acceptance, required mode): 48 passed, 0 failed, 0 skipped, in 41 min.
+- **`disruptive`** (tier 2, required): 6 passed, in 2 min 11 s.
+  - The first run had 5 passed and 1 failed: the form wait across an immediate restart stalled once. That is qualification finding 24, open, with its cause not established.
+  - Every other run of the case passed: one before the failure, and 36 after it. Those were the full tier 2 rerun, 5 isolated runs, then 25 isolated runs and 5 more full tier 2 runs.
+- **`sdk` and `runtime`**, on Python 3.13 and on 3.14: 1,514 passed (68 subtests) and 733 passed on each.
+- **ENG-4.** Before these runs, tier 2 at `dc1a18f` found ENG-4's extension failing for the case's own reason: a restarted runtime waits out its old session lease (finding 18). The case now resumes onto a freshly enrolled runtime.
+- **Distributions** built from `0ca6ef0`, for reference (SHA-256). The tests build their own:
+  - `lotuspond_api-0.3.0-py3-none-any.whl`: `172b9dba881a1ec00239f43383cf708f6fbec5563d6203730611751c6a99982f`
+  - `lotuspond_api-0.3.0.tar.gz`: `f3aa51dd63da478f221887cf763a2f91bc39cef872acb5e360b1e99f6f8c1e7a`
+  - `lotuspond_runtime-0.2.0-py3-none-any.whl`: `0734b76468784b1db8f54556e6a3cbfa5f49263d4a811347ebcea99774175803`
+  - `lotuspond_runtime-0.2.0.tar.gz`: `b415743d94d906626ab2657e1774b01c997334dd7044543bac6e9371c64201ce`
+  - `lotuspond_sdk-0.3.0-py3-none-any.whl`: `351ae89eceeb04f908b2d2aaba153f93b0d78a82081992058dd1c1a765980a98`
+  - `lotuspond_sdk-0.3.0.tar.gz`: `975269ee11a8973a5f217edd5742fedbf89f80dfa3058d4168b8c7d66ac94ed0`
+- **Open for the owner from these runs:** finding 24.
+
+**Not done:**
+
+- **Hosted CI** at the exact final head: GitHub Actions refuses jobs.
+- **Push and draft PR:** waiting for the owner's approval.

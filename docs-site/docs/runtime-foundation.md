@@ -2,15 +2,16 @@
 
 Lotuspond has a separately installable Linux runtime identity client, scoped
 connection metadata and process-session contracts. The opt-in API is for customer
-owners and administrators. The current CLI registers no production connector and
-has no business execution loop. Test-only authorities qualify the foundation;
+owners and administrators. The current CLI registers no production connector, and
+its durable-execution activity worker runs only synthetic test-mode providers (see
+below). Test-only authorities qualify the foundation;
 production recovery, dispatch, deployment-record and command-trust providers
 remain unavailable or deny by default. Enabling the fleet feature alone cannot
 authorize work. Existing evaluation runners remain a separate capability.
 
 ## Bootstrap on a Linux host
 
-Obtain reviewed `lotuspond-sdk==0.2.0` and `lotuspond-runtime==0.1.0` wheels and
+Obtain reviewed `lotuspond-sdk==0.3.0` and `lotuspond-runtime==0.2.0` wheels and
 their independent artifact digests through your operator's private distribution.
 No public package release is implied. Use Python 3.13 or 3.14 and install the
 wheels in a dedicated virtual environment. Provision the control server's CA and
@@ -31,8 +32,8 @@ install -d -m 700 /home/runtime/lotuspond-private
 install -d -m 700 /home/runtime/lotuspond-private/state
 python3.14 -m venv /home/runtime/lotuspond-private/venv
 /home/runtime/lotuspond-private/venv/bin/python -m pip install \
-  /reviewed/lotuspond_sdk-0.2.0-py3-none-any.whl \
-  /reviewed/lotuspond_runtime-0.1.0-py3-none-any.whl
+  /reviewed/lotuspond_sdk-0.3.0-py3-none-any.whl \
+  /reviewed/lotuspond_runtime-0.2.0-py3-none-any.whl
 install -m 600 /trusted/control-ca.pem /home/runtime/lotuspond-private/control-ca.pem
 cat > /home/runtime/lotuspond-private/runtime.json <<'JSON'
 {
@@ -78,6 +79,23 @@ every twenty seconds. Rotation begins with at least five minutes remaining and
 0–30 seconds of bounded jitter. Expiry uses server/database time; disagreement
 beyond thirty seconds fences authority. Exit codes are 0 stopped/success,
 2 invalid input, 3 unavailable/fenced and 4 unsafe storage.
+
+## Durable execution activities
+
+Runtime 0.2.0 adds the runtime side of durable execution (E04). A runtime polls for
+signed, single-use deliveries addressed to its own session, claims each under a
+short lease that it renews, runs the activity in a separate child, and reports the
+result as historical evidence. A private journal records each invocation before it
+starts, so a lost or stopped runtime is reconciled from evidence instead of being
+retried blindly. A delivery the runtime cannot verify is declined, never run.
+
+This release ships no production read or model provider.
+`lotuspond-runtime activity-worker` refuses outside test mode (exit 3,
+`unavailable`); only test mode runs the packaged synthetic providers that
+qualify the protocol. The control plane's orchestrator and sweeper run from the
+API image as `execution-worker --role orchestrator|sweeper`; see the operator guide
+`docs/operations/durable-execution.md` for grants, provisioning, restore and
+runbooks.
 
 ## Operations and capability limits
 

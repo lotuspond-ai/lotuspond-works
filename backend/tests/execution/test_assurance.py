@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from hashlib import sha256
 from threading import Event
-from time import monotonic
+from time import monotonic, sleep
 
 import pytest
 from sqlalchemy import select, text
@@ -148,6 +148,54 @@ def test_evaluation_id_is_not_release_authority(harness):
         actor = authorize_execution(db, h.principal, h.scope, "manage")
         with pytest.raises(ExecutionError, match="assurance_unavailable"):
             check_release_binding(db, actor, publication.id, new_id(), dependencies=h.dependencies)
+
+
+class SlowAssurance(FixtureAssurance):
+    """Answers correctly, after the publisher snapshot it was asked under has expired."""
+
+    def binding(self, scope, package_sha256, configuration_sha256, release_id):
+        sleep(2)
+        return super().binding(scope, package_sha256, configuration_sha256, release_id)
+
+
+def test_standalone_release_check_rechecks_the_snapshot_after_its_provider(harness):
+    """Carried Minor (Task 14): `check_release_binding` ends with the final expiry check."""
+    from lotuspond.fleet.authority import database_now_ms
+
+    h = harness
+    with Session(h.engine) as db, db.begin():
+        p = h.publish(db)
+        request = deployment_request(h, p.id)
+        release, _, proof = release_records(db, h, p, request)
+        configuration = sha256(canonical_configuration(request.configuration)).hexdigest()
+        actor = authorize_execution(db, h.principal, h.scope, "manage")
+        current = ExecutionDependencies(
+            authority=h.authority, assurance=FixtureAssurance(proof), test_mode=True
+        )
+        # Positive control: a current snapshot and a passing bridge are accepted.
+        check_release_binding(
+            db,
+            actor,
+            p.id,
+            release.id,
+            configuration_sha256=configuration,
+            dependencies=current,
+        )
+        current.close()
+        h.authority.snapshot["expires_at_ms"] = database_now_ms(db) + 1000
+        slow = ExecutionDependencies(
+            authority=h.authority, assurance=SlowAssurance(proof), test_mode=True
+        )
+        with pytest.raises(ExecutionError, match="trust_unavailable"):
+            check_release_binding(
+                db,
+                actor,
+                p.id,
+                release.id,
+                configuration_sha256=configuration,
+                dependencies=slow,
+            )
+        slow.close()
 
 
 @pytest.mark.parametrize(

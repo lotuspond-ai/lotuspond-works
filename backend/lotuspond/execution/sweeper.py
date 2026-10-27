@@ -67,7 +67,14 @@ OVERDUE = ("pending", "running", "waiting", "paused")
 LIVE = (*OVERDUE, "reconciliation_required")
 # A sweep item never waits long on a row another transaction holds: it is retried
 # by a later pass instead, so one tenant's long transaction cannot stall a pass.
+# It only ever lowers the worker's own lock timeout, which an operator may already
+# have set lower (configurable downward only); 0, PostgreSQL's "none", is higher.
 ITEM_LOCK_TIMEOUT = "500ms"
+BOUND_LOCK_WAIT = text(
+    "SELECT set_config('lock_timeout', :bound, true)"
+    " WHERE current_setting('lock_timeout') = '0'"
+    " OR current_setting('lock_timeout')::interval > CAST(:bound AS interval)"
+)
 # Queue depths are counted up to this bound; a value at the bound means "at least".
 DEPTH_BOUND = 10000
 Depth = Annotated[int, Field(ge=0, le=DEPTH_BOUND)] | None
@@ -507,7 +514,7 @@ class ExecutionSweeper:
             for identifier in identifiers:
                 try:
                     with sessions() as db, db.begin():
-                        db.execute(text(f"SET LOCAL lock_timeout = '{ITEM_LOCK_TIMEOUT}'"))
+                        db.execute(BOUND_LOCK_WAIT, {"bound": ITEM_LOCK_TIMEOUT})
                         changed = self._item(kind, db, identifier, self._fence(db))
                 except Exception as error:
                     # One item never stops the others; it is retried by a later pass.

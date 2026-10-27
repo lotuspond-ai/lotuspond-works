@@ -416,6 +416,42 @@ def test_locked_workspace_is_skipped_not_waited_on(admission):
         assert claim_runnable(db, worker).id == head  # positive control: head when free
 
 
+def test_a_locked_tenant_filling_the_candidate_window_hides_no_other_tenant(admission, monkeypatch):
+    """Whole-branch review: a claim reads past a locked workspace's due work."""
+    from lotuspond.execution import orchestrator
+    from tests.fleet.test_schema import load
+
+    from .test_schema import execution_rows
+
+    h = admission
+    head = admit(h).id
+    other = execution_rows(5)
+    worker = WORKER.model_copy(update={"interpreter_ids": (INTERPRETER_V1, "fixture")})
+    with Session(h.engine) as db, db.begin():
+        load(db.connection(), other)
+    second = other["executions"]["id"]
+    with Session(h.engine) as db, db.begin():
+        mark_runnable(db, locked(db, second), database_now_ms(db))
+    # The locked tenant's due work fills the whole round.
+    monkeypatch.setattr(orchestrator, "CANDIDATES", 1)
+    with Session(h.engine) as blocker, blocker.begin():
+        blocker.execute(
+            select(Workspace.id).where(Workspace.id == h.scope.workspace_id).with_for_update()
+        )
+        with Session(h.engine) as db, db.begin():
+            db.execute(text("SET LOCAL lock_timeout = '2s'"))
+            claimed = claim_runnable(db, worker)
+            assert claimed is not None and claimed.id == second
+        # With the other execution held as well, the claim ends empty within its bound.
+        with Session(h.engine) as holder, holder.begin():
+            locked(holder, second)
+            with Session(h.engine) as db, db.begin():
+                db.execute(text("SET LOCAL lock_timeout = '2s'"))
+                assert claim_runnable(db, worker) is None
+    with Session(h.engine) as db, db.begin():
+        assert claim_runnable(db, worker).id == head  # positive control: head when free
+
+
 def test_marker_cleared_after_candidate_read_is_rechecked_under_lock(admission):
     from sqlalchemy import event
 

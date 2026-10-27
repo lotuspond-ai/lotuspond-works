@@ -158,6 +158,41 @@ Each finding was observed in a run; none is inferred.
       - The planning-target run: 11,250.
     - The two 27 October calibrations had no restarter, and their runtimes ended with exit 3 as well. So their dispatch counts show what stopped runtimes served, not what the engine could dispatch. Their cursor measurements stand.
     - The operations guide's runbook asks for a restarting service manager.
+    - While a restarted runtime waits out its old lease, deliveries to it expire. A read whose dispatch retries run out in that window fails with `provider_unavailable`, unless another runtime serves the pool. Task 14's final tier 2 run showed this in ENG-4, which now resumes its paused read onto a freshly enrolled runtime.
+
+Found by Task 14's whole-branch review (27 October), after the tiers above had run:
+
+19. **The worker grants missed paths tier 1 never ran (fixed in Task 14).**
+    - Tier 1 recorded the grants of the paths it exercised. It never exercised a capacity step that stops a reserved, unclaimed attempt after a pause or a cancellation. Nor did it authorize an execution that an API key started, or one in an MFA workspace.
+    - The operations guide grants those too.
+    - ENG-4 runs the first two under exactly the guide's grants.
+    - Applying the grant blocks also showed that `memberships` has no `id` column, so its row-lock grant is `UPDATE (workspace_id)`.
+20. **Scheduling fails closed on a database refusal (open for the owner).** The scheduler authorizes each head inside its batch. A missing grant, or any other database error there, aborts the whole batch, so nothing is scheduled anywhere until it is fixed. The worker logs only `authority_unavailable` or `unexpected`; PostgreSQL's own log names the cause.
+21. **No route reconciles an uncertain attempt (open for the owner).** No route or runtime report carries a journal's evidence of stop and usage. So `POST .../reconciliation` refuses with 409 for a lapsed or restore-fenced attempt, and the execution keeps its slot and liability: five such attempts exhaust an environment's default limit. Under the restore hold (finding 12), an attempt that a journal shows ran can only be cancelled, and its usage goes uncharged. The conformance cases reconcile in the test process instead (see Deviations).
+22. **One tenant's due work could hide another's from claims (fixed in Task 14).**
+    - A claim read only the 25 earliest due candidates. Skipping a workspace held `FOR UPDATE` skipped all of them.
+    - A claim now reads past skipped workspaces and executions, for at most 4 rounds.
+    - `test_a_locked_tenant_filling_the_candidate_window_hides_no_other_tenant` failed before the fix.
+23. **A sweep item could raise a lower lock timeout (fixed in Task 14).** Its 500 ms bound now only ever lowers the worker's lock timeout. `test_a_sweep_item_only_ever_lowers_the_worker_lock_timeout` failed for 200 ms before the fix.
+
+Found in Task 14's final runs:
+
+24. **A signal accepted after an immediate restart was not applied for 120 s, once (open for the owner: cause not established).**
+    - **What happened.** In the first final tier 2 run, `test_a_form_wait_survives_an_immediate_restart` sent its signal after the restart. It was accepted on the first try: the API logged no error. The execution then stayed `waiting` for the case's full 120 s.
+    - **The logs.** During the restart the orchestrator logged two refused cycles (`authority_unavailable`), and the sweeper one (`invalid_request`, the engine's code for any database error outside a service). Neither logged a deferred transition, capacity step or retention.
+    - **Checked in the code, and sound:**
+      - the signal's inbox row, its outbox wake-up and the runnable marker commit in one transaction;
+      - a claim skips a candidate only while another transaction holds its workspace or execution row, and reads are authorized without locks;
+      - a connection lost inside a claim rolls the whole transaction back, marker included;
+      - in the harness a worker polls at most every 250 ms, with pre-pinged connections;
+      - due times use `clock_timestamp()`;
+      - the form flow's terminal capacity step has no attempt in flight, so it completes at once.
+
+      None of these loses a wake-up.
+    - **Not reproduced.** 37 other runs of the case passed, isolated or in full tier 2 runs, before and after. It never failed in Task 13's runs.
+    - **No cause from this run.** Its database went with its disposable cluster, so the cause cannot be established from it.
+    - **If it stalls again,** the case now records the evidence: the execution's state, marker and epoch; its outbox, inbox and wait rows; and every open transaction, with its locks on `workspaces` and `executions`.
+    - **Raw output:** `~/Downloads/LotusPond-worktrees/e04-evidence/final/disruptive-3.14-r1.log`.
 
 ## Runs
 

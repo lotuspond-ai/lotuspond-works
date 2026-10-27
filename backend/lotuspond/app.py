@@ -198,7 +198,7 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(
-        title="Lotuspond API", version="0.2.0", lifespan=lifespan, docs_url=None, redoc_url=None
+        title="Lotuspond API", version="0.3.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
@@ -285,7 +285,7 @@ def create_app(
 
     @app.get("/api/v1/health")
     def health():
-        return {"status": "ok", "product": "Lotuspond", "version": "0.2.0"}
+        return {"status": "ok", "product": "Lotuspond", "version": "0.3.0"}
 
     @app.get("/api/v1/ready")
     def ready():
@@ -306,14 +306,14 @@ def create_app(
             "product": "Lotuspond",
             "items": [
                 {
-                    "version": "0.2.0",
+                    "version": "0.3.0",
                     "id": "durable-execution-api",
                     "date": "2026-10-26",
                     "title": "Scoped durable execution API",
                     "description": "The opt-in fleet API adds production executions of admitted executable packages: package publication and exact content, deployment revisions and their activation, starting work, observed and requested state, events and waits, signals and human forms, pause, resume and cancel, owner reconciliation, context sources and artifact reads. Owners and administrators manage deployments; editors start enabled work and control their own executions; viewers read. Keys need the new execute or execution_signal scope; the evaluation run scope grants nothing here, and keys never manage deployments, submit human forms or reconcile. Production providers deny until a qualified integration is configured, while stored evidence stays readable.",
                 },
                 {
-                    "version": "0.2.0",
+                    "version": "0.3.0",
                     "id": "runtime-activity-api",
                     "date": "2026-10-26",
                     "title": "Runtime activity routes",

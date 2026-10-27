@@ -1154,6 +1154,34 @@ assert required_report_missing_error.code == "missing_required_evidence"
 | Claim p95 at target load, or execution-table WAL          | Over 50 ms, or over 50 % of measured primary capacity | ADR-0011 revisit trigger                                                                                               |
 | Lock wait on `execution_scheduler_cursors` at target load | p95 over 100 ms (proposed)                            | Review Task 5's installation-wide serialization                                                                        |
 
+**Conventions fixed by Task 14, for the owner's acknowledgement:**
+
+- **The worker command.** `execution-worker` is a `[project.scripts]` entry of `lotuspond-api`, so the API image already carries it. `deploy/Dockerfile` needed no change, and its default command stays the API.
+- **CI jobs.**
+  - `conformance` (tier 1 and installed acceptance, required, 90 minutes) and `disruptive` (tier 2, required, 20 minutes) are jobs of their own. The timeouts are hang bounds from measured runs (38 and 2 minutes).
+  - The validate job's PostgreSQL suite leaves both out with `--ignore`, by name.
+  - `load` runs only on a `workflow_dispatch` that sets its `load` input, never on a re-run (the whole-branch review).
+- **Tier 2's report.** With `--basetemp`, tier 2 writes `execution-report.json` with its scenarios, required skips, cleanup receipt and outcome: the Task 13 report's shape, as format `lotuspond.execution-disruptive-report.v1`.
+- **Measured grants, completed.** The operations guide's worker grants come from a tier 1 run with the grant recorder.
+  - The whole-branch review added the paths tier 1 never ran: stopping a reserved attempt after a pause or a cancellation, and authorizing an API key's or an MFA workspace's execution.
+  - ENG-4 reads the grants from the guide and runs both workers under them, including an API key's execution, a pause and a cancellation. Only the MFA read is derived and not run.
+  - Tables a role only row-locks get column `UPDATE` on one key column, the narrowest grant PostgreSQL accepts for a lock: `id`, or `workspace_id` for `memberships`, which has no `id`.
+- **Review resolutions in product code.**
+  - A claim reads past every workspace and execution it skipped, in rounds of `CANDIDATES` (25), at most `ROUNDS` (4). So one tenant's locked due work cannot hide another tenant's.
+  - A sweep item's 500 ms lock bound only ever lowers the worker's own lock timeout.
+  - The API reports 0.3.0, its distribution's version, and labels E04's two changelog items 0.3.0.
+- **Left for the owner** (recorded in the validation record):
+  - reconciling a lapsed or restore-fenced attempt, for which no route or runtime report exists;
+  - a database refusal on a scheduling path, which fails the whole batch closed;
+  - runtime 0.1.0's exit on a refused or slow control call.
+- **Production stays deny-by-default.** No qualified provider is configured, so `production_engine` refuses and the API builds no execution services. The packaging test asserts both.
+- **Files beyond Task 14's row,** each necessary:
+  - `scripts/checks/execution-smoke.py` (`EvidenceError` and `require_report`; `verify_report` now also requires each journey's own cleanup receipt);
+  - `deploy/checks/test_durable_execution_smoke.py`;
+  - conformance `disruptive/conftest.py` (the tier 2 report) and `disruptive/test_database_restart.py` (ENG-4's documented grants);
+  - backend `execution/assurance.py`, with `tests/execution/test_assurance.py` (the carried Minor);
+  - from the whole-branch review: backend `execution/orchestrator.py`, `execution/sweeper.py` and `app.py`, with `tests/execution/test_orchestrator.py` and `tests/execution/test_sweeper.py`.
+
 ## Owner-approved addition beyond E04: declining an unverifiable delivery (2026-10-23)
 
 This is not an E04 task. The owner reviewed Task 10's known limitation and decided: "fix outside E04". It lands as its own commit on this branch, with its own specification and quality review, tests and validation entry.
