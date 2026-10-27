@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import json
 import subprocess
@@ -266,3 +267,78 @@ def test_activity_worker_command_refuses_without_installed_providers(tmp_path, c
     module = cli_module()
     assert module.main(["activity-worker", "--config", str(config_file(tmp_path))]) == 3
     assert capsys.readouterr().err.strip() == "unavailable"
+
+
+def activity_config(tmp_path, **changes):
+    from fixtures.activity_provider import CONNECTOR, INSTALLED, MODEL
+
+    path = tmp_path / "activity.json"
+    data = {
+        "trust_file": str(tmp_path / "trust.json"),
+        "journal_directory": str(tmp_path / "journal"),
+        "providers": [
+            {
+                "provider_id": "fixture-read",
+                "dependency": CONNECTOR.model_dump(),
+                "operations": ["read"],
+                "connector": INSTALLED.model_dump(),
+                "script": {"read": {"value": None}},
+            },
+            {"provider_id": "fixture-model", "dependency": MODEL.model_dump()},
+        ],
+        **changes,
+    }
+    path.write_text(json.dumps(data))
+    path.chmod(0o600)
+    return path
+
+
+def test_activity_worker_runs_synthetic_providers_only_in_test_mode(tmp_path, capsys):
+    """Task 13: test mode runs the packaged synthetic providers; nothing else does."""
+    module = cli_module()
+    activity = str(activity_config(tmp_path))
+    # Production and development modes install no provider, whatever is configured.
+    for mode in ("production", "development"):
+        config = str(config_file(tmp_path, mode=mode))
+        assert (
+            module.main(["activity-worker", "--config", config, "--activity-config", activity]) == 3
+        )
+        assert capsys.readouterr().err.strip() == "unavailable"
+    # Test mode needs its activity configuration, and it must be exact closed data.
+    config = str(config_file(tmp_path, mode="test"))
+    assert module.main(["activity-worker", "--config", config]) == 3
+    capsys.readouterr()
+    for bad in (
+        {"trust_file": "relative.json"},
+        {"providers": [{"provider_id": "real-model", "dependency": {}}]},
+        {"providers": []},
+        {"extra": True},
+    ):
+        invalid = str(activity_config(tmp_path, **bad))
+        assert (
+            module.main(["activity-worker", "--config", config, "--activity-config", invalid]) == 2
+        )
+        assert capsys.readouterr().err.strip() == "invalid_input"
+
+
+def test_synthetic_worker_configuration_and_trust_are_reread(tmp_path):
+    from test_state import private_dir
+
+    from lotuspond_runtime.activity_fixture import FixtureTrust, worker_config
+
+    directory = private_dir(tmp_path)
+    trust_file, journal, descriptors = worker_config(activity_config(directory).read_bytes())
+    assert (trust_file.name, journal.name) == ("trust.json", "journal")
+    assert [d.provider_id for d in descriptors] == ["fixture-read", "fixture-model"]
+    assert all(d.test_only for d in descriptors)
+    keys = {"format_version": 1, "keys": []}
+    path = directory / "trust.json"
+    path.write_text(json.dumps(keys))
+    path.chmod(0o600)
+    trust = FixtureTrust(path)
+    assert list(trust.current(None, 0).keys) == []
+    public = bytes(range(32))
+    entry = {"key_id": hashlib.sha256(public).hexdigest(), "public_key": public.hex()}
+    rotated = {"format_version": 1, "keys": [{**entry, "state": "allowed"}]}
+    path.write_text(json.dumps(rotated))
+    assert len(trust.current(None, 0).keys) == 1  # a rewritten file is seen at once

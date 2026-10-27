@@ -240,6 +240,51 @@ def test_a_targeted_poll_names_its_parent_and_nothing_else():
         client.poll(parent_attempt_id="not-a-uuid")
 
 
+def test_each_request_carries_the_live_credential_across_a_rotation():
+    """An invocation in flight across a rotation renews and reports with the new token."""
+    module = client_module()
+    rotated = SecretStr("lpr_" + "B" * 43)
+    current = [(TOKEN, SESSION)]
+    transport = Transport({"/activities/poll": b"null"})
+    client = module.ActivityClient(transport, TOKEN, SESSION, live=lambda: current[0])
+    assert client.poll() is None
+    current[0] = (rotated, SESSION)  # the supervisor rotated the credential
+    assert client.poll() is None
+    current[0] = None  # the loop ended: the client's own pair, never a missing one
+    assert client.poll() is None
+    assert [(call[3], call[4]) for call in transport.calls] == [
+        (TOKEN, SESSION),
+        (rotated, SESSION),
+        (TOKEN, SESSION),
+    ]
+    with pytest.raises(ValueError):
+        module.ActivityClient(transport, TOKEN, SESSION, live="not callable")
+
+
+def test_a_request_refused_by_a_rotation_in_between_is_sent_once_more():
+    """The token was revoked between reading the pair and the request: one retry."""
+    module = client_module()
+    rotated = SecretStr("lpr_" + "B" * 43)
+    current = [(TOKEN, SESSION)]
+
+    class Rotating(Transport):
+        def request(self, method, route, body, token, session=None):
+            self.calls.append((method, route, body, token, session))
+            if token == TOKEN:
+                current[0] = (rotated, SESSION)  # rotated meanwhile; the old one is revoked
+                raise FleetError("unauthenticated")
+            return b"null"
+
+    transport = Rotating({})
+    client = module.ActivityClient(transport, TOKEN, SESSION, live=lambda: current[0])
+    assert client.poll() is None
+    assert [call[3] for call in transport.calls] == [TOKEN, rotated]
+    # Without a newer pair, the refusal is the answer: nothing is retried.
+    stale = module.ActivityClient(Rotating({}), TOKEN, SESSION)
+    with pytest.raises(FleetError, match="unauthenticated"):
+        stale.poll()
+
+
 def test_a_decline_names_the_exact_delivery_and_nothing_else():
     from lotuspond_sdk.activity import ActivityDelivery
 

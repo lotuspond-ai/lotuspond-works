@@ -543,6 +543,8 @@ def invoke_read(deps, envelope, records, arguments, cancel, deadline_ms):
         "deadline_ms": deadline_ms,
         "secrets": _resolve(deps, (*connection.secrets, *descriptor.credentials)),
     }
+    if deps.providers.test_mode:
+        request["attempt_id"] = envelope.attempt_id  # synthetic call counters only
     return call_provider(
         request,
         deadline_ns=_deadline_ns(deps, deadline_ms),
@@ -598,6 +600,8 @@ def invoke_model(deps, descriptor, request, cancel, deadline_ms, *, attempt_id=N
         "deadline_ms": deadline_ms,
         "secrets": _resolve(deps, descriptor.credentials),
     }
+    if deps.providers.test_mode:
+        payload["attempt_id"] = attempt_id  # synthetic call counters only
     return call_provider(
         payload,
         deadline_ns=_deadline_ns(deps, deadline_ms),

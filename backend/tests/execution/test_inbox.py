@@ -329,6 +329,22 @@ def test_payload_type_and_late_equal_replay_do_not_complete_wait(signals):
         assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1
 
 
+def test_an_equal_replay_after_the_signal_took_effect_returns_its_receipt(signals):
+    """Task 13: the answer was lost after commit and progression consumed the signal;
+    the client's equal retry learns it was accepted, instead of a refusal."""
+    h = signals
+    receipt = accept(h)
+    with Session(h.engine) as db, db.begin():  # progression consumed it
+        db.get(ExecutionInbox, receipt.id).status = "delivered"
+        db.get(ExecutionWait, h.wait_id).state = "satisfied"
+    again = accept(h)
+    assert (again.id, again.status) == (receipt.id, "delivered")
+    with pytest.raises(ExecutionError, match="conflict"):  # a changed payload still conflicts
+        accept(h, h.signal.model_copy(update={"payload": {"different": True}}))
+    with Session(h.engine) as db:
+        assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1
+
+
 @pytest.mark.parametrize("signals", ["private"], indirect=True)
 def test_outbox_contains_only_opaque_identity_and_digest_for_private_signal(signals):
     from lotuspond_sdk.activity import ArtifactHandle

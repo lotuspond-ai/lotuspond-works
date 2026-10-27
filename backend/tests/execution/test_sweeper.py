@@ -24,6 +24,7 @@ from lotuspond.models import (
     ExecutionAttempt,
     ExecutionLease,
     ExecutionStepInstance,
+    ExecutionUsageReservation,
     ExecutionWait,
 )
 
@@ -374,3 +375,69 @@ def test_an_item_whose_rows_are_held_is_deferred_not_waited_on(controlled):
     assert (report.timers, report.lapsed_leases) == (1, 0)
     assert elapsed < 3000
     assert h.sweep().lapsed_leases == 1  # a later pass takes it
+
+
+def test_a_sweep_pass_reserves_the_next_attempts_through_the_scheduler(controlled):
+    """Task 13: nothing else drives Task 5's `schedule_batch`, so the sweeper does.
+
+    Without it no attempt is ever reserved outside tests, and none reaches a runtime.
+    """
+    from lotuspond.execution.contracts import AdmissionRequest
+    from lotuspond.execution.scheduler import Scheduler
+
+    from .activity_fixtures import Demand, attempt_at, deploy
+
+    h = controlled
+    revision = deploy(h, "activity_read")
+    with Session(h.engine) as db, db.begin():
+        execution_id = h.service.admit_execution(
+            db, h.actor, AdmissionRequest(deployment_revision_id=revision, input=None), "sched"
+        ).id
+    h.run()
+    attempt_id = attempt_at(h, execution_id, "read")
+
+    def reserved():
+        with Session(h.engine) as db:
+            return db.scalar(
+                select(func.count())
+                .select_from(ExecutionUsageReservation)
+                .where(ExecutionUsageReservation.attempt_id == attempt_id)
+            )
+
+    # The plain sweeper reserves nothing: the attempt would wait forever.
+    assert h.sweep().scheduled_attempts == 0 and reserved() == 0
+    scheduling = ExecutionSweeper(
+        leases=h.leases,
+        recovery=h.fence,
+        scheduler=Scheduler(h.budgets, Demand(), test_mode=True),
+    )
+    assert h.sweep(sweeper=scheduling).scheduled_attempts == 1
+    assert reserved() == 1
+    # Once reserved it is no longer a candidate: a repeat pass reserves nothing more.
+    assert h.sweep(sweeper=scheduling).scheduled_attempts == 0 and reserved() == 1
+    h.dispatch(attempt_id)  # the reservation lets a runtime receive it
+
+
+def test_an_idle_scheduling_pass_takes_no_cursor_lock(controlled, caplog):
+    """Task 13: with nothing to reserve, the scheduler never queues on the cursor."""
+    import logging
+    import time
+
+    from lotuspond.execution.scheduler import Scheduler
+    from lotuspond.models import ExecutionSchedulerCursor
+
+    from .activity_fixtures import Demand
+
+    h = controlled
+    scheduling = ExecutionSweeper(
+        leases=h.leases,
+        recovery=h.fence,
+        scheduler=Scheduler(h.budgets, Demand(), test_mode=True),
+    )
+    with Session(h.engine) as holder, holder.begin():
+        holder.scalar(select(ExecutionSchedulerCursor).with_for_update())  # held throughout
+        started = time.monotonic()
+        with caplog.at_level(logging.WARNING, logger="lotuspond.execution"):
+            assert h.sweep(sweeper=scheduling).scheduled_attempts == 0
+        assert time.monotonic() - started < 5  # it never waited behind the holder
+        assert "scheduling deferred" not in caplog.text  # nor tried for the lock at all

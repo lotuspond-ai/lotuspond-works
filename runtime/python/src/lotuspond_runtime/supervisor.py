@@ -69,6 +69,16 @@ class RuntimeSupervisor:
         ):
             raise ValueError("The activity clock must share the supervisor's monotonic source")
         self._activity_clock = activity_clock
+        self._shared = None
+
+    def activity_session(self):
+        """The live (credential token, session secret, identity), or None.
+
+        The activity worker builds its own transport from it (Task 13). Only a whole
+        tuple is ever assigned, so another thread always reads a consistent one; it is
+        replaced on rotation and cleared when this loop ends.
+        """
+        return self._shared
 
     def _remote(self, method, state, model, *args):
         started = self._monotonic()
@@ -295,6 +305,7 @@ class RuntimeSupervisor:
         self._session, self._identity = session.secret, session.identity
         if state.pending_token is not None:
             state = self._replace(state, state.active_token)
+        self._shared = (state.active_token, session.secret, session.identity)
         jitter = self._jitter()
         if type(jitter) is not int or not 0 <= jitter <= 30000:
             raise FleetError("invalid_request")
@@ -308,6 +319,7 @@ class RuntimeSupervisor:
                 raise FleetError("unauthenticated")
             if self._now() >= next_rotation and not stop.is_set():
                 state, active = self._rotate(state, active, stop, startup_recovery=startup_overdue)
+                self._shared = (state.active_token, self._session, self._identity)
                 startup_overdue = False
                 next_rotation = active.credential_expires_at_ms - 300000 - jitter
                 if next_rotation <= self._now():
@@ -357,6 +369,7 @@ class RuntimeSupervisor:
         except FleetError as error:
             result = 4 if error.code == "unsafe_storage" else 3
         finally:
+            self._shared = None
             self._session = None
             self._identity = None
             self._pending_delivery = None

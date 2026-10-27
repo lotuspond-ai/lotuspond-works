@@ -228,13 +228,36 @@ def queue_depths(db, epoch: int) -> QueueDepths:
     return QueueDepths(**depths)
 
 
+def _schedulable(db) -> bool:
+    """Whether any attempt waits for a reservation: a plain read, without locks."""
+    return bool(
+        db.scalar(
+            select(
+                select(ExecutionAttempt.id)
+                .join(Execution, Execution.id == ExecutionAttempt.execution_id)
+                .where(
+                    ExecutionAttempt.state == "reserved",
+                    Execution.requested_state == "running",
+                    Execution.state.in_(("pending", "running")),
+                    ~select(ExecutionUsageReservation.id)
+                    .where(ExecutionUsageReservation.attempt_id == ExecutionAttempt.id)
+                    .exists(),
+                )
+                .exists()
+            )
+        )
+    )
+
+
 class ExecutionSweeper:
     """Task 11's sweeper; explicitly constructed with Task 9's lease service and the fence."""
 
-    def __init__(self, *, leases, recovery):
+    def __init__(self, *, leases, recovery, scheduler=None):
         if leases is None or recovery is None:
             raise ValueError("Lease service and recovery fence are required")
         self.leases, self.recovery = leases, recovery
+        # Task 5's scheduler, run after each pass's items in batches (Task 13).
+        self.scheduler = scheduler
         self.test_only = bool(getattr(recovery, "test_only", False))
         # The last pass's queue depths, for the worker's metrics; None until read.
         self.depths = None
@@ -390,6 +413,36 @@ class ExecutionSweeper:
             return self._deadline(db, identifier, epoch)
         return kind if changed else None
 
+    def _schedule(self, sessions, limit) -> int:
+        """Reserve the next eligible attempts, under the fence, up to `limit` per pass.
+
+        Each batch reserves at most one head per environment (Task 5's fairness), so
+        batches repeat, each in its own transaction, while they reserve anything. The
+        scheduler takes the installation cursor first, as admission does, and waits for
+        it under the worker role's own lock timeout, like any other request: a shorter
+        bound would let a stream of admissions starve it. When no attempt waits for a
+        reservation it takes no lock at all. A refusal is retried by a later pass and
+        never stops the sweep.
+        """
+        total = 0
+        while total < limit:
+            try:
+                with sessions() as db:
+                    if not _schedulable(db):
+                        break
+                with sessions() as db, db.begin():
+                    self._fence(db)
+                    scheduled = self.scheduler.schedule_batch(
+                        db, self.scheduler.budgets.installation_id, min(limit - total, 25)
+                    )
+            except Exception as error:
+                logger.warning("Execution scheduling deferred: %s", _code(error))
+                break
+            if not scheduled:
+                break
+            total += len(scheduled)
+        return total
+
     def sweep(self, sessions, worker, *, limit: int = 100) -> SweepReport:
         worker = WorkerIdentity.model_validate(worker)
         if worker.role != "sweeper":
@@ -409,6 +462,8 @@ class ExecutionSweeper:
                     continue
                 if changed:
                     counts[changed] += 1
+        if self.scheduler is not None:
+            counts["scheduled_attempts"] = self._schedule(sessions, limit)
         self.depths = None
         try:
             with sessions() as db, db.begin():

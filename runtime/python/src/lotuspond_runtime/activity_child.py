@@ -98,6 +98,10 @@ def _answer(request):
     descriptor = _descriptor(request["descriptor"])
     secrets = tuple(bytes.fromhex(value) for value in request["secrets"])
     provider = _provider(descriptor, secrets, request.get("test_mode"))
+    if request.get("test_mode") is True:
+        from . import activity_fixture
+
+        activity_fixture.ATTEMPT_ID = request.get("attempt_id")  # its call counter
     if provider is None:
         return {"failure": "unavailable", "not_reached": True}
     try:

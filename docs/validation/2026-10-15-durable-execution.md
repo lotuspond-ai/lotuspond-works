@@ -1,0 +1,379 @@
+# Durable execution qualification (E04 Task 13)
+
+Approved E04 plan: Revision 2 (PR #13), 22 October 2026. Task 13 ran 26–27 October 2026.
+
+This is local foundation evidence from Linux containers on Docker Desktop (arm64, 4 CPUs, 6 GB). GitHub Actions has refused every job for this repository since 23 October (billing), so nothing here is hosted CI, a deployment, or production or customer qualification. Providers are synthetic throughout: the owner has no provider to supply.
+
+## What is tested, and how
+
+**A world per case.** Each case owns a PostgreSQL schema (tier 1, on the shared test database) or a whole `postgres:18.6` container (tiers 2 and 3, on a private 127.0.0.1 port, never 5432 or 55439). It also owns a private directory of file-backed test authorities:
+
+- recovery epoch and availability;
+- entitlement, price and demand;
+- tenant policy;
+- deployment trust and the admitted catalog;
+- artifact keys and source access;
+- activity trust and signing.
+
+These are reread on every call and live outside the database, so a restore never rewinds them. Provider calls are counted in files beside each runtime, also outside every database.
+
+**Real processes.** Each runs in its own process group, so a case can SIGKILL, SIGSTOP or SIGCONT it:
+
+- the API, under uvicorn over TLS with a synthetic CA;
+- orchestrator and sweeper workers, through `run_execution_worker`, with the worker role's database timeouts;
+- installed runtimes: `lotuspond_runtime enroll`, then `activity-worker` in test mode. They reach the API only through a TCP proxy that can stall or sever their connections.
+
+Customers act only through HTTP routes and the runtime protocol. A small, labelled set of integrity cases writes rows directly to prove that reads fail closed.
+
+**Setup outside E04, written as labelled rows:**
+
+- projects and environments (E01 has no route for them);
+- operator provisioning of the scheduler cursor and capacity rows (Task 14's procedure);
+- the pool policy and connection for the catalog's `connector-fixture`, which E03's installed catalog does not know.
+
+**Clock.** Real database time. Fixtures use short durations; no test edits a deadline, lease or expiry column.
+
+**Fault injection, test-only.** One armed commit kind fails before its commit (it rolls back) or is lost after it (the API answers 503; an orchestrator exits at once). The kinds are admission, signal, claim, result, transition and projection.
+
+## Cases
+
+Tier 1 has 47 cases and tier 2 has 6; installed acceptance has 16 named scenarios per artifact variant.
+
+| Plan cases                                                                                                    | File                                  | Cases |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ----- |
+| Spike 1–7, REG-4 (tier 1)                                                                                     | `test_restart.py`                     | 3     |
+| Spike 11–14, ENG-7                                                                                            | `test_admission.py`                   | 3     |
+| Spike 8–10 (runtime), ENG-2, ENG-3 (with single use), reference agent                                         | `test_activities.py`                  | 6     |
+| Spike 34, REG-5                                                                                               | `test_waits.py`                       | 2     |
+| REG-1, REG-2, REG-3, REG-6                                                                                    | `test_regions.py`                     | 4     |
+| Spike 23–27                                                                                                   | `test_cancellation.py`                | 3     |
+| Spike 29–33, REV-5                                                                                            | `test_versions.py`                    | 3     |
+| REV-1 to REV-4, REV-6                                                                                         | `test_revocation.py`                  | 5     |
+| DISC-1 to DISC-4                                                                                              | `test_disconnection.py`               | 4     |
+| TEN-1 to TEN-7                                                                                                | `test_isolation.py`                   | 7     |
+| Privacy (`test_decoded_events_and_errors_exclude_payloads`)                                                   | `test_privacy.py`                     | 1     |
+| ENG-1, ENG-4 (sequences), ENG-5, ENG-6 (with spike 8–9 for the orchestrator), ENG-8 (plan; package and input) | `test_invariants.py`                  | 6     |
+| Spike 1–2 (immediate restart), REG-4 (tier 2), ENG-4 (grants)                                                 | `disruptive/test_database_restart.py` | 3     |
+| RESTORE-1 to RESTORE-3                                                                                        | `disruptive/test_restore.py`          | 3     |
+
+**Installed acceptance** (`test_installed_acceptance.py`, through `scripts/checks/execution-smoke.py`):
+
+- It builds the SDK, runtime and API wheels outside the checkout, plus a runtime wheel rebuilt from its sdist.
+- It installs each set into its own isolated environment and runs the copied journey with `python -I`.
+- For each artifact variant it checks:
+  - noneditable installed origins (API 0.3.0, runtime 0.2.0, SDK 0.3.0);
+  - actual TLS authentication;
+  - the reference workflow's result and counted read and model calls;
+  - decoded-event privacy;
+  - rollback before and after the admission, signal, claim, result, transition and projection commits.
+
+The report is refused unless every scenario passed, there were zero required skips and no private sentinel, at most one provider call ran per attempt, and cleanup was confirmed.
+
+## Deviations from the plan's wording
+
+- **Spike 14.** E04 has no schedule triggers. The replacement case is an equal retry after a new revision is enabled: it returns the original execution, pinned to revision 1.
+- **Spike 8–10.** The plan expects that "after reconciliation a new ordinal completes once". In E04 no retry class covers uncertain work, so the reconciled step fails and gets no new ordinal; the case asserts exactly one attempt.
+  - The replacement is a new execution, which runs once on a fresh runtime.
+  - The stopped runtime's journal fence correctly keeps it from serving again.
+- **Spike 5–7.** Events record their origin (orchestrator or activity) and the delivery's runtime instance. They do not record which orchestrator or sweeper made them.
+- **ENG-4.** The least-privilege role is created only on tier 2's disposable cluster (owner decision, 26 October 2026). Tier 1 covers gap-free sequences.
+- **Privacy, credentials.** The credential sentinels are the runtime's own credential token and the customer's session cookie: the credentials E04's paths carry. Connection secrets reach a provider only through E03's mounted-secret resolver. E03's suite qualifies that path, and the test-mode worker mounts none.
+- **Privacy, the prompt.** An agent's instructions are the customer's own package content, stored as published (plaintext) in `executable_publications` and `executable_dependencies`. The prompt sentinel is therefore allowed there and nowhere else, and the case asserts it is present there.
+- **Privacy, documents.** The document sentinel is a knowledge source's content. The fixture connector's reads return null by schema, so a read result cannot carry one.
+- **Journal evidence.** The cases reconcile an uncertain attempt as its owner, through the reconciliation service, with the runtime's journal entry as evidence. They require that entry to exist and assert what it says. No route yet accepts a runtime's journal evidence, so this runs in the test process.
+- **DISC-1** models a disconnection as a hand-driven runtime that polls and never claims. The other disconnection cases sever the proxy.
+- **RESTORE-2** cannot separate its two refusals: under the new epoch every older instance is refused, whatever its generation.
+- **Tier 3.** Changes from the plan's wording:
+  - **Workload.** Every case reads twice, and 20 % then wait on a form that stays open.
+  - **Thresholds.** The plan gives none for "sustained growth" or the "pre-burst range". The runner fails growth over the final 30 minutes above the larger of 10 executions and 10 % of the mean backlog. The pre-burst range is the backlog's p95 over the last 10 steady minutes, at least 10.
+  - **Queue age.** Measured two ways, and the larger counts against the 30 s bound. One is the plan's runnable queue: due executions plus attempts not yet reserved. The other is the age from admission of every execution not finished and not waiting, so a deferral's back-off cannot hide starvation.
+  - **Service manager.** The runner restarts a runtime that exits outside a planned kill after 5 s, as a service manager would (finding 18), and reports every restart.
+  - **Enrollment.** The runner enrolls at most 15 runtimes a minute, below the API's allowance for one peer (finding 3).
+  - **Lock waits.** Every process times each statement that locks the cursor, including those a lock timeout ends. In a CPU-saturated process this client-side figure also includes the time the thread waited to run, so it is acquisition latency as the client saw it. The sampled server-side waiters cross-check it. PostgreSQL's own log holds only waits over 100 ms that were granted.
+
+## Findings
+
+Each finding was observed in a run; none is inferred.
+
+1. **No worker scheduled attempts (fixed, amendment).** Nothing called Task 5's `schedule_batch`, so an execution with an activity stayed `pending` forever. The sweeper now schedules after each pass (`SweepReport.scheduled_attempts`). This was the first red of milestone A.
+2. **A listed-open wait can refuse its signal (open for the owner).**
+   - Progression commits a new wait as `open` in one transaction. The capacity step retains it, and moves a `pending` execution to `waiting`, in the next.
+   - In between, `GET /waits` lists the wait as open, but a signal is refused with 403 `forbidden`, because the signal check accepts only `running`, `waiting` and `paused` executions.
+   - The gap is normally milliseconds. Tier 2 widened it, because an immediate PostgreSQL restart landed in it: the case failed 2 times in 5 before the harness waited for the execution to leave `pending`.
+   - A retention deferred by quota or authority keeps the gap open for as long as the deferral lasts.
+   - A client polling waits cannot tell the cases apart, and 403 does not invite a retry.
+   - Options: accept signals for a `pending` execution with an open wait, list a wait only once retained, or document a retry.
+3. **One authority lookup at a time per API process (Task 12's recorded limitation, measured).** Concurrent callers get 503 `authority_unavailable`. Customers and runtimes retry. The runtime's one-shot `enroll` command does not, so the harness reruns a refused enrollment as an operator would. Tier 3 measures the effect under load.
+    - The API also allows each peer 20 enrollment exchanges a minute, and each token 5. Every tier 3 runtime enrolls from one host, and the harness's reruns count too. The first two planning-target runs failed setup on that 429, which the runtime CLI reports only as `unavailable`. The load runner now paces enrollment at 15 a minute.
+4. **A worker refuses to start if its first cycle meets a database outage.** This is by design: its service manager restarts it. The harness waits for each worker's first completed cycle before disrupting anything.
+5. **Connection call bound.** A connection's `DataHandling.timeout_ms` defaults to 10 s (maximum 30 s), and an agent step's `timeout_seconds` caps the merged active limit. Reads longer than the connection's bound are stopped by the runtime.
+6. **Publish-time compile errors are 503 `dependency_unavailable`** (REG-6, one step past the 10,000-step ceiling), not a 4xx.
+7. **Revoking a deployment's active revision blocks admissions to its older revisions too** (REV-5 uses a separate deployment for disable).
+8. **The tamper fence skips `pending` executions** (ENG-8). A due execution whose stored plan no longer matches its digest stays refused, without being fenced for reconciliation.
+9. **An activity runtime that lacks one provider still receives that provider's deliveries,** and reports `unavailable`. A runtime with no activity capability at all never receives one (spike 33).
+10. **An uncertain attempt is never retried.** The retry codes are limited to `unavailable`, `rate_limited` and `timeout_before_dispatch`; uncertain work waits for reconciliation.
+11. **The installation-wide cursor serializes the engine under load (tier 3; owner decision, 2026-10-28: a follow-up redesign outside E04).** At 5 admissions per second the queue on `execution_scheduler_cursors` never drained, and the scheduler starved (see Runs). This exceeds the plan's proposed threshold for reviewing Task 5's installation-wide serialization (cursor lock wait p95 over 100 ms). PostgreSQL itself was nearly idle, so this does not show the limits of a single primary, which is ADR-0011's engine trigger. The bottleneck is in the application: one installation-wide lock that every admission, signal, result and capacity step takes first.
+    - **Diagnosed (owner decision, 2026-10-28: "Diagnose, then decide").** A calibration with three API processes took the single saturated process out of the way. Each process stayed below one core. Yet the API's total CPU stayed at one core, admissions were no faster, cursor waits grew (p95 10.3 s), and only 10 deliveries happened during the load (see Runs).
+    - So the bound is the cursor itself, held for each admission's whole transaction, not the API process. A multi-process API is not a fix, and is not documented as a deployment requirement.
+    - Task 5's locking is not redesigned in E04. Owner decision (2026-10-28): this finding stays open, as a follow-up redesign outside E04 (cheaper work under the cursor, or a cursor not held across it). No further owner decision is needed for E04.
+    - Evidence, in the local evidence folder outside the repository: the planning-target run, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-full4/` (its report, and the database counts and timing logs saved before the stop under `snapshot/`); the three-process calibration, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-workers/`.
+12. **A restore runs an activity again if it was claimed after the backup (RESTORE-1, red, open for the owner).**
+    - The backup holds a read admitted but not yet delivered. After the backup that read is claimed and completes once.
+    - After the restore, the restored rows show the attempt as never delivered. The restore fence knows only deliveries signed under an older epoch, so it leaves that attempt alone.
+    - A fresh runtime under the new epoch was delivered the same attempt and ran it a second time: two provider calls for one attempt. The run's output is kept in the local evidence folder outside the repository, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/restore1-red.txt`, like earlier tasks' raw logs.
+    - The other RESTORE-1 requirements hold: older-epoch sessions and deliveries are refused, the attempt delivered before the backup is fenced uncertain, and the original signal is accepted once.
+    - In E04 the repeat is a second read or model call (cost and data exposure, no business write). E05's writes would make it a second effect.
+    - This is the consequence of the residual already open for the owner since the reservation refund change (`docs/VALIDATION.md`, 26 October): "an attempt restored as `reserved` with no delivery carries no epoch" and is treated as never started. RESTORE-1 shows it happening.
+    - That entry's second residual is not covered here: an old-epoch child closed by its parent's reconciliation before the fence reaches it.
+    - Options for the owner:
+      - after a restore, hold every non-terminal execution for reconciliation until runtime journals are reconciled;
+      - give runtimes a route to report journal entries under the new epoch, and fence matching attempts;
+      - keep a dispatch record outside the database, with the independent authority.
+13. **An equal signal replay after the signal took effect was refused (fixed).** Installed acceptance's "signal, after commit" rollback found it.
+    - The commit held but its answer was lost, and progression consumed the signal at once. The client's equal retry then got 403, because the replay check ran after the wait-state check.
+    - Task 12's documented contract is that an equal retry replays the first answer.
+    - Now a delivered signal replays its receipt, under current authorization. An undelivered one is still judged by its wait, so Task 6's late-replay refusal stands.
+    - Fixed in this commit, with a unit test in `test_inbox.py`.
+14. **The sweeper may now wait up to the worker's lock timeout for the cursor (a consequence of the scheduling amendment).** It schedules after a pass's items and waits for the cursor as any request does, 15 s by default, because a shorter bound let admissions starve it. Under contention the next pass, and with it due timers, lapsed leases and expiries, can start up to that long late. The second calibration shows sweeper cycles at p95 11 s. REG-4's timers fire once and never early, but not necessarily at their deadline under load. Its lock-free check sees only whether some attempt awaits a reservation, not whether there is capacity for it. So under a saturated backlog the sweeper still takes the cursor on every pass. Bounding scheduling per pass, or running it apart from the item sweep, is for the owner to weigh with finding 11.
+15. **Active time is charged at least its reservation.** A settled attempt keeps its full reserved active time against the root budget, even when the call ended sooner (Task 5's conservative liability). Demand must be sized so that every attempt's reservation fits the root budget (REG-1 needed 30 s, not 60 s, for two reads in a 100 s budget).
+16. **REG-6's bound.** At the 10,000-step ceiling, one more step is refused at publication. The case also asserts a bound on the rows read from `execution_step_instances`: fewer than 9,001 / 3 per step instance created, from `pg_stat_user_tables`. A transition that loaded the whole expansion would read at least 9,001. The measured value is printed by the case and recorded with the tier 1 run.
+17. **Throughput observed in tier 1** (REG-2, 1,000 items, concurrency 5): about 1 item per second. Reserving an attempt takes about 0.6 s, iterations run in waves of 4–5 s, and spawning a child takes about 1 s.
+18. **Runtime 0.1.0 exits under load (by design, measured).**
+    - The runtime ends its process with exit 3 (`unavailable`) when a control call is refused or takes more than 10 s, and leaves restarting it to its service manager. A restarted runtime first waits out its previous session lease.
+    - Under tier 3 every runtime exited this way, over and over. In the first full-scale run all 24 had exited within minutes, so that run was stopped.
+    - The load runner now stands in for a service manager. It restarts a runtime that exits outside a planned kill after 5 s, and records each restart.
+      - The 5-minute check: 780 restarts across all 24 runtimes, every one exit 3.
+      - The planning-target run: 11,250.
+    - The two 27 October calibrations had no restarter, and their runtimes ended with exit 3 as well. So their dispatch counts show what stopped runtimes served, not what the engine could dispatch. Their cursor measurements stand.
+    - The operations guide's runbook asks for a restarting service manager.
+
+## Runs
+
+Results are recorded below as each run completes. Every run is a local Linux container on Docker Desktop (arm64, 4 CPUs, 6 GB), PostgreSQL 18.6, Python 3.14.9. The worktree is mounted read-only. Raw output stays in the local evidence folder outside the repository.
+
+### Tier 1, required mode, 27 October 2026
+
+- **Run.** At `860aa97`, clean tree, 13:57–14:35 UTC: `tests/execution/conformance`, excluding `disruptive/` (tier 2 runs on its own), with `LOTUSPOND_REQUIRE_DURABLE_EXECUTION_TESTS=1`.
+- **Result:** 42 passed and 5 failed, in 38 min 13 s. No skips.
+- **The five failures, each a defect in the case, not in the engine:**
+  - **REG-2:** the package's default elapsed limit of 1,000 s was shorter than the about 1,000 s 1,000 items take (finding 17). The limit was raised to 7,200 s; rerun alone, it passed in 1,273 s.
+  - **ENG-1:** the case assumed the read always starts before the deadline. When the deadline won first, no call was made. Now at most one call is allowed.
+  - **ENG-3, single use:** a holder's equal claim is an idempotent replay by design (the same lease, no second one). The case now asserts the replay, one lease row, and another session's refusal.
+  - **DISC-4:** a read admitted during the 150 s outage failed by its declared dispatch timeout, 2 s three times. That is correct; the case admits its read after reconnection again.
+  - **REV-6:** the new positive control was blocked by the deployment's single active slot, held by the refused read as uncertain liability. It now has two slots, and asserts no attempt runs twice.
+- **REV-6, intermittent.** In one rerun out of three, the control read itself ended uncertain after the authority returned, with no API refusal logged. It was not diagnosed; the case now captures the runtime's journal and the lease rows if it recurs.
+- **Reruns.** After the fixes, each changed case was rerun alone or in small batches, and all passed: REG-2, ENG-1, ENG-3, DISC-4, REV-6, privacy (with the citation's positive control) and REG-1.
+- **REG-6:** 9,002 step instances, 1,082 rows read per instance, against the bound of 3,000.
+- **Slowest cases:**
+  - REG-2: 1,003 s in the run, 1,273 s alone;
+  - ENG-6: 183 s;
+  - REG-6: 167 s;
+  - DISC-4: 152 s;
+  - REV-6: 118 s.
+- **Grants.** The run recorded the worker grants: 3,892 entries, in 34 tables for the orchestrator and 36 for the sweeper. Task 14's operations guide gives them.
+
+### Tier 1, final run, 27 October 2026
+
+- **Run.** At `16c6fea`, after every correction, clean tree, 16:21–16:52 UTC, required mode.
+- **Result:** **47 passed, 0 failed, 0 skipped**, in 31 min 34 s.
+- **REG-6:** 9,002 step instances, 1,111 rows read per instance, against the bound of 3,000.
+- **Slowest cases:**
+  - REG-2: 820 s;
+  - DISC-4: 154 s;
+  - ENG-6: 150 s;
+  - REG-6: 130 s.
+
+### Tier 2, final run, 27 October 2026
+
+- **Run.** At `16c6fea`, run alone.
+- **Result:** 5 passed and 1 red, in 1 min 11 s. The red case is RESTORE-1 (finding 12).
+- **Cleanup.** Clusters and volumes were confirmed removed.
+
+### Installed acceptance, 27 October 2026
+
+- **Run.** On a standalone clone of `16c6fea` (`source_dirty: false`), under `execution_process.run_owned`: **1 passed**, in 90 s.
+- **Both artifact variants passed all 16 named scenarios:** the wheels, and a runtime wheel rebuilt from the sdist.
+- **Observed.**
+  - Each journey made 11 provider calls, at most one per attempt.
+  - No private sentinel was found on any surface.
+  - Zero required skips.
+  - Cleanup was confirmed: 16 owned commands, every process group, no schema, container or volume left.
+- **Distributions** (SHA-256):
+  - `api/lotuspond_api-0.3.0-py3-none-any.whl`: `ad1cc88bcbcf4237a1ab6e8de56b49cbe4cbd923d2dffb694a7e65692c18b126`
+  - `rebuilt/lotuspond_runtime-0.2.0-py3-none-any.whl`: `77c06c86282fcd2f51808a92384f03dbda92b97e4019c765c44629b67f4f9ce0`
+  - `runtime/lotuspond_runtime-0.2.0-py3-none-any.whl`: `77c06c86282fcd2f51808a92384f03dbda92b97e4019c765c44629b67f4f9ce0`
+  - `runtime/lotuspond_runtime-0.2.0.tar.gz`: `5d0dea7a837df107e136a3882e758c745e7d8f7ac39987b9b7b73430f08b9b55`
+  - `sdk/lotuspond_sdk-0.3.0-py3-none-any.whl`: `11f47aebe91ac6cdc16396fdd5d2caa0189b6ebb989c4c713b03a09726a5db0c`
+- **Source manifest** SHA-256: `f8556381bc3561dadc3d01148e7ae08b503e662c8a5f212e8b4c5a6f06d14396`.
+- **Earlier failed attempts, corrected:**
+  - The journey shared one tenant, so uncertain liability from one scenario held later scenarios' capacity. Each scenario now has its own environment.
+  - The deploy and publish caches were keyed by workspace.
+  - The reference check expected 3 claimed attempts instead of 4.
+  - A hand-driven poll was rate-limited.
+  - One engine defect: an equal signal replay was refused after the signal took effect (finding 13).
+  - Two failures were local setup, not code: git from a worktree inside the container, and an incomplete offline package cache. Both were fixed in the local loop.
+
+### Runtime suite, 27 October 2026
+
+- **Run.** At `16c6fea` on Linux, with network access as in CI, because the installed-wheel fixtures build with `uv`: **733 passed**.
+
+### Tier 2, first run, 27 October 2026
+
+- **Run.** At `28b0c07`, with `LOTUSPOND_DISRUPTIVE_EXECUTION_TESTS=1` and required mode.
+- **Result:** 5 passed and 1 failed, in 1 min 52 s. The failure is RESTORE-1, red against the plan as finding 12: the read claimed after the backup ran a second time after the restore.
+- **Cleanup.** Every disposable cluster and its volumes were confirmed removed, and no labelled container remained.
+
+### Tier 3 calibration, 27 October 2026
+
+`execution-load.py` at a reduced scale, ahead of the full run, to check the runner end to end:
+
+- 2 environments, each with 2 runtimes;
+- 2 minutes at 5 admissions per second, 1 minute at 10, then 1 minute at 5;
+- 50 waiting cases.
+
+The cluster was `postgres:18.6` with default settings, except `max_connections=300`, `log_lock_waits=on` and `deadlock_timeout=100ms`. The run was on the hardware above.
+
+**The engine did not keep up.**
+
+- All 1,489 admissions were accepted (201), but each took about 20–29 s. Admissions were tagged by the phase in which they finished, a runner bug fixed afterwards, so the per-phase counts in that report are not usable.
+- No attempt was delivered during the load phases: 0 deliveries, 0 claims, 0 provider calls.
+- Executions piled up `pending`: 1,500 by the end, with 20 waiting.
+- At every sample, 21–22 backends waited for the row lock on `execution_scheduler_cursors`, and the longest current wait was 5.8–7.5 s.
+- PostgreSQL logged 3,683 waits over 100 ms by statements on the cursor (p50 384 ms, p95 6.5 s, max 8.0 s). The plan's proposed trigger is p95 over 100 ms.
+- The API process used 111 CPU-seconds in the 120 s steady phase, one saturated core. The orchestrators used 9 and the sweeper 2.5.
+- PostgreSQL itself was nearly idle: CPU p50 6 %, p95 16 %; WAL about 110 kB/s.
+
+**What this shows.**
+
+- Every admission, signal, result and capacity step takes the installation-wide cursor row first (Task 5's order). The scheduler and the orchestrators' capacity steps need it too.
+- With the single API process saturated, a request holding the cursor proceeds slowly, and the queue on the cursor never drains. Starved of the cursor, the scheduler never reserved an attempt.
+- This exceeds the plan's proposed threshold for reviewing Task 5's installation-wide serialization, measured, not assumed. PostgreSQL was not the limit.
+- Four idle runtimes then polled every 0.2 s, about 20 requests per second to the same API process. The test-mode activity loop now backs off while idle to E03's one-second ceiling.
+
+**Waiting phase.**
+
+- The 50 form executions never reached `waiting` within the 30-minute bound: the orchestrators could not get the cursor either.
+- After every worker and runtime was killed and restarted, the workers were ready in 1.2 s.
+- The 20 new reads all ended `failed` (p50 188 s, max 366 s). That run did not record why; the runner now records state and reason.
+- 5 sweep passes over the remaining set took 36–44 ms.
+- Resident memory: API 208 MB, orchestrators 261 MB in total, sweeper 132 MB.
+
+Cleanup was confirmed: every process group ended, the schema was dropped and the cluster removed. A local result is evidence about this harness on this hardware, not hosted capacity or a service level.
+
+### Tier 3 calibration, second run, 27 October 2026
+
+Same scale, after the review corrections:
+
+- admissions timed from their scheduled arrival;
+- every cursor acquisition timed by its own process;
+- queue age also measured from admission;
+- the real workers' cycle durations;
+- the plan's two-reads-then-form case;
+- the fair scheduler.
+
+**Admissions.**
+
+- 1,289 admissions; one was refused, 503 `recovery_unavailable`: the one-at-a-time lookup.
+- Each request took 22–29 s.
+- Timed from their scheduled arrival, p95 was 124 s in the steady phase and 270 s in the burst.
+
+**The cursor.**
+
+- Of 5,382 acquisitions, 1,854 waited over 100 ms (p95 8.0 s, max 11.8 s), and 342 were ended by a lock timeout.
+- By role: the API made 4,380 (p95 8.2 s), the sweeper 990 (p95 2.2 s), the orchestrators 12.
+- At every sample the queue was about 20 deep. The holders ahead of it were API requests, one of them idle in its transaction: an API thread holding the cursor while it computes.
+
+**The API was the bound.**
+
+- 229 CPU-seconds in 240 s of load: one saturated core, about 0.15 CPU-seconds per admission.
+- PostgreSQL CPU was p50 5 %.
+- The orchestrators' cycles took p50 3 ms. The sweeper's took p95 11 s, waiting for the cursor.
+
+**Outcome.**
+
+- 6 deliveries and 2 claims; 2 provider calls, one per attempt (the one-call criterion passed).
+- 1,445 executions were still `pending` at the end.
+- After the kill and restart, the 20 waiting cases had not reached their wait. All 20 resumed reads ended `failed` with reason `provider_unavailable`, after p50 122 s.
+- The restarted sweeper's passes took p50 0.04 s.
+
+**What this adds.** The first run's conclusion stands, now measured at the holder. Each admission spends about 0.15 CPU-seconds in a single API process, and holds the installation-wide cursor while it does. So everything that needs the cursor queues behind a saturated process: scheduling, claims, results and capacity steps. The planning target needs either cheaper admission work under the cursor, or a cursor that is not held across it. Both are design changes for the owner.
+
+### Tier 3, planning-target attempts, 27 October 2026
+
+Three attempts at the planning target (8 environments of 3 runtimes, 60 minutes at 5 admissions per second) did not reach their load:
+
+- At `bdb71c0` and `293adde`, setup failed: "runtime enrollment refused: unavailable". A diagnostic run showed a 429 from the API's per-peer enrollment allowance (finding 3). Enrollment is now paced.
+- At `13279a5`, every runtime had exited with code 3 within minutes of load (finding 18), so the run was stopped. Cleanup was confirmed.
+
+### Tier 3, five minutes at full scale, 27 October 2026
+
+With the restarter, at `8d12453`: 8 environments of 3 runtimes, 3 minutes at 5 admissions per second, 1 at 10 and 1 at 5, no waiting phase.
+
+- **Admissions.** 1,789 accepted. Each request took about 17 s (p50). Timed from scheduled arrival, p95 was 78 s steady, 164 s in the burst and 188 s in recovery. Some were refused with 503 `entitlement_unavailable`, `recovery_unavailable` and `trust_unavailable`: the one-at-a-time lookups (finding 3).
+- **Work.** 149 deliveries (dispatch p95 23.8 s) and 118 claims. At most one provider call per attempt (passed).
+- **The cursor.** 7,316 acquisitions: 2,667 over 100 ms, p95 5.3 s, max 10.1 s, and 593 ended by a lock timeout.
+- **Load.**
+  - The API used 164 CPU-seconds in the 180 s steady phase.
+  - PostgreSQL CPU was p50 5 %.
+  - Sweep cycles took p95 17 s.
+- **Runtimes.** 780 restarts, all exit 3.
+- The four throughput criteria failed. Cleanup was confirmed.
+
+### Tier 3, planning-target run, 27 October 2026
+
+At `8d12453`, 17:34–19:20 UTC: the plan's workload, 8 environments of 3 runtimes, 60 minutes at 5 admissions per second, 5 at 10 and 10 at 5, then 10,000 waiting cases.
+
+- **Admissions.**
+  - In the steady hour, 9,436 were accepted. Another 8,596 were refused, almost all 429 `capacity_unavailable`: the backlog filled every environment's pending capacity of 1,000.
+  - Each request took 17 s (p50). Timed from scheduled arrival, p50 was 290 s and p95 566 s.
+- **The API was the bound.** It used 3,132 CPU-seconds in the 3,600 s hour, one core at 87 %. The orchestrators used 110 and the sweeper 251.
+- **Work.**
+  - From admission to the stop: 20 deliveries, 9 claims, 1 provider call.
+  - At 105 minutes: 8,000 executions `pending`, 4,848 `failed` with `deadline_exceeded`, 8 `reconciliation_required` after lapses, and 1 running.
+- **The cursor.** 90,644 acquisitions: 31,402 over 100 ms, p95 5.0 s, max 7.4 s, and 4,472 ended by a lock timeout or error. By role:
+  - the API: 72,165 (p95 5.1 s);
+  - the orchestrators: 8,693 (p95 4.8 s);
+  - the sweeper: 9,786 (p95 2.2 s).
+- **PostgreSQL was not.**
+  - Its CPU was p50 6.6 % and p95 9.5 %, and WAL ran at 218 kB/s.
+  - Sweep cycles took p95 13.8 s.
+- **Runtimes.** 11,250 restarts, all exit 3.
+- **Criteria.**
+  - Failed: admission p95, queue age (p95 2,670 s) and backlog growth (1,067 over the final 30 minutes).
+  - Burst recovery passed only because the backlog was pinned at its limit (a band of 8,009).
+  - One provider call per attempt passed.
+- **Stopped in the waiting phase.** 28 minutes in, none of its cases had reached their wait, when the owner's decision to calibrate with several API processes arrived. The run was stopped so that calibration could run alone.
+  - The report keeps the load phases.
+  - The database counts and the timing logs were saved to the evidence folder first.
+  - Cleanup was confirmed: every process group ended and the cluster was removed.
+- **Evidence:** `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-full4/` (`run/load-report.json`, and `snapshot/` with the database counts, timing logs and process logs).
+
+### Tier 3 calibration with three API processes, 27 October 2026
+
+The owner's diagnosis for finding 11 (decision, 2026-10-28: "Diagnose, then decide"). Same scale as the second calibration (2 environments of 2 runtimes; 2 minutes at 5 admissions per second, 1 at 10, 1 at 5; 20 waiting cases), with the API run as three processes on one socket (`--api-workers 3`), at `de358db`, 19:26–20:09 UTC, run alone. Everything else is as on 27 October, plus the restarter and enrollment pacing (findings 3 and 18).
+
+- **No API process was saturated.** In the 120 s steady phase the three used 73, 28 and 16 CPU-seconds (61 %, 24 % and 14 % of a core). The kernel spread the connections unevenly. Their total, 117 CPU-seconds, is the one core a single process used (114 in the second calibration).
+- **Admissions were no faster.**
+  - 1,436 were accepted. Some recovery-phase arrivals met 503 `entitlement_unavailable`, the one-at-a-time lookup.
+  - Each request took p50 26 s (23 s with one process).
+  - Timed from scheduled arrival, p95 was 85 s steady, 232 s in the burst and 271 s in recovery.
+- **The cursor waited longer.**
+  - 6,255 acquisitions: p50 0.2 ms, p95 10.3 s, max 14.4 s.
+  - 1,839 of them waited over 100 ms, and 250 were ended by a lock timeout.
+  - By role, the API's p95 was 10.4 s, the sweeper's 503 ms and the orchestrators' 281 ms.
+  - At each sample about 28 backends waited (max 45), the longest for p50 9.2 s.
+- **Work during load.**
+  - 10 deliveries and 6 claims, all in the steady phase; none in the burst or recovery.
+  - The backlog grew to 658 by the end of the load.
+  - The run's 148 deliveries, 144 claims and 141 provider calls came almost all after the load stopped. That was at most one call per attempt, which passed.
+- **PostgreSQL.** CPU p50 5 % and p95 11 %; WAL 128 kB/s.
+- **Waiting phase.**
+  - The 20 form cases did not reach their wait within 30 minutes.
+  - After every worker and runtime was killed and restarted, the workers were ready in 1.4 s, and all 20 resumed reads succeeded (p50 57 s).
+  - Claims after the restart took p95 679 ms, and sweep passes p95 0.39 s.
+- **Runtimes.** 66 restarts, all exit 3.
+- **Memory.** The three API processes used 594 MB in total.
+- The four throughput criteria failed. Cleanup was confirmed.
+- **Evidence:** `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-workers/` (`run/load-report.json` and the console).
+
+**What this shows.** Taking the single API process out of the way changed nothing that matters. The installation-wide cursor is the bound. Every admission takes it first and holds it for its whole transaction, so admissions, scheduling, claims and results go through it one transaction at a time, however many API processes there are. Finding 11 stays open as a follow-up redesign outside E04 (owner decision, 2026-10-28). A multi-process API is not a deployment requirement.

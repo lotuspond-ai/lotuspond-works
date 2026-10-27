@@ -108,7 +108,7 @@ class InboxService:
             )
         ).hexdigest()
 
-        def current(*, typed=True):
+        def current(*, typed=True, state=True):
             package, sources = self._deployment(db, actor, execution.deployment_revision_id)
             source_package, node = self._node(package, sources, step)
             current_actor = reauthorize(
@@ -119,7 +119,7 @@ class InboxService:
             now = database_now_ms(db)
             # A paused execution still accepts signals; progression consumes them on
             # resume, judged by their acceptance time (Task 11).
-            if (
+            if state and (
                 execution.requested_state == "cancelled"
                 or execution.state not in {"running", "waiting", "paused"}
                 or wait.state != "open"
@@ -131,7 +131,8 @@ class InboxService:
                 validate_value(request.payload, schema, source_package.schemas)
             self.artifacts._current_time(db, self.policy, None)
 
-        current(typed=False)
+        # Current authority first, in the same lock order as before the inbox row.
+        current(typed=False, state=False)
         existing = lock(
             db,
             scoped(ExecutionInbox, actor.scope).where(
@@ -142,7 +143,11 @@ class InboxService:
         if existing is not None:
             if existing.digest != digest or existing.wait_id != wait.id:
                 raise ExecutionError("conflict")
-            current()
+            # A signal that already took effect replays its receipt whatever the wait's
+            # state now: a retry after a lost answer learns it was accepted (Task 13).
+            # One not yet consumed is still judged by the wait, so a late replay of
+            # an undelivered signal stays refused (Task 6).
+            current(state=existing.status != "delivered")
             mark_replay(db)
             return SignalReceipt(id=existing.id, status=existing.status)
         current()

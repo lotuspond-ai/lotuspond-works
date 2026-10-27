@@ -1049,6 +1049,50 @@ assert cleanup_receipt["confirmed"] is True
 - [ ] **Step 4:** Repeat Step 2, plus `B deploy/checks/test_durable_execution_smoke.py -q`. Require every named scenario true, zero required skips, no sentinel and confirmed cleanup. Run tier 3 once on recorded hardware and record it. Record the exact source tree, dependency artifacts, durations, counters and limitations. Unresolved cleanup or missing evidence is a failure.
 - [ ] **Step 5:** Commit Task 13 tests, harness and evidence documents as `test: qualify durable execution across failure, restore and load`; review failure injection and physical observations independently.
 
+**Conventions fixed by Task 13, for the owner's acknowledgement:**
+
+- **Sweeper scheduling (amendment).** No worker called Task 5's scheduler, so an admitted execution with an activity stayed `pending`: nothing reserved its attempt.
+  - `ExecutionSweeper(..., scheduler=Scheduler(...))` now runs `schedule_batch` after each pass's items. It works in batches of at most 25, each in its own fenced transaction, until a batch reserves nothing or the pass's limit is reached.
+  - A plain read without locks first checks that some attempt waits for a reservation, so an idle sweeper never takes the installation cursor.
+  - Each batch waits for the cursor under the worker role's own lock timeout, as any request does. Under the shorter item timeout, a stream of admissions starved the scheduler in the quality review's analysis.
+  - A refusal is logged and retried by a later pass.
+  - `SweepReport` gains `scheduled_attempts`, defaulting to 0.
+- **Runtime test mode.** `lotuspond-runtime activity-worker --activity-config <private file>` serves synthetic providers only in `mode: "test"`: a re-read trust file, a journal directory and up to 8 `fixture-read` or `fixture-model` descriptors.
+  - Production and development modes still refuse with `authority_unavailable`.
+  - The supervisor exposes `activity_session()`. Every activity request carries the supervisor's current credential (`ActivityClient(..., live=...)`), so an invocation in flight across a rotation renews and reports with the rotated token. A rotation keeps the session, so leases survive it.
+  - An idle worker polls again after 0.2 s, backing off to E03's one-second ceiling.
+  - A synthetic provider records each call against its attempt: the test-mode child is told the attempt ID. A synthetic read may sleep a log-normal time, for tier 3's injected latency.
+- **Harness.**
+  - A world is an owned schema plus a private directory of file-backed test authorities: recovery, entitlement and price, tenant policy, deployment trust and catalog, artifact keys and access, activity trust and signing. They live outside the database, so a restore never rewinds them.
+  - The API (uvicorn over TLS), the workers and the installed runtimes run as separate process groups. Runtimes reach the API through a TCP proxy that can stall or sever.
+  - A restarted API comes back on its earlier port.
+  - A worker whose first fenced cycle fails refuses to start, by design. So each worker reports its first completed cycle, and a fixture waits for it before any disruption.
+  - Tier 3 sets two test-only timing logs: every statement that locks the scheduler cursor, timed by its process, and every worker cycle's duration.
+  - With `LOTUSPOND_CONFORMANCE_PRIVILEGE_LOG` set, each worker records every table it reads, writes or row-locks. Task 14's operator grants come from such a tier 1 run.
+- **Clock.** "Database time plus a harness offset" is realised as short fixture durations measured in real database time. No test edits a deadline, lease or expiry column.
+- **Setup outside E04, written as labelled rows:**
+  - projects and environments;
+  - operator provisioning of the cursor and capacity rows;
+  - the pool policy and connection for `connector-fixture`, which E03's installed catalog does not know. The connection allows 30 s calls (`DataHandling.timeout_ms`; the default is 10 s).
+- **Fault injection.** A test-only `faults.json` arms one commit kind (`admission`, `signal`, `claim`, `result` or `transition`), before or after commit, through global SQLAlchemy session hooks. An orchestrator commit counts as a transition only when it writes execution events, so an idle poll never takes the fault. Concurrent commits decide under a file lock.
+  - Before: the commit raises.
+  - After: the API replaces its answer with 503, or the orchestrator exits at once.
+  - Projection rollback is injected in-process, because runtime-reported events have no route.
+- **ENG-4 (owner decision, 2026-10-26).** The least-privilege orchestrator role is created only on tier 2's disposable cluster, and disappears with it.
+- **Tier 2 is opt-in.** Without `LOTUSPOND_DISRUPTIVE_EXECUTION_TESTS=1` its cases skip, even in required mode. Once opted in, a missing Docker CLI fails.
+- **Deviations.**
+  - Spike 14: E04 has no schedule triggers, so an equal retry after a new revision is the replacement case.
+  - Spike 8–10: no retry class covers uncertain work, so after reconciliation the step fails and gets no new ordinal. The replacement is a new execution, which runs once on a fresh runtime; the stopped runtime's journal fence keeps it from serving again.
+  - Spike 5–7: events record their origin (orchestrator or activity) and the delivery's runtime instance, but not which orchestrator or sweeper made them.
+- **Findings** are recorded, with their evidence, in `docs/validation/2026-10-15-durable-execution.md`. Two are red against this plan and open for the owner:
+  - RESTORE-1: an activity claimed after the backup runs again after the restore.
+  - Tier 3: the installation-wide cursor serializes the engine far below the planning target. **Owner decision, 2026-10-28: diagnose, then decide.** A calibration with three API processes still starved: no process was saturated, yet cursor waits grew and dispatch stopped (finding 11). The bound is the cursor, not the API process, so it stays open as a follow-up redesign of Task 5's serialization, outside E04.
+- **Files beyond Task 13's row,** each necessary:
+  - backend `execution/sweeper.py` and `execution/engine_contracts.py` (the scheduling amendment), and `tests/execution/test_sweeper.py`;
+  - backend `execution/inbox.py`, with `tests/execution/test_inbox.py`: an equal replay of a signal that already took effect returns its receipt (validation finding 13);
+  - runtime `cli.py`, `supervisor.py`, `activity_fixture.py`, `activity_client.py` (the live credential), and `activity_child.py` and `activity_worker.py` (the test-mode attempt ID for call counters), with `test_cli.py`, `test_supervisor.py`, `test_activity_client.py` and `test_activity_providers.py`;
+  - conformance `world.py`, `processes.py`, `driver.py`, `journey.py`, `disruptive/conftest.py` and the package `__init__.py` files.
+
 ## Task 14: Complete reproducible packaging, documentation and final review
 
 **Files:**

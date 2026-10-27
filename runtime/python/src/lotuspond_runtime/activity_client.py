@@ -78,13 +78,37 @@ def canonical_value(value) -> bytes:
 
 
 class ActivityClient:
-    def __init__(self, transport: ControlTransport, token: SecretStr, session: SecretStr):
+    def __init__(
+        self, transport: ControlTransport, token: SecretStr, session: SecretStr, *, live=None
+    ):
+        """`live`, when given, returns the supervisor's current (token, session) or None.
+
+        Each request then carries the current credential, so an invocation in flight
+        across a credential rotation renews and reports with the rotated token. The
+        session is unchanged by rotation; a new session ends the old leases anyway.
+        """
         validate_token(token, "lpr_")
         validate_token(session, "lps_")
-        self.transport, self._token, self._session = transport, token, session
+        if live is not None and not callable(live):
+            raise ValueError("live must be callable")
+        self.transport, self._token, self._session, self._live = transport, token, session, live
+
+    def _pair(self):
+        current = self._live() if self._live is not None else None
+        return current if current is not None else (self._token, self._session)
 
     def _call(self, route, body: bytes) -> bytes:
-        return self.transport.request("POST", route, body, self._token, self._session)
+        token, session = self._pair()
+        try:
+            return self.transport.request("POST", route, body, token, session)
+        except FleetError as error:
+            # A rotation can revoke the token between reading the pair and the request.
+            # An unauthenticated request was never applied, so one retry with the
+            # supervisor's newer pair is safe; anything else is the answer.
+            retried = self._pair()
+            if error.code != "unauthenticated" or retried == (token, session):
+                raise
+            return self.transport.request("POST", route, body, *retried)
 
     def poll(self, parent_attempt_id: str | None = None) -> ActivityDelivery | None:
         """The next delivery for this session; with a parent, only that parent's children."""

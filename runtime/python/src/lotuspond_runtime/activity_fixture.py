@@ -33,7 +33,12 @@ def _usage(raw):
     )
 
 
+# The attempt this child serves, set by the test-mode child before each call.
+ATTEMPT_ID = None
+
+
 def _count(script):
+    """One line per provider call, naming its attempt, so calls are counted per attempt."""
     path = script.get("counter")
     if path is None:
         return
@@ -41,7 +46,7 @@ def _count(script):
         raise ValueError("invalid counter")
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
-        os.write(fd, b"invoked\n")
+        os.write(fd, f"{ATTEMPT_ID or 'unknown'}\n".encode("ascii"))
     finally:
         os.close(fd)
 
@@ -54,11 +59,19 @@ def _act(script, step, seen):
     _count(script)  # after any TERM handling is installed: tests wait for it
     if step.get("sleep_s"):
         time.sleep(step["sleep_s"])
+    if step.get("lognormal"):
+        # Injected provider latency for load runs: exp(N(mu, sigma)) seconds, capped.
+        import random
+
+        shape = step["lognormal"]
+        time.sleep(min(shape["cap_s"], random.lognormvariate(shape["mu"], shape["sigma"])))
     if "raise" in step:
         # Private provider text: must never leave the child.
         raise RuntimeError(step["raise"])
-    if "require_seen" in step and step["require_seen"] not in seen:
-        raise ActivityFailure("provider_failed")  # positive control: input arrived
+    required = step.get("require_seen", ())
+    for value in [required] if type(required) is str else required:
+        if value not in seen:
+            raise ActivityFailure("provider_failed")  # positive control: input arrived
     if "failure" in step:
         raise ActivityFailure(
             step["failure"],
@@ -112,3 +125,81 @@ class FixtureModelProvider:
 
 
 PROVIDERS = {"fixture-read": FixtureReadProvider, "fixture-model": FixtureModelProvider}
+
+
+class FixtureTrust:
+    """Test-only delivery trust: a private `TrustSet` file, reread on every call.
+
+    A test rotates or revokes the signer by rewriting the file while the worker runs.
+    """
+
+    def __init__(self, path):
+        from pathlib import Path
+
+        self.path = Path(path)
+
+    def current(self, scope, now_ms):
+        from lotuspond_sdk.trust import TrustSet
+
+        from .state import read_private_file
+
+        return TrustSet.model_validate_json(read_private_file(self.path, 65536))
+
+
+def worker_config(raw: bytes):
+    """A test-mode `activity-worker` configuration: synthetic providers and their trust.
+
+    Strict, closed data: `trust_file` and `journal_directory` are absolute private
+    paths; each provider is one of the fixed synthetic identifiers above, pinned to
+    its catalog dependency, with an optional behaviour script. Never code.
+    """
+    from pathlib import Path
+
+    from lotuspond_sdk.executable.package import ArtifactRef
+
+    from .protocol import ConnectorPin
+    from .providers import ProviderDescriptor
+
+    data = json.loads(raw)
+    if type(data) is not dict or set(data) != {"trust_file", "journal_directory", "providers"}:
+        raise ValueError("Invalid activity worker configuration")
+    paths = [data["trust_file"], data["journal_directory"]]
+    if any(
+        type(path) is not str or not path.startswith("/") or ".." in path.split("/")
+        for path in paths
+    ):
+        raise ValueError("Invalid activity worker path")
+    providers = data["providers"]
+    if type(providers) is not list or not 1 <= len(providers) <= 8:
+        raise ValueError("Invalid providers")
+    descriptors = []
+    for item in providers:
+        if type(item) is not dict or set(item) - {
+            "provider_id",
+            "dependency",
+            "operations",
+            "connector",
+            "script",
+        }:
+            raise ValueError("Invalid provider")
+        provider_id = item.get("provider_id")
+        if provider_id not in PROVIDERS:
+            raise ValueError("Unknown synthetic provider")
+        read = provider_id == "fixture-read"
+        operations = item.get("operations", [])
+        if type(operations) is not list or any(type(name) is not str for name in operations):
+            raise ValueError("Invalid operations")
+        if read and "connector" not in item:
+            raise ValueError("A read provider names its connector")
+        descriptors.append(
+            ProviderDescriptor(
+                provider_id,
+                ArtifactRef.model_validate(item.get("dependency")),
+                "read" if read else "model",
+                frozenset(operations),
+                test_only=True,
+                script=item.get("script"),
+                connector=ConnectorPin.model_validate(item["connector"]) if read else None,
+            )
+        )
+    return Path(data["trust_file"]), Path(data["journal_directory"]), tuple(descriptors)

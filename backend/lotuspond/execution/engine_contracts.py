@@ -75,6 +75,10 @@ class SweepReport(Contract):
     # under an older recovery epoch after a restore.
     retired_reservations: Count = 0
     restored_attempts: Count = 0
+    # Amendment in Task 13, for the owner's acknowledgement: attempts the sweeper
+    # reserved through Task 5's scheduler. Nothing else drove `schedule_batch`, so no
+    # attempt could reach a runtime outside tests.
+    scheduled_attempts: Count = 0
 
 
 class EngineObservation(Contract):

@@ -905,3 +905,56 @@ Same branch, as its own commit after Task 12. This is local evidence only: not p
 
 - An attempt restored as `reserved` with no delivery carries no epoch. It is treated as never started, so its cancellation (since 2026-10-24) or retirement (now) releases it at zero, although it may have run after the backup.
 - An old-epoch child closed by its parent's reconciliation, or an old-epoch root released by a pause, before the fence reaches it, stays charged at its reserved bound. It is recorded `cancelled` rather than `uncertain`, so it is never reconciled. This status bypass predates the change; Task 13's restore tests should cover it.
+
+## E04 Task 13: conformance tiers, installed acceptance and load, 2026-10-27
+
+Same branch as Tasks 7–12. This is local evidence only: not pushed, with no hosted CI (GitHub Actions still refuses jobs) and no deployment. Providers are synthetic throughout. The full record, with every case, deviation and finding, is [the qualification document](validation/2026-10-15-durable-execution.md).
+
+**What it adds.**
+
+- **A process harness for real processes:**
+  - the API over TLS;
+  - orchestrator and sweeper workers;
+  - installed runtimes behind a TCP proxy;
+  - file-backed test authorities kept outside the database, so a restore cannot rewind them;
+  - test-only commit fault injection.
+- **Three tiers:**
+  - tier 1: 47 cases on owned schemas;
+  - tier 2: 6 cases on owned `postgres:18.6` containers, covering immediate restart, backup and restore, and ENG-4's grants;
+  - tier 3: a load runner.
+- **Installed acceptance:** the SDK, runtime and API wheels plus a runtime wheel rebuilt from its sdist, each set in its own environment. It checks TLS, the reference workflow's counted calls, privacy, and rollback before and after six kinds of commit.
+- **Product changes, each recorded in the plan's Task 13 conventions:**
+  - the sweeper schedules attempts: nothing else did;
+  - the runtime's test-mode activity worker;
+  - the live credential across a rotation;
+  - per-attempt call counts.
+
+**Red before implementation.** Milestone A's first end-to-end case stayed `pending`: no worker ever reserved an attempt. The amendment fixed that.
+
+**Reviews.** The specification and quality reviews found three and one Critical issues, plus a number of Important ones:
+
+- **The transition fault** fired on idle commits.
+- **RESTORE-1's backup order** didn't match the plan's.
+- **Privacy** covered one sentinel class of five.
+- **Provider calls** were counted in aggregate.
+- **The rotation:** a credential rotation stranded in-flight work.
+- **Tier 3's queue age** under-reported.
+- **Several denial checks** had no positive control.
+
+Two correction rounds fixed them; both reviews then approved. Open Minors are recorded in the qualification document.
+
+**Green, local Linux:**
+
+- **Tier 1 at `16c6fea`:** 47 passed, 0 failed, 0 skipped, in 31 min 34 s (required mode). An earlier full run at `860aa97` had 5 case defects, each fixed; the qualification document lists them.
+- **Tier 2 at `16c6fea`:** 5 passed and 1 red. RESTORE-1 is red against the plan.
+- **Installed acceptance on a clean clone of `16c6fea`:** passed. Both artifact variants passed all 16 scenarios, with at most one provider call per attempt, no sentinel, and cleanup confirmed. The wheels' digests are in the qualification document.
+- **Runtime suite:** 733 passed.
+
+**Tier 3.** Two calibration runs at a quarter of the planning target: 2 environments, 2 minutes at 5 per second plus a burst. Both failed every throughput criterion. A single CPU-saturated API process holds the installation-wide scheduler cursor while it computes each admission (about 0.15 CPU-seconds each). So scheduling, claims and results queue behind it: cursor acquisition p95 8 s, and almost nothing dispatched. PostgreSQL stayed near idle. Three planning-target attempts first stopped short: two on the API's per-peer enrollment limit, and one because runtime 0.1.0 exits under load. The runner now paces enrollment and restarts runtimes, as a service manager would. The planning-target run then held one API core at 87 % for the hour and made 20 deliveries; the cursor p95 was 5.0 s. It was stopped in its waiting phase so that the owner's diagnosis could run alone. That calibration ran three API processes, none saturated, and starved the same way: cursor p95 10.3 s, 10 deliveries during load. The bound is the installation-wide cursor, not the API process: a follow-up redesign for the owner (finding 11).
+
+**Open for the owner:**
+
+- **RESTORE-1, red.** An activity claimed after a backup runs a second time after the restore. This is the consequence of the residual recorded with the refund change.
+- **Cursor serialization.** It sits far below the planning target (tier 3). A multi-process API does not lift it, so it is a follow-up redesign of Task 5's serialization (owner decision, 2026-10-28: diagnosed, left open).
+- **Signals refused on an open wait.** A wait listed `open` refuses its signal (403) while its execution is still `pending`.
+- **Sweeper delays.** The sweeper's scheduling now waits under the worker role's lock timeout, which can delay timers and lapses under contention.

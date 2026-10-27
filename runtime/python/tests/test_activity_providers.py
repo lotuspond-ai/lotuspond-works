@@ -45,6 +45,14 @@ def test_private_provider_exception_is_sanitized(tmp_path, caplog):
     assert calls(env.counter) == 1
 
 
+def test_each_synthetic_call_is_counted_against_its_attempt(tmp_path):
+    """The counter names the attempt it served, so calls are observed per attempt."""
+    env = build(tmp_path)
+    attempt = env.server.root("connector_read")
+    assert ActivityWorker(env.deps).run_once() == "succeeded"
+    assert env.counter.read_text().splitlines() == [attempt.id]
+
+
 def test_unconfigured_real_provider_reports_unavailable_and_fixtures_need_test_mode(tmp_path):
     env = build(tmp_path)
     worker = ActivityWorker(env.deps)
