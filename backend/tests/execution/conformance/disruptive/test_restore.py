@@ -2,7 +2,8 @@
 
 A restore takes the system down: every process stops, the database returns to the
 backup, the independent recovery epoch advances (it lives outside the database), and
-the processes start again. Runtimes keep their own local state.
+the processes start again. Runtimes keep their own local state. Every restored
+execution is then held until its owner releases it (owner decision, 2026-10-28).
 """
 
 from driver import form_package, reconcile_from_journal
@@ -11,9 +12,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lotuspond.models import (
+    Execution,
     ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionInbox,
+    ExecutionUsageReservation,
     RuntimeSession,
 )
 
@@ -42,14 +45,16 @@ def deliveries_of(world, execution_id):
         )
 
 
-def test_a_restore_refuses_old_epochs_and_reconciles_claimed_work(system, linux):
-    """RESTORE-1: the backup holds a form wait, a delivered read and a queued read.
+def test_a_restore_refuses_old_epochs_and_holds_every_execution(system, linux):
+    """RESTORE-1, under the restore hold (owner decision, 2026-10-28).
 
-    After the backup the queued read is claimed and completes, and the form is
-    signalled. After the restore: older-epoch sessions and deliveries are refused; the
-    read delivered before the backup is fenced uncertain; the read claimed after the
-    backup is never run again, and reconciles from its runtime's journal; the original
-    signal is accepted once.
+    The backup holds a form wait, a delivered read and a queued read. After the backup
+    the queued read is claimed and completes, and the form is signalled. After the
+    restore: older-epoch sessions and deliveries are refused; every restored execution
+    is held for reconciliation, and no restored attempt is delivered under the new
+    epoch; the read claimed after the backup is never run again, and reconciles as
+    uncertain from its runtime's journal; the owner releases what the journals
+    account for, and the original signal is then accepted once.
     """
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
@@ -61,8 +66,12 @@ def test_a_restore_refuses_old_epochs_and_reconciles_claimed_work(system, linux)
     waiting = operator.start(customer, form)["id"]
     wait = operator.open_wait(customer, waiting, "review")
     # Delivered at backup time: a hand-driven runtime polls it, and never claims it.
+    # The sweeper stops once the read is reserved, so its delivery cannot expire (the
+    # read's dispatch timeout is 2 s) before the backup; it starts again after it.
     hand = operator.hand(customer, "hand")
     delivered = operator.start(customer, read)["id"]
+    wait_for(lambda: reservations_of(w, delivered), 60)
+    processes.stop("sweeper-a")
     try:
         assert wait_for(lambda: hand.activity.poll(), 60) is not None
     finally:
@@ -72,10 +81,12 @@ def test_a_restore_refuses_old_epochs_and_reconciles_claimed_work(system, linux)
     dump = w.cluster.backup()
     assert deliveries_of(w, queued) == []  # the backup holds it queued, never delivered
     # After the backup: the queued read runs once; the form is signalled.
+    processes.start_worker("sweeper", "sweeper-b")
     runtime = operator.runtime(customer, "runtime-a")
     assert operator.settled(customer, queued, {"succeeded", "failed"}, 90)["state"] == "succeeded"
     claimed_attempt = attempt_rows(w, queued)[0].id
-    assert Processes.calls_by_attempt(runtime["counter"]) == {claimed_attempt: 1}
+    # Once (the delivered read's own retries, after its delivery expires, may run here).
+    assert Processes.calls_by_attempt(runtime["counter"]).get(claimed_attempt) == 1
     operator.signal(customer, waiting, wait["id"], "form", {"approved": True})
     assert operator.settled(customer, waiting, {"succeeded", "failed"})["state"] == "succeeded"
     restore(w, processes, dump, epoch=2)
@@ -84,13 +95,39 @@ def test_a_restore_refuses_old_epochs_and_reconciles_claimed_work(system, linux)
     # Older-epoch sessions are refused: the runtime cannot come back.
     returning = processes.start_runtime_process("runtime-a")
     assert returning["process"].wait(timeout=90) == 3
-    # The delivery signed under epoch 1 is never claimable again; its attempt, which
-    # may have run, is uncertain.
-    view = operator.settled(customer, delivered, {"reconciliation_required"}, 120)
-    assert view["state"] == "reconciliation_required"
+    # Every restored execution is held. The delivery signed under epoch 1 is never
+    # claimable again; its attempt, which may have run, is uncertain. The queued read
+    # may have been still `pending` at the backup: held, it keeps that state.
+    for execution_id in (delivered, waiting):
+        view = operator.settled(customer, execution_id, {"reconciliation_required"}, 120)
+        assert view["state"] == "reconciliation_required"
+    wait_for(lambda: held(w, queued), 120)
+    assert operator.execution(customer, queued)["state"] in HELD
     assert all(status != "pending" for status, epoch in deliveries_of(w, delivered) if epoch == 1)
-    # The restored form wait is open again; the original signal is accepted once.
-    assert operator.execution(customer, waiting)["state"] == "waiting"
+    # A fresh runtime under the new epoch serves new work (positive control), and is
+    # never delivered a restored attempt.
+    fresh = operator.runtime(customer, "runtime-b")
+    control = operator.start(customer, read)["id"]
+    assert operator.settled(customer, control, {"succeeded", "failed"}, 120)["state"] == "succeeded"
+    second_runs = Processes.calls_by_attempt(fresh["counter"]).get(claimed_attempt, 0)
+    assert second_runs == 0, "the activity claimed after the backup ran again after the restore"
+    assert Processes.calls(fresh["counter"]) == 1
+    assert deliveries_of(w, queued) == []
+    processes.stop("runtime-b")
+    # The read claimed after the backup reconciles as uncertain from runtime-a's
+    # journal; it stays held until its owner releases it.
+    entry = reconcile_from_journal(w, customer, runtime, queued)
+    assert entry["attempt_id"] == claimed_attempt and entry["phase"] == "recorded"
+    assert held(w, queued) and operator.execution(customer, queued)["state"] in HELD
+    # The owner releases what the journals account for. The read delivered under the
+    # older epoch still needs its stop confirmed: nothing proves it never ran.
+    release = "/executions/{}/reconciliation"
+    customer.call("POST", release.format(delivered), {}, expect=(409,))
+    for execution_id in (queued, waiting):
+        customer.call("POST", release.format(execution_id), {})
+    assert operator.settled(customer, queued, {"failed", "succeeded"})["state"] == "failed"
+    # The released form waits again; the original signal is accepted once.
+    assert operator.settled(customer, waiting, {"waiting"}, 60)["state"] == "waiting"
     receipt = operator.signal(customer, waiting, wait["id"], "form", {"approved": True})
     assert operator.signal(customer, waiting, wait["id"], "form", {"approved": True}) == receipt
     assert operator.settled(customer, waiting, {"succeeded", "failed"})["state"] == "succeeded"
@@ -101,25 +138,25 @@ def test_a_restore_refuses_old_epochs_and_reconciles_claimed_work(system, linux)
             .where(ExecutionInbox.execution_id == waiting)
         )
     assert accepted == 1
-    # The read claimed after the backup: the restored rows show it never delivered. A
-    # fresh runtime under the new epoch (positive control: it serves new work) must not
-    # run it a second time; it reconciles from runtime-a's journal instead.
-    fresh = operator.runtime(customer, "runtime-b")
-    control = operator.start(customer, read)["id"]
-    assert operator.settled(customer, control, {"succeeded", "failed"}, 120)["state"] == "succeeded"
-    view = operator.settled(
-        customer, queued, {"reconciliation_required", "succeeded", "failed"}, 120
-    )
-    second_runs = Processes.calls_by_attempt(fresh["counter"]).get(claimed_attempt, 0)
-    assert second_runs == 0, "the activity claimed after the backup ran again after the restore"
-    assert view["state"] == "reconciliation_required", view
-    processes.stop("runtime-b")
-    entry = reconcile_from_journal(w, customer, runtime, queued)
-    assert entry["attempt_id"] == claimed_attempt and entry["phase"] == "recorded"
-    assert operator.settled(customer, queued, {"failed", "succeeded"})["state"] in (
-        "failed",
-        "succeeded",
-    )
+    assert Processes.calls(fresh["counter"]) == 1  # nothing restored ever ran on it
+
+
+HELD = ("pending", "reconciliation_required")
+
+
+def held(world, execution_id):
+    """Held after a restore: its recovery epoch is cleared until its owner releases it."""
+    with Session(world.engine) as db:
+        return db.get(Execution, execution_id).recovery_epoch is None
+
+
+def reservations_of(world, execution_id):
+    with Session(world.engine) as db:
+        return db.scalar(
+            select(func.count())
+            .select_from(ExecutionUsageReservation)
+            .where(ExecutionUsageReservation.execution_id == execution_id)
+        )
 
 
 def attempt_rows(world, execution_id):
@@ -186,6 +223,10 @@ def test_without_recovery_authority_only_reads_work(system, linux):
     w.update("recovery", available=True)  # positive control: the authority returns
     processes.start_worker("orchestrator", "orchestrator-back")
     processes.start_worker("sweeper", "sweeper-back")
+    # Restored, so held (owner decision, 2026-10-28). No runtime ran it after the
+    # backup (runtime-early never started): its owner releases it.
+    wait_for(lambda: held(w, queued), 120)
+    customer.call("POST", f"/executions/{queued}/reconciliation", {})
     fresh = operator.runtime(customer, "runtime-fresh")  # enrolled under the new epoch
     assert operator.settled(customer, queued, {"succeeded", "failed"}, 120)["state"] == "succeeded"
     assert Processes.calls(fresh["counter"]) == 1

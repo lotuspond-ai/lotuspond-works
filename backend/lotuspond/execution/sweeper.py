@@ -10,14 +10,18 @@ it is still due. The recovery epoch is fenced before every item's locks.
 One pass, in this order:
 
 1. attempts in flight under an older recovery epoch become uncertain (restore);
-2. lapsed leases go to Task 9's `lapse_lease`;
-3. expired unclaimed deliveries go to Task 9's `expire_delivery`;
-4. reserved attempts whose reserved active time ran out before dispatch go to
-   Task 9's `expire_reservation`;
-5. due waits: a timer is satisfied, an external or form wait expires, and
+2. executions admitted under an older recovery epoch are held for reconciliation
+   until an owner releases them (`recovery.hold_restored`, owner decision,
+   2026-10-28);
+3. lapsed leases go to Task 9's `lapse_lease`;
+4. expired unclaimed deliveries go to Task 9's `expire_delivery`;
+5. reserved attempts whose reserved active time ran out before dispatch go to
+   Task 9's `expire_reservation`, except a restored execution's: its rows prove
+   nothing about dispatch since the backup;
+6. due waits: a timer is satisfied, an external or form wait expires, and
    progression follows the step's declared expiry path (an execution fenced for
    reconciliation keeps its waits until it resumes);
-6. an overdue execution with nothing due (or due only later than any engine
+7. an overdue execution with nothing due (or due only later than any engine
    back-off) is marked due, so progression stops its work at the next boundary.
 
 No item changes a capacity counter except through those Task 9 services, in Task
@@ -54,7 +58,7 @@ from .engine_contracts import SweepReport, WorkerIdentity
 from .errors import ExecutionError
 from .orchestrator import TERMINAL, clear_runnable, mark_runnable
 from .program import ProgramError, load_program, resolve_occurrence
-from .recovery import fence_restored
+from .recovery import fence_restored, hold_restored, restored
 
 logger = logging.getLogger("lotuspond.execution")
 
@@ -77,6 +81,7 @@ class QueueDepths(Contract):
     due_waits: Depth
     overdue_executions: Depth
     restored_attempts: Depth
+    restored_executions: Depth
     lapsing_leases: Depth
     expiring_deliveries: Depth
 
@@ -160,6 +165,18 @@ def _restored(epoch):
     return pending, leased
 
 
+def _restored_executions(epoch):
+    """Non-terminal executions admitted or released under an older recovery epoch.
+
+    The predicate is `execution_restored_idx`'s, written out so the planner can use
+    that partial index whatever the epoch.
+    """
+    return select(Execution.id).where(
+        Execution.recovery_epoch < epoch,
+        text("executions.state NOT IN ('succeeded','failed','cancelled')"),
+    )
+
+
 def _late(marker, now):
     """A marker that would wake an overdue execution later than any engine back-off.
 
@@ -189,9 +206,14 @@ def _due_waits(now):
 
 
 def _overdue(now):
-    """Overdue executions with nothing due, or due only later than any back-off."""
+    """Overdue executions with nothing due, or due only later than any back-off.
+
+    Not one held after a restore: its release makes it due, and its deadline then ends
+    it (`recovery.hold_restored`).
+    """
     return select(Execution.id).where(
         Execution.state.in_(OVERDUE),
+        Execution.recovery_epoch.is_not(None),
         Execution.deadline_ms <= now,
         or_(Execution.runnable_at_ms.is_(None), _late(Execution.runnable_at_ms, now)),
     )
@@ -208,6 +230,7 @@ def queue_depths(db, epoch: int) -> QueueDepths:
         "due_waits": lambda: _due_waits(now),
         "overdue_executions": lambda: _overdue(now),
         "restored_attempts": lambda: union_all(*_restored(epoch)),
+        "restored_executions": lambda: _restored_executions(epoch),
         "lapsing_leases": lambda: select(ExecutionLease.id).where(
             ExecutionLease.status == "active", ExecutionLease.expires_at_ms <= now
         ),
@@ -285,6 +308,13 @@ class ExecutionSweeper:
             )
             return {
                 "restored_attempts": restored,
+                "restored_executions": list(
+                    db.scalars(
+                        _restored_executions(epoch)
+                        .order_by(Execution.recovery_epoch, Execution.id)
+                        .limit(limit)
+                    )
+                ),
                 "lapsed_leases": list(
                     db.scalars(
                         select(ExecutionLease.id)
@@ -310,7 +340,7 @@ class ExecutionSweeper:
                 "retired_reservations": list(
                     db.scalars(
                         _spent()
-                        .where(_reserved_until() <= now)
+                        .where(_reserved_until() <= now, Execution.recovery_epoch == epoch)
                         .order_by(ExecutionAttempt.id)
                         .limit(limit)
                     )
@@ -375,6 +405,24 @@ class ExecutionSweeper:
         mark_runnable(db, execution, now)
         return "timers" if timer else "expired_waits"
 
+    def _hold(self, db, execution_id, epoch):
+        """Hold an execution admitted before a restore (`recovery.hold_restored`)."""
+        hint = db.scalar(select(Execution).where(Execution.id == execution_id))
+        if hint is None:
+            return None
+        execution = self._claim(db, _scope(hint), execution_id)
+        if execution is None or not restored(execution, epoch):
+            return None
+        held = hold_restored(
+            db,
+            execution,
+            epoch,
+            lambda code, attempt_id: self.leases._event(
+                db, execution, epoch, code, attempt_id, "restored"
+            ),
+        )
+        return "restored_executions" if held else None
+
     def _deadline(self, db, execution_id, epoch):
         """An overdue execution with nothing due is made due; progression stops it.
 
@@ -389,6 +437,7 @@ class ExecutionSweeper:
         if (
             execution is None
             or execution.state not in OVERDUE
+            or execution.recovery_epoch is None
             or execution.deadline_ms > now
             or (execution.runnable_at_ms is not None and not _late(execution.runnable_at_ms, now))
         ):
@@ -407,6 +456,8 @@ class ExecutionSweeper:
             changed = leases.expire_delivery(db, identifier, epoch=epoch)
         elif kind == "retired_reservations":
             changed = leases.expire_reservation(db, identifier, epoch=epoch)
+        elif kind == "restored_executions":
+            return self._hold(db, identifier, epoch)
         elif kind == "waits":
             return self._wait(db, identifier, epoch)
         else:
@@ -431,9 +482,11 @@ class ExecutionSweeper:
                     if not _schedulable(db):
                         break
                 with sessions() as db, db.begin():
-                    self._fence(db)
                     scheduled = self.scheduler.schedule_batch(
-                        db, self.scheduler.budgets.installation_id, min(limit - total, 25)
+                        db,
+                        self.scheduler.budgets.installation_id,
+                        min(limit - total, 25),
+                        epoch=self._fence(db),
                     )
             except Exception as error:
                 logger.warning("Execution scheduling deferred: %s", _code(error))

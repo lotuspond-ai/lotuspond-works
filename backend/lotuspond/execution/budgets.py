@@ -382,6 +382,9 @@ class BudgetService:
         if existing:
             self._final(db, actor, revision, grant, tenant, recovery, execution)
             return view(existing)
+        if execution.recovery_epoch != recovery.epoch:
+            # Restored: held for an owner's release, never reserved before (recovery.py).
+            raise ExecutionError("recovery_unavailable")
         if attempt.state != "reserved":
             raise ExecutionError("conflict")
         if shared:

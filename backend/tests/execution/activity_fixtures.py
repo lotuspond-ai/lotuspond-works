@@ -176,13 +176,13 @@ def deploy(h, name, *, model=None, capacity=1):
     return view.revision_id
 
 
-def runtime(h, *, session_ms=3_600_000, generation=1):
+def runtime(h, *, session_ms=3_600_000, generation=1, epoch=1):
     """One active runtime instance, credential and session in the deployment's pool."""
     fields = dict(
         **h.scope.model_dump(),
         pool_id=h.pool_id,
         installation_id="test-installation",
-        recovery_epoch=1,
+        recovery_epoch=epoch,
     )
     with Session(h.engine) as db, db.begin():
         now = database_now_ms(db)
@@ -214,7 +214,7 @@ def runtime(h, *, session_ms=3_600_000, generation=1):
             scope=h.scope,
             pool_id=h.pool_id,
             installation_id="test-installation",
-            recovery_epoch=1,
+            recovery_epoch=epoch,
             instance_id=instance.id,
             generation=generation,
             credential_version=1,

@@ -79,6 +79,9 @@ class SweepReport(Contract):
     # reserved through Task 5's scheduler. Nothing else drove `schedule_batch`, so no
     # attempt could reach a runtime outside tests.
     scheduled_attempts: Count = 0
+    # Amendment for RESTORE-1 (owner decision, 2026-10-28): executions admitted under
+    # an older recovery epoch, held for reconciliation after a restore.
+    restored_executions: Count = 0
 
 
 class EngineObservation(Contract):

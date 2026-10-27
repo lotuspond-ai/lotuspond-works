@@ -177,6 +177,7 @@ class AdmissionService:
             requested_state="running",
             reason=None,
             next_event_sequence=1,
+            recovery_epoch=recovery.epoch,  # a later restore holds it (recovery.py)
         )
         db.add(row)
         db.flush()

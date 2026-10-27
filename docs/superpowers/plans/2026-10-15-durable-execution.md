@@ -768,7 +768,7 @@ assert resumed_wait.deadline_ms == original_deadline_ms
 - **Recovery.**
   - `RecoveryFence(fleet).current(db)` asks the independent authority through the bounded fleet lookup and never reads rows. It carries the authority's `test_only`.
   - After a restore, pending deliveries and active leases signed under an older epoch make their attempt `uncertain`, its reservation uncertain liability, and the execution `reconciliation_required`. Both are found through the v15 pending-delivery and active-lease indexes. `expire_delivery` leaves such deliveries alone, so an old epoch's "unclaimed" never becomes "never started". A pending old-epoch delivery whose attempt is no longer in flight (an inconsistent restore) is closed (`conflict`), so it is never selected again.
-  - **Residual, for Task 13's restore tests:** attempts and reservations carry no epoch. A restored row that still shows an attempt `reserved`, which was in fact dispatched after the backup, cannot be told apart. Such a row is treated as never started: since 2026-10-24 a cancellation releases it at zero, and since 2026-10-26 so does its retirement, although it may have run. **Open for the owner.**
+  - **Residual, for Task 13's restore tests:** attempts and reservations carry no epoch. A restored row that still shows an attempt `reserved`, which was in fact dispatched after the backup, cannot be told apart. Such a row is treated as never started: since 2026-10-24 a cancellation releases it at zero, and since 2026-10-26 so does its retirement, although it may have run. **Closed by the owner's restore hold, 2026-10-28** (see "Owner decision: hold every restored execution" below).
 - **Runtime-reported events.** `EventProjection.apply_event(db, source_identity, event)` accepts the SDK's admitted `RuntimeEvent`. It requires all of:
   - the current epoch and this installation;
   - a source that equals the authenticated identity;
@@ -1084,8 +1084,8 @@ assert cleanup_receipt["confirmed"] is True
   - Spike 14: E04 has no schedule triggers, so an equal retry after a new revision is the replacement case.
   - Spike 8–10: no retry class covers uncertain work, so after reconciliation the step fails and gets no new ordinal. The replacement is a new execution, which runs once on a fresh runtime; the stopped runtime's journal fence keeps it from serving again.
   - Spike 5–7: events record their origin (orchestrator or activity) and the delivery's runtime instance, but not which orchestrator or sweeper made them.
-- **Findings** are recorded, with their evidence, in `docs/validation/2026-10-15-durable-execution.md`. Two are red against this plan and open for the owner:
-  - RESTORE-1: an activity claimed after the backup runs again after the restore.
+- **Findings** are recorded, with their evidence, in `docs/validation/2026-10-15-durable-execution.md`. Two were red against this plan and open for the owner:
+  - RESTORE-1: an activity claimed after the backup ran again after the restore. **Owner decision, 2026-10-28: hold all after restore**, fixed in its own commit after Task 13 (finding 12; "Owner decision: hold every restored execution" below).
   - Tier 3: the installation-wide cursor serializes the engine far below the planning target. **Owner decision, 2026-10-28: diagnose, then decide.** A calibration with three API processes still starved: no process was saturated, yet cursor waits grew and dispatch stopped (finding 11). The bound is the cursor, not the API process, so it stays open as a follow-up redesign of Task 5's serialization, outside E04.
 - **Files beyond Task 13's row,** each necessary:
   - backend `execution/sweeper.py` and `execution/engine_contracts.py` (the scheduling amendment), and `tests/execution/test_sweeper.py`;
@@ -1222,11 +1222,34 @@ The owner reviewed Task 11's consequence note and decided: "yes, refund those to
 
   Expiry and retirement are bounded by `max_attempts` alike.
 
-- **Residual, open for the owner.**
+- **Residual, open for the owner** (both closed by the owner's restore hold, 2026-10-28, below).
   - An attempt restored as `reserved` with no delivery carries no epoch, so it is treated as never started, as Task 11's pause and cancellation already treated it, and its retirement releases it too. A restore from before its dispatch cannot show that it ran (the Task 11 restore residual).
   - An old-epoch child closed by its parent's reconciliation, or an old-epoch root released by a pause, before the fence reaches it, keeps its reserved liability but is recorded `cancelled`, not `uncertain`, so it is never reconciled. Its charge is the same reserved bound; only its status is wrong. This status bypass predates this change; Task 13's restore tests should cover it.
 - **Superseded.** Task 9's zero usage settlement for these endings, and Task 11's note that they keep their reserved active time.
 - **Files:** `execution/leases.py`, `execution/budgets.py`, `execution/dispatch.py`, `execution/progression.py` and `execution/reconciliation.py`; tests `test_leases.py`, `test_decline.py`, `test_activity_races.py`, `test_dispatch.py`, `test_reconciliation.py`, `test_control.py` and `test_recovery.py`.
+
+## Owner decision: hold every restored execution (2026-10-28)
+
+RESTORE-1 was red: a read claimed after a backup ran again after the restore, because the restored rows showed it never delivered (validation finding 12). The owner chose "Hold all after restore". After a restore, every non-terminal execution is held for reconciliation until the runtime journals are reconciled. No restored attempt may be delivered to a runtime under the new epoch before that. **Owner-confirmed on 2026-10-28.** Rejected: a runtime journal-report route, an off-database dispatch record, and documenting the gap until E05. It lands as its own commit after Task 13.
+
+- **Rule.**
+  - **The epoch.** Each execution records the recovery epoch it was admitted under: `executions.recovery_epoch`, a v15 column. A row from before v15 reads 0.
+  - **The hold.** An execution whose epoch is older than the authority's is held, by the sweeper's new item or by the first orchestrator to meet it. Every attempt of it that has not ended becomes `uncertain`, with its reservation (no counter changes). That covers those the restored rows show reserved and undelivered, and those in flight under the older epoch, fenced as the restore fence would. A started execution becomes `reconciliation_required` (reason `uncertain`). One still `pending` keeps its state and admission slot, and derives no work. The epoch is then cleared. Events reuse `attempt_uncertain` and `reconciliation_required`, with detail `restored`.
+  - **Before the hold.** Scheduling, dispatch and reservation retirement skip an execution whose epoch isn't current, and journal reconciliation refuses it.
+- **Release.**
+  - **Journal evidence.** An owner closes an attempt that a runtime's journal shows ran, with the entry as evidence, even though the restored rows hold no delivery for it. Closing it can only fail it. A parent closed this way cancels its never-delivered, hold-made uncertain children, which keep their liability. The execution stays held. While held, a cancellation or the deadline ends it only once nothing it started may still run.
+  - **The release.** `POST .../reconciliation`, which `ControlService.reconcile_execution` serves, releases a held execution once its owner has reconciled the journals. An attempt the hold made uncertain, which has no delivery and no evidence, is reserved again and may be delivered once under the new epoch. One delivered under the older epoch still needs its confirmed stop. The execution's epoch becomes current, and a `pending` one stays `pending`.
+  - **The procedure** is in `docs/operations/durable-execution.md` (Task 14).
+- **Residuals closed.** Both of the refund change's restore residuals:
+  - a restored reserved attempt is uncertain, never released at zero;
+  - the hold fences every old-epoch attempt in flight itself, and nothing reconciles or releases the execution before the hold, so neither a pause nor a parent's reconciliation treats such an attempt as never started.
+- **Open.** Known usage in the journal of an attempt the restored rows never reserved is not counted (no reservation to settle), with the missing reconciliation route. Rows from before v15 (epoch 0) are held under any later epoch; no v14 build had an execution route.
+- **Left to the operator.** A journal names attempts, not executions. An entry for an attempt the restored rows don't know means some execution of that runtime's environment progressed after the backup. The procedure says how to release or cancel the held executions there.
+- **Files:**
+  - `models.py`, `execution/migration.py` and `schema.sql` (the column, its check and `execution_restored_idx`);
+  - `execution/recovery.py`, `sweeper.py`, `progression.py`, `admission.py`, `scheduler.py`, `budgets.py`, `dispatch.py`, `leases.py`, `reconciliation.py`, `control.py` and `engine_contracts.py`;
+  - tests `test_recovery.py`, `activity_fixtures.py`, `test_budgets.py` (a fixture's direct insert records the epoch) and `test_migration_v15.py`;
+  - conformance `disruptive/test_restore.py` and `driver.py`.
 
 ## Author self-review and scope trace
 

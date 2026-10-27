@@ -1305,6 +1305,7 @@ CREATE TABLE executions (
 	id VARCHAR(36) NOT NULL,
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
 	runnable_at_ms BIGINT,
+	recovery_epoch BIGINT DEFAULT 0,
 	PRIMARY KEY (id),
 	FOREIGN KEY(workspace_id, project_id, environment_id, deployment_revision_id) REFERENCES execution_deployment_revisions (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, initiating_api_key_id) REFERENCES api_keys (workspace_id, id),
@@ -1324,6 +1325,7 @@ CREATE TABLE executions (
 	UNIQUE (workspace_id, project_id, environment_id, admission_sequence),
 	CONSTRAINT executions_runnable_at_ms_check CHECK (runnable_at_ms BETWEEN 0 AND 9007199254740991),
 	CONSTRAINT executions_runnable_terminal_check CHECK (runnable_at_ms IS NULL OR state NOT IN ('succeeded','failed','cancelled')),
+	CONSTRAINT executions_recovery_epoch_check CHECK (recovery_epoch BETWEEN 0 AND 9007199254740991),
 	UNIQUE (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
 	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
@@ -1865,6 +1867,8 @@ CREATE INDEX execution_lease_expiry_idx ON execution_leases (workspace_id, proje
 CREATE INDEX execution_outbox_queue_idx ON execution_outbox (workspace_id, project_id, environment_id, status, available_at_ms, id);
 
 CREATE INDEX execution_queue_idx ON executions (workspace_id, project_id, environment_id, state, admission_sequence, id);
+
+CREATE INDEX execution_restored_idx ON executions (recovery_epoch, id) WHERE state NOT IN ('succeeded','failed','cancelled');
 
 CREATE INDEX execution_runnable_idx ON executions (interpreter_id, runnable_at_ms, id) WHERE runnable_at_ms IS NOT NULL;
 

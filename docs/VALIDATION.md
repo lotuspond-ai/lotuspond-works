@@ -954,7 +954,68 @@ Two correction rounds fixed them; both reviews then approved. Open Minors are re
 
 **Open for the owner:**
 
-- **RESTORE-1, red.** An activity claimed after a backup runs a second time after the restore. This is the consequence of the residual recorded with the refund change.
+- **RESTORE-1, red.** An activity claimed after a backup runs a second time after the restore. This is the consequence of the residual recorded with the refund change. Decided and fixed on 2026-10-28; see the next entry.
 - **Cursor serialization.** It sits far below the planning target (tier 3). A multi-process API does not lift it, so it is a follow-up redesign of Task 5's serialization (owner decision, 2026-10-28: diagnosed, left open).
 - **Signals refused on an open wait.** A wait listed `open` refuses its signal (403) while its execution is still `pending`.
 - **Sweeper delays.** The sweeper's scheduling now waits under the worker role's lock timeout, which can delay timers and lapses under contention.
+
+## Owner decision: hold every restored execution, 2026-10-28
+
+Same branch, as its own commit after Task 13. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Owner decision** (2026-10-28, "Hold all after restore"). After a restore, every non-terminal execution is held for reconciliation until the runtime journals are reconciled. No restored attempt may be delivered to a runtime under the new epoch before that. Rejected: a runtime journal-report route, an off-database dispatch record, and documenting the gap until E05. It is recorded in the plan as **Owner-confirmed on 2026-10-28**, and it fixes RESTORE-1 (qualification document, finding 12).
+
+**What changed.**
+
+- **Schema v15** (still unreleased) gains `executions.recovery_epoch`, with its range check and the partial index `execution_restored_idx`. Admission records the authority's epoch. A row from before v15 reads 0, as a row from before any restore.
+- **The hold** (`recovery.hold_restored`). The sweeper's new item, or the first orchestrator to meet the execution, holds one whose epoch is older than the authority's:
+  - every attempt of it that has not ended becomes `uncertain`, with its reservation: those the restored rows show reserved and undelivered, and those in flight under the older epoch, which the hold fences itself;
+  - a started execution becomes `reconciliation_required`;
+  - one still `pending` keeps its state and admission slot;
+  - its epoch is cleared;
+  - the events reuse existing codes, with detail `restored`.
+- **Before the hold**, scheduling, dispatch and reservation retirement skip the execution. Journal reconciliation refuses it.
+- **While held**, progression derives nothing. A cancellation or the deadline ends the execution only once nothing it started may still run. The sweeper doesn't wake a held execution for its deadline.
+- **Journal evidence.** `reconcile_activity` accepts an owner's journal evidence for a held attempt that the restored rows never delivered or reserved. Closing it can only fail it, and the execution stays held. A parent closed this way cancels its children the hold made uncertain and that were never delivered (`close_children`); they keep their uncertain liability.
+- **Release.** `POST .../reconciliation` (`reconcile_execution`) releases a held execution:
+  - an attempt the hold made uncertain, which has no delivery and no evidence, is reserved again;
+  - one delivered under the older epoch still needs its confirmed stop;
+  - the execution's epoch becomes current.
+- `SweepReport.restored_executions` and the queue depth of the same name are new.
+
+**Residuals closed.** Both restore residuals recorded with the refund change (26 October) are closed. A restored reserved attempt is never released at zero. The hold fences every old-epoch attempt in flight itself, and nothing reconciles or releases the execution before the hold. So neither a pause nor a parent's reconciliation can treat such an attempt as never started.
+
+**Still open.**
+
+- Known usage in the journal of an attempt that the restored rows never reserved is not counted, because there is no reservation to settle. This is part of the missing reconciliation route.
+- Rows from before v15 read epoch 0, so under any later epoch they are held for an owner's release. No v14 build had an execution route, so none exist outside tests.
+
+**Left to the operator.** A runtime journal names attempts, not executions. The operations guide's restore procedure (Task 14) covers an entry for an attempt the restored rows don't know.
+
+**Red before implementation.** RESTORE-1, as now written, failed against the source before this change: Task 13's tree with only the new restore case and journal helper. The restored form execution stayed `waiting` and was never held (local evidence folder, `task13/hold-red.txt`). The original red is finding 12's, `task13/restore1-red.txt`. The new unit tests need the new column, so they cannot run against the old source.
+
+**Review.** An independent specification and quality review required changes. It confirmed the central claim: no restored attempt reaches a runtime under the new epoch before its owner's release. It also confirmed the gates, the lock order, the counters and the additive schema.
+
+- **A held child that was never delivered blocked the release (Important, fixed).** An agent's parent claimed before the backup could not be closed with its own journal evidence: `close_children` refused its hold-made uncertain child. Only invented evidence for the child would have unblocked it. Now the parent's evidence cancels such a child, which keeps its liability. `test_a_held_child_never_delivered_closes_with_its_parent` failed before the fix with `conflict` (`task13/hold-review-red.txt`).
+- **The hold did not fence old-epoch attempts in flight (Important, fixed).** If the sweeper's fence item for a delivery was deferred, the hold applied first. A parent's reconciliation then closed the old-epoch child as `cancelled`, or the owner released a still-`dispatched` root. The hold now fences them itself. The pause case failed before the fix: the old-epoch delivery stayed `pending`.
+- **Minor, fixed:**
+  - an equal repeat of an existing reservation now replays before the epoch check;
+  - the sweeper no longer re-wakes a held execution for its deadline on every pass;
+  - the wording about cancellation and the deadline;
+  - the operations guide is named as Task 14's;
+  - a positive control in `test_a_restored_parent_is_reconciled_only_after_the_hold`.
+- **Minor, documented:** the uncounted usage and the v14 rows above. The v14 case has no test because no v14 build could admit an execution.
+- **Round 2:** approved. The reviewer reran its three probes, which now fail where they should. Its optional tightening is applied: the held child's shared reservation is asserted to stay `uncertain` and charged, with its stop confirmed.
+
+**Green.**
+
+- **macOS, on a disposable PostgreSQL 14 cluster (private port, UTC).**
+  - The backend execution suite before the review: 516 passed, in 15 min (`task13/hold-units.txt`).
+  - After the review's changes: 516 passed and 1 failed (`task13/hold-units-r2.txt`). The failure is `test_sweeper.py::test_no_wake_up_outlasts_the_deadline`, which is timing-bound: its execution has a 4 s deadline, and it holds no restored row. It passed in the first full run, and all 11 sweeper tests passed in each of 5 runs after it.
+  - The suite includes the new and rewritten cases in `test_recovery.py`, the v15 migration and the budget tests.
+- **Local Linux, tier 2, run alone.** RESTORE-1 to RESTORE-3: 3 passed in each of three runs in a row, 67 s each (`task13/hold-green-r3-1.txt` to `-3.txt`).
+  - **The first green attempt** showed the case itself was wrong (`task13/hold-green-r1.txt`). The queued read had still been `pending` at the backup, so it is held as `pending`. The case now asserts the hold itself.
+  - **The case's setup was fragile.** The hand-delivered read's delivery expires after its 2 s dispatch timeout. Twice the sweeper retired it before the backup, and its retry ran on runtime-a, failing the setup's check (`task13/hold-red-concurrent-invalid.txt`, `task13/hold-green-r2.txt`). The case now stops the sweeper from that read's reservation until the backup. It asserts that the claimed read ran exactly once.
+  - **The red above** was rerun with this final case, and still fails where it should (`task13/hold-red.txt`).
+- **Checks.** The schema export check passes, and Ruff is clean on every changed file.
+- **Final runs.** Task 14's final runs repeat tier 1, tier 2 and the full backend suite at the final head.

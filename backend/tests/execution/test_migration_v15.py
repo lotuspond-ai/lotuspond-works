@@ -1,4 +1,7 @@
-"""Exact committed-v14 preservation, the runnable marker backfill and atomic refusal."""
+"""Exact committed-v14 preservation, the runnable marker backfill and atomic refusal.
+
+Existing executions read recovery epoch 0, as rows from before any restore.
+"""
 
 import json
 from copy import deepcopy
@@ -20,6 +23,7 @@ from .test_schema import execution_rows
 FIXTURES = Path(__file__).parent / "fixtures"
 V15_INDEXES = {
     "execution_runnable_idx",
+    "execution_restored_idx",
     "execution_wait_due_idx",
     "execution_lease_due_idx",
     "execution_delivery_due_idx",
@@ -98,7 +102,10 @@ def execution_cases(connection, base):
 def without_marker(values):
     parsed = [json.loads(value) for value in values]
     return sorted(
-        json.dumps({k: v for k, v in row.items() if k != "runnable_at_ms"}, sort_keys=True)
+        json.dumps(
+            {k: v for k, v in row.items() if k not in ("runnable_at_ms", "recovery_epoch")},
+            sort_keys=True,
+        )
         for row in parsed
     )
 
@@ -126,6 +133,8 @@ def test_v14_upgrade_preserves_rows_and_marks_pending_work(execution_database, m
         )
         markers = dict(connection.execute(text("SELECT id, runnable_at_ms FROM executions")).all())
         assert markers == expected
+        epochs = connection.execute(text("SELECT DISTINCT recovery_epoch FROM executions"))
+        assert list(epochs.scalars()) == [0]
         assert connection.scalar(select(SchemaVersion.installed_at)) == installed_at
         assert connection.scalar(select(SchemaVersion.version)) == 15
 
@@ -153,12 +162,13 @@ def test_fresh_upgrade_signature_equal(execution_database, monkeypatch):
             for index in inspect(connection).get_indexes(table)
         }
     assert fresh_signature == migrated_signature == exported_signature
-    assert columns[-1] == "runnable_at_ms"
+    assert columns[-2:] == ["runnable_at_ms", "recovery_epoch"]
     assert V15_INDEXES <= set(indexes)
     predicates = {
         name: indexes[name]["dialect_options"]["postgresql_where"] for name in V15_INDEXES
     }
     assert "runnable_at_ms IS NOT NULL" in predicates["execution_runnable_idx"]
+    assert "'succeeded'" in predicates["execution_restored_idx"]
     assert "'open'" in predicates["execution_wait_due_idx"]
     assert "'active'" in predicates["execution_lease_due_idx"]
     assert "'pending'" in predicates["execution_delivery_due_idx"]

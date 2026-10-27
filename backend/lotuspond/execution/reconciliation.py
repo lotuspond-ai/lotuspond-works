@@ -7,6 +7,12 @@ and never turns unverifiable evidence into success: the attempt ends `failed`
 with `uncertain`, and progression decides what follows. E03 `record_status` is
 not involved.
 
+An execution held after a restore (`recovery.hold_restored`) may hold an attempt
+delivered only after the backup: the restored rows have no delivery to check the
+evidence against, and only its runtime's journal knows it ran. Its owner's
+evidence closes it all the same, since closing it can only fail it. The execution
+stays held until its owner releases it (`ControlService.reconcile_execution`).
+
 Lock order: the route has authorized the actor (workspace and account rows held),
 so the installation cursor is taken with NOWAIT (see `dispatch`), then capacity,
 execution, step, attempt, reservation, delivery and lease.
@@ -42,6 +48,7 @@ from .dispatch import (
 from .errors import ExecutionError
 from .orchestrator import TERMINAL, mark_runnable
 from .progression import INTERRUPTED, record_event
+from .recovery import restored
 
 SOURCE = "historical"
 
@@ -80,6 +87,10 @@ class ReconciliationService:
         hint = record(db, ExecutionAttempt, scope, observation.attempt_id)
         lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, hint.execution_id, locked=True)
+        if restored(execution, recovery.epoch):
+            # The restore hold comes first: it fences what may have run since the
+            # backup, so no child is closed as never started.
+            raise ExecutionError("conflict")
         record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
         attempt = record(db, ExecutionAttempt, scope, hint.id, locked=True)
         reservation = lock(
@@ -107,13 +118,16 @@ class ReconciliationService:
             if existing.digest != digest:
                 raise ExecutionError("conflict")
             return  # immutable: an equal observation changes nothing
-        if (
-            delivery is None
-            or delivery.digest != observation.delivery_sha256
+        held = execution.recovery_epoch is None
+        if delivery is None:
+            if not held:
+                raise ExecutionError("conflict")
+        elif (
+            delivery.digest != observation.delivery_sha256
             or delivery.recovery_epoch > recovery.epoch
         ):
             raise ExecutionError("conflict")
-        if attempt.state != "uncertain" or reservation is None:
+        if attempt.state != "uncertain" or (reservation is None and not held):
             raise ExecutionError("conflict")
         now = database_now_ms(db)
         if observation.usage.completed_at_ms > now:
@@ -146,15 +160,17 @@ class ReconciliationService:
         db.add(evidence)
         db.flush()
         # Known usage settles; unknown usage stays reserved as uncertain liability.
-        # The usage observation ID is derived, so any valid evidence ID fits.
-        self.budgets.settle_attempt(
-            db,
-            attempt.id,
-            SOURCE + ":" + sha256(observation.observation_id.encode()).hexdigest(),
-            observation.usage,
-        )
-        if reservation.compute_stopped_at_ms is None:
-            self.budgets.confirm_stopped(db, attempt.id, evidence.id)
+        # The usage observation ID is derived, so any valid evidence ID fits. A held
+        # attempt the restored rows never reserved has nothing to settle.
+        if reservation is not None:
+            self.budgets.settle_attempt(
+                db,
+                attempt.id,
+                SOURCE + ":" + sha256(observation.observation_id.encode()).hexdigest(),
+                observation.usage,
+            )
+            if reservation.compute_stopped_at_ms is None:
+                self.budgets.confirm_stopped(db, attempt.id, evidence.id)
         a = self.activities
         if keep_interrupted(a.artifacts, db, scope, attempt):
             ended = ("cancelled", attempt.id, INTERRUPTED)  # a pause stopped it (Task 11)
@@ -192,6 +208,8 @@ class ReconciliationService:
             )
             .limit(1)
         )
+        if held:
+            return  # until its owner releases it, once every journal is reconciled
         if remaining is None and execution.state == "reconciliation_required":
             # Back to what was requested; progression and controls take it from there.
             from .control import resumed_state

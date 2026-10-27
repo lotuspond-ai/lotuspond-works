@@ -11,13 +11,27 @@ restore, may have run after the backup without the restored rows knowing: it
 becomes uncertain and is reconciled, never treated as never started. Its runtime
 session and delivery are refused by the epoch checks of claims, renewals and
 results.
+
+Nothing in the restored rows shows what else ran after the backup: an attempt they
+show reserved may have been delivered and run since, and an execution may have
+progressed. So every non-terminal execution admitted under an older epoch is held
+for reconciliation (owner decision, 2026-10-28) until an owner releases it, once the
+runtime journals are reconciled (`ControlService.reconcile_execution`). No restored
+attempt is delivered under the new epoch before that: scheduling, dispatch and
+reservation expiry skip an execution whose `recovery_epoch` is not current.
 """
 
 from ..fleet.authority import FleetDependencies
-from ..models import ExecutionActivityDelivery
+from ..models import (
+    ExecutionActivityDelivery,
+    ExecutionAttempt,
+    ExecutionLease,
+    ExecutionUsageReservation,
+)
 from .activity_records import scope_of
+from .authorization import scoped
 from .errors import ExecutionError, execution_service
-from .orchestrator import TERMINAL
+from .orchestrator import TERMINAL, clear_runnable
 
 # Attempt states a restored row may show while the runtime had already moved on.
 IN_FLIGHT = frozenset({"dispatched", "claimed"})
@@ -84,4 +98,80 @@ def fence_restored(leases, db, delivery_id: str, *, epoch: int) -> bool:
         execution.reason = "uncertain"
         db.flush()
         leases._event(db, execution, epoch, "reconciliation_required", attempt.id, "restored")
+    return True
+
+
+def restored(execution, epoch: int) -> bool:
+    """Admitted or released under an older recovery epoch, and not held yet."""
+    return execution.recovery_epoch is not None and execution.recovery_epoch < epoch
+
+
+def hold_restored(db, execution, epoch: int, event) -> bool:
+    """Hold a restored execution for reconciliation; the caller holds its row.
+
+    Every attempt of it that has not ended becomes uncertain, with its reservation
+    (unknown usage: reserved, never zero), so nothing delivers, retires or releases it
+    as never started:
+
+    - one the restored rows show reserved and undelivered may have been delivered
+      and run since the backup;
+    - one in flight under the older epoch is fenced as `fence_restored` fences it
+      (its pending delivery is never claimable again, its active lease uncertain), so
+      the hold never depends on the sweeper reaching that delivery first.
+
+    A started execution becomes `reconciliation_required`; one still `pending` keeps
+    its state and admission slot and derives no work while held. `recovery_epoch` is
+    cleared until an owner releases it. Lock order: the execution, then its attempts,
+    their reservations, deliveries and leases, each by ID; no counter changes.
+    `event(code, attempt_id)` appends an event (detail `restored`). True when held.
+    """
+    if execution.state in TERMINAL or execution.recovery_epoch is None:
+        return False
+    scope = scope_of(execution)
+    attempts = db.scalars(
+        scoped(ExecutionAttempt, scope)
+        .where(
+            ExecutionAttempt.execution_id == execution.id,
+            ExecutionAttempt.state.in_(("reserved", *IN_FLIGHT)),
+        )
+        .order_by(ExecutionAttempt.id)
+        .with_for_update()
+    ).all()
+    ids = [attempt.id for attempt in attempts]
+
+    def rows(model, *where):
+        return {
+            row.attempt_id: row
+            for row in db.scalars(
+                scoped(model, scope)
+                .where(model.attempt_id.in_(ids), *where)
+                .order_by(model.id)
+                .with_for_update()
+            )
+        }
+
+    reservations = rows(ExecutionUsageReservation)
+    deliveries = rows(ExecutionActivityDelivery)
+    leases = rows(ExecutionLease, ExecutionLease.status == "active")
+    for attempt in attempts:
+        delivery = deliveries.get(attempt.id)
+        if delivery is not None and delivery.recovery_epoch >= epoch:
+            continue  # delivered under this epoch: not restored work
+        if delivery is not None and delivery.status == "pending":
+            delivery.status = "conflict"  # never claimable under the new epoch
+        lease = leases.get(attempt.id)
+        if lease is not None:
+            lease.status = "uncertain"
+        reservation = reservations.get(attempt.id)
+        if reservation is not None and reservation.state == "reserved":
+            reservation.state = "uncertain"
+        attempt.state = "uncertain"
+        db.flush()
+        event("attempt_uncertain", attempt.id)
+    if execution.state not in ("pending", "reconciliation_required"):
+        execution.state, execution.reason = "reconciliation_required", "uncertain"
+    execution.recovery_epoch = None
+    clear_runnable(db, execution)
+    db.flush()
+    event("reconciliation_required", None)
     return True

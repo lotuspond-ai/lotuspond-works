@@ -242,7 +242,11 @@ def close_children(db, budgets, scope, parent, now, epoch):
     caller's current `epoch` (`BudgetService.release_unstarted`). A claimed child, or an
     uncertain one not yet confirmed stopped, may still run inside the parent's
     compute slot: the parent's stop is refused (`conflict`) until that child reports
-    or is reconciled. Returns the cancelled child IDs.
+    or is reconciled. In an execution held after a restore, a child the hold made
+    uncertain was never delivered in the restored rows: if it ran after the backup,
+    it ran inside the parent whose own end is now known, so it is cancelled too and
+    keeps its uncertain liability (`recovery.hold_restored`). Returns the cancelled
+    child IDs.
     """
     children = list(
         db.scalars(
@@ -265,14 +269,37 @@ def close_children(db, budgets, scope, parent, now, epoch):
             )
         )
     )
+    held = db.get(Execution, parent.execution_id).recovery_epoch is None
+    undelivered = (
+        set(
+            db.scalars(
+                select(ExecutionAttempt.id).where(
+                    ExecutionAttempt.id.in_([c.id for c in children if c.state == "uncertain"]),
+                    ~select(ExecutionActivityDelivery.id)
+                    .where(
+                        ExecutionActivityDelivery.workspace_id == scope.workspace_id,
+                        ExecutionActivityDelivery.attempt_id == ExecutionAttempt.id,
+                    )
+                    .exists(),
+                )
+            )
+        )
+        if held
+        else set()
+    )
     # A claimed child, or an uncertain one whose compute was never confirmed stopped,
     # may still run inside the parent's slot: the parent's compute cannot stop yet.
     if any(
-        child.state == "claimed" or (child.state == "uncertain" and child.id in unstopped)
+        child.state == "claimed"
+        or (child.state == "uncertain" and child.id in unstopped and child.id not in undelivered)
         for child in children
     ):
         raise ExecutionError("conflict")
-    closed = [child for child in children if child.state in ("reserved", "dispatched")]
+    closed = [
+        child
+        for child in children
+        if child.state in ("reserved", "dispatched") or child.id in undelivered
+    ]
     for child in closed:
         delivery = lock(
             db,
@@ -597,6 +624,9 @@ class ActivityService:
         self.budgets._final(db, rows["actor"], rows["revision"], grant, tenant, recovery, execution)
         if recovery.epoch != identity.recovery_epoch:
             raise ExecutionError("recovery_unavailable")
+        if execution.recovery_epoch != recovery.epoch:
+            # Admitted before a restore: held until an owner releases it (recovery.py).
+            raise ExecutionError("forbidden")
         now = self._finish(db, rows["locked"])
         parent_deadline = None
         if parent is not None:
@@ -757,6 +787,7 @@ class ActivityService:
                 ExecutionDeploymentRevision.pool_id == identity.pool_id,
                 Execution.requested_state == "running",
                 Execution.state == "running",
+                Execution.recovery_epoch == identity.recovery_epoch,
                 ExecutionAttempt.state == "reserved",
                 ExecutionUsageReservation.state == "reserved",
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),

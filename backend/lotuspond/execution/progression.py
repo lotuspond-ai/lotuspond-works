@@ -857,8 +857,16 @@ def _unclaimed():
 
 
 def _progressing(execution):
-    """Whether new work may be derived: running is requested, and no fence holds it."""
-    return execution.requested_state == "running" and execution.state != "reconciliation_required"
+    """Whether new work may be derived: running is requested, and no fence holds it.
+
+    Nor does the restore hold (`recovery.hold_restored`), which may leave a held
+    execution `pending`.
+    """
+    return (
+        execution.requested_state == "running"
+        and execution.state != "reconciliation_required"
+        and execution.recovery_epoch is not None
+    )
 
 
 def _scoped(model, execution):
@@ -1892,6 +1900,21 @@ class InterpreterV1:
         epoch = self._epoch(db, epoch)
         if execution.next_event_sequence == 1:
             self._event(db, execution, epoch, "started")
+        from .recovery import hold_restored, restored
+
+        if restored(execution, epoch):
+            # Admitted before a restore: held until an owner releases it, and nothing
+            # new is derived. A cancellation or its deadline ends it below only once
+            # nothing it started may still run; the sweeper wakes it for its deadline
+            # only after the release.
+            hold_restored(
+                db,
+                execution,
+                epoch,
+                lambda code, attempt_id: self._event(
+                    db, execution, epoch, code, attempt_id=attempt_id, detail="restored"
+                ),
+            )
         from .control import observe_control
 
         # A requested pause or resume becomes the observed state (Task 11).

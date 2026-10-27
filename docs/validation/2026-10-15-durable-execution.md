@@ -117,18 +117,30 @@ Each finding was observed in a run; none is inferred.
     - So the bound is the cursor itself, held for each admission's whole transaction, not the API process. A multi-process API is not a fix, and is not documented as a deployment requirement.
     - Task 5's locking is not redesigned in E04. Owner decision (2026-10-28): this finding stays open, as a follow-up redesign outside E04 (cheaper work under the cursor, or a cursor not held across it). No further owner decision is needed for E04.
     - Evidence, in the local evidence folder outside the repository: the planning-target run, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-full4/` (its report, and the database counts and timing logs saved before the stop under `snapshot/`); the three-process calibration, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-workers/`.
-12. **A restore runs an activity again if it was claimed after the backup (RESTORE-1, red, open for the owner).**
-    - The backup holds a read admitted but not yet delivered. After the backup that read is claimed and completes once.
-    - After the restore, the restored rows show the attempt as never delivered. The restore fence knows only deliveries signed under an older epoch, so it leaves that attempt alone.
-    - A fresh runtime under the new epoch was delivered the same attempt and ran it a second time: two provider calls for one attempt. The run's output is kept in the local evidence folder outside the repository, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/restore1-red.txt`, like earlier tasks' raw logs.
-    - The other RESTORE-1 requirements hold: older-epoch sessions and deliveries are refused, the attempt delivered before the backup is fenced uncertain, and the original signal is accepted once.
-    - In E04 the repeat is a second read or model call (cost and data exposure, no business write). E05's writes would make it a second effect.
-    - This is the consequence of the residual already open for the owner since the reservation refund change (`docs/VALIDATION.md`, 26 October): "an attempt restored as `reserved` with no delivery carries no epoch" and is treated as never started. RESTORE-1 shows it happening.
-    - That entry's second residual is not covered here: an old-epoch child closed by its parent's reconciliation before the fence reaches it.
-    - Options for the owner:
-      - after a restore, hold every non-terminal execution for reconciliation until runtime journals are reconciled;
-      - give runtimes a route to report journal entries under the new epoch, and fence matching attempts;
-      - keep a dispatch record outside the database, with the independent authority.
+12. **A restore ran an activity again if it was claimed after the backup (RESTORE-1; fixed by the owner's decision, 2026-10-28).**
+    - **Found.** The backup holds a read admitted but not yet delivered. After the backup that read is claimed and completes once. After the restore, the restored rows show the attempt as never delivered. The restore fence knows only deliveries signed under an older epoch, so it left that attempt alone, and a fresh runtime under the new epoch was delivered it and ran it a second time: two provider calls for one attempt. The red run's output is kept in the local evidence folder outside the repository, `~/Downloads/LotusPond-worktrees/e04-evidence/task13/restore1-red.txt`, like earlier tasks' raw logs.
+    - The other RESTORE-1 requirements held: older-epoch sessions and deliveries are refused, the attempt delivered before the backup is fenced uncertain, and the original signal is accepted once.
+    - It was the consequence of the residual open since the reservation refund change (`docs/VALIDATION.md`, 26 October): "an attempt restored as `reserved` with no delivery carries no epoch" and was treated as never started.
+    - **Owner decision (2026-10-28): hold all after restore.** After a restore, every non-terminal execution is held for reconciliation until the runtime journals are reconciled, and no restored attempt is delivered to a runtime under the new epoch before that. Rejected: a route for runtimes to report journal entries, a dispatch record kept outside the database, and documenting the gap until E05.
+    - **The fix.**
+      - Each execution records the recovery epoch it was admitted under (`executions.recovery_epoch`, schema v15).
+      - One admitted under an older epoch is held, by the sweeper or by the first orchestrator to meet it. Every attempt of it that has not ended becomes uncertain, with its reservation. That covers those the restored rows show reserved and undelivered, and those in flight under the older epoch, which the hold fences itself. A started execution becomes `reconciliation_required`. One still `pending` keeps its state and admission slot, and derives no work.
+      - Until the hold applies, scheduling, dispatch and reservation retirement skip the execution, and journal reconciliation refuses it.
+      - Its owner closes an attempt a runtime's journal shows ran, with the journal entry as evidence, even though the restored rows hold no delivery for it. Closing it can only fail it. Closing a parent this way also cancels its children that the hold made uncertain and that were never delivered, and they keep their uncertain liability.
+      - The owner then releases the execution (`POST .../reconciliation`). An attempt with no journal evidence is reserved again and may run once under the new epoch. One delivered under the older epoch still needs its confirmed stop.
+      - While held, nothing ends it until nothing it started may still run: a cancellation or its deadline takes effect after the release, at the latest.
+      - The operator procedure is in Task 14's operations guide, `docs/operations/durable-execution.md`.
+    - **RESTORE-1 now asserts the hold.**
+      - All three restored executions are held.
+      - A fresh runtime serves new work, and is never delivered a restored attempt.
+      - The read claimed after the backup reconciles as uncertain from runtime-a's journal, and fails.
+      - The read delivered before the backup cannot be released without its stop.
+      - The released form waits again, and its original signal is accepted once.
+      - RESTORE-3 releases its restored read before a fresh runtime runs it.
+    - **Residuals.** The refund change's first residual is closed: a restored reserved attempt is uncertain, never released at zero. Its second is closed as well. The hold fences every attempt in flight under the older epoch itself, whether or not the sweeper reached its delivery, and nothing can reconcile or release the execution before the hold. So a pause cannot release a restored root, and a parent's reconciliation cannot close an old-epoch child as never started.
+    - **Open, with the missing reconciliation route.** Known usage in a journal entry is not counted for an attempt that the restored rows never reserved, such as RESTORE-1's queued read. The evidence closes the attempt, but no reservation exists to settle.
+    - **Rows from before v15** read epoch 0. Under any later epoch they are held like restored rows, for an owner's release. No v14 build had an execution route, so no such rows exist outside tests.
+    - **Left to the operator.** A runtime journal names attempts, not executions. An entry for an attempt the restored rows don't know shows that some execution of that runtime's environment progressed after the backup. The journal can't say which one. The procedure covers that case.
 13. **An equal signal replay after the signal took effect was refused (fixed).** Installed acceptance's "signal, after commit" rollback found it.
     - The commit held but its answer was lost, and progression consumed the signal at once. The client's equal retry then got 403, because the replay check ran after the wait-state check.
     - Task 12's documented contract is that an equal retry replays the first answer.

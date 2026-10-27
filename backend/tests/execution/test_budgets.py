@@ -177,6 +177,7 @@ def budget_harness(harness):
                 admission_sequence=capacity.next_admission_sequence - 1,
                 deadline_ms=now + 1000000,
                 admission_digest="b" * 64,
+                recovery_epoch=1,  # admitted under the harness's epoch, as admission records
             )
             db.add(execution)
             db.flush()

@@ -41,7 +41,12 @@ class Scheduler:
         self._slot.closed = True
 
     @execution_service
-    def schedule_batch(self, db, installation_id, limit=25):
+    def schedule_batch(self, db, installation_id, limit=25, *, epoch=None):
+        """Reserve environment heads; with `epoch`, only executions current under it.
+
+        A restored execution is held until an owner releases it (`recovery.py`), and
+        `reserve_attempt` refuses one whatever the caller passes.
+        """
         if (
             installation_id != self.budgets.installation_id
             or type(limit) is not int
@@ -82,6 +87,7 @@ class Scheduler:
                     Execution.environment_id == scope.environment_id,
                     Execution.requested_state == "running",
                     Execution.state.in_(("pending", "running")),
+                    *(() if epoch is None else (Execution.recovery_epoch == epoch,)),
                     ExecutionAttempt.state == "reserved",
                     ~select(ExecutionUsageReservation.id)
                     .where(ExecutionUsageReservation.attempt_id == ExecutionAttempt.id)

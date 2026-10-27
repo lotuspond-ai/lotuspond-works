@@ -29,6 +29,13 @@ authority and a confirmed compute stop for every uncertain attempt. It fails tho
 attempts as `uncertain` (an interrupted one stays interrupted) and lets progression
 decide: a retry with a new ordinal and a fresh reservation under the step's policy,
 or failure. It never turns unverifiable data into success.
+
+It also releases an execution held after a restore (`recovery.hold_restored`, owner
+decision, 2026-10-28), `pending` or `reconciliation_required`, once its owner has
+reconciled the runtime journals. An attempt the hold made uncertain, never
+delivered in the restored rows and with no journal evidence, is one no runtime ran
+since the backup: it is reserved again, and may be delivered under this epoch. One
+delivered under the older epoch still needs its confirmed stop.
 """
 
 from hashlib import sha256
@@ -40,6 +47,7 @@ from sqlalchemy import literal, select
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
+    ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionControlRequest,
     ExecutionDeploymentRevision,
@@ -61,6 +69,7 @@ from .dispatch import failure_content, keep_interrupted, mark_pause_stops
 from .errors import ExecutionError, execution_service
 from .orchestrator import TERMINAL, mark_runnable
 from .progression import INTERRUPTED, record_event
+from .recovery import restored
 
 TARGET = {"pause": "paused", "resume": "running", "cancel": "cancelled"}
 
@@ -91,6 +100,18 @@ def resumed_state(db, execution) -> str:
     if execution.requested_state == "paused":
         return "paused"
     return "waiting" if _retained_open_wait(db, execution) else "running"
+
+
+def _delivered(db, scope, attempt) -> bool:
+    """Whether the rows hold any delivery of this attempt, under any epoch."""
+    return (
+        db.scalar(
+            scoped(ExecutionActivityDelivery, scope)
+            .where(ExecutionActivityDelivery.attempt_id == attempt.id)
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def observe_control(db, execution, event) -> bool:
@@ -276,7 +297,12 @@ class ControlService:
         actor = reauthorize(db, actor, "reconcile")
         scope = actor.scope
         execution = record(db, Execution, scope, execution_id, locked=True)
-        if execution.state != "reconciliation_required":
+        if restored(execution, epoch):
+            raise ExecutionError("conflict")  # the restore hold comes first
+        held = execution.recovery_epoch is None
+        if execution.state != "reconciliation_required" and not (
+            held and execution.state == "pending"
+        ):
             raise ExecutionError("conflict")
         attempts = list(
             db.scalars(
@@ -289,6 +315,7 @@ class ControlService:
                 .with_for_update()
             )
         )
+        released = []
         for attempt in attempts:
             reservation = lock(
                 db,
@@ -302,11 +329,21 @@ class ControlService:
                     ExecutionReconciliationObservation.code == "compute_stopped",
                 )
             )
+            if held and stopped is None and not _delivered(db, scope, attempt):
+                released.append((attempt, reservation))  # in no runtime's journal
+                continue
             if reservation is None or reservation.compute_stopped_at_ms is None or stopped is None:
                 # Something may still run: an owner reconciles only after the stop.
                 raise ExecutionError("conflict")
         now = database_now_ms(db)
         ended = []
+        for attempt, reservation in released:
+            attempt.state = "reserved"
+            if reservation is not None and reservation.state == "uncertain":
+                reservation.state = "reserved"
+            ended.append(("attempt_reserved", attempt.id, "released"))
+        returned = {attempt.id for attempt, _ in released}
+        attempts = [attempt for attempt in attempts if attempt.id not in returned]
         for attempt in attempts:
             if keep_interrupted(self.artifacts, db, scope, attempt):
                 # A pause stopped it: the step resumes with a new attempt.
@@ -335,8 +372,12 @@ class ControlService:
         self._event(db, execution, epoch, "reconciled", detail={"actor_user_id": actor.user_id})
         for code, attempt_id, detail in ended:
             self._event(db, execution, epoch, code, attempt_id=attempt_id, detail=detail)
-        # Back to what was requested; progression and controls take it from there.
-        execution.state, execution.reason = resumed_state(db, execution), None
+        if held:
+            execution.recovery_epoch = epoch  # current again: the hold is released
+        # Back to what was requested; progression and controls take it from there. A
+        # held execution still `pending` keeps its admission slot and state.
+        if execution.state == "reconciliation_required":
+            execution.state, execution.reason = resumed_state(db, execution), None
         db.flush()
         mark_runnable(db, execution, now)
         return execution_view(execution)

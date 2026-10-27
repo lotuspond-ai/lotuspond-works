@@ -717,7 +717,8 @@ def reconcile_from_journal(world, customer, runtime, execution_id):
     observation = HistoricalObservation(
         observation_id="journal-" + attempt.id[:8],
         attempt_id=attempt.id,
-        delivery_sha256=delivery.digest,
+        # A delivery made after a backup is in the journal only, not the restored rows.
+        delivery_sha256=delivery.digest if delivery is not None else entry["delivery_sha256"],
         result=None,
         code=outcome.get("code", "unavailable"),
         usage=outcome.get("usage") or unknown,

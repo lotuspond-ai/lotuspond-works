@@ -1,8 +1,8 @@
 """Additive exact-v13 → v14 and exact-v14 → v15 migrations.
 
 The caller owns its transaction and advisory lock. Engine state is product schema
-(ADR-0011): v15 adds only the orchestration claim marker and sweep indexes. No
-authority backfill, reset or downgrade belongs here.
+(ADR-0011): v15 adds only the orchestration claim marker, the restore hold's epoch
+and sweep indexes. No authority backfill, reset or downgrade belongs here.
 """
 
 from copy import deepcopy
@@ -22,10 +22,16 @@ LEGACY_ADDITIONS = frozenset(
     }
 )
 # Schema v15 objects. Exact v14, and the direct v14 helper, contain none of them.
-V15_COLUMNS = {"executions": ("runnable_at_ms",)}
-V15_CHECKS = frozenset({"executions_runnable_at_ms_check", "executions_runnable_terminal_check"})
+V15_COLUMNS = {"executions": ("runnable_at_ms", "recovery_epoch")}
+V15_CHECKS = frozenset(
+    {
+        "executions_runnable_at_ms_check",
+        "executions_runnable_terminal_check",
+        "executions_recovery_epoch_check",
+    }
+)
 V15_INDEXES = {
-    "executions": ("execution_runnable_idx",),
+    "executions": ("execution_runnable_idx", "execution_restored_idx"),
     "execution_waits": ("execution_wait_due_idx",),
     "execution_leases": ("execution_lease_due_idx",),
     "execution_activity_deliveries": ("execution_delivery_due_idx",),
@@ -714,7 +720,9 @@ def migrate_execution_v15(connection: Connection) -> None:
 
     Never commits. Existing non-terminal executions that still hold a pending
     start, signal or control outbox row become runnable at that row's time, so
-    v14 admissions are not stranded. Rows `leased` through Task 6's external
+    v14 admissions are not stranded. Every existing execution reads recovery epoch
+    0, as a row from before any restore: under a later epoch it is held for an
+    owner's release, like a restored one. Rows `leased` through Task 6's external
     consumer protocol stay with that protocol; no v14 code path leases them.
     No other column, constraint or row changes.
     """

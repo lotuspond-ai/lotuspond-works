@@ -366,6 +366,9 @@ class LeaseService:
         now = database_now_ms(db)
         if (
             attempt.state != "reserved"
+            # A restored execution's rows prove nothing about dispatch since the
+            # backup: it is held instead (recovery.py).
+            or execution.recovery_epoch != epoch
             or delivery is not None
             or reservation is None
             or reservation.compute_stopped_at_ms is not None
