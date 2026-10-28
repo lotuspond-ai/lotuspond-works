@@ -150,7 +150,7 @@ Each finding was observed in a run; none is inferred.
 15. **Active time is charged at least its reservation.** A settled attempt keeps its full reserved active time against the root budget, even when the call ended sooner (Task 5's conservative liability). Demand must be sized so that every attempt's reservation fits the root budget (REG-1 needed 30 s, not 60 s, for two reads in a 100 s budget).
 16. **REG-6's bound.** At the 10,000-step ceiling, one more step is refused at publication. The case also asserts a bound on the rows read from `execution_step_instances`: fewer than 9,001 / 3 per step instance created, from `pg_stat_user_tables`. A transition that loaded the whole expansion would read at least 9,001. The measured value is printed by the case and recorded with the tier 1 run.
 17. **Throughput observed in tier 1** (REG-2, 1,000 items, concurrency 5): about 1 item per second. Reserving an attempt takes about 0.6 s, iterations run in waves of 4–5 s, and spawning a child takes about 1 s.
-18. **Runtime 0.1.0 exits under load (by design, measured).**
+18. **Runtime 0.2.0 exits under load (by design, measured).**
     - The runtime ends its process with exit 3 (`unavailable`) when a control call is refused or takes more than 10 s, and leaves restarting it to its service manager. A restarted runtime first waits out its previous session lease.
     - Under tier 3 every runtime exited this way, over and over. In the first full-scale run all 24 had exited within minutes, so that run was stopped.
     - The load runner now stands in for a service manager. It restarts a runtime that exits outside a planned kill after 5 s, and records each restart.

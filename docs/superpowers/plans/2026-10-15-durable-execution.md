@@ -1173,7 +1173,7 @@ assert required_report_missing_error.code == "missing_required_evidence"
 - **Left for the owner** (recorded in the validation record):
   - reconciling a lapsed or restore-fenced attempt, for which no route or runtime report exists;
   - a database refusal on a scheduling path, which fails the whole batch closed;
-  - runtime 0.1.0's exit on a refused or slow control call.
+  - runtime 0.2.0's exit on a refused or slow control call.
 - **Production stays deny-by-default.** No qualified provider is configured, so `production_engine` refuses and the API builds no execution services. The packaging test asserts both.
 - **Files beyond Task 14's row,** each necessary:
   - `scripts/checks/execution-smoke.py` (`EvidenceError` and `require_report`; `verify_report` now also requires each journey's own cleanup receipt);
