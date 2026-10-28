@@ -798,7 +798,10 @@ def serialize(row, *, exclude: set[str] | None = None) -> dict[str, Any]:
             continue
         value = getattr(row, column.name)
         if isinstance(value, datetime):
-            value = value.replace(tzinfo=value.tzinfo or UTC).isoformat()
+            # One text per instant: PostgreSQL returns the session TimeZone's offset,
+            # and digested evidence must not depend on it. SQLite returns naive UTC.
+            value = value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+            value = value.isoformat()
         elif isinstance(value, Decimal):
             value = float(value)
         result[column.name] = value

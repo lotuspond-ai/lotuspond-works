@@ -1,7 +1,5 @@
-from collections.abc import Iterator
-
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from .config import Settings
@@ -31,13 +29,3 @@ def engine_for(settings: Settings):
 
 def sessions_for(engine):
     return sessionmaker(engine, expire_on_commit=False)
-
-
-def session_scope(factory) -> Iterator[Session]:
-    with factory() as session:
-        try:
-            yield session
-            session.commit()
-        except BaseException:
-            session.rollback()
-            raise

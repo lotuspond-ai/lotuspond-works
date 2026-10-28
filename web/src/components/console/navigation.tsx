@@ -1,25 +1,28 @@
 import { useId } from 'react';
 import { Icon, type IconName } from './icons.js';
 
-export type NavItem = { id: string; label: string; icon: IconName };
+export type NavItem = { id: string; label: string; icon: IconName; planned?: boolean };
 export type NavSection = { title?: string; items: readonly NavItem[] };
 
-// Ordered the way a new workspace is set up: build what will be tested, evaluate it, watch
-// production, then the workspace utilities. Labels are one or two words, keyword first.
+// Grouped as the platform plan organizes the console: build a workflow, assure it before release,
+// operate it in production, then administer the workspace. Labels are one or two words, keyword
+// first. A planned item opens a page that says what it will do and what to use until then.
 export const navigation: readonly NavSection[] = [
   { items: [{ id: 'home', label: 'Home', icon: 'home' }] },
   {
     title: 'Build',
     items: [
       { id: 'projects', label: 'Projects', icon: 'projects' },
-      { id: 'scenarios', label: 'Scenarios', icon: 'scenarios' },
-      { id: 'environments', label: 'Environments', icon: 'environments' },
-      { id: 'runners', label: 'Runners', icon: 'runners' },
+      { id: 'studio', label: 'Studio', icon: 'studio' },
+      { id: 'connections', label: 'Connections', icon: 'connections', planned: true },
     ],
   },
   {
-    title: 'Evaluate',
+    title: 'Assure',
     items: [
+      { id: 'scenarios', label: 'Scenarios', icon: 'scenarios' },
+      { id: 'environments', label: 'Environments', icon: 'environments' },
+      { id: 'runners', label: 'Runners', icon: 'runners' },
       { id: 'runs', label: 'Evaluation runs', icon: 'runs' },
       { id: 'releases', label: 'Releases', icon: 'releases' },
       { id: 'policies', label: 'Policies', icon: 'policies' },
@@ -28,8 +31,10 @@ export const navigation: readonly NavSection[] = [
     ],
   },
   {
-    title: 'Production',
+    title: 'Operate',
     items: [
+      { id: 'control-room', label: 'Control Room', icon: 'control', planned: true },
+      { id: 'human-tasks', label: 'Human tasks', icon: 'tasks', planned: true },
       { id: 'traces', label: 'Traces', icon: 'traces' },
       { id: 'monitors', label: 'Monitors', icon: 'monitors' },
       { id: 'incidents', label: 'Incidents', icon: 'incidents' },
@@ -37,13 +42,14 @@ export const navigation: readonly NavSection[] = [
     ],
   },
   {
-    title: 'Workspace',
+    title: 'Administer',
     items: [
       { id: 'members', label: 'Members', icon: 'members' },
       { id: 'invitations', label: 'Invitations', icon: 'invitations' },
       { id: 'api-keys', label: 'API keys', icon: 'keys' },
       { id: 'integrations', label: 'Integrations', icon: 'integrations' },
       { id: 'audit-events', label: 'Audit log', icon: 'audit' },
+      { id: 'license', label: 'License', icon: 'license' },
       { id: 'settings', label: 'Settings', icon: 'settings' },
     ],
   },
@@ -102,6 +108,7 @@ export function NavList({
                 <>
                   <Icon name={item.icon} />
                   <span>{item.label}</span>
+                  {item.planned && <span className="nav-tag">Planned</span>}
                 </>
               );
               const current = item.id === active;

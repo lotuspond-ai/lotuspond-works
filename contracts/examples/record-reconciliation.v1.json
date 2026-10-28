@@ -1,0 +1,109 @@
+{
+  "schema_version": "lotuspond.workflow-package.v1",
+  "package_id": "record-reconciliation",
+  "version": "1.0.0",
+  "name": "Synthetic record reconciliation pattern",
+  "entry_node": "start",
+  "models": [
+    {
+      "id": "reasoner",
+      "profile": "primary-model",
+      "revision": "2026-10-15"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "source-ledger",
+      "connector": "synthetic-ledger",
+      "version": "1.0.0",
+      "secret_ref": "ledger-credential",
+      "operations": ["read-entries"]
+    },
+    {
+      "id": "target-system",
+      "connector": "synthetic-records-system",
+      "version": "1.0.0",
+      "secret_ref": "records-credential",
+      "operations": ["read-records", "post-adjustment"]
+    }
+  ],
+  "secret_refs": [
+    {
+      "id": "ledger-credential"
+    },
+    {
+      "id": "records-credential"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "start"
+    },
+    {
+      "id": "read-source",
+      "kind": "connector",
+      "connector_ref": "source-ledger",
+      "operation": "read-entries"
+    },
+    {
+      "id": "read-target",
+      "kind": "connector",
+      "connector_ref": "target-system",
+      "operation": "read-records"
+    },
+    {
+      "id": "reconcile",
+      "kind": "agent",
+      "model_ref": "reasoner",
+      "instructions": "Match the synthetic entries with the records. List each unmatched or conflicting item with both values, and propose an adjustment only where a stated rule covers it.",
+      "limits": {
+        "max_steps": 6,
+        "timeout_seconds": 120,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 1500,
+        "max_cost_microusd": 200000
+      }
+    },
+    {
+      "id": "review",
+      "kind": "human_review"
+    },
+    {
+      "id": "adjust",
+      "kind": "connector",
+      "connector_ref": "target-system",
+      "operation": "post-adjustment"
+    },
+    {
+      "id": "end",
+      "kind": "end"
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "read-source"
+    },
+    {
+      "source": "read-source",
+      "target": "read-target"
+    },
+    {
+      "source": "read-target",
+      "target": "reconcile"
+    },
+    {
+      "source": "reconcile",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "adjust"
+    },
+    {
+      "source": "adjust",
+      "target": "end"
+    }
+  ]
+}

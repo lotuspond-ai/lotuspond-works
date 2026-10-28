@@ -1,6 +1,8 @@
 # Declarative workflow package contract
 
-This is the first E02 contract foundation. It validates a bounded declaration; it does **not** execute a workflow, contact a model or connector, resolve credentials, enforce approval, qualify an integration, or authorize a deployment. The included reviewed-action package is synthetic.
+This is the first E02 contract foundation. It validates a bounded declaration; it does **not** execute a workflow, contact a model or connector, resolve credentials, enforce approval, qualify an integration, or authorize a deployment.
+
+Every package in `examples/` is synthetic: `reviewed-action` (quoted on the public introduction), `document-intake`, `case-approval`, `knowledge-answer` and `record-reconciliation`. They are process shapes shared across industries, with placeholder `synthetic-*` connectors, not qualified integrations. They are also the Studio's starting patterns. `backend/tests/test_package_contract.py` validates each one, and `web/src/lib/studioPatterns.test.ts` requires the console to offer every one with the CLI's digest.
 
 This pre-runtime topology is not yet a stable executable SDK contract. Consumers must pin the schema/model revision. Contract changes require explicit compatibility review; future data mapping, approval bindings and execution semantics cannot be silently added to strict version one.
 

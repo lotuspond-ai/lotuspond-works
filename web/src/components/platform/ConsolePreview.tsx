@@ -137,12 +137,18 @@ export function ConsolePreview() {
               <NavList
                 active={current.nav}
                 interactive={false}
+                // The preview shows the assurance workflows it demonstrates and the Studio beside
+                // them. Planned areas stay out, so the sample never suggests they work today.
                 hidden={[
+                  'connections',
+                  'control-room',
+                  'human-tasks',
                   'members',
                   'invitations',
                   'api-keys',
                   'integrations',
                   'audit-events',
+                  'license',
                   'settings',
                 ]}
               />

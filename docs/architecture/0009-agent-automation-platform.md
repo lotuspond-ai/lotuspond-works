@@ -98,3 +98,16 @@ compiled plan, transition result or synthetic match grants no authority. Real
 provider/runtime/Studio/licensing and production qualification remain open;
 installed artifacts and source-content matching are local evidence, not signed
 Git provenance or customer readiness.
+
+## Console Studio for v1 packages (15 October 2026)
+
+The console gains the first Studio increment: a graph canvas with palette
+drag-and-drop, pointer and keyboard node movement, port and keyboard edge
+creation, an inspector for nodes, package fields and declarations, and a browser
+admission check ported from the shared v1 validator with tested message, bound,
+canonical-JSON and digest parity. Publishing calls the existing registry API with
+an idempotency key; stored versions reopen as drafts. The Studio adds no routes,
+schema, server authority or execution: a published version is admitted content,
+not a deployment, an approval or permission to run. It composes v1 packages only;
+executable-v2 authoring, Control Room and production execution keep their own
+gates. Browser drafts are local state, not published or trusted content.

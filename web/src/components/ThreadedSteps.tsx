@@ -24,9 +24,12 @@ function smooth(points: Point[]) {
 export function ThreadedSteps({
   steps,
   glyphs,
+  retainedLabel = 'Retained',
 }: {
   steps: readonly Step[];
   glyphs: readonly GlyphName[];
+  // Names what each step leaves behind, such as a record or a deliverable.
+  retainedLabel?: string;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const ink = useRef<SVGPathElement>(null);
@@ -116,7 +119,7 @@ export function ThreadedSteps({
             <h3>{title}</h3>
             <p>{copy}</p>
             <dl>
-              <dt>Retained</dt>
+              <dt>{retainedLabel}</dt>
               <dd>{retained}</dd>
             </dl>
           </li>

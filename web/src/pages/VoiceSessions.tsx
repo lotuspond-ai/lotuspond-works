@@ -4,6 +4,7 @@ import {
   Alert,
   EmptyState,
   RawRecord,
+  RelativeTime,
   SectionHeader,
   StatusBadge,
   displayValue,
@@ -227,6 +228,7 @@ export function VoiceSessions({
         </p>
       ) : !visible.length && !error ? (
         <EmptyState
+          glyph="trace"
           title="No voice sessions received"
           description="Connect your voice application or transcription pipeline to begin collecting session evidence. Incoming transcripts and model assessments will appear here."
           action={
@@ -250,7 +252,8 @@ export function VoiceSessions({
                 </span>
                 <StatusBadge value={row.status} />
                 <span className="hint">
-                  {String(row.provider || 'Provider not recorded')} · {displayValue(row.created_at)}
+                  {String(row.provider || 'Provider not recorded')} ·{' '}
+                  <RelativeTime value={row.created_at} />
                 </span>
               </button>
             ))}

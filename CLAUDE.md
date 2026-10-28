@@ -8,7 +8,7 @@ Lotuspond is one licensable enterprise agent automation product with separately 
 
 The initial TypeScript API and schema were preserved in the separate recovery archive after Python workflow validation. There is one active API and one authoritative relational model. The current product goal permits selective recovery of useful archived functionality with provenance and Lotuspond naming; never restore credentials, unrelated products, or inherited history. `voice-bridge/` handles live transcription, `protocol-adapters/` contains the HTTP agent and explicit MCP tool runners, and `sandbox/` runs allowlisted software tasks in independently configured containers.
 
-The platform expansion preserves this assurance core. Production business execution will have a separate runtime and contracts; an evaluation `Run` is not a production execution. The first slice is a strict workflow-package v1 JSON contract, local validator, canonical content digest, schema export, and contract tests. The registry increment adds immutable tenant-scoped publication and exact canonical-content retrieval with admission-validator metadata. The standalone SDK adds local content differences, detached Ed25519 signatures against independent trust and exact synthetic capability checks. Studio, hosted publisher trust/admission, production orchestration, commercial licensing, and industry packs are later work. The master, architecture, and delivery plans under `docs/plans/2026-10-13-platform-*.md` describe that target, not available runtime features.
+The platform expansion preserves this assurance core. Production business execution will have a separate runtime and contracts; an evaluation `Run` is not a production execution. The first slice is a strict workflow-package v1 JSON contract, local validator, canonical content digest, schema export, and contract tests. The registry increment adds immutable tenant-scoped publication and exact canonical-content retrieval with admission-validator metadata. The standalone SDK adds local content differences, detached Ed25519 signatures against independent trust and exact synthetic capability checks. The console Studio (`web/src/pages/Studio.tsx`, `web/src/components/studio/`, `web/src/lib/studio.ts`) composes a v1 package as a graph, checks it in the browser with `web/src/lib/packageContract.ts` — a tested port of the SDK validator — and publishes through the registry; it runs nothing and adds no server authority. Studio authoring of executable-v2 definitions, Control Room, hosted publisher trust/admission, production orchestration, commercial licensing, and industry packs are later work. The master, architecture, and delivery plans under `docs/plans/2026-10-13-platform-*.md` describe that target, not available runtime features.
 
 ## Development and validation
 
@@ -30,7 +30,7 @@ Voice transcript partials retain revisions; final segments cannot change. Backgr
 
 ## Design
 
-Use the documented tokens and reusable components: a daylight console with an inset workspace, icon-and-label navigation, a Home setup checklist and a ⌘K palette; muted green actions, legible records, clear states, and restrained typography. Avoid simulated activity and fabricated metrics; the only exception is the public platform preview's labelled sample workspace, whose decisions come from the tested policy port in `web/src/lib/policyPreview.ts`. Keep individual and organization flows distinct and preserve accessible mobile forms.
+Use the documented tokens and reusable components: a daylight console with an inset workspace, icon-and-label navigation, a Home setup checklist and a ⌘K palette; muted green actions, legible records, clear states, and restrained typography. Avoid simulated activity and fabricated metrics; the only exception is the public platform preview's labelled sample workspace, whose decisions come from the tested policy port in `web/src/lib/policyPreview.ts`. Keep individual and organization flows distinct and preserve accessible mobile forms. Navigation groups pages as Build, Assure, Operate and Administer; Control Room, Connections and Human tasks are tagged Planned and render honest pages from `web/src/lib/roadmap.ts`, which change only when `docs/CAPABILITIES.md` does.
 
 Public pages follow the rules in `DESIGN.md` and the structure in `docs/design-system.md`. Show the product through its real rules and quoted product strings, never invented logos, testimonials, or numbers. Build on the brand theme in `DESIGN.md` — the pond as signature scene, the field record (ink glyphs, traces, stamps, threads) everywhere else — and the serif, sans, and mono type roles rather than new motifs, never let motion cost usability, and check visible changes in a browser at 1440px, 768px, and 375px widths with keyboard focus before calling them done.
 
@@ -51,7 +51,6 @@ Agent goals/instructions/models/tools/context/evaluation/debugging/oversight
 follow customer needs in `docs/AGENT_PRODUCT_RATIONALE.md`; Automation Anywhere
 is a reference only. This SDK increment adds no UI or runtime behavior.
 
-
 E03 adds the separately installable Linux runtime 0.1.0 and additive schema 13
 connection/runtime identity APIs. SDK stays 0.2.0. CLI observations are empty;
 production recovery, record, dispatch and trust providers deny/unavailable by
@@ -60,3 +59,16 @@ default. Signed command claims never execute business effects. See
 `docs/validation/2026-10-14-connections-fleet.md` for installed-artifact qualification
 and its limits. E04/E05 execution/actions/approvals/reconciliation, E08 licensing,
 E09 production/customer qualification, Studio/UI and enterprise goals stay open.
+
+## Console Studio for v1 packages (15 October 2026)
+
+The console Studio is the first Studio increment: a drag-and-drop canvas, an
+inspector and a browser admission check that mirrors the shared v1 validator,
+publishing to the existing v1 registry. It reads and writes only the public
+registry API, adds no routes, schema or authority, and composes v1 packages only;
+executable-v2 authoring, Control Room and execution remain open. Keep
+`web/src/lib/packageContract.ts` in step with `sdk/python/src/lotuspond_sdk/contract.py`;
+`web/src/lib/packageContract.test.ts` quotes the SDK source and pins the example digest.
+Studio patterns are the synthetic v1 files in `contracts/examples/`; add a pattern there, never
+as a browser-only definition (`web/src/lib/studioPatterns.test.ts` pins each CLI digest). Drafts
+stay in browser storage; the Studio's version-conflict help only foresees the registry's answer.

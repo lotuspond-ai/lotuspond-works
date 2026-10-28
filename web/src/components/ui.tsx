@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { exactTime, relativeTime } from '../lib/format.js';
+import { InkGlyph, type GlyphName } from './InkGlyph.js';
 
 export function SectionHeader({
   title,
@@ -22,22 +24,34 @@ export function SectionHeader({
     </div>
   );
 }
+// An empty list shows the field-record glyph for what it will hold, then its one next action.
 export function EmptyState({
   title,
   description,
   action,
+  glyph,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  glyph?: GlyphName;
 }) {
   return (
     <div className="empty">
-      <span className="empty-line" aria-hidden="true" />
+      {glyph && <InkGlyph name={glyph} />}
       <h2>{title}</h2>
       {description && <p>{description}</p>}
       {action}
     </div>
+  );
+}
+// A table cell's time: relative in words, exact in the title, machine-readable in dateTime.
+export function RelativeTime({ value }: { value: unknown }) {
+  if (typeof value !== 'string' || !value) return <>Not recorded</>;
+  return (
+    <time className="cell-time" dateTime={value} title={exactTime(value)}>
+      {relativeTime(value)}
+    </time>
   );
 }
 export function Alert({ children, onRetry }: { children: ReactNode; onRetry?: () => void }) {
@@ -64,6 +78,7 @@ export function StatusBadge({ value }: { value: unknown }) {
     'resolved',
     'verified',
     'accepted',
+    'enabled',
   ].includes(status)
     ? 'success'
     : ['block', 'blocked', 'failed', 'error', 'rejected', 'suspended', 'critical'].includes(status)
@@ -84,6 +99,15 @@ export function StatusBadge({ value }: { value: unknown }) {
     <span className={`badge badge-${tone}`}>
       <span aria-hidden="true" />
       {humanize(status)}
+    </span>
+  );
+}
+// Whether a product capability can be used now, as docs/CAPABILITIES.md records it.
+export function Readiness({ state }: { state: 'available' | 'planned' }) {
+  return (
+    <span className={`badge badge-${state === 'available' ? 'success' : 'neutral'}`}>
+      <span aria-hidden="true" />
+      {state === 'available' ? 'Available' : 'Planned'}
     </span>
   );
 }

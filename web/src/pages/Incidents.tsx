@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type Row } from '../api.js';
-import { Alert, EmptyState, SectionHeader, StatusBadge, displayValue } from '../components/ui.js';
+import {
+  Alert,
+  EmptyState,
+  RelativeTime,
+  SectionHeader,
+  StatusBadge,
+  displayValue,
+} from '../components/ui.js';
 import { IncidentReview } from '../components/IncidentReview.js';
 import {
   incidentCategory,
@@ -345,8 +352,13 @@ export function Incidents({
         </p>
       ) : !visible.length && !error ? (
         <EmptyState
-          title="No incidents match this view"
-          description="Change the status, category, project, or search filter to review other records."
+          glyph={filter || category || status !== 'open' ? undefined : 'pulse'}
+          title={rows.length ? 'No incidents match this view' : 'No open incidents'}
+          description={
+            rows.length
+              ? 'Change the status, category, project, or search filter to review other records.'
+              : 'Incidents are raised by failed or unavailable assessments, or reported by hand. Change the status filter to review resolved records.'
+          }
         />
       ) : (
         <>
@@ -360,7 +372,9 @@ export function Incidents({
                   <th scope="col">Severity</th>
                   <th scope="col">Status</th>
                   <th scope="col">Created</th>
-                  <th scope="col">Action</th>
+                  <th className="actions">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -382,7 +396,9 @@ export function Incidents({
                     <td>
                       <StatusBadge value={incident.status} />
                     </td>
-                    <td>{displayValue(incident.created_at)}</td>
+                    <td>
+                      <RelativeTime value={incident.created_at} />
+                    </td>
                     <td className="actions">
                       <button
                         className="text-button"

@@ -1,0 +1,109 @@
+{
+  "schema_version": "lotuspond.workflow-package.v1",
+  "package_id": "knowledge-answer",
+  "version": "1.0.0",
+  "name": "Synthetic knowledge answer pattern",
+  "entry_node": "start",
+  "models": [
+    {
+      "id": "reasoner",
+      "profile": "primary-model",
+      "revision": "2026-10-15"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "service-desk",
+      "connector": "synthetic-service-desk",
+      "version": "1.0.0",
+      "secret_ref": "desk-credential",
+      "operations": ["read-request", "post-reply"]
+    },
+    {
+      "id": "knowledge-base",
+      "connector": "synthetic-knowledge-base",
+      "version": "1.0.0",
+      "secret_ref": "knowledge-credential",
+      "operations": ["search-articles"]
+    }
+  ],
+  "secret_refs": [
+    {
+      "id": "desk-credential"
+    },
+    {
+      "id": "knowledge-credential"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "start",
+      "kind": "start"
+    },
+    {
+      "id": "read",
+      "kind": "connector",
+      "connector_ref": "service-desk",
+      "operation": "read-request"
+    },
+    {
+      "id": "search",
+      "kind": "connector",
+      "connector_ref": "knowledge-base",
+      "operation": "search-articles"
+    },
+    {
+      "id": "draft",
+      "kind": "agent",
+      "model_ref": "reasoner",
+      "instructions": "Draft a reply to the synthetic request using only the retrieved articles. Cite each article you rely on and say so when they do not answer the question.",
+      "limits": {
+        "max_steps": 6,
+        "timeout_seconds": 120,
+        "max_input_tokens": 8000,
+        "max_output_tokens": 1500,
+        "max_cost_microusd": 200000
+      }
+    },
+    {
+      "id": "review",
+      "kind": "human_review"
+    },
+    {
+      "id": "reply",
+      "kind": "connector",
+      "connector_ref": "service-desk",
+      "operation": "post-reply"
+    },
+    {
+      "id": "end",
+      "kind": "end"
+    }
+  ],
+  "edges": [
+    {
+      "source": "start",
+      "target": "read"
+    },
+    {
+      "source": "read",
+      "target": "search"
+    },
+    {
+      "source": "search",
+      "target": "draft"
+    },
+    {
+      "source": "draft",
+      "target": "review"
+    },
+    {
+      "source": "review",
+      "target": "reply"
+    },
+    {
+      "source": "reply",
+      "target": "end"
+    }
+  ]
+}

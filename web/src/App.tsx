@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
 import { api, ApiError, type Account, type Row } from './api.js';
-import { Alert, StatusBadge } from './components/ui.js';
+import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
 import { VoiceSessions } from './pages/VoiceSessions.js';
 import { Workspaces } from './pages/Workspaces.js';
@@ -19,7 +19,8 @@ import {
   saveOrganizationDraft,
 } from './lib/registration.js';
 import { AuthenticatorPolicy } from './components/AuthenticatorPolicy.js';
-import { billingView, type Billing } from './lib/billing.js';
+import { type Billing } from './lib/billing.js';
+import { BillingCard } from './components/BillingCard.js';
 import {
   authenticatorRequirement,
   type AuthenticatorPolicy as AuthenticatorPolicyState,
@@ -41,8 +42,16 @@ import { Icon } from './components/console/icons.js';
 import { allPages, navigation, pageLabel } from './components/console/navigation.js';
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
+import { License } from './pages/License.js';
+import { Planned } from './pages/Planned.js';
+import { plannedArea } from './lib/roadmap.js';
+
+// The Studio carries the canvas and the contract validator, so it loads when first opened.
+const Studio = lazy(() =>
+  import('./pages/Studio.js').then((module) => ({ default: module.Studio })),
+);
 import { requestCreate, takeCreateRequest, useSetupProgress } from './lib/setup.js';
-import { exactTime, fieldLabel, formatLatency, relativeTime } from './lib/format.js';
+import { fieldLabel, formatLatency } from './lib/format.js';
 import { documentTitle, useDocumentTitle } from './lib/title.js';
 
 type Field = {
@@ -230,6 +239,7 @@ const label = (key: string) =>
 // Pages whose records belong to a project, so the project filter applies to them.
 const projectScoped = [
   'projects',
+  'studio',
   'scenarios',
   'environments',
   'runs',
@@ -242,6 +252,7 @@ const projectScoped = [
 // Records a reader can create from the command palette, with the verb the page uses.
 const creatable: Record<string, string> = {
   projects: 'Create project',
+  studio: 'New workflow',
   scenarios: 'Add scenario',
   runners: 'Register runner',
   runs: 'Start evaluation run',
@@ -664,6 +675,22 @@ export function App({
               projectId={projectId}
               role={currentWorkspace?.role || 'viewer'}
             />
+          ) : page === 'studio' ? (
+            <Suspense
+              fallback={
+                <p className="loading-state" role="status">
+                  Opening the Studio…
+                </p>
+              }
+            >
+              <Studio
+                key={`${workspace}-${projectId}`}
+                workspace={workspace}
+                projectId={projectId}
+                projectName={String(projects.find((item) => item.id === projectId)?.name ?? '')}
+                role={currentWorkspace?.role || 'viewer'}
+              />
+            </Suspense>
           ) : page === 'voice-sessions' ? (
             <VoiceSessions
               key={`${workspace}-${projectId}`}
@@ -680,6 +707,10 @@ export function App({
             />
           ) : page === 'changelog' ? (
             <Changelog />
+          ) : page === 'license' ? (
+            <License key={workspace} workspace={workspace} />
+          ) : plannedArea(page) ? (
+            <Planned area={plannedArea(page)!} />
           ) : definitions[page] ? (
             <Resource
               key={`${page}-${workspace}`}
@@ -831,15 +862,16 @@ function Welcome({
       {initialError && <Alert>{initialError}</Alert>}
       <main className="welcome-grid auth-active">
         <section>
-          <p className="eyebrow">Agent release assurance</p>
+          <p className="eyebrow">Enterprise agent automation</p>
           {/* A tagline, not a heading: the form's "Welcome back" is this page's one h1. */}
           <p className="hero-title">
-            Release agents
-            <br /> on the record.
+            Agents at work,
+            <br /> people in charge.
           </p>
           <p className="lede">
-            Evaluate every candidate against frozen scenarios, apply a policy no one can quietly
-            edit, and keep the reasons behind each release decision.
+            Put AI agents to work in real business processes, with rules where rules suffice and
+            people where accountability belongs. Agent testing, release decisions, production
+            evidence and a Studio for workflow packages are available today.
           </p>
           <button
             className="text-button"
@@ -1318,13 +1350,7 @@ function Resource({
                       ) : ['status', 'severity', 'outcome'].includes(field) ? (
                         <StatusBadge value={row[field]} />
                       ) : field.endsWith('_at') && row[field] ? (
-                        <time
-                          className="cell-time"
-                          dateTime={String(row[field])}
-                          title={exactTime(String(row[field]))}
-                        >
-                          {relativeTime(String(row[field]))}
-                        </time>
+                        <RelativeTime value={row[field]} />
                       ) : field === 'latency_ms' && Number.isFinite(Number(row[field])) ? (
                         formatLatency(Number(row[field]))
                       ) : (
@@ -1677,35 +1703,6 @@ function RecordForm({
   );
 }
 
-function BillingCard({ billing }: { billing?: Billing }) {
-  if (!billing) return null;
-  const view = billingView(billing);
-  return (
-    <section className="panel">
-      <h2>Plan and allowance</h2>
-      <p>
-        <StatusBadge value={view.plan} />{' '}
-        <StatusBadge
-          value={
-            view.state === 'exhausted'
-              ? 'exhausted'
-              : view.state === 'nearly'
-                ? 'nearly used'
-                : 'within allowance'
-          }
-        />
-      </p>
-      <p>{view.allowance}</p>
-      <p className="hint">{view.retention}</p>
-      <p className="hint">{billing.payment.message}</p>
-      <p className="hint">
-        A workspace administrator cannot change this plan. Ask your Lotuspond operator to provision
-        a different one.
-      </p>
-    </section>
-  );
-}
-
 function Settings({
   workspace,
   role,
@@ -1757,7 +1754,7 @@ function Settings({
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Workspace</p>
+          <p className="eyebrow">Administer</p>
           <h1>Settings</h1>
           <p>Manage your workspace name, access policy, and model usage budget.</p>
         </div>

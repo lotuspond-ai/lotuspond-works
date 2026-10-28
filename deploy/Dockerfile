@@ -3,6 +3,10 @@ FROM node:24.21.0-alpine AS web
 WORKDIR /src
 COPY package.json package-lock.json vite.config.ts tsconfig.json ./
 COPY web ./web
+# The Studio imports its starting patterns, the synthetic v1 example packages, with a path
+# outside web/. The production bundle inlines them; contract tests keep reading the same files
+# in the repository.
+COPY contracts/examples/*.v1.json ./contracts/examples/
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     npm ci && npx vite build
