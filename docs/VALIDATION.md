@@ -1107,4 +1107,4 @@ Those unit runs used a disposable PostgreSQL 14 cluster on this Mac (private por
 **Not done:**
 
 - **Hosted CI** at the exact final head: GitHub Actions refuses jobs.
-- **Push and draft PR:** waiting for the owner's approval.
+- **Merge:** not requested. On the owner's approval (28 October) the branch was pushed and opened as draft PR #17. It conflicts with `main` in `docs/CAPABILITIES.md` and `docs/VALIDATION.md`, and was not merged with it.
