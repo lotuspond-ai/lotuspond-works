@@ -25,7 +25,11 @@ Completion of this foundation does not establish production agent execution or p
 | Owner change | `df94536` | Every never-claimed reservation is released at zero (26 October) |
 | 13 | `d707bd4` | Conformance tiers 1–3, installed acceptance and the qualification record |
 | Owner change | `0b5cd42` | Every restored execution is held until its owner releases it (28 October) |
-| 14 | this commit | Packaging, CI jobs, the operator guide and final review |
+| 14 | `d95bcff` | Packaging, CI jobs, the operator guide and final review |
+| Docs | `3efc1bd`, `335f3f1` | The runtime version tier 3 measured; the push and draft PR #17 |
+| Merge | `9cb7e1e` | `main` at `6fd0f3a` (#11, #12, #14 and #15) |
+| Tests | `34de53a`, `7d2e97c` | REV-6 and RESTORE-1 off the fixture read's 2 s deadline; REG-6's bound |
+| Docs | this commit | The merge's reruns in VALIDATION |
 
 ## Open for the owner
 

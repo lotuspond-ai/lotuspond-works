@@ -1157,4 +1157,66 @@ Those unit runs used a disposable PostgreSQL 14 cluster on this Mac (private por
 **Not done:**
 
 - **Hosted CI** at the exact final head: GitHub Actions refuses jobs.
-- **Merge:** not requested. On the owner's approval (28 October) the branch was pushed and opened as draft PR #17. It conflicts with `main` in `docs/CAPABILITIES.md` and `docs/VALIDATION.md`, and was not merged with it.
+- **Merge into `main`:** not requested. On the owner's approval (28 October) the branch was pushed and opened as draft PR #17. `main` was then merged into the branch, and the jobs rerun (next section).
+
+## Merge with `main` and reruns, 2026-10-28
+
+Same branch, draft PR #17. This is local Linux evidence only: GitHub Actions still refuses jobs, and nothing is deployed.
+
+**The merge.** `9cb7e1e` merges `main` at `6fd0f3a`: #11's merge, #12's Studio, #14's landing and Planned pages, and #15's UTC `serialize` fix.
+
+- **Conflicts were in two documents, and in no code:**
+  - `docs/CAPABILITIES.md`: main's table, with this branch's E04 row in place of the planned "Production business runtime" row.
+  - This file: main's 22 October time-zone section, then the E04 sections. Nothing was dropped from either side.
+- **Code merged automatically:** `app.py` (changelog items, still in date order), `models.py` and `test_assurance.py`. Main removed `database.session_scope` and `entitlements.PLAN_NAMES`; nothing here uses them.
+- **Left for the owner:** main's landing page and `web/src/lib/roadmap.ts` still mark Execution "Planned". Both trace their statuses to `docs/CAPABILITIES.md`, which now records the E04 foundation.
+
+**Runs at the merge, `9cb7e1e`.** Each `ci.yml` job ran alone in the local runner, through `e04-evidence/ci-local.py`, on a clean clone.
+
+- **`validate`:** every step passed, in 57 min.
+  - `npm run check`, including the SQLite Python suite: 1,101 passed. Its 195 PostgreSQL-only cases skip there by design.
+  - **The required PostgreSQL suite:** 1,242 passed, 102 subtests, 0 failed, 0 skipped. #15 adds 4 tests and 5 subtests.
+  - The image build and metadata check, the packaging tests (4 passed), schema parity and the strict docs build.
+- **`sdk` and `runtime`**, on Python 3.13 and 3.14: 1,514 and 733 passed. Not required, because the merge touches neither `sdk/` nor `runtime/`.
+- **`conformance`** (tier 1): 47 passed, 1 failed (REV-6).
+- **`disruptive`** (tier 2): 5 passed, 1 failed (RESTORE-1).
+
+**Diagnosis: timing in the cases, not the merge or the engine.**
+
+- **Comparison** (diagnosis only). Each failing case ran alone, for 10 rounds, alternating `9cb7e1e` and the pre-merge `335f3f1`, one run at a time. 39 of 40 passed. The one failure was in RESTORE-1's setup, at the merged head, with REV-6's signature.
+- **The signature.** A read that had to complete was claimed, its renewals answered 409 after its lease had ended, and the runtime's journal showed it ran once. The attempt was uncertain, and the execution was held for reconciliation.
+- **The cause.** The fixture `activity_read` has a 2 s step deadline, which is also its lease.
+  - REV-6's failing lease ran 1,724 ms.
+  - A forced failure with the new capture showed a lease ending at its delivery's issue time plus 2,000 ms, with 60 s of reserved active time left.
+  - On a loaded host, claim, read and report outlasted 2 s. The engine behaved as designed: a lease that reaches its deadline with no outcome leaves the attempt uncertain.
+  - This also explains Task 13's undiagnosed REV-6 intermittent, recorded in the qualification document's tier 1 runs.
+- **Ruled out:**
+  - **A stale authority or entitlement answer at renewal.** The fixture provider rereads its file on every call, and the engine caches none.
+  - **A runtime session fenced by the expiry and never re-established.** The runtime served the read, and its idle poll backs off to at most 1 s.
+  - The 403 in REV-6's log was the cancelled slow read's expected refusal. The merge changes no `execution/`, `fleet/` or runtime code.
+- **RESTORE-1's last assertion failed separately.** A repeated signal returns the same receipt with its current status. The orchestrator consumed the signal between the two calls, so the status went from `pending` to `delivered`. This was a race in `0b5cd42`'s assertion.
+
+**Fixes, all in tests.**
+
+- **`34de53a`:**
+  - `patient_read()`: `activity_read` with a 30 s step deadline.
+  - **REV-6.** Its reads use `patient_read()`. Its slow runtime stops once its part is over, so the positive control goes to the fresh runtime only. On failure, the case records each read's events, deliveries by runtime, reservations, leases, runtimes and entitlement.
+  - **RESTORE-1.** The queued read uses its own 30 s deployment. The delivered read keeps the 2 s dispatch timeout its setup relies on. The last assertion checks the same receipt id, a `pending` or `delivered` status, one inbox row and one `signal_received` event.
+  - **Alone:** RESTORE-1 passed 5 of 5 with the receipt fix, then 5 of 5 with both changes. REV-6 passed 5 of 5.
+  - **At `34de53a`:** tier 2 had 6 passed and 0 failed. Tier 1 had 47 passed and 1 failed: REG-6, which had passed before the merge and at `9cb7e1e`.
+- **`7d2e97c`, REG-6's bound:**
+  - **The failure.** REG-6 measured 3,569 rows read per step instance, against the case's own margin of 9,001 / 3.
+  - **Alone, three runs per head:** 1,000, 1,012 and 2,112 at `34de53a`; 1,169, 1,356 and 2,618 at `335f3f1`. Sequential-scan tuples ranged from 6.9 M to 18.8 M, and index fetches from 0.25 M to 16.7 M.
+  - **Why it varies.** The disposable table grows from empty to 9,002 rows in about 3 minutes, faster than autovacuum analyses it. So the plans for the same exact-path loads vary. This is not an engine or merge regression, and `_cancel`'s `LIKE` prefix query is not on this path.
+  - **The change.** The bound is now fewer than 9,001 rows per instance: the whole-expansion read the case exists to catch. Region-scoped loads cost about 1,000. The case prints sequential and index reads separately.
+  - **Decision.** The change was approved on 28 October. The plan's criterion, "within the recorded region bound", is unchanged, and qualification finding 16 records the change.
+
+**Final runs at `7d2e97c`.**
+
+- **Tier 1** (`conformance`), alone, 17:03–17:45 UTC: **48 passed, 0 failed, 0 skipped**, in 41 min 20 s.
+- **Tier 2** was not rerun, because `7d2e97c` changes only REG-6, a tier 1 case. At `34de53a` it had 6 passed and 0 failed.
+- **`validate`, `sdk` and `runtime`** stand as at the merge. The later commits change only conformance tests and documents, which are outside the required PostgreSQL suite. The repository's Python lint passes, and all 53 conformance tests collect.
+
+**Residual, not changed here.** 16 deployments in 11 conformance files use the 2 s fixture read. Many depend on the short deadline on purpose, for lapse and expiry cases. A positive path among them can fail the same way on a loaded host.
+
+**Not done:** hosted CI, and merging into `main` (not requested).
