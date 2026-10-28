@@ -217,15 +217,16 @@ def test_the_largest_expansion_runs_and_one_more_step_is_refused(system):
     schema = w.config["schema"]
 
     def rows_read():
+        """Rows read from the table so far: by sequential scans, and through indexes."""
         with Session(w.engine) as db:
-            return db.scalar(
+            return db.execute(
                 text(
-                    "SELECT coalesce(seq_tup_read, 0) + coalesce(idx_tup_fetch, 0) "
+                    "SELECT coalesce(seq_tup_read, 0), coalesce(idx_tup_fetch, 0) "
                     "FROM pg_stat_user_tables WHERE schemaname = :schema "
                     "AND relname = 'execution_step_instances'"
                 ),
                 {"schema": schema},
-            )
+            ).one()
 
     before = rows_read()
     execution_id = operator.start(customer, revision, value=list(range(1000)))["id"]
@@ -238,9 +239,16 @@ def test_the_largest_expansion_runs_and_one_more_step_is_refused(system):
             .select_from(ExecutionStepInstance)
             .where(ExecutionStepInstance.execution_id == execution_id)
         )
-    per_instance = (rows_read() - before) / instances
-    print(f"REG-6: {instances} step instances, {per_instance:.0f} rows read per instance")
-    # A load reads the 1,000 pinned items of the root region, or one item's eight
-    # steps. Reading the whole 9,001-step expansion on every transition would read at
-    # least 9,001 rows per instance; region-scoped loads stay far below it.
-    assert instances >= 9001 and per_instance < 9001 / 3, (instances, per_instance)
+    after = rows_read()
+    sequential, indexed = (after[0] - before[0]) / instances, (after[1] - before[1]) / instances
+    per_instance = sequential + indexed
+    print(
+        f"REG-6: {instances} step instances, {per_instance:.0f} rows read per instance"
+        f" ({sequential:.0f} by sequential scans, {indexed:.0f} through indexes)"
+    )
+    # This catches whole-expansion reads on every transition: reading all 9,001 steps
+    # each time is at least 9,001 rows per instance. Region-scoped loads cost about
+    # 1,000 rows per instance: the root region's 1,000 pinned items, or one item's
+    # eight steps. The disposable table grows from empty faster than autovacuum
+    # analyses it, so plans vary: 1,000 to 3,569 were measured (VALIDATION, 28 October).
+    assert instances >= 9001 and per_instance < 9001, (instances, sequential, indexed)
