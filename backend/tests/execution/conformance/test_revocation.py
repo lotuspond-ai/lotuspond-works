@@ -8,10 +8,18 @@ import time
 from datetime import timedelta
 
 import pytest
-from driver import Refused, diagnose, form_package, serving, timer_then_read, two_reads
+from driver import (
+    Refused,
+    diagnose,
+    form_package,
+    patient_read,
+    serving,
+    timer_then_read,
+    two_reads,
+)
 from lotuspond_runtime.errors import FleetError
 from processes import Processes, wait_for
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from lotuspond import models
@@ -49,6 +57,43 @@ def attempts(world, execution_id):
 
 def started(counter, seconds=60):
     wait_for(lambda: Processes.calls(counter) > 0, seconds)
+
+
+def dispatch_evidence(world, execution_ids, runtimes):
+    """Each execution's timeline in database milliseconds, with deliveries by runtime."""
+    ms = "floor(extract(epoch FROM {}) * 1000)::bigint"
+    queries = {
+        "execution": f"SELECT state, requested_state, reason, {ms.format('created_at')},"
+        f" {ms.format('clock_timestamp()')} AS now_ms FROM executions WHERE id = :id",
+        "events": "SELECT sequence, code, attempt_id, occurred_at_ms FROM execution_events"
+        " WHERE execution_id = :id ORDER BY sequence",
+        "attempts": f"SELECT id, ordinal, state, {ms.format('created_at')}"
+        " FROM execution_attempts WHERE execution_id = :id ORDER BY ordinal",
+        "reservations": f"SELECT attempt_id, state, active_ms, {ms.format('created_at')},"
+        " compute_stopped_at_ms, completed_at_ms FROM execution_usage_reservations"
+        " WHERE execution_id = :id",
+        "deliveries": "SELECT attempt_id, instance_id, generation, status, issued_at_ms,"
+        " expires_at_ms FROM execution_activity_deliveries WHERE execution_id = :id"
+        " ORDER BY issued_at_ms",
+        "leases": "SELECT attempt_id, status, claimed_at_ms, renewed_at_ms, expires_at_ms"
+        " FROM execution_leases WHERE execution_id = :id",
+    }
+    names = {runtime["instance_id"]: name for name, runtime in runtimes.items()}
+    found = {"entitlement": world.state("entitlement")}
+    with Session(world.engine) as db:
+        for execution_id in execution_ids:
+            found[execution_id] = {
+                name: [
+                    tuple(names.get(value, value) for value in row)
+                    for row in db.execute(text(query), {"id": execution_id})
+                ]
+                for name, query in queries.items()
+            }
+        found["runtimes"] = [
+            (names.get(row.id, row.id), row.status, row.last_seen_at_ms)
+            for row in db.execute(text("SELECT id, status, last_seen_at_ms FROM runtime_instances"))
+        ]
+    return found
 
 
 def test_a_runtime_revoked_while_holding_a_lease(system, linux):
@@ -184,7 +229,15 @@ def test_expired_entitlement_stops_dispatch_but_not_reads_or_reconciliation(syst
     slow = operator.deploy(customer, "two-reads", package=two_reads(), dependencies=[documents[0]])
     # Two active slots: the read refused while the authority is expired keeps one as
     # uncertain liability until it is reconciled.
-    read = operator.deploy(customer, "activity_read", dependencies=[documents[0]], capacity=2)
+    # A read that completes normally on a loaded host: the fixture read's 2 s step
+    # deadline is also its lease, and claim, read and report can outlast it.
+    read = operator.deploy(
+        customer,
+        "activity_read_30",
+        package=patient_read(),
+        dependencies=[documents[0]],
+        capacity=2,
+    )
     operator.demand(60000)  # long enough to stop and report after a refused renewal
     runtime = operator.runtime(customer, "runtime-slow", read={"read": {"sleep_s": 28}})
     reconciled = operator.start(customer, slow)["id"]
@@ -203,6 +256,8 @@ def test_expired_entitlement_stops_dispatch_but_not_reads_or_reconciliation(syst
     assert operator.events(customer, reconciled)
     customer.call("POST", f"/executions/{reconciled}/reconciliation", {})
     assert operator.settled(customer, reconciled, {"cancelled"})["state"] == "cancelled"
+    # The slow runtime's part is over: new work goes to the fresh runtime only.
+    w.processes.stop("runtime-slow")
     # Positive control: with the authority current again, the same runtime serves new
     # work. The read refused meanwhile either runs now too, or, fenced for
     # reconciliation after repeated refusals (Task 11's rule), waits for its owner;
@@ -243,8 +298,16 @@ def test_expired_entitlement_stops_dispatch_but_not_reads_or_reconciliation(syst
                 entries,
                 leases,
                 Processes.calls_by_attempt(fresh["counter"]),
+                Processes.calls_by_attempt(runtime["counter"]),
+                dispatch_evidence(
+                    w, (control, queued), {"runtime-slow": runtime, "runtime-fresh": fresh}
+                ),
             )
         ) from None
-    assert view["state"] == "succeeded", (diagnose(w, control), diagnose(w, queued))
+    assert view["state"] == "succeeded", (
+        diagnose(w, control),
+        diagnose(w, queued),
+        dispatch_evidence(w, (control, queued), {"runtime-slow": runtime, "runtime-fresh": fresh}),
+    )
     calls = Processes.calls_by_attempt(fresh["counter"])
     assert calls and max(calls.values()) == 1 and "unknown" not in calls, calls

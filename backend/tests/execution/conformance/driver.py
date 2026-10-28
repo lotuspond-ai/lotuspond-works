@@ -748,6 +748,19 @@ def _read_step(step_id, flows=FLOWS, timeout_seconds=30):
     return read
 
 
+def patient_read(timeout_seconds=30, flows=FLOWS):
+    """`activity_read` with a longer step deadline, for a read that must complete.
+
+    The fixture's 2 s deadline is also the read's lease: on a loaded host, claim, read
+    and report can outlast it, and the attempt is then uncertain, as designed.
+    """
+    package = copy.deepcopy(flow("activity_read", flows))
+    package["package_id"] = f"activity-read-{timeout_seconds}"
+    step = package["body"]["steps"][0]
+    package["body"]["steps"][0] = _read_step(step["id"], flows, timeout_seconds)
+    return package
+
+
 def read_iteration(items, concurrency, flows=FLOWS):
     """Iteration over integer items: each item reads once, then yields itself (+0)."""
     package = copy.deepcopy(flow("wide", flows))

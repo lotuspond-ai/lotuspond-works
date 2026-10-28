@@ -6,7 +6,7 @@ the processes start again. Runtimes keep their own local state. Every restored
 execution is then held until its owner releases it (owner decision, 2026-10-28).
 """
 
-from driver import form_package, reconcile_from_journal
+from driver import form_package, patient_read, reconcile_from_journal
 from processes import Processes, wait_for
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,6 +15,7 @@ from lotuspond.models import (
     Execution,
     ExecutionActivityDelivery,
     ExecutionAttempt,
+    ExecutionEvent,
     ExecutionInbox,
     ExecutionUsageReservation,
     RuntimeSession,
@@ -63,6 +64,12 @@ def test_a_restore_refuses_old_epochs_and_holds_every_execution(system, linux):
     read = operator.deploy(
         customer, "activity_read", dependencies=[operator.documents[0]], capacity=3
     )
+    # The queued read must complete on a freshly started runtime. The fixture read's 2 s
+    # step deadline is also its lease, which claim, read and report can outlast on a
+    # loaded host, leaving it uncertain.
+    patient = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     waiting = operator.start(customer, form)["id"]
     wait = operator.open_wait(customer, waiting, "review")
     # Delivered at backup time: a hand-driven runtime polls it, and never claims it.
@@ -76,7 +83,7 @@ def test_a_restore_refuses_old_epochs_and_holds_every_execution(system, linux):
         assert wait_for(lambda: hand.activity.poll(), 60) is not None
     finally:
         hand.close()
-    queued = operator.start(customer, read)["id"]  # no activity runtime yet
+    queued = operator.start(customer, patient)["id"]  # no activity runtime yet
     wait_for(lambda: attempt_rows(w, queued), 60)
     dump = w.cluster.backup()
     assert deliveries_of(w, queued) == []  # the backup holds it queued, never delivered
@@ -129,7 +136,11 @@ def test_a_restore_refuses_old_epochs_and_holds_every_execution(system, linux):
     # The released form waits again; the original signal is accepted once.
     assert operator.settled(customer, waiting, {"waiting"}, 60)["state"] == "waiting"
     receipt = operator.signal(customer, waiting, wait["id"], "form", {"approved": True})
-    assert operator.signal(customer, waiting, wait["id"], "form", {"approved": True}) == receipt
+    # A replay answers the same receipt with its current status: the orchestrator may
+    # consume the signal between the two calls.
+    replay = operator.signal(customer, waiting, wait["id"], "form", {"approved": True})
+    assert replay["id"] == receipt["id"], (receipt, replay)
+    assert {receipt["status"], replay["status"]} <= {"pending", "delivered"}, (receipt, replay)
     assert operator.settled(customer, waiting, {"succeeded", "failed"})["state"] == "succeeded"
     with Session(w.engine) as db:
         accepted = db.scalar(
@@ -137,7 +148,12 @@ def test_a_restore_refuses_old_epochs_and_holds_every_execution(system, linux):
             .select_from(ExecutionInbox)
             .where(ExecutionInbox.execution_id == waiting)
         )
-    assert accepted == 1
+        received = db.scalar(
+            select(func.count())
+            .select_from(ExecutionEvent)
+            .where(ExecutionEvent.execution_id == waiting, ExecutionEvent.code == "signal_received")
+        )
+    assert accepted == 1 and received == 1, (accepted, received)
     assert Processes.calls(fresh["counter"]) == 1  # nothing restored ever ran on it
 
 
