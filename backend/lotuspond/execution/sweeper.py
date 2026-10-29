@@ -261,6 +261,7 @@ def queue_depths(db, epoch: int) -> QueueDepths:
 
 def _schedulable(db) -> bool:
     """Whether any attempt waits for a reservation: a plain read, without locks."""
+    now = database_now_ms(db)
     return bool(
         db.scalar(
             select(
@@ -270,6 +271,7 @@ def _schedulable(db) -> bool:
                     ExecutionAttempt.state == "reserved",
                     Execution.requested_state == "running",
                     Execution.state.in_(("pending", "running")),
+                    Execution.deadline_ms > now,  # never a head (`schedule_batch`)
                     ~select(ExecutionUsageReservation.id)
                     .where(ExecutionUsageReservation.attempt_id == ExecutionAttempt.id)
                     .exists(),
@@ -478,14 +480,18 @@ class ExecutionSweeper:
         One head per transaction (`Scheduler.schedule_batch`), so a transaction holds
         one tenant's rows and takes the installation cursor last, for a few
         statements: it never waits behind another tenant's batch, and nothing waits
-        long behind it. Transactions repeat while each reserves something. Before
-        each, plain reads without locks check that some attempt waits for a
-        reservation and that the installation is not visibly full, so an idle or
-        saturated installation takes no lock at all. A refusal is retried by a later
-        pass and never stops the sweep.
+        long behind it. Before each, plain reads without locks check that some
+        attempt waits for a reservation and that the installation is not visibly
+        full, so an idle or saturated installation takes no lock at all.
+        Transactions repeat until `limit` reservations, or until as many in a row as
+        there are environments reserve nothing. Each one that reserves nothing moves
+        the round-robin position past every environment it looked at, so by then
+        every environment's head has had its turn: one environment's refused head
+        never stops the pass for the others. A refusal is retried by a later pass
+        and never stops the sweep.
         """
         budgets = self.scheduler.budgets
-        total = 0
+        total = misses = 0
         while total < limit:
             try:
                 with sessions() as db:
@@ -493,6 +499,7 @@ class ExecutionSweeper:
                         budgets._installation(db).active_limit
                     ):
                         break
+                    environments = db.scalar(select(func.count()).select_from(ExecutionCapacity))
                 with sessions() as db, db.begin():
                     scheduled = self.scheduler.schedule_batch(
                         db, budgets.installation_id, 1, epoch=self._fence(db)
@@ -500,9 +507,12 @@ class ExecutionSweeper:
             except Exception as error:
                 logger.warning("Execution scheduling deferred: %s", _code(error))
                 break
-            if not scheduled:
+            if scheduled:
+                total, misses = total + len(scheduled), 0
+                continue
+            misses += 1
+            if misses >= min(environments, limit):
                 break
-            total += len(scheduled)
         return total
 
     def sweep(self, sessions, worker, *, limit: int = 100) -> SweepReport:

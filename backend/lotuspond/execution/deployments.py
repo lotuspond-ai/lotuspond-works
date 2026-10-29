@@ -414,17 +414,24 @@ def load_deployment(
     require_enabled=True,
     dependencies=DEFAULT_DEPENDENCIES,
     include_assurance=False,
+    snapshot=None,
 ):
     """Recheck pins/current authority using the shared lock order.
 
     include_assurance retains fully validated expiring evidence for a final guard
     in this same transaction; it is not reusable authority. Default stays a pair.
+    `snapshot` is a publisher snapshot the caller looked up before its first lock
+    (admission). It is checked here exactly as one looked up now, its expiry again at
+    the end, and the caller's final guard looks one up again.
     """
     actor = reauthorize(db, actor, operation)
     hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
     policy = _pool(db, actor.scope, hint.pool_id)
     revision = hint
-    snapshot = dependencies.current(db, actor.scope)
+    if snapshot is None:
+        snapshot = dependencies.current(db, actor.scope)
+    elif snapshot.scope != actor.scope:
+        raise ExecutionError("trust_unavailable")
     publication, package, links, rows, sources = load_publication(
         db, actor.scope, revision.publication_id, snapshot
     )

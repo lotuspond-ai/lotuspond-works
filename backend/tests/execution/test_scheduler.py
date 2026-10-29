@@ -667,3 +667,90 @@ def test_a_visibly_full_installation_schedules_without_any_lock(budget_harness):
         assert not [s for s in seen if "FOR UPDATE" in s.upper()], seen
     finally:
         scheduler.close()
+
+
+def test_an_expired_head_is_skipped_and_a_late_refusal_says_deadline_exceeded(
+    budget_harness, monkeypatch
+):
+    """An execution past its deadline never blocks its environment's queue (full1)."""
+    from lotuspond.execution import scheduler as module
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import Execution, ExecutionAttempt
+
+    from .test_budgets import set_concurrency
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        expired, expired_execution = h.add(db)
+        current, _ = h.add(db)
+        db.get(Execution, expired_execution).deadline_ms = database_now_ms(db) - 1
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        with Session(h.engine) as db, db.begin():
+            scheduled = scheduler.schedule_batch(db, "test-installation")
+            assert [item.attempt_id for item in scheduled] == [current]
+            assert db.get(ExecutionAttempt, expired).state == "reserved"
+        # Chosen while still current (an earlier clock), expired by its reservation:
+        # refused, and labelled as what it is, not as revoked authority.
+        real, calls = module.database_now_ms, []
+
+        def earlier(db):
+            calls.append(None)
+            return real(db) - 60_000 if len(calls) == 1 else real(db)
+
+        monkeypatch.setattr(module, "database_now_ms", earlier)
+        with Session(h.engine) as db, db.begin():
+            assert scheduler.schedule_batch(db, "test-installation") == ()
+        with Session(h.engine) as db:
+            assert db.get(Execution, expired_execution).reason == "deadline_exceeded"
+            assert installation_active(db) == 1
+    finally:
+        scheduler.close()
+
+
+def test_a_refused_head_does_not_end_the_scheduling_pass_for_other_environments(
+    budget_harness,
+):
+    """full1: one environment's refused head stopped every environment's scheduling."""
+    from sqlalchemy.orm import sessionmaker
+
+    from lotuspond.execution.sweeper import ExecutionSweeper
+    from lotuspond.models import Execution, ExecutionUsageReservation
+
+    from .test_budgets import set_concurrency
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        refused, refused_execution = h.add(db)
+        epoch = db.get(Execution, refused_execution).recovery_epoch
+        other = clone_environment(h, db)[refused]  # its copy in a second environment
+        environments = sorted(db.scalars(select(ExecutionCapacity.environment_id)))
+        # The refused head's environment has the first turn.
+        db.scalar(select(ExecutionSchedulerCursor)).cursor = environments.index(
+            h.scope.environment_id
+        )
+
+    class Pricing:
+        test_only = True
+
+        def demand(self, attempt_id):
+            if attempt_id == refused:
+                raise RuntimeError("synthetic price outage")
+            return demand(1)
+
+    class Fence:
+        def current(self, db):
+            return epoch
+
+    scheduler = Scheduler(h.budgets, Pricing(), test_mode=True)
+    sweeper = ExecutionSweeper(leases=object(), recovery=Fence(), scheduler=scheduler)
+    try:
+        assert sweeper._schedule(sessionmaker(h.engine), 100) == 1
+        with Session(h.engine) as db:
+            reserved = set(db.scalars(select(ExecutionUsageReservation.attempt_id)))
+            assert reserved == {other}
+            assert db.get(Execution, refused_execution).reason == "provider_unavailable"
+    finally:
+        scheduler.close()

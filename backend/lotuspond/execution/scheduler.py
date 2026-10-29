@@ -5,6 +5,7 @@ import json
 from lotuspond_runtime.protocol import CanonicalUUID, Scope
 from sqlalchemy import func, select
 
+from ..fleet.authority import database_now_ms
 from ..models import (
     Connection,
     Execution,
@@ -60,7 +61,10 @@ class Scheduler:
             return ()
         # IDs only, bounded to eligible environment heads. A full environment
         # cannot conceal another behind its queue. A head failure never bypasses
-        # FIFO within that environment.
+        # FIFO within that environment. An execution past its deadline is not a
+        # head: it can never run, and the sweeper fails it (`deadline_exceeded`), so
+        # under overload the queue serves what can still run instead of stalling.
+        now = database_now_ms(db)
         count = db.scalar(select(func.count()).select_from(ExecutionCapacity))
         if not count:
             return ()
@@ -91,6 +95,7 @@ class Scheduler:
                     Execution.environment_id == scope.environment_id,
                     Execution.requested_state == "running",
                     Execution.state.in_(("pending", "running")),
+                    Execution.deadline_ms > now,
                     *(() if epoch is None else (Execution.recovery_epoch == epoch,)),
                     ExecutionAttempt.state == "reserved",
                     ~select(ExecutionUsageReservation.id)
@@ -209,6 +214,10 @@ class Scheduler:
                     self.budgets.reserve_attempt(db, actors[attempt_id], attempt_id, demand)
                 selected.append(ScheduledAttempt(attempt_id=attempt_id))
             except ExecutionError as error:
+                if error.code == "forbidden" and execution.deadline_ms <= database_now_ms(db):
+                    # Expired since the head was chosen: not a revoked authority.
+                    execution.reason = "deadline_exceeded"
+                    continue
                 execution.reason = {
                     "capacity_unavailable": "capacity",
                     "budget_exceeded": "budget",

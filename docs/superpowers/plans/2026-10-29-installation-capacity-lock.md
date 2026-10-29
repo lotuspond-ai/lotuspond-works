@@ -151,6 +151,28 @@ Each entry is keyed by SHA-256 of the exact inputs, serialized with `marshal` fo
   - grants, tenant policy, recovery and assurance.
 - The cache lives in process memory only, is dropped on restart, and returns nothing a caller did not supply the bytes for.
 
+### 6. After the planning-target run: admission looks up first; an expired or refused head no longer stalls scheduling (approved 29 October 2026)
+
+The planning-target run (full1, 3 API processes) met the cursor criterion (wait p95 0.96 ms) but delivered work only for its first 24.5 minutes. Three causes were measured:
+
+1. **The single sweeper reserved about 3 attempts a second,** about 330 ms per one-head transaction, mostly waiting on tenant `workspaces` rows. Those rows are held by admissions, at 8–10 waiters on average.
+2. **Expired heads.** Once queue age reached the 1,000 s deadline, every head arrived expired. `reserve_attempt` refused it `forbidden`, which the scheduler recorded as `authority_revoked`.
+3. **The pass ended at the first refusal.** `_schedule` stopped at the first transaction that reserved nothing, so one refused head stopped every environment's scheduling.
+
+Approved changes:
+
+- **Admission looks up before its first lock** (`AdmissionService._lookups`). The publisher snapshot, the grants (recovery, entitlement, tenant policy) and the artifact key are looked up before `reauthorize`.
+  - Under the locks, each is checked exactly as one looked up there would be (`load_deployment(snapshot=...)`, `_expiry`, `ArtifactStore.put(key=...)`).
+  - The pending-capacity step runs on the parents and limits already held (`_count_admission`), instead of `reserve_admission` loading them all again.
+  - The final guard (`_final`) is unchanged: it repeats every lookup and compares, so authority is current at the end as before.
+  - Under the workspace row, an admission now loads the deployment twice instead of four times, and makes the provider round twice instead of four times.
+  - A lookup that refuses early is left out and repeated at its usual place, so nothing is disclosed before authorization.
+  - The request is copied before the first provider call, as before.
+- **An execution past its deadline is not a head.** `schedule_batch` and the sweeper's plain pre-check pass over it, and the sweeper fails it. A head that expires between being chosen and being reserved is labelled `deadline_exceeded`.
+- **A pass gives every environment a turn.** `_schedule` repeats transactions until `limit` reservations, or until as many transactions in a row as there are environments reserve nothing.
+
+Not changed: one sweeper per installation, one head per transaction, and the cursor as a leaf.
+
 ## Why Task 5's guarantees still hold
 
 - **FIFO by admission sequence.** Admission sequences come from `next_admission_sequence` under the environment row lock. That lock is held to commit, so sequences commit in order within an environment. The scheduler still takes the lowest admission sequence, then execution ID, among each environment's unreserved attempts.
@@ -265,3 +287,9 @@ Existing tests that hold the cursor to make a transaction wait (the expired-enti
    - **Direct `schedule_batch` callers.** Decided in this amendment: a limit other than 1 is refused, never silently reduced.
 2. **Part 4: approved.** Lookups wait for their slot within the existing bound. Tier 3 records how many callers waited.
 3. **Part 5: approved after the first calibrations** ("go ahead with A"): memoize pure validation per process, keyed by exact content, with authority rechecks unchanged.
+4. **Part 6: approved after the planning-target run** ("go ahead with the two fixes plus (a)"):
+   - (a) admission looks up before its first lock;
+   - the scheduling pass continues past a refused head;
+   - an expired execution is never a head and is labelled `deadline_exceeded`.
+
+   Not chosen: reserving the first attempt at admission, more than one sweeper, or accepting the measured ceiling.

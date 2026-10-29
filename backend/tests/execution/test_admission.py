@@ -113,9 +113,7 @@ def test_admission_failure_rolls_back_every_record(admission, monkeypatch, failu
     with Session(h.engine) as db:
         rows_before_request = counts(db)
     if failure in {"artifact", "reservation"}:
-        owner, name = (
-            (h.store, "put") if failure == "artifact" else (h.budgets, "reserve_admission")
-        )
+        owner, name = (h.store, "put") if failure == "artifact" else (h.budgets, "_count_admission")
         original = getattr(owner, name)
 
         def fail(*args, **kwargs):
@@ -382,7 +380,21 @@ def test_admission_rechecks_expiry_after_real_provider_wait(admission, expiry):
         assert release.wait(5)
         return original_key(scope, key_id)
 
-    h.keys.key = blocking_key
+    if expiry == "deadline":
+        # The key is looked up before admission time is taken (finding 11, part 6);
+        # the final guard's tenant lookup (the second) still waits after it.
+        original_tenant, calls = h.budgets.tenant_policy.current, []
+
+        def blocking_tenant(scope, now_ms):
+            calls.append(None)
+            if len(calls) == 2:
+                entered.set()
+                assert release.wait(5)
+            return original_tenant(scope, now_ms)
+
+        h.budgets.tenant_policy.current = blocking_tenant
+    else:
+        h.keys.key = blocking_key
     with ThreadPoolExecutor(1) as executor:
         future = executor.submit(admit, h)
         try:
@@ -623,3 +635,75 @@ def test_admission_accepts_declared_number_domain(typed_admission):
         assert admit(h, f"number-{index}", request).id == first.id
     with Session(h.engine) as db:
         assert db.scalar(select(ExecutionCapacity.pending)) == 3
+
+
+def test_admission_looks_up_before_its_first_lock_and_loads_the_deployment_twice(
+    admission, monkeypatch
+):
+    """Finding 11, part 6: a tenant's workspace row is not held while lookups wait.
+
+    The grants, the publisher snapshot and the artifact key are looked up before the
+    first row lock; under the locks the deployment is loaded once, then once more by
+    the final guard, which repeats and compares every lookup (it was four of each).
+    """
+    from sqlalchemy import text
+
+    from lotuspond.execution import budgets as budgets_module
+
+    h = admission
+    calls, db = [], Session(h.engine)
+
+    def row_locks():
+        return db.scalar(
+            text(
+                "SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid()"
+                " AND locktype = 'relation' AND mode IN ('RowShareLock', 'RowExclusiveLock')"
+            )
+        )
+
+    def watched(name, function):
+        def wrapper(*args, **kwargs):
+            calls.append((name, row_locks()))
+            return function(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(h.budgets, "_grants", watched("grants", h.budgets._grants))
+    dependencies = type(h.budgets.deployments)  # a frozen dataclass: patch its class
+    monkeypatch.setattr(dependencies, "current", watched("snapshot", dependencies.current))
+    monkeypatch.setattr(h.store, "_key", watched("key", h.store._key))
+    monkeypatch.setattr(
+        budgets_module, "load_deployment", watched("load", budgets_module.load_deployment)
+    )
+    with db, db.begin():
+        h.service.admit_execution(db, h.actor, h.request, "looked-up")
+    assert calls[:3] == [("snapshot", 0), ("grants", 0), ("key", 0)]
+    names = [name for name, _ in calls]
+    assert names.count("load") == 2
+    assert names.count("grants") == 2
+    assert names.count("key") == 1
+
+
+def test_a_refused_early_lookup_refuses_in_the_usual_order(admission, monkeypatch):
+    """A lookup refused before the first lock discloses nothing before authorization."""
+    h = admission
+    original = h.budgets._grants
+    refusing = {"on": True}
+
+    def grants(db, scope):
+        if refusing["on"]:
+            raise ExecutionError("entitlement_unavailable")
+        return original(db, scope)
+
+    monkeypatch.setattr(h.budgets, "_grants", grants)
+    with Session(h.engine) as db, db.begin():
+        membership = db.scalar(select(Membership))
+        role, membership.role = membership.role, "viewer"
+    with pytest.raises(ExecutionError, match="forbidden"):
+        admit(h, key="unauthorized")
+    with Session(h.engine) as db, db.begin():
+        db.scalar(select(Membership)).role = role
+    with pytest.raises(ExecutionError, match="entitlement_unavailable"):
+        admit(h, key="unentitled")
+    refusing["on"] = False
+    assert admit(h, key="entitled").state == "pending"

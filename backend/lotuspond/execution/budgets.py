@@ -118,6 +118,14 @@ def installation_active(db) -> int:
     return int(db.scalar(select(func.coalesce(func.sum(ExecutionCapacity.active), 0))))
 
 
+def _admission_room(capacity, limits) -> None:
+    if (
+        capacity.pending >= min(capacity.pending_limit, limits["pending_capacity"])
+        or capacity.next_admission_sequence >= MAX_SAFE
+    ):
+        raise ExecutionError("capacity_unavailable")
+
+
 class BudgetService:
     def __init__(
         self,
@@ -197,7 +205,7 @@ class BudgetService:
         db.flush()
         return True
 
-    def _parents(self, db, actor, revision_id):
+    def _parents(self, db, actor, revision_id, *, snapshot=None):
         installation = self._installation(db)
         actor = reauthorize(db, actor, "execute")
         hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
@@ -205,7 +213,9 @@ class BudgetService:
         capacity = lock(db, scoped(ExecutionCapacity, actor.scope))
         if capacity is None:
             raise ExecutionError("capacity_unavailable")
-        _, revision = load_deployment(db, actor, revision_id, dependencies=self.deployments)
+        _, revision = load_deployment(
+            db, actor, revision_id, dependencies=self.deployments, snapshot=snapshot
+        )
         return installation, capacity, revision, policy
 
     def _grants(self, db, scope):
@@ -340,12 +350,18 @@ class BudgetService:
         _, capacity, revision, _ = self._parents(db, actor, deployment_revision_id)
         grant, tenant, recovery = self._grants(db, actor.scope)
         limits, _, _ = self._limits(db, actor.scope, revision, grant, tenant)
-        if (
-            capacity.pending >= min(capacity.pending_limit, limits["pending_capacity"])
-            or capacity.next_admission_sequence >= MAX_SAFE
-        ):
-            raise ExecutionError("capacity_unavailable")
+        _admission_room(capacity, limits)
         self._final(db, actor, revision, grant, tenant, recovery)
+        self._count_admission(db, capacity, limits)
+
+    def _count_admission(self, db, capacity, limits) -> None:
+        """Take one pending place and the next admission sequence on a locked row.
+
+        The caller holds `capacity` from `_parents`, with the deployment loaded and
+        `limits` from `_limits` under the same locks, and runs `_final` in this
+        transaction (admission runs it after its own writes).
+        """
+        _admission_room(capacity, limits)
         capacity.pending += 1
         capacity.next_admission_sequence += 1
         db.flush()
