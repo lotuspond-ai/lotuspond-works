@@ -8,7 +8,7 @@ import signal
 import time
 
 import pytest
-from driver import Refused, decoded_events, form_package, reconcile_from_journal
+from driver import Refused, decoded_events, flow, form_package, reconcile_from_journal
 from processes import Processes, wait_for
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -64,7 +64,20 @@ def test_event_sequences_are_gap_free_under_concurrent_transitions(system):
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
     processes.start_worker("orchestrator", "orchestrator-b")
-    revision = operator.deploy(customer, "waits_fast", dependencies=["waits.policy"])
+    # A package's `retained_waits` is applied environment-wide (validation finding 25):
+    # `waits_fast`'s 10 would let only 10 of these 12 executions ever retain a wait, and
+    # the others stay `pending` (finding 2). This case is about event order, not quota,
+    # so its package covers both waits of all 12 (owner decision, 2026-10-29).
+    package = flow("waits_fast")
+    package["package_id"] = "waits-fast-wide"
+    package["limits"]["retained_waits"] = 24
+    revision = operator.deploy(
+        customer,
+        "waits_fast",
+        package=package,
+        label="waits-fast-wide",
+        dependencies=["waits.policy"],
+    )
     executions = [operator.start(customer, revision)["id"] for _ in range(12)]
     for execution_id in executions:
         operator.open_wait(customer, execution_id, "callback", seconds=60)

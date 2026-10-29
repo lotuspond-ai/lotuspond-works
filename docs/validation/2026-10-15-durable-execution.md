@@ -197,6 +197,24 @@ Found in Task 14's final runs:
     - **If it stalls again,** the case now records the evidence: the execution's state, marker and epoch; its outbox, inbox and wait rows; and every open transaction, with its locks on `workspaces` and `executions`.
     - **Raw output:** `~/Downloads/LotusPond-worktrees/e04-evidence/final/disruptive-3.14-r1.log`.
 
+Found while qualifying the installation cursor redesign (finding 11, 29 October):
+
+25. **A package's `retained_waits` is applied environment-wide, and the retained-wait quota is not first come, first served (open for the owner; no engine change).** Both facts are on `main` (`533b3d6`). The [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md) leaves them unchanged: `retain_wait` is byte-identical, and the redesign only removed the cursor from the capacity step's lock order.
+    - **Environment-wide.** `BudgetService.retain_wait` (`backend/lotuspond/execution/budgets.py:742`) compares the environment's `capacity.retained_waits` with `min(capacity.wait_limit, limits["retained_waits"])`.
+      - `_limits` folds in the package's own `retained_waits`. The [executable-v2 plan](../superpowers/plans/2026-10-14-executable-package-v2.md) (line 75) declares that limit alongside per-execution limits such as `max_steps`.
+      - There is no per-execution counter. So a package that declares 10 is refused once its environment holds 10 retained waits, from any execution of any deployment.
+    - **Not first come, first served.** A refused retention backs off like any capacity step that changes nothing, up to 60 s, and the execution stays `pending` while its wait is unretained (finding 2). A retained wait keeps its slot until it closes. A capacity step releases a closed wait and retains the same execution's next wait in one transaction, so the slot passes to that execution's next wait.
+    - **Measured in ENG-4** (`test_event_sequences_are_gap_free_under_concurrent_transitions`). The case starts 12 executions of `waits_fast` (`retained_waits: 10`) in one environment, with two orchestrators, and never signals them. It waits for each execution to have an open callback and to have left `pending`.
+      - A failure-state dump from three failures, identical each time: executions 0–9 retained their pause and then their callback, holding all 10 slots. Executions 10–11 never retained a wait, stayed `pending`, and their callbacks expired. The orchestrators logged retention deferred `capacity_unavailable`, plus a few `conflict`: a 2 s pause satisfied or expired before its capacity step ran.
+      - Executions 10–11 can get in only in a short window, when another execution has released its pause in one capacity step and not yet retained its callback in the next. So the case passes or fails on timing:
+        - `main` (`533b3d6`), alone: failed 1 of 3;
+        - the redesigned head (`2067363`), alone: failed 5 of 6, and in the full tier 1 run;
+        - every full E04 tier 1 run before the redesign passed (4 of 4).
+
+        The redesign's capacity steps no longer queue on the cursor and run faster, so those windows are shorter. Raw output: `~/Downloads/LotusPond-worktrees/cursor-evidence/suites/eng4-*.log`.
+      - **Test-only fix (owner decision, 2026-10-29: option A).** ENG-4 keeps 12 executions and two orchestrators, with a copy of `waits_fast` whose `retained_waits` is 24, covering both waits of all 12. The case is about event order, not quota.
+    - **For the owner:** whether a package's `retained_waits` should cap each execution or the whole environment, and whether the retained-wait quota should be granted in admission order.
+
 ## Runs
 
 Results are recorded below as each run completes. Every run is a local Linux container on Docker Desktop (arm64, 4 CPUs, 6 GB), PostgreSQL 18.6, Python 3.14.9. The worktree is mounted read-only. Raw output stays in the local evidence folder outside the repository.
