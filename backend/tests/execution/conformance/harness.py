@@ -472,6 +472,8 @@ def _serve_on(world, listener, started) -> None:
     install_faults(world, "api")
     if os.environ.get(CURSOR_LOG):
         record_cursor_waits("api", Path(os.environ[CURSOR_LOG]))
+    if os.environ.get(LOOKUP_LOG):
+        record_lookup_waits("api", Path(os.environ[LOOKUP_LOG]))
     graph = build(world)
     app = create_app(
         settings_for(world),
@@ -501,6 +503,7 @@ def _serve_on(world, listener, started) -> None:
 
 CURSOR_LOG = "LOTUSPOND_CONFORMANCE_CURSOR_LOG"
 CYCLE_LOG = "LOTUSPOND_CONFORMANCE_CYCLE_LOG"
+LOOKUP_LOG = "LOTUSPOND_CONFORMANCE_LOOKUP_LOG"
 
 
 def _append(path, value):
@@ -510,13 +513,20 @@ def _append(path, value):
 
 
 def record_cursor_waits(role, path: Path):
-    """Test-only (tier 3): how long each statement locking the scheduler cursor took.
+    """Test-only (tier 3): how long each statement locking the scheduler cursor took,
+    and how long the cursor was then held.
 
     That statement does no other work, so its time is the lock wait. Every
     acquisition is recorded, in every process, including those a lock timeout ends.
+    The hold runs from the acquisition to the end of its transaction's commit or
+    rollback (`hold_ms`); a savepoint rollback that releases it earlier still counts
+    to the end, so holds are never understated.
     """
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
+    from sqlalchemy.orm import Session
+
+    holding = threading.local()  # a session's statements and commit share its thread
 
     @event.listens_for(Engine, "before_cursor_execute")
     def started(connection, cursor, statement, parameters, context, executemany):
@@ -526,8 +536,19 @@ def record_cursor_waits(role, path: Path):
     def finished(connection, failed):
         began = connection.info.pop("cursor_lock_started", None)
         if began is not None:
-            elapsed = round((time.monotonic() - began) * 1000, 2)
-            _append(path, {"role": role, "ms": elapsed, "failed": failed})
+            now = time.monotonic()
+            _append(path, {"role": role, "ms": round((now - began) * 1000, 2), "failed": failed})
+            if not failed and getattr(holding, "since", None) is None:
+                holding.since = now
+
+    def released(session, failed):
+        since, holding.since = getattr(holding, "since", None), None
+        if since is not None:
+            held = round((time.monotonic() - since) * 1000, 2)
+            _append(path, {"role": role, "hold_ms": held, "failed": failed})
+
+    event.listen(Session, "after_commit", lambda session: released(session, False))
+    event.listen(Session, "after_rollback", lambda session: released(session, True))
 
     @event.listens_for(Engine, "after_cursor_execute")
     def done(connection, cursor, statement, parameters, context, executemany):
@@ -537,6 +558,30 @@ def record_cursor_waits(role, path: Path):
     def refused(context):
         if context.connection is not None:
             finished(context.connection, True)
+
+
+def record_lookup_waits(role, path: Path):
+    """Test-only (tier 3): every provider lookup that had to wait for its slot.
+
+    A lookup that finds its slot free records nothing. One that waits records how
+    long, and whether it got the slot within its bound (finding 3, owner decision
+    2026-10-29), for the execution services' slots and the fleet recovery slot.
+    """
+    from lotuspond.execution.publication import _Lookup
+    from lotuspond.fleet.authority import _LookupSlot
+
+    def timed(kind, wait):
+        def waiting(self, timeout):
+            began = time.monotonic()
+            acquired = wait(self, timeout)
+            elapsed = round((time.monotonic() - began) * 1000, 2)
+            _append(path, {"role": role, "slot": kind, "ms": elapsed, "acquired": acquired})
+            return acquired
+
+        return waiting
+
+    _Lookup._wait = timed("execution", _Lookup._wait)
+    _LookupSlot._wait = timed("fleet", _LookupSlot._wait)
 
 
 class FirstCycle:
@@ -620,6 +665,8 @@ def serve_worker(world, role, worker_id, interpreters, timeout_ms, user=None) ->
     install_faults(world, role)
     if os.environ.get(CURSOR_LOG):
         record_cursor_waits(role, Path(os.environ[CURSOR_LOG]))
+    if os.environ.get(LOOKUP_LOG):
+        record_lookup_waits(role, Path(os.environ[LOOKUP_LOG]))
     if os.environ.get(PRIVILEGE_LOG):
         record_privileges(role, Path(os.environ[PRIVILEGE_LOG]))
     graph = build(world)

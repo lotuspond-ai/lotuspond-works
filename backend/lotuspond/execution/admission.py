@@ -1,7 +1,9 @@
 """Atomic execution admission. All writes belong to the caller's transaction.
 
-Acquire the configured installation cursor before authenticating a transport actor
-in the same transaction. Actor objects convey identity, never reusable authority.
+Authority is current in the same transaction: the workspace and account rows are
+locked first, then Task 5's parents. Admission changes only its environment's
+counters, so it never takes the installation cursor. Actor objects convey
+identity, never reusable authority.
 Service instances/providers are long-lived, explicitly provisioned dependencies.
 """
 
@@ -109,8 +111,7 @@ class AdmissionService:
     def admit_execution(
         self, db, actor, request: AdmissionRequest, request_key: str
     ) -> ExecutionView:
-        self.budgets._cursor(db)  # first lock, before current customer authority
-        actor = reauthorize(db, actor, "execute")
+        actor = reauthorize(db, actor, "execute")  # first lock: the workspace row
         request = AdmissionRequest.model_validate(request)
         # Frozen DTOs may still contain caller-owned mutable JSON containers.
         # Copy before provider calls without normalizing numbers: only the declared

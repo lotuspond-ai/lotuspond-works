@@ -58,7 +58,7 @@ class RecoveryFence:
 def fence_restored(leases, db, delivery_id: str, *, epoch: int) -> bool:
     """A delivery signed under an older epoch: its attempt becomes uncertain.
 
-    Lock order as for a lapse (`LeaseService._rows`, no cursor): no counter changes,
+    Lock order as for a lapse (`LeaseService._rows`, no capacity): no counter changes,
     the reservation stays reserved as uncertain liability. True when it changed.
     """
     if type(epoch) is not int or epoch < 0:
@@ -68,7 +68,7 @@ def fence_restored(leases, db, delivery_id: str, *, epoch: int) -> bool:
         raise ExecutionError("not_found")
     scope = scope_of(hint)
     execution, attempt, reservation, delivery, lease = leases._rows(
-        db, scope, hint.attempt_id, cursor=False
+        db, scope, hint.attempt_id, counters=False
     )
     if (
         delivery is None

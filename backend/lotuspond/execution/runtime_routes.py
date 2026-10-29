@@ -9,8 +9,9 @@ attempt it holds; never anything else.
 
 E03's `FleetRequestBoundary` already applies to every `/api/v1/runtime/` path: the
 opt-in switch, single authority headers, JSON bodies and the 64 KiB body bound
-(the runtime transport's). Routes that change capacity counters take the
-installation cursor before runtime authentication, in Task 5's order.
+(the runtime transport's). Routes for results, declines and child requests refuse
+an unknown credential or session before any lock; no route takes the installation
+cursor (docs/superpowers/plans/2026-10-29-installation-capacity-lock.md).
 """
 
 import json
@@ -76,7 +77,7 @@ def _presented(request, db) -> None:
     """Refuse an unknown credential or session before any lock (Task 12 review).
 
     A plain look-up takes no row lock, so unauthenticated traffic never queues on
-    the installation cursor; the locked authentication after it still decides.
+    a tenant's workspace row; the locked authentication after it still decides.
     """
     secret = request.headers.get("x-lotuspond-runtime-session")
     if secret is None:
@@ -97,11 +98,10 @@ def _presented(request, db) -> None:
         raise FleetError("unauthenticated")
 
 
-def _runtime(request, db, *, cursor=False):
+def _runtime(request, db, *, presented=False):
     configured = services(request)
-    if cursor:
+    if presented:
         _presented(request, db)
-        configured.activities.lock_cursor(db)
     return configured, principal(request, db, require_session=True)
 
 
@@ -141,7 +141,7 @@ def renew(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/children")
 def children(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db, cursor=True)
+    configured, current = _runtime(request, db, presented=True)
     body = ChildActivityRequest.model_validate(raw)
     attempt_id = configured.activities.request_child_activity(db, current, body)
     return _json(ChildActivityView(attempt_id=attempt_id).model_dump(mode="json"))
@@ -149,7 +149,7 @@ def children(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/results")
 def results(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db, cursor=True)
+    configured, current = _runtime(request, db, presented=True)
     body = ActivityResult.model_validate(raw)
     configured.activities.record_activity_result(db, current, body)
     return _json({})
@@ -157,7 +157,7 @@ def results(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/decline")
 def decline(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db, cursor=True)
+    configured, current = _runtime(request, db, presented=True)
     body = ActivityClaim.model_validate(raw)
     configured.leases.decline_activity(db, current, body.delivery_id, body.delivery_sha256)
     return _json({})

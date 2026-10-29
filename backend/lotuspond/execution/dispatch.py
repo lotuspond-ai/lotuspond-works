@@ -10,9 +10,9 @@ Lock order: see `activity_records`. Runtime routes authenticate before calling i
 so the workspace and E03 fleet rows are already held. The initiating principal's
 account rows follow them; this is safe because every transaction that locks account
 rows of a workspace first holds that workspace row `FOR UPDATE`. Operations that
-change capacity counters need the installation cursor, which Task 5's order puts
-first: they take it with `NOWAIT`, so a late acquisition never waits and cannot
-close a cycle (a busy cursor refuses with a retryable code).
+change capacity counters lock the environment capacity row before the execution.
+None of them takes the installation cursor: a stop changes only its environment's
+count, which is the installation's too (`budgets.installation_active`).
 """
 
 import json
@@ -40,7 +40,7 @@ from lotuspond_sdk.activity import (
 from lotuspond_sdk.executable.input import JsonLimits, decode_executable_bytes, project_json
 from lotuspond_sdk.trust import TrustSet
 from sqlalchemy import func, select
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 
 from ..fleet.authentication import RuntimePrincipal, machine_fields, machine_query
 from ..fleet.identity import locked_identity
@@ -54,7 +54,6 @@ from ..models import (
     ExecutionLease,
     ExecutionReconciliationObservation,
     ExecutionRequest,
-    ExecutionSchedulerCursor,
     ExecutionStepInstance,
     ExecutionUsageReservation,
     RuntimeCredential,
@@ -117,23 +116,6 @@ def activity_service(function):
             raise ExecutionError("invalid_request") from None
 
     return invoke
-
-
-def cursor_nowait(db, installation_id):
-    """The installation cursor taken after other rows: never waits (see module doc)."""
-    try:
-        with db.begin_nested():
-            row = db.scalar(
-                select(ExecutionSchedulerCursor)
-                .where(ExecutionSchedulerCursor.installation_id == installation_id)
-                .with_for_update(nowait=True)
-                .execution_options(populate_existing=True)
-            )
-    except OperationalError:
-        raise ExecutionError("capacity_unavailable") from None
-    if row is None:
-        raise ExecutionError("capacity_unavailable")
-    return row
 
 
 def failure_content(code, at_ms) -> bytes:
@@ -235,7 +217,7 @@ def close_children(db, budgets, scope, parent, now, epoch):
     """End the never-started children of a root attempt whose own work is over.
 
     The caller holds the execution row (every activity transaction locks it before
-    any attempt row) and the installation cursor. A reserved or dispatched child
+    any attempt row) and the environment capacity row. A reserved or dispatched child
     never started: it is cancelled, its delivery can no longer be claimed, and its
     compute stop is confirmed so containment can complete; its reservation is then
     released at zero, unless its delivery was signed under another epoch than the
@@ -377,15 +359,6 @@ class ActivityService:
         for slot in self._slots.values():
             slot.closed = True
 
-    def lock_cursor(self, db):
-        """Routes for child requests and results call this before runtime authentication.
-
-        Task 5's order puts the installation cursor first. The services still take
-        it with NOWAIT, so a caller that skipped this cannot deadlock; it is refused
-        with a retryable code while another transaction holds the cursor.
-        """
-        return self.budgets._cursor(db)
-
     # ------------------------------------------------------------ identity
 
     def _principal(self, db, recipient):
@@ -473,8 +446,6 @@ class ActivityService:
         an outcome (a result or a stored value) grants nothing and skips it, so a
         revoked initiator cannot discard a known outcome; renewal and new work keep it.
         """
-        if counters:
-            cursor_nowait(db, self.installation_id)
         locked = self._identity(db, principal)
         identity = principal.identity
         scope = identity.scope

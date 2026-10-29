@@ -2076,7 +2076,7 @@ class InterpreterV1:
         db.flush()
 
     def apply_capacity(self, db, worker, execution_id, *, epoch=None):
-        """One ordered capacity transaction: cursor, workspace, pool, capacity, then rows.
+        """One ordered capacity transaction: workspace, pool, capacity, then rows.
 
         Releases, stops and the terminal state never wait on a retention: each
         retention runs in its own savepoint, and a refusal leaves only that wait
@@ -2091,7 +2091,6 @@ class InterpreterV1:
             _SCRATCH.reset(token)
 
     def _apply_capacity(self, db, worker, execution_id, epoch):
-        self.budgets._cursor(db)
         hint = db.scalar(
             select(Execution)
             .where(Execution.id == execution_id)

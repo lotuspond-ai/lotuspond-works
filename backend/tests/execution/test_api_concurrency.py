@@ -1,7 +1,8 @@
 """Task 12: the execution APIs under concurrent requests.
 
 A request holds at most one pooled connection, unauthenticated runtime traffic
-never queues on the installation cursor, and reads never wait for a writer.
+never queues on a tenant's rows, no route waits for the installation cursor, and
+reads never wait for a writer.
 """
 
 import threading
@@ -15,7 +16,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from lotuspond.app import create_app
-from lotuspond.models import ExecutionSchedulerCursor, Workspace
+from lotuspond.models import User, Workspace
 
 from .activity_fixtures import activity as activity
 from .api_fixtures import api as api
@@ -99,14 +100,15 @@ def test_a_request_holds_one_pooled_connection(api):
         engine.dispose()
 
 
-def test_unknown_runtime_credentials_never_wait_for_the_cursor(api):
+def test_unknown_runtime_credentials_never_wait_for_a_tenant_lock(api):
     h = api
     bogus = {
         "authorization": "Bearer lpr_" + "A" * 43,
         "x-lotuspond-runtime-session": "lps_" + "A" * 43,
     }
     wrong_session = {**bogus, "authorization": h.runtime["authorization"]}
-    with held(h, select(ExecutionSchedulerCursor).with_for_update()):
+    workspace = select(Workspace).where(Workspace.id == h.scope.workspace_id)
+    with held(h, workspace.with_for_update()):
         for headers in (bogus, wrong_session, {"authorization": h.runtime["authorization"]}):
             for route in ("children", "results", "decline"):
                 call = partial(
@@ -150,18 +152,31 @@ def test_equal_concurrent_registrations_return_one_source(api):
     assert responses[0].json() == responses[1].json()
 
 
-def test_a_write_holds_no_account_lock_while_its_service_waits_for_the_cursor(api):
+def test_an_admission_route_never_waits_for_the_installation_cursor(api):
+    """Finding 11: the cursor's holder is a slot taking reservation, never a route."""
+    from .cursor_checks import without_cursor
+
+    h = api
+    revision = h.deploy("waits", "waits.policy")
+    response = without_cursor(
+        h.engine, lambda: post(h, "/executions", start_body(revision), h.owner, "o-0")
+    )
+    assert response.status_code == 201, response.text
+
+
+def test_a_write_holds_no_account_lock_while_its_service_waits_for_the_workspace(api):
     h = api
     revision = h.deploy("waits", "waits.policy")
     workspace = select(Workspace).where(Workspace.id == h.scope.workspace_id)
     with Session(h.engine) as db, db.begin():
-        db.execute(select(ExecutionSchedulerCursor).with_for_update())
+        db.execute(workspace.with_for_update())
         pool = ThreadPoolExecutor(1)
         write = pool.submit(post, h, "/executions", start_body(revision), h.owner, "o-1")
         pool.shutdown(wait=False)
         with pytest.raises(TimeoutError):
-            write.result(timeout=1)  # its service waits for the cursor, Task 5's first lock
-        # The route's pre-check left no account row locked, so the cursor's holder may
-        # still take the workspace next, in that same order, without deadlocking.
-        db.execute(workspace.with_for_update(nowait=True))
+            write.result(timeout=1)  # its service waits for the workspace, Task 5's first lock
+        # The route's pre-check left no account row locked, so the workspace's holder
+        # may still take the account rows next, in that same order, without deadlocking.
+        owner = db.scalar(select(Workspace.owner_id).where(Workspace.id == h.scope.workspace_id))
+        db.execute(select(User).where(User.id == owner).with_for_update(nowait=True))
     assert write.result(timeout=10).status_code == 201

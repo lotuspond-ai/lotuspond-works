@@ -52,6 +52,7 @@ from ..models import (
     Workspace,
 )
 from .authorization import record, scoped
+from .budgets import installation_active
 from .contracts import Contract
 from .engine import MAX_RETRY_MS
 from .engine_contracts import SweepReport, WorkerIdentity
@@ -474,26 +475,27 @@ class ExecutionSweeper:
     def _schedule(self, sessions, limit) -> int:
         """Reserve the next eligible attempts, under the fence, up to `limit` per pass.
 
-        Each batch reserves at most one head per environment (Task 5's fairness), so
-        batches repeat, each in its own transaction, while they reserve anything. The
-        scheduler takes the installation cursor first, as admission does, and waits for
-        it under the worker role's own lock timeout, like any other request: a shorter
-        bound would let a stream of admissions starve it. When no attempt waits for a
-        reservation it takes no lock at all. A refusal is retried by a later pass and
-        never stops the sweep.
+        One head per transaction (`Scheduler.schedule_batch`), so a transaction holds
+        one tenant's rows and takes the installation cursor last, for a few
+        statements: it never waits behind another tenant's batch, and nothing waits
+        long behind it. Transactions repeat while each reserves something. Before
+        each, plain reads without locks check that some attempt waits for a
+        reservation and that the installation is not visibly full, so an idle or
+        saturated installation takes no lock at all. A refusal is retried by a later
+        pass and never stops the sweep.
         """
+        budgets = self.scheduler.budgets
         total = 0
         while total < limit:
             try:
                 with sessions() as db:
-                    if not _schedulable(db):
+                    if not _schedulable(db) or installation_active(db) >= (
+                        budgets._installation(db).active_limit
+                    ):
                         break
                 with sessions() as db, db.begin():
                     scheduled = self.scheduler.schedule_batch(
-                        db,
-                        self.scheduler.budgets.installation_id,
-                        min(limit - total, 25),
-                        epoch=self._fence(db),
+                        db, budgets.installation_id, 1, epoch=self._fence(db)
                     )
             except Exception as error:
                 logger.warning("Execution scheduling deferred: %s", _code(error))

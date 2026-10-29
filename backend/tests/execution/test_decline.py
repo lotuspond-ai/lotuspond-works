@@ -37,7 +37,6 @@ from .test_publication import harness as harness
 def decline(h, delivery, principal=None, digest=None):
     envelope = json.loads(delivery.envelope)
     with Session(h.engine) as db, db.begin():
-        h.activities.lock_cursor(db)
         return h.leases.decline_activity(
             db,
             principal or h.principal_runtime,
@@ -275,3 +274,18 @@ def test_refunded_declines_still_end_at_the_steps_attempts(activity):
         assert set().union(*(charged(db, row) for row in rows)) == {0}
         assert db.scalar(select(ExecutionCapacity.active)) == 0
     assert LeaseService.DECLINES_PER_MINUTE == 6
+
+
+def test_a_decline_takes_no_installation_cursor(activity):
+    """Finding 11: a decline's stop changes only its environment's count."""
+    from lotuspond.execution.budgets import installation_active
+
+    from .cursor_checks import without_cursor
+
+    h = activity
+    _, attempt_id = h.ready("activity_read")
+    delivery = h.dispatch(attempt_id)
+    assert without_cursor(h.engine, lambda: decline(h, delivery)) is None
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, attempt_id).state == "failed"
+        assert installation_active(db) == 0

@@ -407,6 +407,7 @@ def _clean_environment() -> dict:
     keep = {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"}
     # Test-only measurement files (tier 3), never configuration.
     keep |= {"LOTUSPOND_CONFORMANCE_CURSOR_LOG", "LOTUSPOND_CONFORMANCE_CYCLE_LOG"}
+    keep.add("LOTUSPOND_CONFORMANCE_LOOKUP_LOG")  # provider lookups that waited (tier 3)
     keep.add("LOTUSPOND_CONFORMANCE_PRIVILEGE_LOG")  # the worker grants, measured
     return {key: value for key, value in os.environ.items() if key in keep}
 

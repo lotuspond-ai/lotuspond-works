@@ -1232,7 +1232,8 @@ def test_wait_at_quota_never_delays_a_sibling_retry(flows):
 
 
 def test_cancelling_a_reserved_attempt_returns_its_compute_slot(flows):
-    from lotuspond.models import ExecutionSchedulerCursor, ExecutionUsageReservation
+    from lotuspond.execution.budgets import installation_active
+    from lotuspond.models import ExecutionUsageReservation
 
     from .test_budgets import demand
 
@@ -1261,7 +1262,7 @@ def test_cancelling_a_reserved_attempt_returns_its_compute_slot(flows):
         assert db.get(ExecutionAttempt, think).state == "cancelled"
         assert reservation.compute_stopped_at_ms is not None
         assert db.scalar(select(ExecutionCapacity.active)) == 0
-        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+        assert installation_active(db) == 0
     assert result(h, execution_id) == ("failed", None)
 
 
@@ -1399,3 +1400,15 @@ def test_oversized_activity_input_fails_the_step(flows):
         )
         assert record["failure"] == "value_too_large"
         db.rollback()
+
+
+def test_a_capacity_step_takes_no_installation_cursor(flows):
+    """Finding 11: wait retention and releases change only their environment's counts."""
+    from .cursor_checks import without_cursor
+
+    h = flows
+    execution_id = h.start("waits", None, "waits.policy")
+    without_cursor(h.engine, h.drive, seconds=60)
+    with Session(h.engine) as db:
+        assert db.scalar(select(ExecutionCapacity.retained_waits)) == 1  # the step ran
+        assert db.get(Execution, execution_id).state == "waiting"

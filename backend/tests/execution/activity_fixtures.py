@@ -316,7 +316,6 @@ def activity(flows):
         principal = principal or h.principal_runtime
         handle = store(attempt_id, value, principal) if code == "succeeded" else None
         with Session(h.engine) as db, db.begin():
-            h.activities.lock_cursor(db)
             h.activities.record_activity_result(
                 db,
                 principal,

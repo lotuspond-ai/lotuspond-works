@@ -72,8 +72,7 @@ class InboxService:
 
     @execution_service
     def accept_signal(self, db, actor, execution_id: str, request: SignalRequest) -> SignalReceipt:
-        self.budgets._cursor(db)
-        actor = reauthorize(db, actor, "signal")
+        actor = reauthorize(db, actor, "signal")  # first lock: the workspace row
         request = SignalRequest.model_validate(request)
         # Own the nested JSON graph before provider waits, preserving exact numeric
         # types until the declared wait schema validates them (including replays).

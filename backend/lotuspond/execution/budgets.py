@@ -1,9 +1,17 @@
 """Caller-transaction reservations, conservative liabilities and reconciled capacity.
 
-Lock order: installation cursor, current workspace/account, pool and connection
-parents, environment capacity, deployment/revision, execution, sorted steps,
-sorted attempts, reservations. Never commit here. Composing callers must enter
-at the same parent order, and roll back the entire operation on refusal.
+Lock order: current workspace/account, pool and connection parents, environment
+capacity, deployment/revision, execution, sorted steps, sorted attempts,
+reservations, and the installation cursor last. Never commit here. Composing
+callers must enter at the same parent order, and roll back the entire operation
+on refusal.
+
+The installation's active count is the sum of the environment counts, which
+every slot and stop changes under its environment row. Only a reservation that
+takes a compute slot, or a scheduling transaction, takes the cursor: last, after
+every lookup and lock, for the sum and its record, and then it commits. Its
+holder never waits on another lock, so the cursor closes no deadlock cycle
+(docs/superpowers/plans/2026-10-29-installation-capacity-lock.md).
 """
 
 import json
@@ -100,6 +108,11 @@ def view(row):
     return ReservationView(id=row.id, attempt_id=row.attempt_id, state=row.state)
 
 
+def installation_active(db) -> int:
+    """The installation's compute slots in use: the sum of the environment counts."""
+    return int(db.scalar(select(func.coalesce(func.sum(ExecutionCapacity.active), 0))))
+
+
 class BudgetService:
     def __init__(
         self,
@@ -142,7 +155,24 @@ class BudgetService:
     def _call(self, name, method, args, code):
         return self._slots[name].call(getattr(self, name), method, args, self.timeout_seconds, code)
 
-    def _cursor(self, db):
+    def _installation(self, db):
+        """The provisioned installation row, read without a lock; missing denies."""
+        row = db.scalar(
+            select(ExecutionSchedulerCursor)
+            .where(ExecutionSchedulerCursor.installation_id == self.installation_id)
+            .execution_options(populate_existing=True)
+        )
+        if row is None:
+            raise ExecutionError("capacity_unavailable")
+        return row
+
+    def _leaf(self, db):
+        """The installation cursor, always the transaction's last lock.
+
+        Every write is flushed first, so after this only the sum, the cursor's own
+        row and the commit remain: the holder never waits on another lock.
+        """
+        db.flush()
         row = lock(
             db,
             select(ExecutionSchedulerCursor).where(
@@ -153,8 +183,17 @@ class BudgetService:
             raise ExecutionError("capacity_unavailable")
         return row
 
+    def _record_active(self, db, cursor):
+        """Write the installation count under the cursor; True while within its limit."""
+        total = installation_active(db)
+        if total > cursor.active_limit:
+            return False
+        cursor.active = total  # a record: never below the count, which only slots raise
+        db.flush()
+        return True
+
     def _parents(self, db, actor, revision_id):
-        cursor = self._cursor(db)
+        installation = self._installation(db)
         actor = reauthorize(db, actor, "execute")
         hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
         policy = _pool(db, actor.scope, hint.pool_id)
@@ -162,7 +201,7 @@ class BudgetService:
         if capacity is None:
             raise ExecutionError("capacity_unavailable")
         _, revision = load_deployment(db, actor, revision_id, dependencies=self.deployments)
-        return cursor, capacity, revision, policy
+        return installation, capacity, revision, policy
 
     def _grants(self, db, scope):
         now = database_now_ms(db)
@@ -353,13 +392,18 @@ class BudgetService:
         compute: the shared budget still applies, but no compute slot is taken. A
         `capacity.shared:` request row records this, so stopping that child returns
         no slot. Without it a child takes its own slot like any attempt.
+
+        A slot meets the installation limit last, under the cursor (`_leaf`), after
+        every lookup, lock and write. A visibly full installation refuses before any
+        provider lookup; one that fills meanwhile refuses at the leaf, and the caller
+        rolls the reservation back.
         """
         demand = BudgetDemand.model_validate(demand)
         if type(shared) is not bool:
             raise ExecutionError("invalid_request")
         hint = record(db, ExecutionAttempt, actor.scope, attempt_id)
         execution_hint = record(db, Execution, actor.scope, hint.execution_id)
-        cursor, capacity, revision, pool = self._parents(
+        installation, capacity, revision, pool = self._parents(
             db, actor, execution_hint.deployment_revision_id
         )
         execution = record(db, Execution, actor.scope, hint.execution_id, locked=True)
@@ -371,6 +415,8 @@ class BudgetService:
                 ExecutionUsageReservation.attempt_id == attempt.id
             ),
         )
+        if not shared and existing is None and installation_active(db) >= installation.active_limit:
+            raise ExecutionError("capacity_unavailable")  # visibly full: no lookups
         grant, tenant, recovery = self._grants(db, actor.scope)
         limits, packages, catalog = self._limits(db, actor.scope, revision, grant, tenant)
         if (
@@ -469,8 +515,7 @@ class BudgetService:
             )
         )
         if not shared and (
-            cursor.active >= cursor.active_limit
-            or capacity.active >= min(capacity.active_limit, limits["active_capacity"])
+            capacity.active >= min(capacity.active_limit, limits["active_capacity"])
             or pool_active >= pool.max_concurrent_invocations
         ):
             raise ExecutionError("capacity_unavailable")
@@ -494,20 +539,22 @@ class BudgetService:
             )
             db.flush()
             return view(row)
-        cursor.active += 1
         capacity.active += 1
         if execution.state == "pending":
             if capacity.pending < 1:
                 raise ExecutionError("conflict")
             capacity.pending -= 1
             execution.state = "running"
-        db.flush()
+        # Last: the installation limit. Only slot-taking reservations raise the sum,
+        # and each holds the cursor from its sum to its commit, so the sum it reads
+        # includes every committed slot and its own. Nothing is locked after this.
+        if not self._record_active(db, self._leaf(db)):
+            raise ExecutionError("capacity_unavailable")
         return view(row)
 
     def _settlement_rows(self, db, attempt_id):
         # Internal observation APIs grant no external caller authority. Task6/10
         # must authenticate evidence before entering this service boundary.
-        self._cursor(db)
         attempt_id = TypeAdapter(CanonicalUUID).validate_python(attempt_id, strict=True)
         hint = db.get(ExecutionAttempt, attempt_id)
         if hint is None:
@@ -604,10 +651,9 @@ class BudgetService:
                 )
             )
             if shared is None:  # a shared child took no compute slot
-                cursor = self._cursor(db)  # already held from _settlement_rows
-                if cursor.active < 1 or capacity is None or capacity.active < 1:
+                # The environment count is the installation's too: no cursor.
+                if capacity is None or capacity.active < 1:
                     raise ExecutionError("conflict")
-                cursor.active -= 1
                 capacity.active -= 1
             row.compute_stopped_at_ms = observation.observed_at_ms
             row.active_ms = active_liability(row, observation.observed_at_ms)
@@ -725,11 +771,10 @@ class BudgetService:
         db.flush()
 
     def _release_rows(self, db, execution_id):
-        """Cursor, workspace, capacity, then the execution: Task 5's order, no actor.
+        """Workspace, capacity, then the execution: Task 5's order, no actor.
 
         Releases only shrink counted liability, so they need no customer authority.
         """
-        self._cursor(db)
         execution_id = TypeAdapter(CanonicalUUID).validate_python(execution_id, strict=True)
         hint = db.get(Execution, execution_id)
         if hint is None:

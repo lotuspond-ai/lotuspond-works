@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lotuspond.execution.budgets import installation_active
 from lotuspond.execution.scheduler import Scheduler
 from lotuspond.models import ExecutionCapacity, ExecutionSchedulerCursor
 
@@ -25,14 +26,17 @@ def test_fair_capacity_and_wait_release(budget_harness):
     with Session(h.engine) as db, db.begin():
         scheduled = scheduler.schedule_batch(db, "test-installation")
         assert [value.attempt_id for value in scheduled] == [first]
-        installation_active = db.scalar(select(ExecutionSchedulerCursor.active))
         environment_active = {
             row.environment_id: row.active for row in db.scalars(select(ExecutionCapacity))
         }
-        assert installation_active <= 25
+        assert installation_active(db) <= 25
+        assert db.scalar(select(ExecutionSchedulerCursor.active)) == installation_active(db)
         assert max(environment_active.values()) <= 5
         h.stop(db, first, "stop")
-        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+        # The live count is the environment counts' sum; the cursor's record of the
+        # last reservation is never below it.
+        assert installation_active(db) == 0
+        assert db.scalar(select(ExecutionSchedulerCursor.active)) >= installation_active(db)
     scheduler.close()
 
 
@@ -70,7 +74,7 @@ def test_wait_quota_requires_stop_counts_parallel_once_and_keeps_deadline(budget
         assert db.scalar(select(ExecutionCapacity.retained_waits)) == 2
         assert all(wait.deadline_ms == deadline for wait in waits)
         assert execution.deadline_ms == deadline
-        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+        assert installation_active(db) == 0
         capacity = db.scalar(select(ExecutionCapacity))
         capacity.retained_waits = 10000
         db.flush()
@@ -178,6 +182,7 @@ def test_exhausted_environment_does_not_starve_other_and_fifo_is_sequence(budget
         scheduled = scheduler.schedule_batch(db, "test-installation")
         assert [item.attempt_id for item in scheduled] == [ids[first]]
         assert db.get(ExecutionAttempt, ids[second]).state == "reserved"
+        assert installation_active(db) == 1
         assert db.scalar(select(ExecutionSchedulerCursor.active)) == 1
     scheduler.close()
 
@@ -220,21 +225,24 @@ def test_parallel_scheduler_enforces_installation_25_and_environment_5(budget_ha
     barrier = Barrier(2)
 
     def run(_):
+        # One head per transaction: two schedulers, each running transactions back
+        # to back, race for 36 heads behind 25 installation and 5 environment slots.
         barrier.wait(timeout=5)
-        with Session(h.engine) as db, db.begin():
-            return scheduler.schedule_batch(db, "test-installation")
+        reserved = 0
+        for _ in range(30):
+            with Session(h.engine) as db, db.begin():
+                reserved += len(scheduler.schedule_batch(db, "test-installation"))
+        return reserved
 
     with ThreadPoolExecutor(2) as pool:
-        for _ in range(3):
-            batches = list(pool.map(run, range(2)))
-            assert all(len(batch) <= 25 for batch in batches)
+        assert sum(pool.map(run, range(2))) >= 25
     with Session(h.engine) as db:
-        installation_active = db.scalar(select(ExecutionSchedulerCursor.active))
+        active = installation_active(db)
         environment_active = {
             row.environment_id: row.active for row in db.scalars(select(ExecutionCapacity))
         }
-        assert installation_active == 25
-        assert installation_active <= 25
+        assert active == 25
+        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 25
         assert max(environment_active.values()) <= 5
         assert sum(environment_active.values()) == 25
         assert len(list(db.scalars(select(ExecutionUsageReservation)))) == 25
@@ -594,3 +602,68 @@ def test_dependency_resolution_refuses_unresolved_paths(budget_harness):
             h.budgets._dependency(
                 SimpleNamespace(occurrence_path=path, node_id=node), packages, catalog, None
             )
+
+
+def test_a_scheduling_transaction_reserves_one_head(budget_harness):
+    """Finding 11: no scheduling transaction spans heads, whatever its caller asks."""
+    import pytest
+
+    from lotuspond.execution.errors import ExecutionError
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        h.add(db)
+        h.add(db)
+        clone_environment(h, db)
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        for limit in (0, 2, 25, True, 1.0):
+            with Session(h.engine) as db, db.begin(), pytest.raises(ExecutionError):
+                scheduler.schedule_batch(db, "test-installation", limit)
+        with Session(h.engine) as db, db.begin():
+            assert len(scheduler.schedule_batch(db, "test-installation", 1)) == 1
+            assert installation_active(db) == 1
+    finally:
+        scheduler.close()
+
+
+def test_scheduling_takes_the_installation_cursor_last(budget_harness):
+    """The cursor is a leaf: after it, only the sum and the cursor's own row (pg_locks)."""
+    from .cursor_checks import assert_leaf, leaves
+    from .test_budgets import set_concurrency
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        h.add(db)
+        h.add(db)
+        clone_environment(h, db)  # two heads in each of two environments
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        with leaves(h.engine) as records:
+            for _ in range(3):
+                with Session(h.engine) as db, db.begin():
+                    assert len(scheduler.schedule_batch(db, "test-installation")) == 1
+        assert len(records) == 3
+        for record in records:
+            assert_leaf(record)
+        with Session(h.engine) as db:
+            assert installation_active(db) == 3
+    finally:
+        scheduler.close()
+
+
+def test_a_visibly_full_installation_schedules_without_any_lock(budget_harness):
+    from .cursor_checks import statements
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        h.add(db)
+        db.scalar(select(ExecutionSchedulerCursor)).active_limit = 0
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        with statements(h.engine) as seen, Session(h.engine) as db, db.begin():
+            assert scheduler.schedule_batch(db, "test-installation") == ()
+        assert not [s for s in seen if "FOR UPDATE" in s.upper()], seen
+    finally:
+        scheduler.close()

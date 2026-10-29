@@ -7,9 +7,9 @@ its liability kept; an unclaimed delivery that expires, or a reserved attempt wh
 reserved active time ran out before dispatch, fails its attempt, which only a new
 ordinal can retry. Task 11's sweeper calls the three sweeper transitions.
 
-Lock order: see `activity_records`. The sweeper paths take no runtime identity:
-expiry enters at the installation cursor because it returns a compute slot; a lapse
-changes no counter and enters at the workspace.
+Lock order: see `activity_records`. The sweeper paths take no runtime identity and
+enter at the workspace: expiry then locks the environment capacity row, because it
+returns a compute slot; a lapse changes no counter and skips it.
 """
 
 from hashlib import sha256
@@ -139,12 +139,10 @@ class LeaseService:
             db.flush()
         return lease_view(row, delivery, records.deadline_ms)
 
-    def _rows(self, db, scope, attempt_id, *, cursor):
-        if cursor:
-            self.budgets._cursor(db)
+    def _rows(self, db, scope, attempt_id, *, counters):
         hint = record(db, ExecutionAttempt, scope, attempt_id)
         lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
-        if cursor:
+        if counters:
             lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, hint.execution_id, locked=True)
         record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
@@ -179,7 +177,7 @@ class LeaseService:
             raise ExecutionError("not_found")
         scope = scope_of(hint)
         execution, attempt, reservation, delivery, lease = self._rows(
-            db, scope, hint.attempt_id, cursor=False
+            db, scope, hint.attempt_id, counters=False
         )
         now = database_now_ms(db)
         if lease is None or lease.status != "active" or now < lease.expires_at_ms:
@@ -214,7 +212,7 @@ class LeaseService:
             raise ExecutionError("not_found")
         scope = scope_of(hint)
         execution, attempt, reservation, delivery, _ = self._rows(
-            db, scope, hint.attempt_id, cursor=True
+            db, scope, hint.attempt_id, counters=True
         )
         now = database_now_ms(db)
         if (
@@ -251,7 +249,7 @@ class LeaseService:
 
         No runtime ever claimed it, so its reservation is released at zero once the
         stop is confirmed (owner decision, 2026-10-26), as a cancelled one's is. The
-        caller holds the cursor, workspace, capacity, execution and attempt rows.
+        caller holds the workspace, capacity, execution and attempt rows.
         """
         a = self.activities
         handle = a.artifacts._put_internal(db, scope, failure_content(code, now), a.policy)
@@ -295,8 +293,8 @@ class LeaseService:
         An equal repeat changes nothing. Like a result it grants nothing, so the
         initiator's current `execute` permission is not required; the runtime's
         current identity, session and recovery epoch are. A runtime may decline at
-        most `DECLINES_PER_MINUTE` deliveries a minute. Routes call
-        `ActivityService.lock_cursor` first, as for results.
+        most `DECLINES_PER_MINUTE` deliveries a minute. Like a result, it takes no
+        installation cursor.
         """
         a = self.activities
         identity = principal.identity
@@ -362,7 +360,7 @@ class LeaseService:
         if hint is None:
             raise ExecutionError("not_found")
         scope = scope_of(hint)
-        execution, attempt, reservation, delivery, _ = self._rows(db, scope, hint.id, cursor=True)
+        execution, attempt, reservation, delivery, _ = self._rows(db, scope, hint.id, counters=True)
         now = database_now_ms(db)
         if (
             attempt.state != "reserved"

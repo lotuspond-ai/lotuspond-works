@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from hashlib import sha256
 from threading import Event, Lock, Thread
+from time import monotonic
 from typing import Annotated
 
 from lotuspond_runtime.protocol import Digest, SafeInt, Scope
@@ -44,14 +45,31 @@ class AuthoritySnapshot(Contract):
 
 
 class _Lookup:
-    """One bounded, non-caching lookup slot; late/stuck answers never grant authority."""
+    """One bounded, non-caching lookup slot; late/stuck answers never grant authority.
+
+    A concurrent caller waits for the slot, and its timeout bounds the wait and the
+    call together: the call gets only what the wait left. So at most one call is in
+    flight, a stuck provider holds one thread and its slot, and every caller is
+    refused within its own bound (owner decision, 2026-10-29; finding 3).
+    """
 
     def __init__(self):
         self.lock = Lock()
         self.closed = False
 
+    def _wait(self, timeout):
+        """Wait for a slot another call holds; True once this caller holds it."""
+        return self.lock.acquire(timeout=timeout)
+
     def call(self, provider, method, args, timeout, code):
-        if provider is None or self.closed or not self.lock.acquire(blocking=False):
+        if provider is None or self.closed:
+            raise ExecutionError(code)
+        started = monotonic()
+        if not (self.lock.acquire(blocking=False) or self._wait(timeout)):
+            raise ExecutionError(code)
+        remaining = timeout - (monotonic() - started)
+        if self.closed or remaining <= 0:
+            self.lock.release()
             raise ExecutionError(code)
         done, result = Event(), []
 
@@ -69,7 +87,7 @@ class _Lookup:
         except Exception:
             self.lock.release()
             raise ExecutionError(code) from None
-        if not done.wait(timeout) or self.closed or not result:
+        if not done.wait(remaining) or self.closed or not result:
             raise ExecutionError(code)
         return result[0]
 

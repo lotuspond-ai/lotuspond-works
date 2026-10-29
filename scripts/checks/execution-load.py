@@ -15,7 +15,9 @@ runtimes from the conformance harness, and admits through the public API:
   duration and the worker memory are recorded.
 
 Writes `load-report.json` (hardware, PostgreSQL version and settings, latency
-distributions, queue age, backlog, lock waits on `execution_scheduler_cursors`,
+distributions, queue age, backlog, lock waits and hold times on
+`execution_scheduler_cursors`, lock waiters by relation, provider lookups that
+waited for their slot, reservations, deliveries and claims per phase, deadlocks,
 database CPU, WAL rate, table and index sizes, dead-tuple ratios and the pass
 criteria). A result is evidence about this harness on this hardware, not hosted
 capacity or a service level. Needs Linux (runtime private state) and a Docker CLI.
@@ -44,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend/tests/execution/conformance"))
 import driver as drivers
 import world as worlds
-from harness import CURSOR_LOG, CYCLE_LOG
+from harness import CURSOR_LOG, CYCLE_LOG, LOOKUP_LOG
 from processes import Processes
 
 IMAGE = "postgres:18.6"
@@ -191,6 +193,13 @@ class Cluster:
                 entry = None
         return distribution(waited)
 
+    def deadlocks_from_log(self) -> int:
+        """Deadlocks PostgreSQL detected and logged during the run."""
+        log = docker("logs", self.name, check=False, timeout=300).stderr.decode(
+            errors="replace"
+        )
+        return sum(1 for line in log.splitlines() if "deadlock detected" in line)
+
     def remove(self) -> bool:
         """Remove the container and its anonymous volumes; confirm both are gone.
 
@@ -260,6 +269,18 @@ def sample(world, cluster):
         lock_waits = db.scalar(
             text("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'")
         )
+        # Every waiting backend by the relation it waits on: a row lock waits on the
+        # holder's transaction while holding that row's tuple lock, so its relation is
+        # the tuple lock's. A queue that moved off the cursor shows up here.
+        by_relation = db.execute(
+            text(
+                "SELECT coalesce(w.relation, t.relation)::regclass::text, "
+                "count(DISTINCT w.pid), coalesce(max(extract(epoch FROM "
+                "clock_timestamp() - w.waitstart)), 0) FROM pg_locks w "
+                "LEFT JOIN pg_locks t ON t.pid = w.pid AND t.locktype = 'tuple' "
+                "AND t.granted WHERE NOT w.granted GROUP BY 1"
+            )
+        ).all()
         # Who holds what the cursor's waiters wait for: the API (no application
         # name) or a worker, and whether it is running SQL or idle in its transaction.
         holders = db.execute(
@@ -297,6 +318,10 @@ def sample(world, cluster):
         "cursor_lock_waiters": waits[0],
         "cursor_lock_wait_max_s": float(waits[1]),
         "lock_waiters": lock_waits,
+        "lock_waiters_by_relation": {
+            str(relation): {"waiters": n, "max_wait_s": float(longest)}
+            for relation, n, longest in by_relation
+        },
         "cursor_holders": {f"{who}/{state}": n for who, state, n in holders},
         "wal_bytes": int(wal),
         "states": states,
@@ -367,11 +392,23 @@ def latencies(world, since_ms=0):
 
 
 def activity_by_phase(world, timeline):
-    """Deliveries issued and leases claimed inside each load phase, from rows."""
+    """Reservations, deliveries and claims inside each load phase, from rows.
+
+    Reservations count compute slots taken (shared child reservations take none),
+    in database time, with each count's rate per second over its phase.
+    """
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
     with Session(world.engine) as db:
+        reserved = db.scalars(
+            text(
+                "SELECT floor(extract(epoch FROM r.created_at) * 1000)::bigint "
+                "FROM execution_usage_reservations r WHERE NOT EXISTS (SELECT 1 FROM "
+                "execution_requests q WHERE q.workspace_id = r.workspace_id AND "
+                "q.request_key = 'capacity.shared:' || r.attempt_id)"
+            )
+        ).all()
         issued = db.scalars(
             text("SELECT issued_at_ms FROM execution_activity_deliveries")
         ).all()
@@ -380,10 +417,19 @@ def activity_by_phase(world, timeline):
     def within(times, window):
         return sum(1 for t in times if window["start_ms"] <= t < window["end_ms"])
 
-    return {
-        name: {"deliveries": within(issued, window), "claims": within(claimed, window)}
-        for name, window in timeline.items()
-    }
+    phases = {}
+    for name, window in timeline.items():
+        seconds = max((window["end_ms"] - window["start_ms"]) / 1000, 1e-9)
+        counts = {
+            "reservations": within(reserved, window),
+            "deliveries": within(issued, window),
+            "claims": within(claimed, window),
+        }
+        phases[name] = {
+            **counts,
+            "per_second": {key: round(n / seconds, 2) for key, n in counts.items()},
+        }
+    return phases
 
 
 def cpu_seconds(pid):
@@ -520,6 +566,7 @@ class Load:
         self.phase = "setup"
         self.cursor_log = Path(os.environ[CURSOR_LOG])
         self.cycle_log = Path(os.environ[CYCLE_LOG])
+        self.lookup_log = Path(os.environ[LOOKUP_LOG])
 
     def setup(self):
         operator = self.operator
@@ -900,8 +947,10 @@ def timing_log(path):
 
 def cursor_waits(path):
     """Every scheduler-cursor acquisition, by process role, as each process timed it."""
-    entries = timing_log(path)
-    roles = sorted({item["role"] for item in entries})
+    logged = timing_log(path)
+    entries = [item for item in logged if "ms" in item]
+    holds = [item for item in logged if "hold_ms" in item]
+    roles = sorted({item["role"] for item in logged})
     return {
         "all_ms": distribution([item["ms"] for item in entries]),
         "over_100ms": sum(1 for item in entries if item["ms"] > 100),
@@ -910,6 +959,64 @@ def cursor_waits(path):
             role: distribution([item["ms"] for item in entries if item["role"] == role])
             for role in roles
         },
+        # From the acquisition to the end of its transaction's commit or rollback.
+        "hold_ms": distribution([item["hold_ms"] for item in holds]),
+        "hold_by_role_ms": {
+            role: distribution(
+                [item["hold_ms"] for item in holds if item["role"] == role]
+            )
+            for role in roles
+        },
+        "holds_rolled_back": sum(1 for item in holds if item["failed"]),
+    }
+
+
+def lookup_waits(path):
+    """Provider lookups that waited for their slot (finding 3), by slot and role."""
+    entries = timing_log(path)
+    keys = sorted({(item["slot"], item["role"]) for item in entries})
+    return {
+        "waiting_callers": len(entries),
+        "wait_ms": distribution([item["ms"] for item in entries]),
+        "refused_after_the_bound": sum(1 for item in entries if not item["acquired"]),
+        "by_slot_and_role": {
+            f"{slot}/{role}": {
+                "waiting_callers": sum(
+                    1 for i in entries if (i["slot"], i["role"]) == (slot, role)
+                ),
+                "wait_ms": distribution(
+                    [i["ms"] for i in entries if (i["slot"], i["role"]) == (slot, role)]
+                ),
+            }
+            for slot, role in keys
+        },
+    }
+
+
+def relation_waits(samples):
+    """Sampled lock waiters by the relation they waited on, across every sample."""
+    relations = sorted(
+        {name for s in samples for name in s.get("lock_waiters_by_relation", {})}
+    )
+    return {
+        name: {
+            "waiters": distribution(
+                [
+                    s.get("lock_waiters_by_relation", {})
+                    .get(name, {})
+                    .get("waiters", 0)
+                    for s in samples
+                ]
+            ),
+            "max_wait_s": distribution(
+                [
+                    s["lock_waiters_by_relation"][name]["max_wait_s"]
+                    for s in samples
+                    if name in s.get("lock_waiters_by_relation", {})
+                ]
+            ),
+        }
+        for name in relations
     }
 
 
@@ -960,6 +1067,9 @@ def summarize(report, load, cluster, timeline, world):
         # distribution above holds only waits that were eventually granted).
         "every_acquisition": cursor_waits(load.cursor_log),
     }
+    report["lock_waits_by_relation"] = relation_waits(observed)
+    report["lookup_slot_waits"] = lookup_waits(load.lookup_log)
+    report["deadlocks_logged"] = cluster.deadlocks_from_log()
     cycles = timing_log(load.cycle_log)
     report["worker_cycles_s"] = {
         kind: distribution([item["s"] for item in cycles if item["cycle"] == kind])
@@ -1018,6 +1128,7 @@ def main():
     work = worlds.private_directory(args.work.absolute())
     os.environ[CURSOR_LOG] = str(work / "cursor-waits.jsonl")
     os.environ[CYCLE_LOG] = str(work / "cycles.jsonl")
+    os.environ[LOOKUP_LOG] = str(work / "lookup-waits.jsonl")
 
     def terminate(signum, frame):
         for other in (signal.SIGTERM, signal.SIGINT):  # a second one never cuts cleanup

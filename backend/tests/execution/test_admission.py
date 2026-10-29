@@ -303,13 +303,22 @@ def test_activation_serializes_new_admission_but_keeps_old_replay(admission):
     )
 
 
-def test_installation_lock_precedes_customer_locks(admission):
+def test_admission_takes_no_installation_cursor(admission):
+    """Finding 11: admission changes only its environment's counters, never the cursor."""
+    from .cursor_checks import without_cursor
+
+    h = admission
+    view = without_cursor(h.engine, lambda: admit(h, "no-cursor"))
+    assert view.state == "pending"
+
+
+def test_admission_takes_the_workspace_row_before_customer_and_capacity_rows(admission):
     from threading import Event
     from time import monotonic
 
     from sqlalchemy import text
 
-    from lotuspond.models import ExecutionSchedulerCursor, Workspace
+    from lotuspond.models import User, Workspace
 
     h = admission
     started, pids = Event(), []
@@ -322,7 +331,9 @@ def test_installation_lock_precedes_customer_locks(admission):
 
     with ThreadPoolExecutor(1) as executor:
         with Session(h.engine) as blocker, blocker.begin():
-            blocker.scalar(select(ExecutionSchedulerCursor).with_for_update())
+            blocker.scalar(
+                select(Workspace).where(Workspace.id == h.scope.workspace_id).with_for_update()
+            )
             future = executor.submit(blocked)
             assert started.wait(5)
             with h.engine.connect() as observer:
@@ -333,13 +344,12 @@ def test_installation_lock_precedes_customer_locks(admission):
                     ):
                         break
                 else:
-                    pytest.fail("Admission did not wait on installation")
-            # NOWAIT proves the admission thread has not acquired workspace first.
+                    pytest.fail("Admission did not wait on its workspace row")
+            # NOWAIT proves the admission has acquired neither account nor capacity rows.
             blocker.scalar(
-                select(Workspace)
-                .where(Workspace.id == h.scope.workspace_id)
-                .with_for_update(nowait=True)
+                select(User).where(User.id == h.actor.user_id).with_for_update(nowait=True)
             )
+            blocker.scalar(select(ExecutionCapacity).with_for_update(nowait=True))
         assert future.result(timeout=10).state == "pending"
 
 

@@ -19,7 +19,7 @@ from ..models import (
 )
 from ..security import Principal
 from .authorization import authorize_execution, lock, record, scoped
-from .budgets import BudgetDemand
+from .budgets import BudgetDemand, installation_active
 from .contracts import Contract
 from .deployments import _pool, load_deployment
 from .errors import ExecutionError, execution_service
@@ -41,26 +41,30 @@ class Scheduler:
         self._slot.closed = True
 
     @execution_service
-    def schedule_batch(self, db, installation_id, limit=25, *, epoch=None):
-        """Reserve environment heads; with `epoch`, only executions current under it.
+    def schedule_batch(self, db, installation_id, limit=1, *, epoch=None):
+        """Reserve one environment head; with `epoch`, only executions current under it.
 
+        One head per transaction, for every caller. A transaction holds its head's
+        rows until it commits, and takes the installation cursor last
+        (`BudgetService._leaf`), so it may not lock a second head after that. `limit`
+        must be 1, so no caller silently gets fewer than it asked for: one that wants
+        more runs more transactions. The round-robin position is read without a lock
+        and written at the leaf; a visibly full installation takes no lock at all.
         A restored execution is held until an owner releases it (`recovery.py`), and
         `reserve_attempt` refuses one whatever the caller passes.
         """
-        if (
-            installation_id != self.budgets.installation_id
-            or type(limit) is not int
-            or not 1 <= limit <= 25
-        ):
+        if installation_id != self.budgets.installation_id or type(limit) is not int or limit != 1:
             raise ExecutionError("invalid_request")
-        cursor = self.budgets._cursor(db)
+        installation = self.budgets._installation(db)
+        if installation_active(db) >= installation.active_limit:
+            return ()
         # IDs only, bounded to eligible environment heads. A full environment
         # cannot conceal another behind its queue. A head failure never bypasses
         # FIFO within that environment.
         count = db.scalar(select(func.count()).select_from(ExecutionCapacity))
         if not count:
             return ()
-        start = cursor.cursor % count
+        start = installation.cursor % count
         query = select(ExecutionCapacity).order_by(ExecutionCapacity.environment_id)
         ordered = list(db.scalars(query.offset(start).limit(25)))
         if len(ordered) < min(25, count):
@@ -183,10 +187,7 @@ class Scheduler:
         selected = []
         next_position = start
         for scope, attempt_id, execution in heads:
-            if cursor.active >= cursor.active_limit:
-                break
-            # A turn includes a handled refusal, but never a head merely
-            # collected before another environment filled the last slot.
+            # A turn includes a handled refusal, the leaf's included.
             next_position = (positions[scope.environment_id] + 1) % count
             if attempt_id not in actors or scope.environment_id in blocked:
                 execution.reason = "authority_revoked"
@@ -201,10 +202,11 @@ class Scheduler:
                         "price_unavailable",
                     )
                 )
+                # Written before the reservation, which ends at the leaf.
+                execution.reason = None
                 # Refusal leaves no partial reservation/counter writes.
                 with db.begin_nested():
                     self.budgets.reserve_attempt(db, actors[attempt_id], attempt_id, demand)
-                execution.reason = None
                 selected.append(ScheduledAttempt(attempt_id=attempt_id))
             except ExecutionError as error:
                 execution.reason = {
@@ -214,6 +216,10 @@ class Scheduler:
                     "forbidden": "authority_revoked",
                 }.get(error.code, "provider_unavailable")
                 continue
-        cursor.cursor = next_position if heads else (start + traversed) % count
-        db.flush()
+        position = next_position if heads else (start + traversed) % count
+        if heads or position != start:
+            # Last: only the cursor's own row and the sum follow (`_leaf`).
+            cursor = self.budgets._leaf(db)
+            cursor.cursor = position
+            self.budgets._record_active(db, cursor)
         return tuple(selected)

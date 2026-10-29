@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lotuspond.execution.authorization import authorize_execution
-from lotuspond.execution.budgets import BudgetDemand, BudgetService
+from lotuspond.execution.budgets import BudgetDemand, BudgetService, installation_active
 from lotuspond.execution.contracts import ExecutionLimits
 from lotuspond.execution.deployments import create_deployment, set_deployment_status
 from lotuspond.execution.entitlement import EntitlementGrant, PolicyGrant
@@ -418,7 +418,7 @@ def test_settlement_conflicts_and_unknown_observation_identity(budget_harness):
         with pytest.raises(ExecutionError):
             h.budgets.confirm_stopped(db, attempt, new_id())
         h.stop(db, attempt, "confirmed")
-        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+        assert installation_active(db) == 0  # the live count; the cursor keeps a record
 
 
 @pytest.mark.parametrize("scope", ["tenant", "entitlement", "deployment", "agent", "pool"])
@@ -585,7 +585,6 @@ def test_reservation_serializes_real_e03_renewal_revocation_and_control(budget_h
                 else:
                     # Task6 handler is not implemented; this is its canonical
                     # PostgreSQL parent/control-write contract, not handler qualification.
-                    blocker.scalar(select(ExecutionSchedulerCursor).with_for_update())
                     blocker.scalar(
                         select(Workspace)
                         .where(Workspace.id == h.scope.workspace_id)

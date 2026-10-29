@@ -123,9 +123,13 @@ def test_restore_cannot_restore_epoch_or_grant(controlled):
 
 def confirm_stopped(h, attempt_id):
     """A separately authorized confirmation that the attempt's compute stopped."""
+    from lotuspond.models import Workspace
+
     with Session(h.engine) as db, db.begin():
-        h.budgets._cursor(db)
         attempt = db.get(ExecutionAttempt, attempt_id)
+        # The workspace first, as Task 5's order does, before the observation's
+        # foreign keys lock its parents.
+        db.scalar(select(Workspace).where(Workspace.id == attempt.workspace_id).with_for_update())
         observation = ExecutionReconciliationObservation(
             workspace_id=attempt.workspace_id,
             project_id=attempt.project_id,

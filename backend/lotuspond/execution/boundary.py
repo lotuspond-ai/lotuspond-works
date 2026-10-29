@@ -282,8 +282,8 @@ def actor(db, request: Request, project_id: str, environment_id: str, operation:
     """Authenticate the session or key, then pre-check the operation without locks.
 
     The check holds no lock and opens no second connection: every service
-    reauthorizes under its own lock order (the installation cursor and provider
-    lookups before any account row), and a read is authorized lock-free anyway.
+    reauthorizes under its own lock order (the workspace row before any account
+    row), and a read is authorized lock-free anyway.
     Reads and writes have their own per-workspace allowance.
     """
     try:
