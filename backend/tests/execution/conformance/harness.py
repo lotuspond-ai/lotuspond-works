@@ -474,6 +474,10 @@ def _serve_on(world, listener, started) -> None:
         record_cursor_waits("api", Path(os.environ[CURSOR_LOG]))
     if os.environ.get(LOOKUP_LOG):
         record_lookup_waits("api", Path(os.environ[LOOKUP_LOG]))
+    if os.environ.get(CALL_LOG):
+        record_service_calls("api", Path(os.environ[CALL_LOG]))
+    if os.environ.get(PROFILE_DIRECTORY):
+        profile_process("api", Path(os.environ[PROFILE_DIRECTORY]))
     graph = build(world)
     app = create_app(
         settings_for(world),
@@ -504,6 +508,8 @@ def _serve_on(world, listener, started) -> None:
 CURSOR_LOG = "LOTUSPOND_CONFORMANCE_CURSOR_LOG"
 CYCLE_LOG = "LOTUSPOND_CONFORMANCE_CYCLE_LOG"
 LOOKUP_LOG = "LOTUSPOND_CONFORMANCE_LOOKUP_LOG"
+CALL_LOG = "LOTUSPOND_CONFORMANCE_CALL_LOG"
+PROFILE_DIRECTORY = "LOTUSPOND_CONFORMANCE_PROFILE_DIRECTORY"
 
 
 def _append(path, value):
@@ -582,6 +588,83 @@ def record_lookup_waits(role, path: Path):
 
     _Lookup._wait = timed("execution", _Lookup._wait)
     _LookupSlot._wait = timed("fleet", _LookupSlot._wait)
+
+
+def record_service_calls(role, path: Path):
+    """Test-only (tier 3): each admission and runtime activity call, timed in its process.
+
+    `wall_ms` runs from the service's entry to its return, lock waits included.
+    `cpu_ms` is the calling thread's CPU in that time; provider lookups run in their
+    own threads and are not in it (`PROFILE_DIRECTORY` covers every thread).
+    """
+    from lotuspond.execution.admission import AdmissionService
+    from lotuspond.execution.dispatch import ActivityService
+    from lotuspond.execution.inbox import InboxService
+    from lotuspond.execution.leases import LeaseService
+
+    def timed(name, method):
+        def call(*args, **kwargs):
+            wall, cpu, failed = time.monotonic(), time.thread_time(), True
+            try:
+                result = method(*args, **kwargs)
+                failed = False
+                return result
+            finally:
+                _append(
+                    path,
+                    {
+                        "role": role,
+                        "call": name,
+                        "wall_ms": round((time.monotonic() - wall) * 1000, 2),
+                        "cpu_ms": round((time.thread_time() - cpu) * 1000, 2),
+                        "failed": failed,
+                        "at": int(time.time() * 1000),
+                    },
+                )
+
+        return call
+
+    for owner, names in (
+        (AdmissionService, ("admit_execution",)),
+        (InboxService, ("accept_signal",)),
+        (
+            ActivityService,
+            (
+                "poll_activity",
+                "claim_activity",
+                "record_activity_result",
+                "request_child_activity",
+                "store_activity_value",
+            ),
+        ),
+        (LeaseService, ("renew_activity", "decline_activity")),
+    ):
+        for name in names:
+            setattr(owner, name, timed(name, getattr(owner, name)))
+
+
+def profile_process(role, directory: Path):
+    """Test-only: a whole-process cProfile, written every 15 s and so never lost.
+
+    Python 3.12's cProfile observes every thread through `sys.monitoring`, so
+    provider lookup threads are counted with the requests that started them.
+    """
+    import cProfile
+
+    profiler = cProfile.Profile()
+    target = directory / f"{role}-{os.getpid()}.prof"
+
+    def dump():
+        while True:
+            time.sleep(15)
+            profiler.disable()
+            try:
+                profiler.dump_stats(target)
+            finally:
+                profiler.enable()
+
+    profiler.enable()
+    threading.Thread(target=dump, name="conformance-profile", daemon=True).start()
 
 
 class FirstCycle:

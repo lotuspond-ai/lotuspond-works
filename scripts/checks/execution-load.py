@@ -46,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend/tests/execution/conformance"))
 import driver as drivers
 import world as worlds
-from harness import CURSOR_LOG, CYCLE_LOG, LOOKUP_LOG
+from harness import CALL_LOG, CURSOR_LOG, CYCLE_LOG, LOOKUP_LOG, PROFILE_DIRECTORY
 from processes import Processes
 
 IMAGE = "postgres:18.6"
@@ -269,6 +269,22 @@ def sample(world, cluster):
         lock_waits = db.scalar(
             text("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'")
         )
+        # Who blocks the waiters of each relation: role, state and the statement it
+        # runs (SQL text only; bound values are never in pg_stat_activity's query).
+        blocking = db.execute(
+            text(
+                "SELECT coalesce(w.relation, t.relation)::regclass::text, "
+                "CASE WHEN b.application_name LIKE 'lotuspond-%' THEN "
+                "split_part(b.application_name, ':', 1) ELSE 'api' END, b.state, "
+                "left(regexp_replace(b.query, '\\s+', ' ', 'g'), 90), "
+                "count(DISTINCT w.pid) FROM pg_locks w "
+                "LEFT JOIN pg_locks t ON t.pid = w.pid AND t.locktype = 'tuple' "
+                "AND t.granted "
+                "CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) AS blocking(pid) "
+                "JOIN pg_stat_activity b ON b.pid = blocking.pid "
+                "WHERE NOT w.granted GROUP BY 1, 2, 3, 4"
+            )
+        ).all()
         # Every waiting backend by the relation it waits on: a row lock waits on the
         # holder's transaction while holding that row's tuple lock, so its relation is
         # the tuple lock's. A queue that moved off the cursor shows up here.
@@ -322,6 +338,15 @@ def sample(world, cluster):
             str(relation): {"waiters": n, "max_wait_s": float(longest)}
             for relation, n, longest in by_relation
         },
+        "blocking_holders": [
+            {
+                "relation": str(rel),
+                "holder": f"{who}/{state}",
+                "query": query,
+                "waiters": n,
+            }
+            for rel, who, state, query, n in blocking
+        ],
         "cursor_holders": {f"{who}/{state}": n for who, state, n in holders},
         "wal_bytes": int(wal),
         "states": states,
@@ -567,6 +592,7 @@ class Load:
         self.cursor_log = Path(os.environ[CURSOR_LOG])
         self.cycle_log = Path(os.environ[CYCLE_LOG])
         self.lookup_log = Path(os.environ[LOOKUP_LOG])
+        self.call_log = Path(os.environ[CALL_LOG])
 
     def setup(self):
         operator = self.operator
@@ -993,6 +1019,36 @@ def lookup_waits(path):
     }
 
 
+def service_calls(path, timeline):
+    """Admission and runtime activity calls by phase: count, wall and thread CPU."""
+    entries = timing_log(path)
+    names = sorted({item["call"] for item in entries})
+
+    def summary(items):
+        return {
+            "count": len(items),
+            "failed": sum(1 for item in items if item["failed"]),
+            "wall_ms": distribution([item["wall_ms"] for item in items]),
+            "cpu_ms": distribution([item["cpu_ms"] for item in items]),
+            "cpu_s_total": round(sum(item["cpu_ms"] for item in items) / 1000, 1),
+        }
+
+    return {
+        phase: {
+            name: summary(
+                [
+                    item
+                    for item in entries
+                    if item["call"] == name
+                    and window["start_ms"] <= item["at"] < window["end_ms"]
+                ]
+            )
+            for name in names
+        }
+        for phase, window in timeline.items()
+    }
+
+
 def relation_waits(samples):
     """Sampled lock waiters by the relation they waited on, across every sample."""
     relations = sorted(
@@ -1069,6 +1125,7 @@ def summarize(report, load, cluster, timeline, world):
     }
     report["lock_waits_by_relation"] = relation_waits(observed)
     report["lookup_slot_waits"] = lookup_waits(load.lookup_log)
+    report["service_calls"] = service_calls(load.call_log, timeline)
     report["deadlocks_logged"] = cluster.deadlocks_from_log()
     cycles = timing_log(load.cycle_log)
     report["worker_cycles_s"] = {
@@ -1111,6 +1168,11 @@ def main():
     parser.add_argument(
         "--api-workers", type=int, default=1, help="API processes on one socket"
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="test-only: write each API process's cProfile into the report directory",
+    )
     args = parser.parse_args()
     output = worlds.private_directory(args.output.absolute())
     report_path = output / "load-report.json"
@@ -1129,6 +1191,9 @@ def main():
     os.environ[CURSOR_LOG] = str(work / "cursor-waits.jsonl")
     os.environ[CYCLE_LOG] = str(work / "cycles.jsonl")
     os.environ[LOOKUP_LOG] = str(work / "lookup-waits.jsonl")
+    os.environ[CALL_LOG] = str(work / "service-calls.jsonl")
+    if args.profile:
+        os.environ[PROFILE_DIRECTORY] = str(output)
 
     def terminate(signum, frame):
         for other in (signal.SIGTERM, signal.SIGINT):  # a second one never cuts cleanup
