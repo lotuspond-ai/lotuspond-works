@@ -1,6 +1,6 @@
 # Actions and human tasks (E05)
 
-Date: 26 October 2026 (Asia/Kolkata). Status: **written specification proposed for owner review; not approved and not implemented.** It continues the approved product-completion sequence after [E04](2026-10-15-durable-execution-design.md) (Revision 2) and is reviewed together with its [implementation plan](../plans/2026-10-26-actions-human-tasks.md), which lists the open owner decisions. Nothing described here exists in the product: E04 publication and deployment admission still refuse every node this document covers, and the console's Human tasks page remains Planned. This is not a production-readiness claim. Approval would authorize only the local, synthetic implementation the plan describes.
+Date: 26 October 2026 (Asia/Kolkata). Status: **written specification approved by the owner on 29 October 2026, with decisions 1 and 13 restated; not implemented.** It continues the approved product-completion sequence after [E04](2026-10-15-durable-execution-design.md) (Revision 2) and is reviewed together with its [implementation plan](../plans/2026-10-26-actions-human-tasks.md), which records the owner's decisions. Nothing described here exists in the product: E04 publication and deployment admission still refuse every node this document covers, and the console's Human tasks page remains Planned. This is not a production-readiness claim. Approval would authorize only the local, synthetic implementation the plan describes.
 
 Authorities: the [approved completion design](2026-10-14-product-completion-design.md) (rows "E05 actions and human tasks" and "Recovery authority"), the [delivery plan](../../plans/2026-10-13-platform-delivery.md#dependency-ordered-epics) (the E05 gate), the [executable-v2 specification](2026-10-14-executable-package-v2-design.md), the [connections and runtime identity specification](2026-10-14-connections-fleet-design.md), the [E04 specification](2026-10-15-durable-execution-design.md) and [plan](../plans/2026-10-15-durable-execution.md) (Revision 2), [ADR-0011](../../architecture/0011-postgresql-durable-execution.md), the [durable-engine spike](../../plans/2026-10-15-durable-engine-spike.md) and [agent needs and UI boundaries](../../AGENT_PRODUCT_RATIONALE.md). The complete requirement register remains in the completion design.
 
@@ -32,18 +32,19 @@ No real model or tool provider exists. Every effect in E05 is against a syntheti
 
 ## Starting point
 
-As read on 26 October 2026:
+As read on 29 October 2026:
 
-- **E04 on `main`.** Tasks 1–6, schema v14.
-- **E04 on the unpushed `claude/e04-postgresql-impl` branch.** Tasks 7–11 are committed: schema v15, the orchestrator and sweeper, interpreter v1, read and model activities, controls and the recovery fence. Task 12, the customer and runtime APIs, is in review at `c9e14cc`. Tasks 13 (conformance harness) and 14 (packaging) have not started.
+- **E04 on `main`.** Tasks 1–14, merged as PR #17 (`533b3d6`): schema v15, the orchestrator and sweeper, interpreter v1, read and model activities, controls, the recovery fence, the customer and runtime APIs, the conformance harness and packaging.
+- **The finding 11 redesign, approved and not merged.** It is on `claude/e04-cursor-redesign`, with its proposal in `docs/superpowers/plans/2026-10-29-installation-capacity-lock.md`. The installation cursor moves from the head of E04's lock order to its end. It is taken only by a transaction that takes a compute slot, after every lookup and lock. Provider lookups wait for their slot within their 5 s bound instead of refusing at once.
 
-E05 builds on conventions that the E04 plan on that branch records as implemented:
+E05 builds on conventions that E04 on `main` implements:
 
 - Publication and deployment refuse `action_intent`, `action_dispatch`, `outcome_verification`, `human_task` with `mode=review` (`unsupported_step`) and every escalation policy (`unsupported_policy`). The only accepted policy is `workspace_admins` assignment with `approval: human` and independent review.
 - Owners and admins signal form waits through `POST …/executions/{id}/signals`.
 - An attempt's failure is an encrypted `{"failure": code, "failed_at_ms": ms}` record. Root attempts use ordinals 1–10; an agent's children use ordinals above 10.
 - A lapsed read or model lease makes its attempt uncertain and the execution `reconciliation_required` until an owner or admin reconciles it.
 - A terminal state waits for containment: no attempt may still be running and no reservation may be unstopped.
+- After a restore, every execution admitted under an older epoch that has not ended is held (owner decision, 2026-10-28). None of its attempts reaches a runtime until an owner releases it with `POST …/executions/{id}/reconciliation`. A release is refused while an attempt delivered under the older epoch has no confirmed stop.
 - Runtime-reported events have no route. `apply_event` refuses action-review and outcome kinds.
 
 E03 supplies what actions were designed around, none of which has a caller yet:
@@ -54,7 +55,7 @@ E03 supplies what actions were designed around, none of which has a caller yet:
 
 The SDK supplies `ActionBinding`, `ActionIntent`, `HumanDecision`, `RuntimeCommand`, `ActionReceipt`, `OutcomeRecord`, the reconciliation payload and pure binding and transition checks, none of which grants authority. The compiler already requires two things: every write operation declares `read_back` reconciliation, and every dispatch on every path is covered by outcome verification (`verification_missing`).
 
-E05's implementation starts after E04 is complete and merged (owner decision 1).
+E05's implementation starts from `main` after the finding 11 redesign merges, because the redesign changes the lock order in the files E05 extends (owner decision 1, restated 29 October 2026).
 
 ## Approach and alternatives
 
@@ -229,14 +230,14 @@ E06 keeps business cases, partial business completion, exception ownership, busi
 
 ## Recovery authority and restore
 
-Every binding contains the recovery epoch, so an intent or decision made under an older epoch can never dispatch: the SDK reports `stale_epoch`. When the epoch changes after a restore, the control plane takes these steps:
+Every binding contains the recovery epoch, so an intent or decision made under an older epoch can never dispatch: the SDK reports `stale_epoch`. When the epoch changes after a restore, E04's hold applies unchanged, and E05 extends it (owner decision 13, restated 29 October 2026):
 
-1. It holds every intent that is not settled. That covers intents awaiting review, approved, dispatching or uncertain, because the restored rows cannot show what happened after the backup.
-2. It schedules a read-back of each held intent's target under the new epoch, with current identity and grants.
-3. It settles each one from the read-back result:
+1. **Hold.** With each held execution, the control plane holds every intent that is not settled. That covers intents awaiting review, approved, dispatching or uncertain, because the restored rows cannot show what happened after the backup. Nothing is read back while the execution is held, because none of its attempts may reach a runtime before the owner's release.
+2. **Release.** The owner reviews the runtime journals, as E04's procedure requires, and releases the execution. A write claimed under the older epoch blocks the release until its stop is confirmed, by the runtime's journal report or an owner's `compute_stopped` resolution. At the release, each held intent's target is read back under the new epoch, with current identity and grants. The write is never delivered again.
+3. **Settle.** Each held intent is settled from its read-back result:
    - effect present: the intent is marked observed from evidence and verification continues, with no resend;
-   - qualified absence: the intent is `superseded` and its step fails with `recovery_epoch_changed`, with no automatic re-proposal (owner decision 13);
-   - unknown: the execution becomes `reconciliation_required`.
+   - qualified absence: the intent is `superseded` and its step fails with `recovery_epoch_changed`, with no automatic re-proposal;
+   - unknown: read-backs repeat within decision 11's bound, then the execution becomes `reconciliation_required`.
 
 Commands, sessions and leases from older epochs are refused, as in E03 and E04. A restored grant, decision or revocation state never authorizes a write. Admissions, decisions and signals accepted after the backup are absent and must be resubmitted under their original identities. Read, export and resolution remain available while the RecoveryAuthority is unavailable; dispatch, claims and read-backs do not.
 
@@ -304,7 +305,7 @@ Completion means locally verified action, review and reconciliation behaviour ag
 
 ## Review handoff
 
-This specification and its plan are proposed for owner review together. The owner decides the open questions in the plan, each with a recommended option. Approval would permit implementation after E04 completes, with the owner's selected subagent-driven method and independent review after each task. Nothing in either document is implemented, and no merge, deployment, production database access, provider or customer connection, or public distribution is requested.
+This specification and its plan were reviewed together. On 29 October 2026 the owner accepted all 18 of the plan's recommended options, restating decisions 1 and 13. The approval permits implementation from `main` after the finding 11 redesign merges, with the owner's selected subagent-driven method and independent review after each task. Two E04 findings that are still open must be decided along the way: finding 2 before Task 5, and finding 21 for uncertain E04 reads. Nothing in either document is implemented, and no merge, deployment, production database access, provider or customer connection, or public distribution is requested.
 
 Author review checks:
 
