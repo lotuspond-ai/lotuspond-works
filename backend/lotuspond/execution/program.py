@@ -27,7 +27,7 @@ from lotuspond_sdk.executable import (
     compile_package,
     validate_executable_package,
 )
-from lotuspond_sdk.executable.catalog import canonical_catalog_document, validate_catalog
+from lotuspond_sdk.executable.catalog import validate_catalog
 from lotuspond_sdk.executable.package import (
     DecisionStep,
     IterationStep,
@@ -37,6 +37,7 @@ from lotuspond_sdk.executable.package import (
 from lotuspond_sdk.executable.plan import CompiledPlan, canonical_plan_json
 
 from ..models import ExecutableDependency, ExecutablePublication, ExecutionDeploymentRevision
+from . import memo
 from .authorization import record, scoped
 from .interpreters import COMPILERS
 
@@ -89,12 +90,12 @@ def program_from(package, sources, plan=None):
     """Build from already verified publication sources (admission/signal services)."""
     packages, catalog = {}, {}
     for source in sources.values():
+        # The same canonical bytes as the validated child's, without validating again.
         if source.get("schema_version") == "lotuspond.workflow-package.v2":
-            child = validate_executable_package(source)
-            packages[_digest(canonical_executable_json(child))] = child
+            packages[_digest(memo.package_bytes(source))] = memo.package(source)
         else:
-            document = validate_catalog({"documents": [source]}).documents[0]
-            catalog[_digest(canonical_catalog_document(source))] = document
+            document = memo.catalog({"documents": [source]}).documents[0]
+            catalog[_digest(memo.catalog_bytes(source))] = document
     root = _digest(canonical_executable_json(package))
     packages[root] = package
     return Program(root, plan, packages, catalog)

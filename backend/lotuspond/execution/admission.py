@@ -14,7 +14,6 @@ from lotuspond_runtime.protocol import OpaqueId
 from lotuspond_sdk.activity import ArtifactHandle
 from lotuspond_sdk.executable.input import project_json
 from lotuspond_sdk.executable.types import validate_value
-from lotuspond_sdk.executable.validation import validate_executable_package
 from pydantic import TypeAdapter
 
 from ..fleet.authority import database_now_ms
@@ -26,6 +25,7 @@ from ..models import (
     ExecutionRequest,
     new_id,
 )
+from . import memo
 from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
 from .authorization import lock, mark_replay, reauthorize, record, scoped
@@ -149,7 +149,7 @@ class AdmissionService:
         if deployment.active_revision_id != revision.id:
             raise ExecutionError("deployment_unavailable")
         publication = record(db, ExecutablePublication, actor.scope, revision.publication_id)
-        package = validate_executable_package(json.loads(publication.canonical_package))
+        package = memo.package(json.loads(publication.canonical_package))
         validate_value(request.input, package.input_schema, package.schemas)
         admitted_at = database_now_ms(db)
         grant, tenant, recovery = self.budgets._grants(db, actor.scope)

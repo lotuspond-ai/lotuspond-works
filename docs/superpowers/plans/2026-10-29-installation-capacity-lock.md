@@ -117,6 +117,40 @@ A caller now waits for the slot. The call's existing timeout (at most 5 s) bound
 - late answers are still discarded;
 - a stuck provider holds one thread and its slot. Every caller is refused within its own bound, never later.
 
+### 5. Pure validation is memoized per process (approved 29 October 2026, after the first calibration)
+
+**Why.** With the cursor gone, the 29 October calibrations moved the queue to each tenant's workspace row. Every write in a tenant locks it `FOR UPDATE`, and an admission held it while it spent about 0.31 s of request-thread CPU.
+
+A single-threaded cProfile of the API showed what that CPU was. About two thirds of it was the SDK re-validating and re-canonicalizing the same immutable stored bytes: JSON-domain checks, JCS (`rfc8785`) and pydantic. Per admission there were about:
+
+- 6 `load_publication` calls;
+- 6 plan compilations;
+- 6 signature verifications;
+- 34 package validations;
+- 20 catalog validations.
+
+SQL was about 14 %, and backend code under 1 %.
+
+**What.** `execution/memo.py` keeps the results of pure SDK functions per process in one bounded LRU of 512 entries:
+
+- package and catalog validation;
+- canonical package and catalog bytes;
+- plan compilation with its canonical plan bytes;
+- package signature verification;
+- the budget service's step list.
+
+Each entry is keyed by SHA-256 of the exact inputs, serialized with `marshal` format 2. That format has no object references and decodes back to the same structure, so two different inputs can never share a key. Tuple and list, int and bool, and str and bytes stay distinct. An input `marshal` cannot encode is not memoized. A signature verdict is keyed by the package, the envelope and the exact trust set as dumped, and only a `valid` verdict is kept. Signature verification reads no clock, so a revoked or replaced key changes the trust set and misses the cache.
+
+**Rules.**
+
+- Only successes are kept. A refusal raises before anything is stored, and is recomputed every time.
+- Cached models are never shared: every caller gets its own deep copy (about 0.05 ms, against about 2.8 ms to validate the tier 3 package).
+- Nothing here is authority. Every authority input is still read or fetched on every call, and after each provider wait as before (Review Focus 2):
+  - rows and their status, digests and dependency links;
+  - the current trust snapshot, its expiry and catalog membership;
+  - grants, tenant policy, recovery and assurance.
+- The cache lives in process memory only, is dropped on restart, and returns nothing a caller did not supply the bytes for.
+
 ## Why Task 5's guarantees still hold
 
 - **FIFO by admission sequence.** Admission sequences come from `next_admission_sequence` under the environment row lock. That lock is held to commit, so sequences commit in order within an environment. The scheduler still takes the lowest admission sequence, then execution ID, among each environment's unreserved attempts.
@@ -230,3 +264,4 @@ Existing tests that hold the cursor to make a transaction wait (the expired-enti
 1. **Parts 1–3: approved, with the cursor taken last.** Every transaction that takes it takes it last. No scheduling transaction spans heads. A refusal at the leaf rolls back and the wasted work is accepted. A `pg_locks` test proves the leaf. Tier 3 records reservations per second per phase and the cursor's hold time.
    - **Direct `schedule_batch` callers.** Decided in this amendment: a limit other than 1 is refused, never silently reduced.
 2. **Part 4: approved.** Lookups wait for their slot within the existing bound. Tier 3 records how many callers waited.
+3. **Part 5: approved after the first calibrations** ("go ahead with A"): memoize pure validation per process, keyed by exact content, with authority rechecks unchanged.

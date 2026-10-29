@@ -5,7 +5,6 @@ from hashlib import sha256
 from typing import Literal
 
 from lotuspond_runtime.protocol import ConnectorPin
-from lotuspond_sdk.executable.catalog import validate_catalog
 from lotuspond_sdk.executable.package import (
     AgentStep,
     ConnectorReadStep,
@@ -13,7 +12,6 @@ from lotuspond_sdk.executable.package import (
     IterationStep,
     ParallelStep,
 )
-from lotuspond_sdk.executable.validation import validate_executable_package
 from sqlalchemy import func, select
 
 from ..fleet.authority import database_now_ms
@@ -31,6 +29,7 @@ from ..models import (
     RuntimePoolPolicy,
     SecretReference,
 )
+from . import memo
 from .assurance import release_binding, validated_release_binding
 from .authorization import reauthorize, record, scoped
 from .contracts import (
@@ -134,9 +133,9 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
         raise ExecutionError("dependency_unavailable")
     workflow_packages = [
         package,
-        *[validate_executable_package(sources[row.id]) for row in rows if row.kind == "workflow"],
+        *[memo.package(sources[row.id]) for row in rows if row.kind == "workflow"],
     ]
-    catalog = validate_catalog(
+    catalog = memo.catalog(
         {"documents": [sources[row.id] for row in rows if row.kind != "workflow"]}
     )
     required_operations = _required_operations(workflow_packages, catalog)

@@ -44,6 +44,7 @@ from ..models import (
     ExecutionUsageReservation,
     ExecutionWait,
 )
+from . import memo
 from .assurance import check_assurance_current
 from .authorization import lock, reauthorize, record, scoped
 from .contracts import Contract, DeploymentConfig, canonical_value
@@ -75,10 +76,14 @@ class ChargeAuthority(Protocol):
 
 
 def steps(source):
-    return [
-        step.model_dump(mode="json")
-        for step in _body_steps(validate_executable_package(source).body)
-    ]
+    return memo.remembered(
+        "budget-steps",
+        (source,),
+        lambda: [
+            step.model_dump(mode="json")
+            for step in _body_steps(validate_executable_package(source).body)
+        ],
+    )
 
 
 def active_liability(row, now_ms):
@@ -350,7 +355,7 @@ class BudgetService:
         # arbitrary caller ID or a same-named node elsewhere cannot select a model.
         try:
             program = program_from(
-                validate_executable_package(packages[0]),
+                memo.package(packages[0]),
                 dict(enumerate([*packages[1:], *catalog.values()])),
             )
             ref = resolve_occurrence(program, step.occurrence_path)
