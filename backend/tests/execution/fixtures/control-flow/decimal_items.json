@@ -1,0 +1,227 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "ref",
+   "pointer": "",
+   "source": {
+    "id": "each",
+    "kind": "step"
+   }
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "items": {
+     "kind": "string",
+     "max_length": 5
+    },
+    "kind": "array",
+    "max_items": 5
+   }
+  },
+  "steps": [
+   {
+    "id": "limit",
+    "kind": "transform",
+    "mapping": {
+     "kind": "literal",
+     "schema": {
+      "kind": "decimal",
+      "precision": 10,
+      "scale": 2
+     },
+     "value": "10.00"
+    },
+    "output_schema": {
+     "kind": "decimal",
+     "precision": 10,
+     "scale": 2
+    }
+   },
+   {
+    "body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "pick",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "kind": "string",
+       "max_length": 5
+      }
+     },
+     "steps": [
+      {
+       "condition": {
+        "args": [
+         {
+          "kind": "ref",
+          "pointer": "",
+          "source": {
+           "kind": "iteration_item"
+          }
+         },
+         {
+          "kind": "ref",
+          "pointer": "",
+          "source": {
+           "id": "limit",
+           "kind": "step"
+          }
+         }
+        ],
+        "fn": "lt",
+        "kind": "call"
+       },
+       "else_body": {
+        "result": {
+         "kind": "ref",
+         "pointer": "",
+         "source": {
+          "id": "above",
+          "kind": "step"
+         }
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "kind": "string",
+          "max_length": 5
+         }
+        },
+        "steps": [
+         {
+          "id": "above",
+          "kind": "transform",
+          "mapping": {
+           "kind": "literal",
+           "schema": {
+            "kind": "string",
+            "max_length": 5
+           },
+           "value": "above"
+          },
+          "output_schema": {
+           "kind": "string",
+           "max_length": 5
+          }
+         }
+        ]
+       },
+       "id": "pick",
+       "kind": "decision",
+       "then_body": {
+        "result": {
+         "kind": "ref",
+         "pointer": "",
+         "source": {
+          "id": "below",
+          "kind": "step"
+         }
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "kind": "string",
+          "max_length": 5
+         }
+        },
+        "steps": [
+         {
+          "id": "below",
+          "kind": "transform",
+          "mapping": {
+           "kind": "literal",
+           "schema": {
+            "kind": "string",
+            "max_length": 5
+           },
+           "value": "below"
+          },
+          "output_schema": {
+           "kind": "string",
+           "max_length": 5
+          }
+         }
+        ]
+       }
+      }
+     ]
+    },
+    "concurrency": 2,
+    "id": "each",
+    "input": {
+     "kind": "ref",
+     "pointer": "",
+     "source": {
+      "kind": "package_input"
+     }
+    },
+    "kind": "iteration",
+    "max_items": 5
+   }
+  ]
+ },
+ "connectors": [],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "items": {
+   "kind": "decimal",
+   "precision": 10,
+   "scale": 2
+  },
+  "kind": "array",
+  "max_items": 5
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [],
+ "name": "Synthetic fixture-decimal-items",
+ "output_schema": {
+  "items": {
+   "kind": "string",
+   "max_length": 5
+  },
+  "kind": "array",
+  "max_items": 5
+ },
+ "package_id": "fixture-decimal-items",
+ "policies": [],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

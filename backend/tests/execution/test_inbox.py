@@ -329,6 +329,22 @@ def test_payload_type_and_late_equal_replay_do_not_complete_wait(signals):
         assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1
 
 
+def test_an_equal_replay_after_the_signal_took_effect_returns_its_receipt(signals):
+    """Task 13: the answer was lost after commit and progression consumed the signal;
+    the client's equal retry learns it was accepted, instead of a refusal."""
+    h = signals
+    receipt = accept(h)
+    with Session(h.engine) as db, db.begin():  # progression consumed it
+        db.get(ExecutionInbox, receipt.id).status = "delivered"
+        db.get(ExecutionWait, h.wait_id).state = "satisfied"
+    again = accept(h)
+    assert (again.id, again.status) == (receipt.id, "delivered")
+    with pytest.raises(ExecutionError, match="conflict"):  # a changed payload still conflicts
+        accept(h, h.signal.model_copy(update={"payload": {"different": True}}))
+    with Session(h.engine) as db:
+        assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1
+
+
 @pytest.mark.parametrize("signals", ["private"], indirect=True)
 def test_outbox_contains_only_opaque_identity_and_digest_for_private_signal(signals):
     from lotuspond_sdk.activity import ArtifactHandle
@@ -454,3 +470,22 @@ def test_signal_accepts_declared_number_domain(signals):
     with Session(h.engine) as db:
         assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 3
         assert db.get(ExecutionWait, h.wait_id).state == "open"
+
+
+def test_node_resolution_refuses_unresolved_record_and_mismatched_paths(signals):
+    from types import SimpleNamespace
+
+    h = signals
+    with Session(h.engine) as db, db.begin():
+        execution = db.get(Execution, h.execution_id)
+        package, sources = h.inbox._deployment(db, h.actor, execution.deployment_revision_id)
+    node = SimpleNamespace(occurrence_path="form", node_id="form")
+    assert h.inbox._node(package, sources, node)[1].id == "form"  # positive control
+    for path, node_id in (
+        ("nope", "nope"),
+        ("form#select", "form"),
+        ("form", "other"),
+        ("form:then", "form"),
+    ):
+        with pytest.raises(ExecutionError, match="dependency_unavailable"):
+            h.inbox._node(package, sources, SimpleNamespace(occurrence_path=path, node_id=node_id))

@@ -1,0 +1,52 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "deadline_ms": 1800003600000,
+    "node_id": "review",
+    "occurrence_path": "review",
+    "type": "OpenWait"
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "waits-form-open",
+ "now_ms": 1800000000000,
+ "package": "waits",
+ "sources": [
+  "waits.policy"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": null,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-pause",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": null
+     }
+    ],
+    "path": "pause"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-callback",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": 9
+     }
+    ],
+    "path": "callback"
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

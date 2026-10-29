@@ -1,14 +1,15 @@
 # Lotuspond runtime contracts
 
-`lotuspond-runtime==0.1.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
+`lotuspond-runtime==0.2.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
 This independently installable distribution supplies pure, strict fleet models
 and domain-separated connection/pool content identities. Importing the package
 or `lotuspond_runtime.protocol` performs no I/O or runtime initialization.
 
 The package supplies a private control client, direct TLS transport, durable C/P
 credential store and Linux lifecycle supervisor. It grants no execution authority.
-Business polling, invocation, connector and secret-provider integration are separate
-work; the supervisor cannot execute business work. Observations are declarations,
+Runtime 0.2.0 adds the durable-execution activity worker (below); production read
+and model providers, connector and secret-provider integration remain separate
+work, so outside test mode it refuses rather than claim work. Observations are declarations,
 not attestations. Empty allowlists grant no capability. Destination-free operations
 still require explicit catalog permission. Later runtime admission must recheck
 current scoped authority, identity, pool/connection status and destination policy.
@@ -247,6 +248,25 @@ business effect loop. Authoritative deployment records must link the signed inte
 to exact connection versions and secret references: SDK command bytes do not encode
 those direct pins, and E03 supplies no production deployment record source.
 
+
+## Durable execution activities (runtime 0.2.0)
+
+`lotuspond-runtime activity-worker --config <file>` runs the E03 supervisor with an
+activity thread that follows its live session. It polls only deliveries addressed
+to that session, verifies each signed single-use delivery against independent
+activity trust, claims it under a short lease and renews the lease, runs the
+activity in a separate child, and reports the result as historical evidence. A
+private invocation journal records each call before it starts and is the evidence
+for reconciliation after a lost lease or stop; an uncertain call is never retried
+blindly. A delivery the runtime cannot verify is declined, never run.
+
+This distribution installs no production read or model provider. Outside
+`mode: "test"`, or without `--activity-config`, the command exits 3 (`unavailable`)
+before doing anything. In test mode `--activity-config <private file>` names a
+reread trust file, a journal directory and up to eight synthetic `fixture-read` or
+`fixture-model` descriptors: they exist only to qualify the protocol (Task 13's
+conformance suite and installed acceptance), never to run customer work. While
+idle the worker polls again after 0.2 s, backing off to 1 s.
 
 Operator bootstrap and qualification are documented in
 [`runtime-foundation.md`](../../docs-site/docs/runtime-foundation.md) and the

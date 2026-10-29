@@ -1,0 +1,86 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "inbox_id": "f2",
+    "occurrence_path": "review",
+    "rejected": [
+     "f1"
+    ],
+    "type": "ConsumeSignal",
+    "wait_id": "w-review"
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "waits-form-consume",
+ "now_ms": 1800000000000,
+ "package": "waits",
+ "sources": [
+  "waits.policy"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": null,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-pause",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": null
+     }
+    ],
+    "path": "pause"
+   },
+   {
+    "attempts": [
+     {
+      "id": "a-callback",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": 9
+     }
+    ],
+    "path": "callback"
+   },
+   {
+    "attempts": [],
+    "path": "review",
+    "signals": [
+     {
+      "available_at_ms": 1799999999980,
+      "digest": "76546864fed88143712f7f2dedd0c0e7928a5eb4fa492d313428088a136a6059",
+      "expires_at_ms": 1800000001000,
+      "id": "f1",
+      "payload": {
+       "approved": "yes"
+      },
+      "signal_id": "f1"
+     },
+     {
+      "available_at_ms": 1799999999990,
+      "digest": "b80524245878a098afb9fe63e54e9e28459bbdb875e54a090a9eca301de6feab",
+      "expires_at_ms": 1800000001000,
+      "id": "f2",
+      "payload": {
+       "approved": true
+      },
+      "signal_id": "f2"
+     }
+    ],
+    "wait": {
+     "deadline_ms": 1800000005000,
+     "id": "w-review",
+     "state": "open"
+    }
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

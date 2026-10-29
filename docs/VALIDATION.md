@@ -391,3 +391,832 @@ Local results used a private PostgreSQL 14.20 cluster on `127.0.0.1:55483` (data
 - SQLite suite like the one in `npm run check` (`npm run test:python` with the execution URL set, cluster default zone Asia/Kolkata): `5 failed, 855 passed, 141 skipped` (604.78 s). The five are the macOS-only acceptance cases above. `npm run lint:python` passed.
 
 Same-pattern search in `backend/lotuspond/execution/` and `backend/lotuspond/fleet/`: `assurance.py` is the only code that compares serialized timestamps. Every other timing value is integer epoch milliseconds: `database_now_ms` (`extract(epoch FROM clock_timestamp())`), `budgets.py` and `authorization.py` (`timestamp()`) and `fleet/management.py` (`astimezone(UTC)`). None of these depend on the session zone. The `model_dump(mode="json")` and RFC 8785 inputs that these packages digest contain no datetime fields. Their SQL has no zone-dependent casts (`::date`, `date_trunc`, `to_char`); the `::text` casts are check constraints on text columns. Outside these packages, `identity_lifecycle.py` still writes `utc(...).isoformat()` of stored invitation times. That value is the correct instant in the session offset, is only displayed and is never digested, so it was left unchanged. This is local evidence only: not hosted CI, publication or deployment.
+
+## E04 Task 7: PostgreSQL orchestration claim, schema v15 and worker, 2026-10-23
+
+Branch `claude/e04-postgresql-impl` from `7b3a0c7` (PR #13's recorded owner approval of Revision 2). Local evidence only: not pushed, no hosted CI and no deployment.
+
+**Environment.** A private disposable PostgreSQL 14.20 cluster (Homebrew, macOS arm64) on `127.0.0.1:55471`, TCP only, with its own data directory and the `lotuspond_platform_test` database. Its `TimeZone` is UTC to match CI's container. No other cluster, port 5432, port 55439 or development database was used. Python 3.14.3. CI runs PostgreSQL 18.6; the frozen v14 check-constraint texts in `migration.py` were captured on 14 and use the same forms as the v13 texts that already pass there, so hosted CI must confirm them.
+
+**Red before implementation.** The new tests were copied onto unmodified `7b3a0c7`. The contract, orchestrator and worker tests failed at collection because `engine_contracts`, `orchestrator` and `execution_worker` did not exist. The v15 migration tests failed: the initializer refused a v14 database as already current, and `migrate_execution_v15` was missing.
+
+**Green after implementation:**
+
+- The named Task 7 tests in `test_engine_contracts.py`, `test_orchestrator.py` and `test_execution_worker.py`: 28 passed. `test_migration_v15.py` with the existing `test_migration.py`, `test_admission.py`, `test_inbox.py` and `test_outbox.py`: 124 passed. `tests/test_migrations.py` and `tests/fleet/test_migration.py`: 68 passed. No database skips.
+- The full backend suite against the same cluster (`pytest -q`, 1,047 tests): 1,039 passed and 8 failed in 1,035 s. All 8 failures are in `tests/fleet/test_acceptance.py`. Its harness refuses non-Linux hosts on purpose (`lotuspond_runtime.state.private_directory` returns `unsafe_storage`), so these tests run only in CI's Linux job. This run used the content before the last review round; that round's engine and test fixes were then rerun with the targeted sets above.
+- **Measured.** A worker stopped with SIGSTOP while holding an execution row was ended by `idle_in_transaction_session_timeout` (5 s in the test), and a second worker claimed the execution 4.998 s after the stop. A worker stuck inside a transition exited through the shutdown bound with code 3 after 2.047 s (bound 2 s). Cleanup of the owned sessions was observed in `pg_stat_activity`.
+- Ruff is clean and `export_schema.py --check` matches `schema.sql` at version 15.
+
+**Reviews.**
+
+- The independent specification review approved Task 7 with seven minor findings. All were fixed and the reviewer confirmed them.
+- The independent quality review required changes for two liveness defects:
+  - The workspace `FOR KEY SHARE` lock waited on API transactions, so one tenant could stall every claim.
+  - A pending capacity step, or a pass that made no progress, re-marked the execution due at once and spun the worker.
+
+  Both were fixed, and the re-review passed. Its last minor findings were fixed too: continuation after progress with a non-capacity reason, back-off for repeated capacity refusals, and two test hazards.
+
+**Proposed for the owner's acknowledgement** (marked in the plan):
+
+- Locked workspaces are skipped like locked executions. The cost is that a tenant with continuous traffic can have its own executions skipped repeatedly; Task 13 tier 3 measures this.
+- Work that made no progress is re-marked only after back-off.
+- A new `apply_capacity` interface for Task 8.
+
+**Pre-existing, out of scope.** On unmodified `7b3a0c7`, 7 tests (3 in `test_assurance.py`, 4 in `test_entitlement.py`) fail when the PostgreSQL session time zone is not UTC and pass with UTC. Release-binding evidence compares timestamps serialized in different time zones.
+
+## E04 Task 8: deterministic interpreter v1 as row transitions, 2026-10-23
+
+Same branch, cluster and limits as Task 7. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Red before implementation.** The new tests were copied onto the Task 7 commit `77959d9`. All three modules failed at collection: `lotuspond.execution.expressions` and `lotuspond.execution.program` did not exist. Each later review fix added a test that failed with that fix reverted. Covered: an in-time signal for a wait the sweeper expired; a wait opened beside running compute; retention while paused; back-off of a capacity step that changes nothing; a wait at quota throttling sibling progress; and a sibling retry delayed by the capacity back-off.
+
+**Green:**
+
+- The full backend suite, run from a clean checkout of the final reviewed content (`129948a`, 1,088 tests): 1,080 passed and 8 failed in 821 s. All 8 failures are in `tests/fleet/test_acceptance.py`, which runs only on CI's Linux job (see Task 7).
+- 35 golden progression records for `lotuspond.execution-interpreter.v1` re-derive byte for byte. They cover every admitted step kind and all seven actions and store actions, regions and the wake time. Recording them is an explicit command (`python -m tests.execution.test_progression_fixtures`), never part of a test run.
+- **Derivation bound.** A 1,000-item iteration with eight body steps (9,001 steps, the largest expansion the SDK admits at 1,000 items; the test proves one more body step is refused) ran 1,280 transitions in 20 transactions. Across 3,079 region loads the largest read 278 rows, against 1,280 committed step instances. Root loads stayed within the 1,000 pinned item paths, and item-region loads within 8 rows.
+- **Throughput, a Task 13 follow-up.** Each 64-transition transaction took about 1.5 s on this laptop, with per-transaction decryption and key caches.
+- Ruff is clean. The schema is unchanged at version 15.
+
+**Reviews.** The specification and quality reviews each ran four rounds.
+
+- **Round 1** required changes:
+  - a pending wait retention blocked every release (Critical);
+  - branch IDs could collide with composite records, fixed with the `#` record grammar;
+  - oversized values retried forever;
+  - a late-consumed signal was refused;
+  - provider calls were made under the row lock, fixed by passing the fenced epoch;
+  - item typing failed open, the compiled plan was not checked against a recompilation, and inbox decryption errors were swallowed;
+  - there were gaps in the tests and goldens.
+- **Round 2** found that the fixes had added regressions:
+  - an expired wait no longer loaded its in-time signals;
+  - a retention deferred at quota did not back off;
+  - a wait opened beside running compute was never retained;
+  - paused executions polled for retention.
+- **Round 3** found that a wait stuck at quota throttled sibling progress: a pass stopped by the transition bound reported capacity. The gate now reads committed state (`_capacity_pending`).
+- **Round 4** found that a capacity pass dropped its own retry wake-up.
+
+All of these are fixed. Both reviews approved the final content. The quality review accepted one deliberate Minor: retention defers on `authority_unavailable` and `conflict`, which can hide a database fault or a pending-count underflow. A savepoint rolls back either, and the deferral is logged.
+
+**For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 8"):
+
+- the occurrence-path grammar with `#` records;
+- failure records;
+- wait keys;
+- signal timeliness judged at acceptance;
+- the capacity step order;
+- an unretained wait stays open, so the 10,000 retained-wait ceiling bounds quota, not open waits;
+- the epoch passed in, with the key provider as the only bounded call under the row lock;
+- `pending` held until the first reservation;
+- the 10,000-step target is unreachable at 1,000 items (the maximum is 9,001);
+- the files beyond Task 8's ownership row.
+
+**Obligation carried to Tasks 9 and 11:** every result, lapse, stop confirmation and reconciliation that can complete containment calls `mark_runnable` in the same transaction.
+
+## E04 Task 9: signed activity dispatch, leases and reconciliation, 2026-10-23
+
+Same branch, cluster and limits as Task 7. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is currently refusing jobs because of an account billing problem. The runtime distribution is now 0.2.0.
+
+**Red before implementation.** The new tests were copied onto the Task 8 commit `8326b39`. `test_dispatch.py` failed at collection because `lotuspond_runtime.activity_protocol` did not exist. `test_activity_client.py` failed because `lotuspond_runtime.activity_client` did not exist. Each later review fix added a test that failed with the fix reverted:
+
+- unstarted children are closed when a root ends;
+- the lease is capped by the reserved active time;
+- reconciliation closes children;
+- a child's renewal needs its parent's live lease.
+
+**Green:**
+
+- The Task 9 backend tests (`test_dispatch.py`, `test_leases.py`, `test_reconciliation.py`, `test_activity_races.py`): 60 passed; with `test_budgets.py`, 92 passed.
+- Runtime `test_activity_client.py`: 11 passed. The whole runtime suite has the same 121 failures as a clean Task 8 checkout, 85 of them `unsafe_storage`: the runtime's private-storage check refuses macOS by design, and CI's Linux job runs them.
+- `tests/execution` with `tests/fleet`, after the first review round (E03 command, authentication, rotation and management tests; the Linux-only acceptance module excluded): 786 passed, 0 failed.
+- The full backend suite at the reviewed code: `3fcdcf6`, 1,145 tests: 1,137 passed and 8 failed in 805 s (the final commit only adds the pinned race variants, run in the line above). The only failures are the 8 tests in `tests/fleet/test_acceptance.py`, which run only on CI's Linux job.
+- Ruff is clean on both distributions. Runtime 0.2.0 metadata, both lock files, CI and the acceptance harness agree.
+- Covered:
+  - **Pins:** every persisted pin and envelope field (23 variants, each re-signed with trusted keys and refused with `conflict`).
+  - **Claims:** claim once with a lost acknowledgement; expiry and revocation while a claim waits on a lock; refusal on cancellation and instance revocation.
+  - **Leases:** renewal bounded by the attempt deadline, by 60 s and by the reserved active time.
+  - **Retirement:** unclaimed-delivery expiry, and retirement of a spent reservation, each allowing only a new ordinal; a lapse requiring reconciliation.
+  - **Results:** result and runnable marker committing together; output-schema and unknown-usage refusals; a lost result response repeatable only by its own session.
+  - **Children:**
+    - undeclared, wrong-kind, unregistered and mistyped arguments refused;
+    - equal and conflicting repeats;
+    - another session refused;
+    - a parent's end closing its unstarted children and waiting for running ones;
+    - a child's lease needing its parent's live lease.
+  - **Polling:** a refused head never blocking a pool; a paused execution's delivery not served again.
+  - **Bounds:** a stuck trust provider bounded at 5 s; a narrowed pool policy; another pool refused before any provider call; the value cap.
+  - **Credentials:** sentinel runtime credentials absent from envelopes, stored rows and decrypted artifacts.
+  - **Races:** real PostgreSQL races, each with both outcomes pinned:
+    - claim against claim;
+    - renewal against result;
+    - child request against parent result;
+    - claim against delivery expiry;
+    - result against lease lapse;
+    - renewal against E03 `revoke_instance`.
+
+**Reviews.** Both independent reviews required changes, and both approved the final content.
+
+- Specification review, five rounds. Its main findings:
+  - children orphaned when a root ended;
+  - renewal ignoring the remaining budget;
+  - a timing-fragile child-lease test;
+  - a spent reservation stuck until its deadline.
+- Quality review, four rounds. Its main findings:
+  - the root slot returned while a shared child still ran;
+  - a refused head blocking the pool;
+  - no recheck after child-admission provider waits;
+  - a flaky race test;
+  - missing race tests.
+- An execution and fleet run before the reviews also caught two Task 5 regressions in child slots. Sharing a parent's slot is now an explicit opt-in.
+- Accepted as Minor and carried:
+  - no per-transaction keys cache in the activity paths;
+  - event rows keep `source_id="orchestrator"`, with the origin recorded only in the encrypted content;
+  - the runtime worker (Task 10) must apply and test `validate_lease`.
+
+**For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 9"):
+
+- Lock order for runtime routes: account rows after fleet rows under the workspace lock, and the cursor taken with `NOWAIT` when late.
+- Deliveries:
+  - one delivery per attempt, with zero usage when it is never claimed;
+  - leases and deliveries bounded by the reserved active time, with spent reservations retired by the sweeper.
+- Leases: the derived lease revision and the session-bound token digest.
+- Outcomes:
+  - a lapse not marked runnable;
+  - unknown result usage leading to reconciliation;
+  - results and values accepted without the initiator's current `execute`;
+  - reconciliation never producing success.
+- Children: they share their parent's step instance, ordinals above 10 and the parent's compute slot; a parent cannot stop while a child may run.
+- Tool naming.
+- Polling order and bounds.
+- The 64 KiB runtime value bound, at most 1,024 per execution.
+
+**Obligations carried to Task 11:**
+
+- The sweeper calls `lapse_lease`, `expire_delivery` and `expire_reservation`.
+- Spent reservations need a `SweepReport` field or a recorded amendment, and an efficient due query, because v15 has no index for them.
+
+## E04 Task 10: bounded agent and read activities in the runtime, 2026-10-23
+
+Same branch as Tasks 7–9. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is refusing jobs because of an account billing problem. The Linux results below come from local containers, not from hosted CI.
+
+**Red before implementation.** The five new Task 10 test files were run on the Task 9 commit `fccf5bd`, and all five failed at collection because `lotuspond_runtime.agent` did not exist.
+
+The review fixes were checked by mutation: each fix was reverted in a scratch copy of the runtime, and its witness test was run there. All 27 mutations made their witness fail. One at first did not: the anchor-age test was passing through the wall-clock check, and it was corrected. They cover:
+
+- child binding and targeted child polls;
+- lost-claim re-claims, the persisted fence, surviving-group fencing and self-recovery;
+- digest-only model rounds;
+- the connector pin, every pinned secret, request and response bounds, and tool cost;
+- the server-anchored clock, its anchor age and the renewal margin;
+- usage that is never zero, and codes that are never retryable, after a provider may have run;
+- process-group cleanup and the cancel-aware frame;
+- the journal's lock, its non-blocking open and torn-record recovery.
+
+**Green on macOS.** These runs used a dev-only shim that lets the journal accept a 0700 directory off Linux; the shim is never committed.
+
+- The Task 10 files plus `test_activity_client.py`: 81 passed, including a 31 s model round, which no longer hits a fixed child cap. One failed: `test_mounted_secrets_resolve_pins_through_the_operator_mapping` goes through E03's resolver, which refuses macOS by design, like `test_resolver.py`.
+- Backend `test_dispatch.py`, `test_leases.py`, `test_reconciliation.py` and `test_activity_races.py` on the local PostgreSQL cluster: 61 passed. That is Task 9's 60 plus the targeted-poll test.
+- Ruff is clean on both distributions, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).**
+
+Setup:
+
+- Docker Desktop 29.5.2, linux/arm64, with the owner's limits of 4 CPUs and 6 GB; hosted runners are amd64.
+- Image `lotuspond-ci-runner:local`: Debian, Python 3.14.9, uv 0.11.16, non-root user `runner` (uid 1001). Every container ran with `--rm` and `--init`.
+- The code came from a standalone clone of each commit, mounted read-only, so the harness's `git` checks work. Pytest's `--basetemp` stayed inside the container.
+- Dependencies were hash-pinned PyPI wheels installed into a disposable volume, with the fleet harness's exported requirements prewarmed. The suites then ran offline.
+- PostgreSQL 18.6 ran in a container on an internal network, listening only on loopback. The tests joined its network namespace.
+- Cleanup was confirmed after every run. The check fails if the Docker daemon cannot be reached.
+
+Results:
+
+- Runtime suite at `1f564ce`: 706 passed, 0 failed, including the Linux-only state, journal, resolver and mounted-secrets tests. At `c19618e`: 695 passed.
+- Full backend suite at `1f564ce`: 1,150 passed, 97 subtests, 0 failed, 0 skipped, in 16 min 18 s. At `c19618e`: 1,150 passed, 97 subtests, 0 failed, 0 skipped, in 17 min 15 s.
+- The 8 fleet acceptance tests in `tests/fleet/test_acceptance.py` pass in both runs. Every earlier entry recorded them as Linux-only failures on macOS, so this also closes that gap for Tasks 7–9.
+- An earlier run at the checkpoint `32f8600` failed 3 of them for harness reasons, not code:
+  - the worktree's `.git` file pointed outside the mount;
+  - the offline uv cache lacked the harness's requirements.
+- The final source differs from `1f564ce` only in one comment and one sentence of the plan.
+
+**Reviews.** Both independent reviews required changes, and both approved the final content.
+
+- The specification review ran four rounds. Its main findings:
+  - child deliveries not bound to what was invoked;
+  - connection pins, secrets and data-handling limits not enforced;
+  - frozen provider interfaces unused;
+  - resolved context stored as workspace values;
+  - a fenced worker still claiming;
+  - lost claim acknowledgements stranded;
+  - wall-clock trust;
+  - untargeted child polls.
+
+  Later rounds added Minors: the renewal margin, renewal between context reads, an unreported refused child lease, persisting the fence at detection, tool cost, the agent-output code and self-recovery.
+
+- The quality review ran four rounds. Its main findings:
+  - renewal threads clashing with the single-flight control transport;
+  - a 30 s cap on every provider call;
+  - process groups not always stopped;
+  - transient failures turned into reconciliations;
+  - truthful usage on failures;
+  - zero usage after a provider was reached;
+  - nothing re-anchoring the clock;
+  - surviving provider groups after a crash.
+
+**For the owner's acknowledgement** (marked in the plan under "Conventions fixed by Task 10"):
+
+- Process model: provider children, how they are stopped, and the fence.
+- Providers and connections:
+  - the provider interfaces called inside the child;
+  - connector-pin, secret and limit enforcement;
+  - **destination enforcement deferred** to the change that installs the first real provider.
+- Model rounds: digest-only rounds and remaining limits.
+- Children: binding and targeted polls (a change to Task 9's client and service, with a test).
+- Time and leases: the server-anchored clock with drift allowance and a 10-minute anchor age; main-thread lease keeping with a 13 s margin.
+- Outcomes: the result and usage rules, and the journal phases (`finished` keeps the outcome as evidence).
+- Known limitation: an unverifiable pending delivery blocks its session's polls until it expires (at most 5 minutes).
+
+**Obligations carried to Task 12:**
+
+- Runtime routes and their runtime-side clients:
+  - the pinned records and agent declarations;
+  - fetches of the attempt's input;
+  - context reads under current source access;
+  - the targeted poll's `parent_attempt_id` body field.
+- Re-anchoring of the activity clock from the E03 supervisor's heartbeat loop.
+- One activity worker per process.
+
+## Owner-approved addition beyond E04: declining an unverifiable delivery, 2026-10-23
+
+This is not an E04 task. The owner decided "fix outside E04" for Task 10's known limitation, so it is a separate commit on the same branch. It delivers the behaviour behind the service boundary; the HTTP route `POST /activities/decline` and its changelog item are a Task 12 obligation. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Red before the change.** The new tests were run on the Task 10 commit `8f4f790`:
+
+- Backend `test_decline.py`: 3 failed, because `LeaseService.decline_activity` did not exist.
+- Runtime: 6 failed, because the client had no `decline` and the worker never declined.
+- Two guard tests passed there, as they should, since they assert that nothing is declined.
+
+**Mutations.** 13 reverted fixes, 5 in the backend and 8 in the runtime, each made their witness test fail. An unmutated control copy passed all 6 backend tests. They cover:
+
+- **Backend:** the digest check, the pending-only rule, idempotency, the per-instance allowance and the retry class.
+- **Runtime:** declining at all; declining only `command_rejected`; children; the local-state exemptions (`LocalMismatch`, `untrusted_key`); record-source refusals; the circuit breaker; its journaled count.
+
+**Green:**
+
+- Backend activity tests (`test_dispatch.py`, `test_leases.py`, `test_reconciliation.py`, `test_activity_races.py`, `test_decline.py`) on the local PostgreSQL cluster: 67 passed. They include:
+  - decline and expiry in either order ending the attempt once;
+  - a decline racing a claim with one winner;
+  - the 6-per-minute allowance.
+- Runtime activity tests on macOS with the dev-only shim: 92 passed, of which 78 were rerun after the last change. One failed: the mounted-secrets test, which is Linux-only by design.
+
+**Local Linux evidence (not hosted CI).** Same container setup as the Task 10 entry, from a standalone clone of the commit.
+
+- At the final source: runtime 717 passed.
+- At the review checkpoint just before it, which differs only in counting a decline before sending it: runtime 717 passed; full backend 1,156 passed, 97 subtests, 0 failed, 0 skipped, in 17 min 26 s, including all 8 fleet acceptance tests.
+- At the first review checkpoint: runtime 710 passed; backend 1,153 passed, 97 subtests, 0 failed.
+
+**Reviews.** The specification review approved all three rounds, each with Minors:
+
+- a stale trust set declining everything;
+- the retry class;
+- record-source refusals;
+- cross-references;
+- the wording of the narrowed limitation;
+- `invalid_request`.
+
+The quality review required changes once. Its Important finding was that a runtime broken in its own state (wrong trust, a stale identity, a wrong clock) would decline every delivery and fail its pool's work at poll rate. The fix has three layers:
+
+- local-state refusals decline nothing;
+- a journaled circuit breaker allows 3 declines in a row;
+- the backend allows 6 declines a minute per instance.
+
+After both approvals, the quality reviewer's last suggestion was applied: count a decline before sending it, so a crash never loses one. It only swaps the order of two calls, and the Linux runtime suite was run again on it.
+
+**For the owner's acknowledgement** (in the plan's "Owner-approved addition beyond E04" section):
+
+- A decline fails its attempt exactly as an expiry does (`timeout_before_dispatch`, zero usage).
+- It requires the dispatched session and the delivery's exact digest, but not the initiator's current `execute`.
+- **Trade-off:** a runtime with stale trust declines nothing, and its delivery still expires within 5 minutes.
+
+## E04 Task 11: sweeper, controls, interpreter pins and recovery fences, 2026-10-23
+
+Same branch as Tasks 7–10. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions is still refusing jobs because of the account billing problem, so the Linux results below come from local containers, not from hosted CI.
+
+**Red before implementation.** The five new Task 11 test files were run on `3682c39`, the commit before Task 11, and all five failed at collection. `lotuspond.execution` had no `sweeper`, `control`, `interpreters` or `projections` module.
+
+**Time and concurrency in the tests.**
+
+- No Task 11 test edits a deadline, lease or expiry column. Due work comes in real database time from five short-time fixtures:
+  - `waits_fast`: a 2 s timer and a 3 s external wait;
+  - `waits_deadline`: a 5 s deadline;
+  - `activity_deadline`: a 4 s deadline;
+  - `activity_backoff`: a one-hour retry back-off under a 4 s deadline;
+  - `activity_budget`: a 10 microdollar budget.
+- Race tests cover concurrent sweepers, the sweeper against the orchestrator, a pause against a claim, a signal against its wait's expiry, and concurrent runtime events. Each racing thread gets its own bounded fleet lookup, as a separate worker process would.
+
+**Mutations.** All 44 reverted fixes made their witness test fail. The worker-pin mutation at first hung rather than failed: with the startup check reverted, the worker ran until stopped. Its test now stops a wrongly started worker after 5 s, so it fails, and the harness has a 10-minute timeout reported apart from caught mutations.
+
+- **Runtime (2):** a refused renewal treated as loss, and a stop treated as a failure. Both were run in the Linux container.
+- **Backend (42):** each reverts one fix in a scratch copy and runs its witness test on the local PostgreSQL cluster. They cover:
+  - item independence and timers;
+  - the deadline pass and its back-off rule;
+  - the per-item lock timeout;
+  - the restore fence and closing an inconsistent candidate;
+  - controls under the execution lock, roles, cancellation finality, and the resume checks (deadline, budget, deployment, an equal repeat without grants);
+  - pause release and unstarted reservations charging nothing;
+  - interrupted attempts not counted, the 10 root attempts, and pause markers;
+  - renewal refused while paused, and an interrupted report kept through reconciliation;
+  - signals accepted while paused;
+  - the program never loaded before controls, the integrity fence, waits held while fenced, and the resumed state;
+  - event gaps, the gap bound, live work, and late abandoned events;
+  - reconciliation's authority;
+  - interpreter, compiler and worker pins.
+
+**Green on macOS.**
+
+- Backend `tests/execution` on the local PostgreSQL cluster (`PGTZ=UTC`) at the round 2 checkpoint: 476 passed, 1 failed. The failure was the stale budget test fixed in round 3.
+- The five Task 11 files at the final source: 37 passed, `test_control.py` 18 of 18.
+- Ruff is clean on both distributions, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).** Same container setup as the Task 10 entry: a standalone clone of the commit mounted read-only, hash-pinned PyPI wheels, and PostgreSQL 18.6 on an internal network.
+
+- Runtime suite at `cccd2cc`: 722 passed, 0 failed. The runtime is unchanged after it.
+- Full backend suite at `8b5626b`: 1,193 passed, 97 subtests, 0 failed, 0 skipped, in 24 min 56 s, including all 8 fleet acceptance tests. Cleanup was confirmed.
+- The final source differs from `8b5626b` only in this entry and one plan sentence: the owner's confirmation of the refund.
+
+**Reviews.** Both independent reviews required changes for three rounds and approved the fourth.
+
+- **Round 1** (both reviews):
+  - executions whose program could not be loaded were never fenced, and blocked cancellation and the deadline;
+  - the compiler-revision rule was missing from the registry;
+  - pause failed in-flight work and burned reservations;
+  - cancellation of claimed work always ended in reconciliation;
+  - wake-ups could outlast the deadline;
+  - the spent-reservation scan read every attempt;
+  - tests edited time columns and had no race tests;
+  - Minors: lock waits, event sources, resume checks, depths, restore candidates.
+- **Round 2:**
+  - repeated pauses pushed root ordinals into an agent's child range;
+  - any `cancelled` report counted as a free restart;
+  - never-run reservations were charged on every pause.
+- **Round 3:** one stale test, plus Minors recorded for the owner: the pause marker is never cleared, the cap counts releases of never-started work, and Task 9's never-started failures keep their reserved active time.
+
+**Owner decisions** (2026-10-23, "OK to all three, proceed"), recorded in the plan's Task 11 conventions:
+
+1. A paused read or agent starts over on resume, and spent usage stays charged.
+2. A provider stopped mid-call has unknown usage, so it needs one owner reconciliation before resume.
+3. Signals are accepted while paused, and one accepted before its wait's deadline counts.
+
+On 2026-10-24 ("OK, keep the refund"), the owner also confirmed the reservation refund. A reservation whose attempt no runtime ever claimed is released at zero once its stop is confirmed. That applies to every cancelled, unclaimed attempt the capacity step stops, not just pauses.
+
+**Also for the owner's acknowledgement** (plan, "Conventions fixed by Task 11"):
+
+- Pause now stops claimed work cooperatively, following the spec. Unstarted work is released, and its reservation is refunded (owner-confirmed above).
+- A step has at most 10 root attempts, interrupted ones included, so 10 pauses of a queued step fail it although nothing ran.
+- A pause marker counts a stop as an interruption only after a pause, and it is never cleared.
+- Programs that fail verification are fenced to `reconciliation_required`. The deadline, cancellation and pause need only the execution row.
+- Each interpreter version pins the compiler revision whose plans it interprets.
+- The sweeper waits at most 500 ms for an item's locks, and never cuts the engine's back-off short.
+- Runtime events require live work. Taking a `RuntimePrincipal` is an obligation for the first task that serves them.
+- `SweepReport` gains `retired_reservations` and `restored_attempts`.
+
+**Obligations carried to Task 12 and later:**
+
+- The single-call fleet lookup refuses concurrent callers, so the API's wiring must account for it.
+- Runtime-event routes, if any, take a `RuntimePrincipal`.
+- Task 13 measures the spent-reservation scan, and repeats the restore and kill cases with real processes.
+
+## E04 Task 12: scoped execution APIs and runtime activity routes, 2026-10-26
+
+Same branch as Tasks 7–11. This is local evidence only: not pushed, with no hosted CI and no deployment. Hosted GitHub Actions still refuses jobs because of the account billing problem, so the Linux results below come from local containers, not hosted CI.
+
+**Red before implementation.** The three new Task 12 test files (`test_routes.py`, `test_runtime_routes.py`, `test_boundary.py`) were run on `62856ec`, the commit before Task 12. All three failed at collection, because `lotuspond.execution` had no `boundary` module.
+
+**What it serves.** Every route is part of the opt-in fleet API. With it off, every route answers 404.
+
+- Customer routes under `/api/v1/projects/{project}/environments/{environment}`:
+  - executable packages and their exact content;
+  - deployments and their status;
+  - production executions: start, list, detail, events, waits, signals, control and reconciliation;
+  - context sources;
+  - execution artifacts.
+- Runtime routes:
+  - Task 9's fixed `/api/v1/runtime/activities/...` paths, including `/decline`;
+  - the worker reads under `/activity-artifacts`: the pinned records, an agent's declarations, the held attempt's input, and its pinned context.
+- The runtime client's `records`, `agent`, `input` and `context` reads, and the supervisor's re-anchoring of the activity clock.
+
+**Mutations.**
+
+- **Backend (28):** each reverts one fix or guard in a scratch copy and runs its witness test on the local PostgreSQL cluster. All were rerun at the final source. Their subjects:
+  - the request boundary: duplicated headers, the runtime session header, the declared and streamed body bounds, pages, opt-in, idempotency keys;
+  - test-only service injection and audit on start;
+  - the worker reads: digest, input and pinned context;
+  - one pooled connection per request;
+  - lock-free reads, and a write's pre-check holding no lock;
+  - the runtime pre-check before the cursor, including the session check;
+  - closed quota and outage codes, and separate read and write allowances;
+  - the replay marker in each service and in audit;
+  - serialized context registration;
+  - the oversize delivery code.
+- **Equivalent mutation (1):** checking `publish` instead of `manage` when creating a deployment. `create_deployment` reauthorizes `manage` itself, so editors still get 403.
+- **Runtime (5), run in the Linux container:**
+  - read routes missing from the transport;
+  - records trusting the answer's text;
+  - an unchecked input digest;
+  - an unclamped agent step limit;
+  - a supervisor that never re-anchors.
+- **Harness errors, caught and corrected:**
+  - one mutation was itself equivalent (`not x` became `None is x`);
+  - one left an empty `if` block, which is a collection error, not a valid kill.
+
+  Both were rewritten and are caught.
+
+**Green on macOS.**
+
+- Backend `tests/execution` on the local PostgreSQL cluster (`PGTZ=UTC`) at the round 1 fixes: 503 passed.
+- Every Task 12 file at the final source: 27 (`test_routes`, `test_runtime_routes`, `test_boundary`, `test_api_concurrency`) passed.
+- Ruff is clean on both distributions, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).** The same container setup as the Task 10 entry: a standalone clone of the commit mounted read-only, hash-pinned PyPI wheels, and PostgreSQL 18.6 on an internal network.
+
+- Runtime suite at `c9e14cc`: 727 passed, 0 failed, as the non-root `runner` user.
+- Full backend suite at `c9e14cc`: 1,219 passed, 97 subtests, 1 failed, in 28 min 54 s. That includes all 8 fleet acceptance tests, and cleanup was confirmed.
+  - The failure was in Task 11's `test_sweeper_items_are_independent_and_idempotent`: 2 due timers instead of 1. The test assumed a paused execution's 5 s deadline was still ahead at the first sweep. This run shared the machine with the runtime container and the mutation runs, so it was not.
+  - Rerun alone five times on Linux, `test_sweeper.py` passed 9 of 9 each time.
+  - The next commit removes the timing assumption from the test.
+- The final source differs from `c9e14cc` only in this entry and in the plan's list of files beyond Task 12's row.
+
+**Reviews.** Code quality required changes twice and approved round 3. The specification review approved every round, with Minors fixed or recorded.
+
+- **Round 1, quality (Important):**
+  - every request held two pooled connections, so concurrent requests could exhaust the pool;
+  - unauthenticated runtime requests queued on the installation cursor;
+  - reads locked the workspace row `FOR UPDATE`, so they serialized with writers and made the orchestrator skip the tenant.
+
+  Fixes:
+  - authorization in a route is a lock-free pre-check in the request's own session;
+  - reads are always authorized without locks;
+  - a lock-free credential and session check comes before the cursor.
+
+- **Round 1, Minors:**
+  - closed codes for quota and outage refusals;
+  - an oversize delivery got a 500;
+  - replays were audited twice;
+  - the waits page read every step instance;
+  - one allowance served both reads and writes;
+  - context registration raced its replay check;
+  - revocation's key was unused.
+
+  All fixed.
+
+- **Round 2, quality (Important):** the audit replay check searched the workspace's audit history under the service's locks. Services now mark a replay on their session instead, and nothing is looked up.
+- **Round 3:** both reviews approved. Nit: `db.info` is not transactional, so a future replay check inside a savepoint must clear the marker on rollback.
+
+**For the owner's acknowledgement** (plan, "Conventions fixed by Task 12"), including its "Open for the owner" list:
+
+- Package publication follows Task 3's rule: editors and `write` keys publish, and only owners and admins deploy.
+- A revoked knowledge source answers the runtime 503, so its agent attempt ends `unavailable`, which is retryable. The withdrawn deployment dispatches nothing new.
+- Reconciliation takes no key: it is idempotent by state.
+- `ExecutionServices` are injected only in test mode. Without them, routes that need a service answer 503, and database-only reads still answer.
+
+**Obligations carried to Tasks 13 and 14:**
+
+- Task 14's production wiring must resolve the single-call fleet lookup before the API serves real load.
+- Task 13 should measure `ArtifactStore.get`'s row lock on reads.
+- Runtime-reported events still have no route. Whichever task serves them takes a `RuntimePrincipal`.
+
+## Sweeper test made independent of machine load, 2026-10-26
+
+Test-only. Task 12's full Linux run showed `test_sweeper_items_are_independent_and_idempotent` assuming that a paused execution's 5 s deadline was still ahead at the first sweep. The test now starts that execution after the first sweep, so its deadline cannot fall due early, and the later pass still sweeps its timer while paused.
+
+- On macOS, with a 6 s stall injected before the first sweep, the reordered test passes.
+- Local Linux (not hosted CI), at this commit in the same container setup: `test_sweeper.py` was run five times and passed 9 of 9 each time. Cleanup was confirmed.
+
+## Owner-approved change: release every never-claimed reservation at zero, 2026-10-26
+
+Same branch, as its own commit after Task 12. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Owner decision** (2026-10-26, "yes, refund those too and proceed"): any attempt that was never claimed has its reservation released at zero once its end is confirmed, whether that end is a cancellation, a delivery expiry, a reservation retirement or a decline. Anything that may have run stays charged, and so does unknown usage after a mid-call stop. It is recorded in the plan as **Owner-confirmed on 2026-10-26**.
+
+**What changed.**
+
+- `LeaseService._fail_unstarted` (expiry, retirement and decline) confirms the stop and releases the reservation; it no longer settles a zero usage observation first.
+- `dispatch.close_children` releases each never-claimed child it closes. This covers a parent's result, its reconciliation, and a pause that stops it.
+- `BudgetService.release_unstarted(db, attempt_id, epoch)` also accepts failed attempts, still only with a confirmed stop and no lease row.
+- A reservation that is not `reserved` is left as it is, and so is one whose attempt has a delivery signed under another recovery epoch than the caller's current one. Such an attempt may have run after a backup, so it stays charged.
+
+**Superseded.** These historical entries describe the old charge and are not edited:
+
+- the Task 9 entry's zero usage for never-started attempts;
+- the decline entry's "zero usage";
+- the Task 11 entry's Round 3 Minor, under which Task 9's never-started failures kept their reserved active time.
+
+**Red before implementation.** The 7 new or updated tests failed against the pre-refund source (`5e1ccd1`): the expiry, retirement and decline tests, the guard test, the churn test, and two runs of the claim-and-expiry race.
+
+**Decline safeguards hold.** A decline now charges nothing, so the budget no longer slows a declining runtime. What bounds it:
+
+- the step's `max_attempts`, pinned with zero charge by `test_refunded_declines_still_end_at_the_steps_attempts`;
+- 6 declines a minute per instance, `test_a_runtime_declines_at_most_its_allowance_per_minute`;
+- the runtime's breaker after 3 declines in a row, `test_a_broken_runtime_declines_at_most_three_in_a_row` and `test_the_decline_breaker_survives_new_workers_and_restarts` (runtime unchanged; part of the 727 Linux runtime tests above);
+- released reservations still counting toward `max_steps`.
+
+**Mutations (19), all caught:** each reverts one rule in a scratch copy and runs its witness test on the local PostgreSQL cluster.
+
+- the charge kept on each ending: expiry, retirement, decline, the claim race, either order, a declined child, and children closed by a result, a reconciliation or a pause;
+- the pause release removed;
+- the guard: any attempt state, a claimed attempt, an unstopped one, cancelled only, any reservation state, and a stale epoch for a child and for a root;
+- the decline allowance removed.
+
+**Green on macOS.**
+
+- On the local cluster (`PGTZ=UTC`) at round 3: 163 passed across leases, declines, races, control, budgets, the sweeper, recovery, reconciliation, dispatch and progression.
+- The full `tests/execution` suite, run by the reviewers on their copies: 506, 508 and 510 passed at rounds 1, 2 and 3.
+- Ruff is clean, and Prettier is clean on the plan.
+
+**Local Linux evidence (not hosted CI).** Same container setup as above.
+
+- Full backend suite at `44fbcad`: 1,226 passed, 97 subtests, 0 failed, 0 skipped, in 26 min 56 s. That includes all 8 fleet acceptance tests and the reordered sweeper test, and cleanup was confirmed.
+- The final source differs from `44fbcad` only in this entry.
+- The runtime is unchanged by this commit.
+
+**Reviews.** Both independent reviews required changes for two rounds and approved round 3.
+
+- **Round 1 (both):** never-claimed children closed with their parent were still fully charged, so a pause while an agent waited on a queued tool child spent budget. `close_children` now releases them.
+- **Round 1 Minors:**
+  - the reservation-state guard and the declined child were untested;
+  - the decline tests asserted no reservations;
+  - the guard test did not isolate the stop check;
+  - the restore residual was undocumented;
+  - the owner-confirmation marker was missing.
+- **Round 2 (both):** that fix released an unfenced old-epoch child at zero when its parent was reconciled, and a pause did the same to an old-epoch root. Both may have run after a backup. `release_unstarted` now takes the caller's current epoch and keeps such a reservation charged.
+- **Round 3:** both approved. The wording Minors and a stronger assertion in the pause-restore test were applied.
+
+**Open for the owner** (plan, "Residual, open for the owner"):
+
+- An attempt restored as `reserved` with no delivery carries no epoch. It is treated as never started, so its cancellation (since 2026-10-24) or retirement (now) releases it at zero, although it may have run after the backup.
+- An old-epoch child closed by its parent's reconciliation, or an old-epoch root released by a pause, before the fence reaches it, stays charged at its reserved bound. It is recorded `cancelled` rather than `uncertain`, so it is never reconciled. This status bypass predates the change; Task 13's restore tests should cover it.
+
+## E04 Task 13: conformance tiers, installed acceptance and load, 2026-10-27
+
+Same branch as Tasks 7–12. This is local evidence only: not pushed, with no hosted CI (GitHub Actions still refuses jobs) and no deployment. Providers are synthetic throughout. The full record, with every case, deviation and finding, is [the qualification document](validation/2026-10-15-durable-execution.md).
+
+**What it adds.**
+
+- **A process harness for real processes:**
+  - the API over TLS;
+  - orchestrator and sweeper workers;
+  - installed runtimes behind a TCP proxy;
+  - file-backed test authorities kept outside the database, so a restore cannot rewind them;
+  - test-only commit fault injection.
+- **Three tiers:**
+  - tier 1: 47 cases on owned schemas;
+  - tier 2: 6 cases on owned `postgres:18.6` containers, covering immediate restart, backup and restore, and ENG-4's grants;
+  - tier 3: a load runner.
+- **Installed acceptance:** the SDK, runtime and API wheels plus a runtime wheel rebuilt from its sdist, each set in its own environment. It checks TLS, the reference workflow's counted calls, privacy, and rollback before and after six kinds of commit.
+- **Product changes, each recorded in the plan's Task 13 conventions:**
+  - the sweeper schedules attempts: nothing else did;
+  - the runtime's test-mode activity worker;
+  - the live credential across a rotation;
+  - per-attempt call counts.
+
+**Red before implementation.** Milestone A's first end-to-end case stayed `pending`: no worker ever reserved an attempt. The amendment fixed that.
+
+**Reviews.** The specification and quality reviews found three and one Critical issues, plus a number of Important ones:
+
+- **The transition fault** fired on idle commits.
+- **RESTORE-1's backup order** didn't match the plan's.
+- **Privacy** covered one sentinel class of five.
+- **Provider calls** were counted in aggregate.
+- **The rotation:** a credential rotation stranded in-flight work.
+- **Tier 3's queue age** under-reported.
+- **Several denial checks** had no positive control.
+
+Two correction rounds fixed them; both reviews then approved. Open Minors are recorded in the qualification document.
+
+**Green, local Linux:**
+
+- **Tier 1 at `16c6fea`:** 47 passed, 0 failed, 0 skipped, in 31 min 34 s (required mode). An earlier full run at `860aa97` had 5 case defects, each fixed; the qualification document lists them.
+- **Tier 2 at `16c6fea`:** 5 passed and 1 red. RESTORE-1 is red against the plan.
+- **Installed acceptance on a clean clone of `16c6fea`:** passed. Both artifact variants passed all 16 scenarios, with at most one provider call per attempt, no sentinel, and cleanup confirmed. The wheels' digests are in the qualification document.
+- **Runtime suite:** 733 passed.
+
+**Tier 3.** Two calibration runs at a quarter of the planning target: 2 environments, 2 minutes at 5 per second plus a burst. Both failed every throughput criterion. A single CPU-saturated API process holds the installation-wide scheduler cursor while it computes each admission (about 0.15 CPU-seconds each). So scheduling, claims and results queue behind it: cursor acquisition p95 8 s, and almost nothing dispatched. PostgreSQL stayed near idle. Three planning-target attempts first stopped short: two on the API's per-peer enrollment limit, and one because runtime 0.2.0 exits under load. The runner now paces enrollment and restarts runtimes, as a service manager would. The planning-target run then held one API core at 87 % for the hour and made 20 deliveries; the cursor p95 was 5.0 s. It was stopped in its waiting phase so that the owner's diagnosis could run alone. That calibration ran three API processes, none saturated, and starved the same way: cursor p95 10.3 s, 10 deliveries during load. The bound is the installation-wide cursor, not the API process: a follow-up redesign for the owner (finding 11).
+
+**Open for the owner:**
+
+- **RESTORE-1, red.** An activity claimed after a backup runs a second time after the restore. This is the consequence of the residual recorded with the refund change. Decided and fixed on 2026-10-28; see the next entry.
+- **Cursor serialization.** It sits far below the planning target (tier 3). A multi-process API does not lift it, so it is a follow-up redesign of Task 5's serialization (owner decision, 2026-10-28: diagnosed, left open).
+- **Signals refused on an open wait.** A wait listed `open` refuses its signal (403) while its execution is still `pending`.
+- **Sweeper delays.** The sweeper's scheduling now waits under the worker role's lock timeout, which can delay timers and lapses under contention.
+
+## Owner decision: hold every restored execution, 2026-10-28
+
+Same branch, as its own commit after Task 13. This is local evidence only: not pushed, with no hosted CI and no deployment.
+
+**Owner decision** (2026-10-28, "Hold all after restore"). After a restore, every non-terminal execution is held for reconciliation until the runtime journals are reconciled. No restored attempt may be delivered to a runtime under the new epoch before that. Rejected: a runtime journal-report route, an off-database dispatch record, and documenting the gap until E05. It is recorded in the plan as **Owner-confirmed on 2026-10-28**, and it fixes RESTORE-1 (qualification document, finding 12).
+
+**What changed.**
+
+- **Schema v15** (still unreleased) gains `executions.recovery_epoch`, with its range check and the partial index `execution_restored_idx`. Admission records the authority's epoch. A row from before v15 reads 0, as a row from before any restore.
+- **The hold** (`recovery.hold_restored`). The sweeper's new item, or the first orchestrator to meet the execution, holds one whose epoch is older than the authority's:
+  - every attempt of it that has not ended becomes `uncertain`, with its reservation: those the restored rows show reserved and undelivered, and those in flight under the older epoch, which the hold fences itself;
+  - a started execution becomes `reconciliation_required`;
+  - one still `pending` keeps its state and admission slot;
+  - its epoch is cleared;
+  - the events reuse existing codes, with detail `restored`.
+- **Before the hold**, scheduling, dispatch and reservation retirement skip the execution. Journal reconciliation refuses it.
+- **While held**, progression derives nothing. A cancellation or the deadline ends the execution only once nothing it started may still run. The sweeper doesn't wake a held execution for its deadline.
+- **Journal evidence.** `reconcile_activity` accepts an owner's journal evidence for a held attempt that the restored rows never delivered or reserved. Closing it can only fail it, and the execution stays held. A parent closed this way cancels its children the hold made uncertain and that were never delivered (`close_children`); they keep their uncertain liability.
+- **Release.** `POST .../reconciliation` (`reconcile_execution`) releases a held execution:
+  - an attempt the hold made uncertain, which has no delivery and no evidence, is reserved again;
+  - one delivered under the older epoch still needs its confirmed stop;
+  - the execution's epoch becomes current.
+- `SweepReport.restored_executions` and the queue depth of the same name are new.
+
+**Residuals closed.** Both restore residuals recorded with the refund change (26 October) are closed. A restored reserved attempt is never released at zero. The hold fences every old-epoch attempt in flight itself, and nothing reconciles or releases the execution before the hold. So neither a pause nor a parent's reconciliation can treat such an attempt as never started.
+
+**Still open.**
+
+- Known usage in the journal of an attempt that the restored rows never reserved is not counted, because there is no reservation to settle. This is part of the missing reconciliation route.
+- Rows from before v15 read epoch 0, so under any later epoch they are held for an owner's release. No v14 build had an execution route, so none exist outside tests.
+
+**Left to the operator.** A runtime journal names attempts, not executions. The operations guide's restore procedure (Task 14) covers an entry for an attempt the restored rows don't know.
+
+**Red before implementation.** RESTORE-1, as now written, failed against the source before this change: Task 13's tree with only the new restore case and journal helper. The restored form execution stayed `waiting` and was never held (local evidence folder, `task13/hold-red.txt`). The original red is finding 12's, `task13/restore1-red.txt`. The new unit tests need the new column, so they cannot run against the old source.
+
+**Review.** An independent specification and quality review required changes. It confirmed the central claim: no restored attempt reaches a runtime under the new epoch before its owner's release. It also confirmed the gates, the lock order, the counters and the additive schema.
+
+- **A held child that was never delivered blocked the release (Important, fixed).** An agent's parent claimed before the backup could not be closed with its own journal evidence: `close_children` refused its hold-made uncertain child. Only invented evidence for the child would have unblocked it. Now the parent's evidence cancels such a child, which keeps its liability. `test_a_held_child_never_delivered_closes_with_its_parent` failed before the fix with `conflict` (`task13/hold-review-red.txt`).
+- **The hold did not fence old-epoch attempts in flight (Important, fixed).** If the sweeper's fence item for a delivery was deferred, the hold applied first. A parent's reconciliation then closed the old-epoch child as `cancelled`, or the owner released a still-`dispatched` root. The hold now fences them itself. The pause case failed before the fix: the old-epoch delivery stayed `pending`.
+- **Minor, fixed:**
+  - an equal repeat of an existing reservation now replays before the epoch check;
+  - the sweeper no longer re-wakes a held execution for its deadline on every pass;
+  - the wording about cancellation and the deadline;
+  - the operations guide is named as Task 14's;
+  - a positive control in `test_a_restored_parent_is_reconciled_only_after_the_hold`.
+- **Minor, documented:** the uncounted usage and the v14 rows above. The v14 case has no test because no v14 build could admit an execution.
+- **Round 2:** approved. The reviewer reran its three probes, which now fail where they should. Its optional tightening is applied: the held child's shared reservation is asserted to stay `uncertain` and charged, with its stop confirmed.
+
+**Green.**
+
+- **macOS, on a disposable PostgreSQL 14 cluster (private port, UTC).**
+  - The backend execution suite before the review: 516 passed, in 15 min (`task13/hold-units.txt`).
+  - After the review's changes: 516 passed and 1 failed (`task13/hold-units-r2.txt`). The failure is `test_sweeper.py::test_no_wake_up_outlasts_the_deadline`, which is timing-bound: its execution has a 4 s deadline, and it holds no restored row. It passed in the first full run, and all 11 sweeper tests passed in each of 5 runs after it.
+  - The suite includes the new and rewritten cases in `test_recovery.py`, the v15 migration and the budget tests.
+- **Local Linux, tier 2, run alone.** RESTORE-1 to RESTORE-3: 3 passed in each of three runs in a row, 67 s each (`task13/hold-green-r3-1.txt` to `-3.txt`).
+  - **The first green attempt** showed the case itself was wrong (`task13/hold-green-r1.txt`). The queued read had still been `pending` at the backup, so it is held as `pending`. The case now asserts the hold itself.
+  - **The case's setup was fragile.** The hand-delivered read's delivery expires after its 2 s dispatch timeout. Twice the sweeper retired it before the backup, and its retry ran on runtime-a, failing the setup's check (`task13/hold-red-concurrent-invalid.txt`, `task13/hold-green-r2.txt`). The case now stops the sweeper from that read's reservation until the backup. It asserts that the claimed read ran exactly once.
+  - **The red above** was rerun with this final case, and still fails where it should (`task13/hold-red.txt`).
+- **Checks.** The schema export check passes, and Ruff is clean on every changed file.
+- **Final runs.** Task 14's final runs repeat tier 1, tier 2 and the full backend suite at the final head.
+
+## E04 Task 14: packaging, CI jobs, operator documentation and final review, 2026-10-27
+
+Same branch. This is local evidence only: not pushed, with no hosted CI (GitHub Actions still refuses jobs) and no deployment.
+
+**What it adds.**
+
+- **`execution-worker`.** It is the API image's explicit worker command, a `[project.scripts]` entry: `execution-worker --role orchestrator|sweeper`. There is no separate engine image or server, and importing the API starts no worker. With a complete configuration it still refuses to start (`engine_unavailable`), because no qualified production provider ships.
+- **CI:**
+  - a `conformance` job, tier 1 plus installed acceptance, required, with a 90-minute hang bound from the measured 38 minutes;
+  - a `disruptive` job, tier 2 with its own clusters, 20 minutes, exporting `execution-report.json`;
+  - a manual `load` job for tier 3.
+  - The broad PostgreSQL suite leaves the conformance tiers out by name, so nothing hides as a skip.
+  - The validate job checks the packaging against the built image, and asserts API 0.3.0 next to SDK 0.3.0 and runtime 0.2.0.
+- **`scripts/checks/test_execution_packaging.py`:**
+  - the image ships no engine client or server, and no Temporal;
+  - the worker refuses to start without a role or a configuration;
+  - a configured but unqualified engine refuses, and fixture providers cannot be selected outside test mode;
+  - every required scenario and cleanup receipt is required (`missing_required_evidence`).
+- **Operator documentation:**
+  - `docs/operations/durable-execution.md`: topology, trust boundaries, the worker grants (measured, then completed for the paths tier 1 never ran), provisioning SQL, autovacuum, thresholds, restore, interpreter coexistence, runbooks and what remains open;
+  - `deploy/execution/execution-worker.env.example`;
+  - updates to the READMEs, the operator site, `CAPABILITIES.md`, the product rationale, and the E04 progress record.
+- **Proven grants.** Tier 2's ENG-4 now applies the operations guide's grants, read from the guide itself, to unique orchestrator and sweeper roles on its own cluster. It runs both workers as those roles.
+- **The carried Minor, resolved.** The standalone `check_release_binding` now ends with the final publisher-snapshot expiry check. A red test, `test_standalone_release_check_rechecks_the_snapshot_after_its_provider`, failed before the fix and passes after it, with the assurance and deployment tests: 42 passed.
+
+**Whole-branch review** (independent, over `origin/main..` the Task 14 head). It found no Critical issue and confirmed:
+
+- no Temporal code or dependency;
+- the fixed lock order on every path it traced;
+- additive migrations;
+- deny-by-default production wiring;
+- the carried Minor's fix.
+
+What it found, and what was done:
+
+- **The worker grants missed paths tier 1 never ran (Important, fixed).** These are a capacity step that stops a reserved, unclaimed attempt after a pause or a cancellation, and authorizing an execution an API key started or one in an MFA workspace.
+  - The guide now grants them.
+  - ENG-4 now runs the first two under exactly those grants: an API key's execution, then a pause and a cancellation of reserved attempts, whose reservations the capacity step frees.
+  - Applying the grant blocks to a schema at the current version also found an error the review had not: `memberships` has no `id` column, so `GRANT UPDATE (id)` failed. It is now `UPDATE (workspace_id)`.
+  - The guide's diagnostic is corrected: a missing grant logs `authority_unavailable` or `unexpected`, and stops scheduling installation-wide (recorded for the owner in the validation record).
+- **No path reconciles a lapsed or restore-fenced attempt (Important, open for the owner).**
+  - No route or runtime report carries the journal's evidence of stop and usage, so `POST /executions/{id}/reconciliation` refuses with 409.
+  - The guide's lapsed-lease runbook and restore step 5 had said otherwise. They now say what happens: the execution keeps its slot and liability. The gap is listed under Still open.
+- **One tenant's due work could hide another's from claims (Important, fixed).**
+  - A claim read only the 25 earliest due candidates. A workspace held `FOR UPDATE`, even by another orchestrator advancing one of its executions, skipped all of them.
+  - A claim now reads past each skipped workspace and execution, for at most 4 rounds.
+  - `test_a_locked_tenant_filling_the_candidate_window_hides_no_other_tenant` failed before the fix. All 19 orchestrator tests pass after it.
+- **Minor, fixed:**
+  - **Sweeper lock timeout.** A sweep item's 500 ms lock bound could raise an operator's lower lock timeout. It now only lowers it. `test_a_sweep_item_only_ever_lowers_the_worker_lock_timeout` failed for 200 ms before the fix. All 14 sweeper tests pass after it.
+  - **API version.** The API reported 0.2.0 in its OpenAPI document and `/api/v1/health`, and labelled E04's two changelog items 0.2.0. All now say 0.3.0, the distribution's version.
+  - **Worker healthcheck.** Worker containers inherit the image's API healthcheck, so the guide and the env example now pass `--no-healthcheck`.
+  - **Load job trigger.** Tier 3's `load` job runs only on a manual dispatch that sets its `load` input, never on a re-run. The packaging test asserts this.
+  - **Wording.** Wait retention is the orchestrator's capacity step, not the sweeper's, and the shutdown bound is above 0.
+- **Agreed with the recorded owner items,** with two notes. RESTORE-1 kept the required `disruptive` job red by design until the owner decided; the owner has since chosen to hold every restored execution (28 October), and RESTORE-1 is green with it. The cursor finding is at least as severe as recorded; the owner's diagnosis then showed the cursor itself, not the API process, is the bound.
+
+Those unit runs used a disposable PostgreSQL 14 cluster on this Mac (private port, UTC), removed afterwards. The final Linux runs below are on PostgreSQL 18.6.
+
+**Red before implementation.** `test_execution_packaging.py` failed 2 of 4 before the changes:
+
+- `execution-worker` was not installed;
+- `verify_report` accepted a report whose journey reported unconfirmed cleanup. That was a real gap in the verifier, now fixed.
+
+**Final runs, local Linux** (not hosted CI). These ran at `0ca6ef0`, on a clean standalone clone. Each `ci.yml` job ran alone, one after another, in the local runner image, through `e04-evidence/ci-local.py`: a non-root `runner` user, `--init`, and the job's PostgreSQL 18.6 service on a private loopback port mapped to its 5432. The final source differs from `0ca6ef0` only in documents, and in the stall evidence that one tier 2 case now records.
+
+- **`validate`:** every step passed, in 53 min.
+  - `npm run check`, in 20 min. That includes the SQLite Python suite (1,097 passed; its 195 PostgreSQL-only cases skip there by design, and run in the required suite below), the SDK suite (1,514) and the runtime suite (733).
+  - **The required PostgreSQL suite**, with installed fleet acceptance and the supervised runner: 1,238 passed, 97 subtests, 0 failed, 0 skipped, in 31 min.
+  - The API image build and its metadata check; the packaging tests against the built image (4 passed); schema parity; and the strict docs build.
+  - The first attempt stopped before any test ran, because of the local driver, not the code. The driver had run the PostgreSQL service on the host network at the private port. So the workflow's identity check, `docker exec … psql` on the default socket, could not reach the database. The driver now maps the private port to the service's 5432, as GitHub does.
+- **`conformance`** (tier 1 and installed acceptance, required mode): 48 passed, 0 failed, 0 skipped, in 41 min.
+- **`disruptive`** (tier 2, required): 6 passed, in 2 min 11 s.
+  - The first run had 5 passed and 1 failed: the form wait across an immediate restart stalled once. That is qualification finding 24, open, with its cause not established.
+  - Every other run of the case passed: one before the failure, and 36 after it. Those were the full tier 2 rerun, 5 isolated runs, then 25 isolated runs and 5 more full tier 2 runs.
+- **`sdk` and `runtime`**, on Python 3.13 and on 3.14: 1,514 passed (68 subtests) and 733 passed on each.
+- **ENG-4.** Before these runs, tier 2 at `dc1a18f` found ENG-4's extension failing for the case's own reason: a restarted runtime waits out its old session lease (finding 18). The case now resumes onto a freshly enrolled runtime.
+- **Distributions** built from `0ca6ef0`, for reference (SHA-256). The tests build their own:
+  - `lotuspond_api-0.3.0-py3-none-any.whl`: `172b9dba881a1ec00239f43383cf708f6fbec5563d6203730611751c6a99982f`
+  - `lotuspond_api-0.3.0.tar.gz`: `f3aa51dd63da478f221887cf763a2f91bc39cef872acb5e360b1e99f6f8c1e7a`
+  - `lotuspond_runtime-0.2.0-py3-none-any.whl`: `0734b76468784b1db8f54556e6a3cbfa5f49263d4a811347ebcea99774175803`
+  - `lotuspond_runtime-0.2.0.tar.gz`: `b415743d94d906626ab2657e1774b01c997334dd7044543bac6e9371c64201ce`
+  - `lotuspond_sdk-0.3.0-py3-none-any.whl`: `351ae89eceeb04f908b2d2aaba153f93b0d78a82081992058dd1c1a765980a98`
+  - `lotuspond_sdk-0.3.0.tar.gz`: `975269ee11a8973a5f217edd5742fedbf89f80dfa3058d4168b8c7d66ac94ed0`
+- **Open for the owner from these runs:** finding 24.
+
+**Not done:**
+
+- **Hosted CI** at the exact final head: GitHub Actions refuses jobs.
+- **Merge into `main`:** not requested. On the owner's approval (28 October) the branch was pushed and opened as draft PR #17. `main` was then merged into the branch, and the jobs rerun (next section).
+
+## Merge with `main` and reruns, 2026-10-28
+
+Same branch, draft PR #17. This is local Linux evidence only: GitHub Actions still refuses jobs, and nothing is deployed.
+
+**The merge.** `9cb7e1e` merges `main` at `6fd0f3a`: #11's merge, #12's Studio, #14's landing and Planned pages, and #15's UTC `serialize` fix.
+
+- **Conflicts were in two documents, and in no code:**
+  - `docs/CAPABILITIES.md`: main's table, with this branch's E04 row in place of the planned "Production business runtime" row.
+  - This file: main's 22 October time-zone section, then the E04 sections. Nothing was dropped from either side.
+- **Code merged automatically:** `app.py` (changelog items, still in date order), `models.py` and `test_assurance.py`. Main removed `database.session_scope` and `entitlements.PLAN_NAMES`; nothing here uses them.
+- **Left for the owner:** main's landing page and `web/src/lib/roadmap.ts` still mark Execution "Planned". Both trace their statuses to `docs/CAPABILITIES.md`, which now records the E04 foundation.
+
+**Runs at the merge, `9cb7e1e`.** Each `ci.yml` job ran alone in the local runner, through `e04-evidence/ci-local.py`, on a clean clone.
+
+- **`validate`:** every step passed, in 57 min.
+  - `npm run check`, including the SQLite Python suite: 1,101 passed. Its 195 PostgreSQL-only cases skip there by design.
+  - **The required PostgreSQL suite:** 1,242 passed, 102 subtests, 0 failed, 0 skipped. #15 adds 4 tests and 5 subtests.
+  - The image build and metadata check, the packaging tests (4 passed), schema parity and the strict docs build.
+- **`sdk` and `runtime`**, on Python 3.13 and 3.14: 1,514 and 733 passed. Not required, because the merge touches neither `sdk/` nor `runtime/`.
+- **`conformance`** (tier 1): 47 passed, 1 failed (REV-6).
+- **`disruptive`** (tier 2): 5 passed, 1 failed (RESTORE-1).
+
+**Diagnosis: timing in the cases, not the merge or the engine.**
+
+- **Comparison** (diagnosis only). Each failing case ran alone, for 10 rounds, alternating `9cb7e1e` and the pre-merge `335f3f1`, one run at a time. 39 of 40 passed. The one failure was in RESTORE-1's setup, at the merged head, with REV-6's signature.
+- **The signature.** A read that had to complete was claimed, its renewals answered 409 after its lease had ended, and the runtime's journal showed it ran once. The attempt was uncertain, and the execution was held for reconciliation.
+- **The cause.** The fixture `activity_read` has a 2 s step deadline, which is also its lease.
+  - REV-6's failing lease ran 1,724 ms.
+  - A forced failure with the new capture showed a lease ending at its delivery's issue time plus 2,000 ms, with 60 s of reserved active time left.
+  - On a loaded host, claim, read and report outlasted 2 s. The engine behaved as designed: a lease that reaches its deadline with no outcome leaves the attempt uncertain.
+  - This also explains Task 13's undiagnosed REV-6 intermittent, recorded in the qualification document's tier 1 runs.
+- **Ruled out:**
+  - **A stale authority or entitlement answer at renewal.** The fixture provider rereads its file on every call, and the engine caches none.
+  - **A runtime session fenced by the expiry and never re-established.** The runtime served the read, and its idle poll backs off to at most 1 s.
+  - The 403 in REV-6's log was the cancelled slow read's expected refusal. The merge changes no `execution/`, `fleet/` or runtime code.
+- **RESTORE-1's last assertion failed separately.** A repeated signal returns the same receipt with its current status. The orchestrator consumed the signal between the two calls, so the status went from `pending` to `delivered`. This was a race in `0b5cd42`'s assertion.
+
+**Fixes, all in tests.**
+
+- **`34de53a`:**
+  - `patient_read()`: `activity_read` with a 30 s step deadline.
+  - **REV-6.** Its reads use `patient_read()`. Its slow runtime stops once its part is over, so the positive control goes to the fresh runtime only. On failure, the case records each read's events, deliveries by runtime, reservations, leases, runtimes and entitlement.
+  - **RESTORE-1.** The queued read uses its own 30 s deployment. The delivered read keeps the 2 s dispatch timeout its setup relies on. The last assertion checks the same receipt id, a `pending` or `delivered` status, one inbox row and one `signal_received` event.
+  - **Alone:** RESTORE-1 passed 5 of 5 with the receipt fix, then 5 of 5 with both changes. REV-6 passed 5 of 5.
+  - **At `34de53a`:** tier 2 had 6 passed and 0 failed. Tier 1 had 47 passed and 1 failed: REG-6, which had passed before the merge and at `9cb7e1e`.
+- **`7d2e97c`, REG-6's bound:**
+  - **The failure.** REG-6 measured 3,569 rows read per step instance, against the case's own margin of 9,001 / 3.
+  - **Alone, three runs per head:** 1,000, 1,012 and 2,112 at `34de53a`; 1,169, 1,356 and 2,618 at `335f3f1`. Sequential-scan tuples ranged from 6.9 M to 18.8 M, and index fetches from 0.25 M to 16.7 M.
+  - **Why it varies.** The disposable table grows from empty to 9,002 rows in about 3 minutes, faster than autovacuum analyses it. So the plans for the same exact-path loads vary. This is not an engine or merge regression, and `_cancel`'s `LIKE` prefix query is not on this path.
+  - **The change.** The bound is now fewer than 9,001 rows per instance: the whole-expansion read the case exists to catch. Region-scoped loads cost about 1,000. The case prints sequential and index reads separately.
+  - **Decision.** The change was approved on 28 October. The plan's criterion, "within the recorded region bound", is unchanged, and qualification finding 16 records the change.
+
+**Final runs at `7d2e97c`.**
+
+- **Tier 1** (`conformance`), alone, 17:03–17:45 UTC: **48 passed, 0 failed, 0 skipped**, in 41 min 20 s.
+- **Tier 2** was not rerun, because `7d2e97c` changes only REG-6, a tier 1 case. At `34de53a` it had 6 passed and 0 failed.
+- **`validate`, `sdk` and `runtime`** stand as at the merge. The later commits change only conformance tests and documents, which are outside the required PostgreSQL suite. The repository's Python lint passes, and all 53 conformance tests collect.
+
+**Residual, not changed here.** 16 deployments in 11 conformance files use the 2 s fixture read. Many depend on the short deadline on purpose, for lapse and expiry cases. A positive path among them can fail the same way on a loaded host.
+
+**Not done:** hosted CI, and merging into `main` (not requested).

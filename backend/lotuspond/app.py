@@ -11,6 +11,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .config import Settings
 from .database import engine_for, sessions_for
+from .execution.boundary import ExecutionRequestBoundary, ExecutionServices
+from .execution.routes import router as execution_router
+from .execution.runtime_routes import router as execution_runtime_router
 from .fleet.authority import FleetDependencies, UnavailableRecoveryAuthority
 from .fleet.catalog import InstalledCatalog
 from .fleet.management_routes import FleetRequestBoundary
@@ -164,12 +167,17 @@ def create_app(
     engine=None,
     fleet_dependencies: FleetDependencies | None = None,
     command_dependencies=None,
+    execution_services: ExecutionServices | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     if (
-        fleet_dependencies is not None or command_dependencies is not None
+        fleet_dependencies is not None
+        or command_dependencies is not None
+        or execution_services is not None
     ) and settings.env != "test":
         raise ValueError("Fleet fixture injection requires test mode")
+    if execution_services is not None and type(execution_services) is not ExecutionServices:
+        raise ValueError("Invalid execution services")
     owned_engine = engine is None
     engine = engine if engine is not None else engine_for(settings)
     limiter = RateLimiter(settings)
@@ -190,10 +198,13 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(
-        title="Lotuspond API", version="0.2.0", lifespan=lifespan, docs_url=None, redoc_url=None
+        title="Lotuspond API", version="0.3.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
+    # Production builds no execution services yet: routes that need one refuse
+    # (`authority_unavailable`) and database-only reads still answer (Task 14 wires them).
+    app.state.execution_services = execution_services
     from .fleet.commands import (
         CommandDependencies,
         CommandService,
@@ -221,6 +232,8 @@ def create_app(
     app.state.limiter = limiter
     app.add_middleware(RequestBoundary, settings=settings)
     app.add_middleware(FleetRequestBoundary, settings=settings)
+    # Outermost, so execution paths answer with their own fixed codes first.
+    app.add_middleware(ExecutionRequestBoundary, settings=settings)
 
     @app.exception_handler(HTTPException)
     async def http_error(_, exc):
@@ -272,7 +285,7 @@ def create_app(
 
     @app.get("/api/v1/health")
     def health():
-        return {"status": "ok", "product": "Lotuspond", "version": "0.2.0"}
+        return {"status": "ok", "product": "Lotuspond", "version": "0.3.0"}
 
     @app.get("/api/v1/ready")
     def ready():
@@ -292,6 +305,20 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.3.0",
+                    "id": "durable-execution-api",
+                    "date": "2026-10-26",
+                    "title": "Scoped durable execution API",
+                    "description": "The opt-in fleet API adds production executions of admitted executable packages: package publication and exact content, deployment revisions and their activation, starting work, observed and requested state, events and waits, signals and human forms, pause, resume and cancel, owner reconciliation, context sources and artifact reads. Owners and administrators manage deployments; editors start enabled work and control their own executions; viewers read. Keys need the new execute or execution_signal scope; the evaluation run scope grants nothing here, and keys never manage deployments, submit human forms or reconcile. Production providers deny until a qualified integration is configured, while stored evidence stays readable.",
+                },
+                {
+                    "version": "0.3.0",
+                    "id": "runtime-activity-api",
+                    "date": "2026-10-26",
+                    "title": "Runtime activity routes",
+                    "description": "Enrolled runtimes poll, claim, renew and report signed read and model activities, request an agent's child activities and store values, using their runtime credential and current session only. A runtime reads only the pinned records, input and pinned context of its own work, and can decline a delivery it cannot verify, so the delivery stops heading its polls.",
+                },
                 {
                     "version": "0.2.0",
                     "id": "studio-patterns-and-drafts",
@@ -527,6 +554,8 @@ def create_app(
     app.include_router(packages_router)
     app.include_router(fleet_management_router)
     app.include_router(fleet_runtime_router)
+    app.include_router(execution_router)
+    app.include_router(execution_runtime_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)
     app.include_router(gateway_router)

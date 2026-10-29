@@ -26,10 +26,12 @@ from ..models import (
 )
 from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
-from .authorization import lock, reauthorize, record, scoped
+from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
 from .deployments import _configuration, _pool, _stored_configuration, load_deployment
 from .errors import ExecutionError, execution_service
+from .interpreters import require_interpreter
+from .orchestrator import mark_runnable
 from .publication import current_snapshot, load_publication
 
 
@@ -97,6 +99,11 @@ class AdmissionService:
         if self.policy.source_id is not None:
             raise ValueError("Admission requires workspace response policy")
         self.interpreter_id = TypeAdapter(OpaqueId).validate_python(interpreter_id, strict=True)
+        # Admission pins only a version this build registers (Task 11).
+        try:
+            require_interpreter(self.interpreter_id)
+        except ExecutionError:
+            raise ValueError("Unregistered interpreter version") from None
 
     @execution_service
     def admit_execution(
@@ -133,6 +140,7 @@ class AdmissionService:
             row = record(db, Execution, actor.scope, existing.execution_id, locked=True)
             if row.admission_digest != digest or row.deployment_revision_id != revision.id:
                 raise ExecutionError("conflict")
+            mark_replay(db)
             return execution_view(row)
         deployment = record(
             db, ExecutionDeployment, actor.scope, revision.deployment_id, locked=True
@@ -169,6 +177,7 @@ class AdmissionService:
             requested_state="running",
             reason=None,
             next_event_sequence=1,
+            recovery_epoch=recovery.epoch,  # a later restore holds it (recovery.py)
         )
         db.add(row)
         db.flush()
@@ -188,6 +197,7 @@ class AdmissionService:
             )
         )
         db.flush()
+        mark_runnable(db, row, admitted_at)
         # Later key/reservation/provider waits must not extend any authority/deadline.
         self.budgets._final(db, actor, revision, grant, tenant, recovery, row)
         self.artifacts._current_time(db, self.policy, None)

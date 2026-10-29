@@ -29,6 +29,18 @@ class ExecutionActor:
     _seal: object = field(default=None, repr=False, compare=False)
 
 
+REPLAY = "lotuspond.execution.replay"
+
+
+def mark_replay(db) -> None:
+    """This transaction answered an equal repeat; the API audits only first-time work."""
+    db.info[REPLAY] = True
+
+
+def replayed(db) -> bool:
+    return db.info.pop(REPLAY, False)
+
+
 def lock(db, query):
     return db.scalar(query.with_for_update().execution_options(populate_existing=True))
 
@@ -48,16 +60,31 @@ def record(db, model, scope, identifier, *, locked=False):
     return row
 
 
+def _read(db, query):
+    return db.scalar(query.execution_options(populate_existing=True))
+
+
 @execution_service
 def authorize_execution(
-    db: Session, principal: Principal, scope: Scope, operation: str
+    db: Session, principal: Principal, scope: Scope, operation: str, *, locked=None
 ) -> ExecutionActor:
+    """Current authority for one operation, with the same rules locked or not.
+
+    Writes lock the account rows, so a revocation cannot commit between the check
+    and the write. A read fences no write, so it reads current committed rows
+    without locks and never queues behind writers or other readers (Task 12).
+    `locked=False` makes any operation such a lock-free pre-check: the API's,
+    before a service reauthorizes under its own lock order.
+    """
+    if locked is None:
+        locked = operation != "read"
+    get = lock if locked else _read
     if type(principal) is not Principal or operation not in OPERATIONS:
         raise ExecutionError("forbidden")
     scope = Scope.model_validate(scope)
     if principal.workspace_id != scope.workspace_id:
         raise ExecutionError("forbidden")
-    workspace = lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+    workspace = get(db, select(Workspace).where(Workspace.id == scope.workspace_id))
     if workspace is None or workspace.status != "active":
         raise ExecutionError("forbidden")
     project = db.scalar(
@@ -88,11 +115,11 @@ def authorize_execution(
         if principal.actor_id != principal.user_id:
             raise ExecutionError("forbidden")
         user_id = principal.user_id
-    user = lock(db, select(User).where(User.id == user_id))
+    user = get(db, select(User).where(User.id == user_id))
     if key is not None:
         # Account lifecycle changes lock User before revoking attributed keys.
         # The unlocked creator hint grants nothing; bind it again after both locks.
-        key = lock(
+        key = get(
             db,
             select(ApiKey).where(
                 ApiKey.workspace_id == scope.workspace_id, ApiKey.id == principal.actor_id
@@ -100,7 +127,7 @@ def authorize_execution(
         )
         if key is None or key.created_by_user_id != user_id:
             raise ExecutionError("forbidden")
-    member = lock(
+    member = get(
         db,
         select(Membership).where(
             Membership.workspace_id == scope.workspace_id, Membership.user_id == user_id

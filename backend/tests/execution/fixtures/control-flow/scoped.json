@@ -1,0 +1,227 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "ref",
+   "pointer": "",
+   "source": {
+    "id": "each",
+    "kind": "step"
+   }
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "items": {
+     "kind": "integer"
+    },
+    "kind": "array",
+    "max_items": 5
+   }
+  },
+  "steps": [
+   {
+    "id": "base",
+    "kind": "transform",
+    "mapping": {
+     "kind": "literal",
+     "schema": {
+      "kind": "integer"
+     },
+     "value": 10
+    },
+    "output_schema": {
+     "kind": "integer"
+    }
+   },
+   {
+    "body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "pick",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "kind": "integer"
+      }
+     },
+     "steps": [
+      {
+       "condition": {
+        "args": [
+         {
+          "kind": "ref",
+          "pointer": "",
+          "source": {
+           "kind": "iteration_item"
+          }
+         },
+         {
+          "kind": "literal",
+          "schema": {
+           "kind": "integer"
+          },
+          "value": 1
+         }
+        ],
+        "fn": "gt",
+        "kind": "call"
+       },
+       "else_body": {
+        "result": {
+         "kind": "ref",
+         "pointer": "",
+         "source": {
+          "id": "zero",
+          "kind": "step"
+         }
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "kind": "integer"
+         }
+        },
+        "steps": [
+         {
+          "id": "zero",
+          "kind": "transform",
+          "mapping": {
+           "kind": "literal",
+           "schema": {
+            "kind": "integer"
+           },
+           "value": 0
+          },
+          "output_schema": {
+           "kind": "integer"
+          }
+         }
+        ]
+       },
+       "id": "pick",
+       "kind": "decision",
+       "then_body": {
+        "result": {
+         "kind": "ref",
+         "pointer": "",
+         "source": {
+          "id": "plus",
+          "kind": "step"
+         }
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "kind": "integer"
+         }
+        },
+        "steps": [
+         {
+          "id": "plus",
+          "kind": "transform",
+          "mapping": {
+           "args": [
+            {
+             "kind": "ref",
+             "pointer": "",
+             "source": {
+              "kind": "iteration_item"
+             }
+            },
+            {
+             "kind": "ref",
+             "pointer": "",
+             "source": {
+              "id": "base",
+              "kind": "step"
+             }
+            }
+           ],
+           "fn": "add",
+           "kind": "call"
+          },
+          "output_schema": {
+           "kind": "integer"
+          }
+         }
+        ]
+       }
+      }
+     ]
+    },
+    "concurrency": 5,
+    "id": "each",
+    "input": {
+     "kind": "ref",
+     "pointer": "",
+     "source": {
+      "kind": "package_input"
+     }
+    },
+    "kind": "iteration",
+    "max_items": 5
+   }
+  ]
+ },
+ "connectors": [],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "items": {
+   "kind": "integer",
+   "max": 1000,
+   "min": 0
+  },
+  "kind": "array",
+  "max_items": 5
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [],
+ "name": "Synthetic fixture-scoped",
+ "output_schema": {
+  "items": {
+   "kind": "integer"
+  },
+  "kind": "array",
+  "max_items": 5
+ },
+ "package_id": "fixture-scoped",
+ "policies": [],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

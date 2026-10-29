@@ -34,6 +34,39 @@ _ROUTES = {
     "/credentials/cancel",
     "/commands/poll",
 }
+# Activity routes (E04): all POST, all require the runtime session.
+_ACTIVITY_ROUTES = {
+    "/activities/poll",
+    "/activities/claim",
+    "/activities/renew",
+    "/activities/children",
+    "/activities/results",
+    "/activities/decline",
+}
+_ACTIVITY_VALUE = re.compile(
+    r"/activities/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/values"
+)
+# Reads of the runtime's own work (Task 12): its delivery's records, a held agent's
+# declarations, a held attempt's input and pinned context.
+_ACTIVITY_READ = re.compile(
+    r"/activity-artifacts/(?:records|agent|"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/(?:input|context))"
+)
+# Response bounds: a delivery's two 64 KiB documents travel JSON-escaped, and a held
+# attempt's records, input and context may reach the 1 MiB artifact bound.
+MAX_RESPONSE_BYTES = 65536
+MAX_DELIVERY_RESPONSE_BYTES = 131072
+MAX_READ_RESPONSE_BYTES = 1048576
+
+
+def response_bound(route: str) -> int:
+    if route == "/activities/poll":
+        return MAX_DELIVERY_RESPONSE_BYTES
+    if _ACTIVITY_READ.fullmatch(route) is not None:
+        return MAX_READ_RESPONSE_BYTES
+    return MAX_RESPONSE_BYTES
+
+
 _DNS_PROGRAM = """import json, socket, sys
 rows = socket.getaddrinfo(sys.argv[1], int(sys.argv[2]), type=socket.SOCK_STREAM)
 print(json.dumps([(af, list(addr)) for af, kind, proto, name, addr in rows[:64]]))
@@ -209,8 +242,13 @@ class ControlTransport:
             and re.fullmatch(r"/commands/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}/claim", route)
             is not None
         )
+        activity = type(route) is str and (
+            route in _ACTIVITY_ROUTES
+            or _ACTIVITY_VALUE.fullmatch(route) is not None
+            or _ACTIVITY_READ.fullmatch(route) is not None
+        )
         if (
-            (route not in _ROUTES and not command_claim)
+            (route not in _ROUTES and not command_claim and not activity)
             or method != ("GET" if route == "/self" else "POST")
             or (route == "/self" and body is not None)
             or (route != "/self" and type(body) is not bytes)
@@ -227,6 +265,7 @@ class ControlTransport:
                 route
                 in ("/heartbeat", "/credentials/prepare", "/credentials/cancel", "/commands/poll")
                 or command_claim
+                or activity
             )
         ):
             raise FleetError("invalid_request")
@@ -295,7 +334,7 @@ class ControlTransport:
             if status != (201 if route in ("/enroll", "/session", "/credentials/prepare") else 200):
                 raise FleetError(_STATUS.get(status, "transport_failed"))
             size = headers.get(b"content-length", b"")
-            if not re.fullmatch(rb"0|[1-9][0-9]{0,5}", size) or int(size) > 65536:
+            if not re.fullmatch(rb"0|[1-9][0-9]{0,6}", size) or int(size) > response_bound(route):
                 raise FleetError("transport_failed")
             response = bytearray()
             while len(response) < int(size):

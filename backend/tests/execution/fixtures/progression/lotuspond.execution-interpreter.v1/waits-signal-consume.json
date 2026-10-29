@@ -1,0 +1,98 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "inbox_id": "s4",
+    "occurrence_path": "callback",
+    "rejected": [
+     "s1",
+     "s2",
+     "s3",
+     "s5"
+    ],
+    "type": "ConsumeSignal",
+    "wait_id": "w-callback"
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "waits-signal-consume",
+ "now_ms": 1800000000000,
+ "package": "waits",
+ "sources": [
+  "waits.policy"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": null,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "id": "a-pause",
+      "ordinal": 1,
+      "state": "succeeded",
+      "value": null
+     }
+    ],
+    "path": "pause"
+   },
+   {
+    "attempts": [],
+    "path": "callback",
+    "signals": [
+     {
+      "available_at_ms": 1799999999950,
+      "digest": "a95abc2ae593af71b0622ecb0b6e267a1fc5677c236694b24da1b6f57c5c6153",
+      "expires_at_ms": 1800000001000,
+      "id": "s1",
+      "payload": 7,
+      "signal_id": "s1"
+     },
+     {
+      "available_at_ms": 1799999999960,
+      "digest": "41395e29dd584a2d8c25035aae5fb70668ddd827807f2ddc4b4981bd197bde71",
+      "expires_at_ms": 1800000001000,
+      "id": "s2",
+      "payload": "seven",
+      "signal_id": "s2"
+     },
+     {
+      "available_at_ms": 1799999999970,
+      "digest": "596e5e0eb964b0c5689ba443f1ae5b281ed55a37ac7d1e247d2c7ff2759fd1b2",
+      "expires_at_ms": 1799999999960,
+      "id": "s3",
+      "payload": 7,
+      "signal_id": "s3"
+     },
+     {
+      "available_at_ms": 1799999999980,
+      "digest": "ee15bf27411e4811fdc84b6f2ad6faeef81932b20d87477e225a49af8ad1ec23",
+      "expires_at_ms": 1800000001000,
+      "id": "s4",
+      "payload": 9,
+      "signal_id": "s4"
+     },
+     {
+      "available_at_ms": 1799999999990,
+      "digest": "6c92f9a22df2e64be17d99eaf21a3dd169f2dd6ac87b6162332f92e6720c2581",
+      "expires_at_ms": 1800000001000,
+      "id": "s5",
+      "payload": 10,
+      "signal_id": "s5"
+     }
+    ],
+    "wait": {
+     "deadline_ms": 1800000005000,
+     "id": "w-callback",
+     "state": "open"
+    }
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

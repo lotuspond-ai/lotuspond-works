@@ -1,0 +1,105 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "ref",
+   "pointer": "",
+   "source": {
+    "id": "read",
+    "kind": "step"
+   }
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "kind": "null"
+   }
+  },
+  "steps": [
+   {
+    "connector_ref": "source",
+    "id": "read",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    },
+    "kind": "connector_read",
+    "operation": "read",
+    "retry": {
+     "backoff_seconds": 0,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable",
+      "timeout_before_dispatch"
+     ],
+     "timeout_seconds": 2
+    },
+    "target": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    }
+   }
+  ]
+ },
+ "connectors": [
+  {
+   "id": "source",
+   "ref": {
+    "kind": "connector",
+    "name": "connector-fixture",
+    "sha256": "478fde8e7f65a29046477b92f4110126d77aff896e45e5686213e47f720ce76d",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "kind": "null"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [],
+ "name": "Synthetic fixture-activity-read",
+ "output_schema": {
+  "kind": "null"
+ },
+ "package_id": "fixture-activity-read",
+ "policies": [],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

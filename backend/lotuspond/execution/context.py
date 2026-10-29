@@ -15,7 +15,7 @@ from pydantic import BeforeValidator, Field
 from ..fleet.authority import database_now_ms
 from ..models import ExecutionArtifact, ExecutionContextSource, ExecutionContextVersion, new_id
 from .artifacts import ArtifactPolicy, ArtifactStore, SourceAccess, _json
-from .authorization import reauthorize, record, scoped
+from .authorization import mark_replay, reauthorize, record, scoped
 from .contracts import Contract, array, canonical_value
 from .errors import ExecutionError, execution_service
 
@@ -212,5 +212,7 @@ class ContextSource:
         source = record(db, ExecutionContextSource, actor.scope, source_id, locked=True)
         if source.status == "deleted" and status != "deleted":
             raise ExecutionError("forbidden")
+        if source.status == status:
+            mark_replay(db)  # already so: nothing changes
         source.status = status
         db.flush()

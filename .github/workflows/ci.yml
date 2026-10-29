@@ -4,6 +4,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      load:
+        description: Also run durable execution tier 3 (about four hours)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -121,7 +126,8 @@ jobs:
           fi
           LOTUSPOND_PLATFORM_TEST_DATABASE_URL="postgresql+psycopg://lotuspond@127.0.0.1:$smoke_port/lotuspond_platform_test" \
           LOTUSPOND_FLEET_TEST_DATA_DIRECTORY=/var/lib/postgresql/18/runner-smoke \
-            npm run test:python -- --basetemp="$RUNNER_TEMP/fleet-required-pytest" -ra -vv --durations=20
+            npm run test:python -- --basetemp="$RUNNER_TEMP/fleet-required-pytest" -ra -vv --durations=20 \
+              --ignore=tests/execution/conformance --ignore=tests/execution/test_installed_acceptance.py
           LOTUSPOND_PLATFORM_TEST_DATABASE_URL="postgresql+psycopg://lotuspond@127.0.0.1:$smoke_port/lotuspond_platform_test" \
             backend/.venv/bin/python scripts/checks/runner-smoke.py \
               --expected-data-directory /var/lib/postgresql/18/runner-smoke \
@@ -155,13 +161,152 @@ jobs:
           docker run --rm --network none --entrypoint python lotuspond-api:e03-ci -c
           'import importlib.metadata as m, json, pathlib, sys;
           import lotuspond.app, lotuspond_sdk, lotuspond_runtime.protocol;
+          assert m.version("lotuspond-api") == "0.3.0";
           assert m.version("lotuspond-sdk") == "0.3.0";
-          assert m.version("lotuspond-runtime") == "0.1.0";
+          assert m.version("lotuspond-runtime") == "0.2.0";
           assert all(not json.loads(m.distribution(n).read_text("direct_url.json") or "{}").get("dir_info", {}).get("editable", False) for n in ("lotuspond-api", "lotuspond-sdk", "lotuspond-runtime"));
           assert pathlib.Path(lotuspond_sdk.__file__).is_relative_to(pathlib.Path(sys.prefix));
           assert pathlib.Path(lotuspond_runtime.__file__).is_relative_to(pathlib.Path(sys.prefix))'
+      - name: Check durable execution packaging against the built image
+        env:
+          LOTUSPOND_API_IMAGE: lotuspond-api:e03-ci
+          LOTUSPOND_REQUIRE_DURABLE_EXECUTION_TESTS: '1'
+        run: backend/.venv/bin/python -m pytest scripts/checks -q -ra
       - name: Build operator docs strictly
         run: uv run --with mkdocs==1.6.1 mkdocs build --strict --config-file docs-site/mkdocs.yml --site-dir "$RUNNER_TEMP/lotuspond-docs"
+  conformance:
+    # Durable execution tier 1 and installed acceptance (Task 13): real API, worker and
+    # runtime processes against isolated PostgreSQL. A job of its own, so the broad
+    # PostgreSQL suite keeps its bound; the timeout is a hang bound from measured runs
+    # (docs/validation/2026-10-15-durable-execution.md), not a speed target.
+    runs-on: ubuntu-latest
+    # Measured locally on 4 arm64 CPUs (2026-10-27): tier 1 38 min, installed
+    # acceptance 1.5 min. About twice that, as a hang bound.
+    timeout-minutes: 90
+    env:
+      LOTUSPOND_REQUIRE_DURABLE_EXECUTION_TESTS: '1'
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: lotuspond
+          POSTGRES_DB: lotuspond_platform_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+          PGDATA: /var/lib/postgresql/18/docker
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.11.16'
+      - run: uv sync --frozen --project backend
+      - name: Conformance tier 1 and installed acceptance, required
+        working-directory: backend
+        env:
+          LOTUSPOND_PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://lotuspond@127.0.0.1:5432/lotuspond_platform_test
+        run: >-
+          .venv/bin/python -m pytest tests/execution/conformance tests/execution/test_installed_acceptance.py
+          --ignore=tests/execution/conformance/disruptive
+          -ra -vv --durations=30 --basetemp="$RUNNER_TEMP/conformance"
+      - name: Retain durable execution reports, receipts and distributions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-execution-conformance
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/conformance/**/execution-report.json
+            ${{ runner.temp }}/conformance/**/source-manifest.json
+            ${{ runner.temp }}/conformance/**/distribution-manifest.json
+            ${{ runner.temp }}/conformance/**/outer-process-receipt.json
+            ${{ runner.temp }}/conformance/**/process-receipt.json
+            ${{ runner.temp }}/conformance/**/cleanup.json
+            ${{ runner.temp }}/conformance/**/sdk/*.whl
+            ${{ runner.temp }}/conformance/**/runtime/*.whl
+            ${{ runner.temp }}/conformance/**/runtime/*.tar.gz
+            ${{ runner.temp }}/conformance/**/rebuilt/*.whl
+            ${{ runner.temp }}/conformance/**/api/*.whl
+  disruptive:
+    # Durable execution tier 2 (Task 13): each case owns a disposable postgres:18.6
+    # container on a private loopback port, restarts it immediately, and backs it up
+    # and restores it. Never port 5432, 55439 or a development database.
+    runs-on: ubuntu-latest
+    # Measured locally (2026-10-27): 2 min, most of it container start and restore.
+    timeout-minutes: 20
+    env:
+      LOTUSPOND_REQUIRE_DURABLE_EXECUTION_TESTS: '1'
+      LOTUSPOND_DISRUPTIVE_EXECUTION_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.11.16'
+      - run: uv sync --frozen --project backend
+      - run: docker pull postgres:18.6
+      - name: Conformance tier 2, required
+        working-directory: backend
+        run: >-
+          .venv/bin/python -m pytest tests/execution/conformance/disruptive
+          -ra -vv --durations=10 --basetemp="$RUNNER_TEMP/disruptive"
+      - name: Confirm every disposable cluster is gone
+        if: always()
+        run: test -z "$(docker ps --all --quiet --filter label=com.lotuspond.conformance)"
+      - name: Retain the tier 2 report and cleanup receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-execution-disruptive
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/disruptive/execution-report.json
+            ${{ runner.temp }}/disruptive/**/cleanup.json
+  load:
+    # Durable execution tier 3 (Task 13): the planning-target workload, run by hand on
+    # recorded hardware. Never part of an ordinary push, pull request or re-run: only a
+    # manual dispatch that asks for it.
+    if: github.event_name == 'workflow_dispatch' && inputs.load
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: '0.11.16'
+      - run: uv sync --frozen --project backend
+      - run: docker pull postgres:18.6
+      - name: Planning-target load with its own disposable cluster
+        working-directory: backend
+        run: >-
+          .venv/bin/python ../scripts/checks/execution-load.py
+          --output "$RUNNER_TEMP/load" --work "$RUNNER_TEMP/load-work"
+      - name: Confirm the load cluster is gone
+        if: always()
+        run: test -z "$(docker ps --all --quiet --filter label=com.lotuspond.conformance)"
+      - name: Retain the load report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-execution-load
+          if-no-files-found: error
+          path: ${{ runner.temp }}/load/load-report.json
   sdk:
     runs-on: ubuntu-latest
     strategy:

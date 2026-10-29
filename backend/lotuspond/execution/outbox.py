@@ -1,8 +1,11 @@
-"""Internal trusted dispatcher delivery, never customer or worker authority.
+"""Leased delivery for external consumers, never customer or worker authority.
 
-Commit leases before sending. A matching engine acknowledgement is required in a
-new caller-owned transaction; exceptions must roll back. A token is only a lookup
-key: dispatcher consumers reconstruct exact scoped records before engine calls.
+The PostgreSQL engine never calls these: its orchestrator consumes start, signal
+and control rows in the transaction that applies them (ADR-0011). This two-step
+protocol remains for an external consumer or a replacement engine adapter.
+Commit leases before sending. A matching consumer acknowledgement is required in
+a new caller-owned transaction; exceptions must roll back. A token is only a
+lookup key: consumers reconstruct exact scoped records before acting on it.
 """
 
 from hashlib import sha256

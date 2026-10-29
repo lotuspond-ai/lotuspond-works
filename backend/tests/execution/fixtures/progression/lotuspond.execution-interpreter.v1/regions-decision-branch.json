@@ -1,0 +1,36 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "failure": null,
+    "node_id": "high",
+    "occurrence_path": "choose:then/high",
+    "type": "RecordPure",
+    "value": "high"
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "regions-decision-branch",
+ "now_ms": 1800000000000,
+ "package": "regions",
+ "sources": [],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": {
+   "amount": "1.005",
+   "flag": true,
+   "items": [
+    3,
+    1,
+    2
+   ]
+  },
+  "occurrences": [],
+  "region_path": "choose:then",
+  "requested_state": "running"
+ }
+}

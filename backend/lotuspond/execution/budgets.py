@@ -17,16 +17,18 @@ from lotuspond_sdk.activity import UsageObservation
 from lotuspond_sdk.executable import validate_executable_package
 from lotuspond_sdk.executable.package import ArtifactRef
 from pydantic import TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import func, literal, select
 
 from ..fleet.authority import RecoverySnapshot, database_now_ms
 from ..models import (
     ExecutableDependency,
     ExecutablePublication,
     Execution,
+    ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionCapacity,
     ExecutionDeploymentRevision,
+    ExecutionLease,
     ExecutionReconciliationObservation,
     ExecutionRequest,
     ExecutionSchedulerCursor,
@@ -40,9 +42,11 @@ from .contracts import Contract, DeploymentConfig, canonical_value
 from .deployments import _body_steps, _configuration, _pool, _stored_configuration, load_deployment
 from .entitlement import EntitlementGrant, PolicyGrant
 from .errors import ExecutionError, execution_service
+from .program import ProgramError, program_from, resolve_occurrence
 from .publication import _Lookup, current_snapshot, load_publication
 
 MAX_SAFE = 9007199254740991
+SHARED = "capacity.shared:"
 
 
 class BudgetDemand(Contract):
@@ -79,6 +83,8 @@ def active_liability(row, now_ms):
 
 
 def liability(row, field, now_ms):
+    if row.state == "released":
+        return 0  # stopped before any claim: nothing ran, so nothing is charged
     if field == "active_ms":
         return active_liability(row, now_ms)
     observed = getattr(row, "observed_" + field)
@@ -301,17 +307,19 @@ class BudgetService:
         db.flush()
 
     def _dependency(self, step, packages, catalog, parent):
-        matches = [
-            (source, node)
-            for source in packages
-            for node in steps(source)
-            if node["id"] == step.node_id
-        ]
-        # Ambiguous occurrence linkage is refused until the interpreter supplies
-        # unambiguous nodes; an arbitrary caller ID cannot select a cheap model.
-        if len(matches) != 1:
+        # The exact persisted occurrence selects the node (Task 8 resolver); an
+        # arbitrary caller ID or a same-named node elsewhere cannot select a model.
+        try:
+            program = program_from(
+                validate_executable_package(packages[0]),
+                dict(enumerate([*packages[1:], *catalog.values()])),
+            )
+            ref = resolve_occurrence(program, step.occurrence_path)
+        except ProgramError:
+            raise ExecutionError("dependency_unavailable") from None
+        if ref.selector is not None or ref.step_id != step.node_id:
             raise ExecutionError("dependency_unavailable")
-        source, node = matches[0]
+        source, node = ref.package.model_dump(mode="json"), ref.step.model_dump(mode="json")
         if node["kind"] == "connector_read":
             ref = next(d["ref"] for d in source["connectors"] if d["id"] == node["connector_ref"])
         elif node["kind"] == "agent":
@@ -338,8 +346,17 @@ class BudgetService:
         return [ArtifactRef.model_validate(ref) for ref in references]
 
     @execution_service
-    def reserve_attempt(self, db, actor, attempt_id, demand):
+    def reserve_attempt(self, db, actor, attempt_id, demand, *, shared=False):
+        """Reserve one attempt under the root execution budget.
+
+        `shared` (Task 9) admits an agent's child attempt into its parent's running
+        compute: the shared budget still applies, but no compute slot is taken. A
+        `capacity.shared:` request row records this, so stopping that child returns
+        no slot. Without it a child takes its own slot like any attempt.
+        """
         demand = BudgetDemand.model_validate(demand)
+        if type(shared) is not bool:
+            raise ExecutionError("invalid_request")
         hint = record(db, ExecutionAttempt, actor.scope, attempt_id)
         execution_hint = record(db, Execution, actor.scope, hint.execution_id)
         cursor, capacity, revision, pool = self._parents(
@@ -365,8 +382,23 @@ class BudgetService:
         if existing:
             self._final(db, actor, revision, grant, tenant, recovery, execution)
             return view(existing)
+        if execution.recovery_epoch != recovery.epoch:
+            # Restored: held for an owner's release, never reserved before (recovery.py).
+            raise ExecutionError("recovery_unavailable")
         if attempt.state != "reserved":
             raise ExecutionError("conflict")
+        if shared:
+            parent = (
+                db.scalar(
+                    scoped(ExecutionUsageReservation, actor.scope).where(
+                        ExecutionUsageReservation.attempt_id == attempt.parent_attempt_id
+                    )
+                )
+                if attempt.parent_attempt_id is not None
+                else None
+            )
+            if parent is None or parent.compute_stopped_at_ms is not None:
+                raise ExecutionError("conflict")
         bounded = []
         for dependency in self._dependency(step, packages, catalog, attempt.parent_attempt_id):
             try:
@@ -425,9 +457,18 @@ class BudgetService:
                 ExecutionUsageReservation.environment_id == actor.scope.environment_id,
                 ExecutionDeploymentRevision.pool_id == revision.pool_id,
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),
+                ~select(ExecutionRequest.id)
+                .where(
+                    ExecutionRequest.workspace_id == actor.scope.workspace_id,
+                    ExecutionRequest.project_id == actor.scope.project_id,
+                    ExecutionRequest.environment_id == actor.scope.environment_id,
+                    ExecutionRequest.request_key
+                    == literal(SHARED) + ExecutionUsageReservation.attempt_id,
+                )
+                .exists(),
             )
         )
-        if (
+        if not shared and (
             cursor.active >= cursor.active_limit
             or capacity.active >= min(capacity.active_limit, limits["active_capacity"])
             or pool_active >= pool.max_concurrent_invocations
@@ -442,6 +483,17 @@ class BudgetService:
             **demand.model_dump(),
         )
         db.add(row)
+        if shared:
+            db.add(
+                ExecutionRequest(
+                    **actor.scope.model_dump(),
+                    execution_id=execution.id,
+                    request_key=SHARED + attempt.id,
+                    digest=sha256((SHARED + attempt.id).encode()).hexdigest(),
+                )
+            )
+            db.flush()
+            return view(row)
         cursor.active += 1
         capacity.active += 1
         if execution.state == "pending":
@@ -546,14 +598,59 @@ class BudgetService:
         ):
             raise ExecutionError("conflict")
         if row.compute_stopped_at_ms is None:
-            cursor = self._cursor(db)  # already held from _settlement_rows
-            if cursor.active < 1 or capacity is None or capacity.active < 1:
-                raise ExecutionError("conflict")
-            cursor.active -= 1
-            capacity.active -= 1
+            shared = db.scalar(
+                scoped(ExecutionRequest, scope).where(
+                    ExecutionRequest.request_key == SHARED + attempt_id
+                )
+            )
+            if shared is None:  # a shared child took no compute slot
+                cursor = self._cursor(db)  # already held from _settlement_rows
+                if cursor.active < 1 or capacity is None or capacity.active < 1:
+                    raise ExecutionError("conflict")
+                cursor.active -= 1
+                capacity.active -= 1
             row.compute_stopped_at_ms = observation.observed_at_ms
             row.active_ms = active_liability(row, observation.observed_at_ms)
         db.flush()
+        return view(row)
+
+    @execution_service
+    def release_unstarted(self, db, attempt_id, epoch):
+        """Free a stopped reservation whose attempt no runtime ever claimed.
+
+        Nothing ran, so zero is known, as a runtime reports an outcome no provider
+        could have caused; work that ends before it started charges nothing. That is
+        a cancellation the capacity step stops (Task 11), and a delivery expiry, a
+        reservation retirement or a decline (owner decision, 2026-10-26). Only a
+        confirmed stop of a cancelled or failed attempt without a lease is released;
+        anything claimed stays charged as observed, and an uncertain attempt (a
+        restore's "unclaimed" proves nothing) keeps its uncertain liability. Only a
+        `reserved` reservation changes: an `uncertain` or `settled` one, such as a
+        restore-fenced attempt that reconciliation failed, is left as it is. So is one
+        whose delivery was signed under another recovery epoch than the caller's
+        current `epoch`: after a restore, its "unclaimed" proves nothing, so it keeps
+        its reserved liability even when the fence has not reached it yet.
+        """
+        scope, _, _, attempt, row = self._settlement_rows(db, attempt_id)
+        claimed = db.scalar(
+            scoped(ExecutionLease, scope).where(ExecutionLease.attempt_id == attempt_id)
+        )
+        if (
+            row is None
+            or row.compute_stopped_at_ms is None
+            or attempt.state not in {"cancelled", "failed"}
+            or claimed is not None
+        ):
+            raise ExecutionError("conflict")
+        stale = db.scalar(
+            scoped(ExecutionActivityDelivery, scope).where(
+                ExecutionActivityDelivery.attempt_id == attempt_id,
+                ExecutionActivityDelivery.recovery_epoch != epoch,
+            )
+        )
+        if row.state == "reserved" and stale is None:
+            row.state = "released"
+            db.flush()
         return view(row)
 
     @execution_service
@@ -607,6 +704,10 @@ class BudgetService:
             or execution.deadline_ms <= database_now_ms(db)
         ):
             raise ExecutionError("forbidden")
+        # Carried Task 6 finding: the wait's own, shorter deadline is checked again
+        # after the provider waits in _final, not only the execution deadline.
+        if wait.deadline_ms <= database_now_ms(db):
+            raise ExecutionError("conflict")
         db.add(
             ExecutionRequest(
                 **actor.scope.model_dump(),
@@ -621,4 +722,93 @@ class BudgetService:
                 raise ExecutionError("conflict")
             capacity.pending -= 1
         execution.state = "waiting"
+        db.flush()
+
+    def _release_rows(self, db, execution_id):
+        """Cursor, workspace, capacity, then the execution: Task 5's order, no actor.
+
+        Releases only shrink counted liability, so they need no customer authority.
+        """
+        self._cursor(db)
+        execution_id = TypeAdapter(CanonicalUUID).validate_python(execution_id, strict=True)
+        hint = db.get(Execution, execution_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope = Scope(
+            workspace_id=hint.workspace_id,
+            project_id=hint.project_id,
+            environment_id=hint.environment_id,
+        )
+        from ..models import Workspace
+
+        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        capacity = lock(db, scoped(ExecutionCapacity, scope))
+        if capacity is None:
+            raise ExecutionError("capacity_unavailable")
+        execution = record(db, Execution, scope, execution_id, locked=True)
+        return scope, capacity, execution
+
+    @execution_service
+    def release_wait(self, db, wait_id):
+        """Return one retained wait slot once its wait closed; repeats are no-ops."""
+        wait_id = TypeAdapter(CanonicalUUID).validate_python(wait_id, strict=True)
+        hint = db.get(ExecutionWait, wait_id)
+        if hint is None:
+            raise ExecutionError("not_found")
+        scope, capacity, execution = self._release_rows(db, hint.execution_id)
+        record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
+        wait = record(db, ExecutionWait, scope, wait_id, locked=True)
+        keys = {
+            row.request_key: row
+            for row in db.scalars(
+                scoped(ExecutionRequest, scope).where(
+                    ExecutionRequest.request_key.in_(
+                        ("capacity.wait:" + wait.id, "capacity.wait-release:" + wait.id)
+                    )
+                )
+            )
+        }
+        if "capacity.wait:" + wait.id not in keys or "capacity.wait-release:" + wait.id in keys:
+            return
+        if wait.state == "open" or wait.execution_id != execution.id:
+            raise ExecutionError("conflict")
+        if capacity.retained_waits < 1:
+            raise ExecutionError("conflict")
+        capacity.retained_waits -= 1
+        db.add(
+            ExecutionRequest(
+                **scope.model_dump(),
+                execution_id=execution.id,
+                request_key="capacity.wait-release:" + wait.id,
+                digest=sha256(
+                    canonical_value({"wait_id": wait.id, "released": wait.state})
+                ).hexdigest(),
+            )
+        )
+        db.flush()
+
+    @execution_service
+    def release_pending(self, db, execution_id):
+        """Return the admission slot of an execution that ends without ever running.
+
+        Keyed by a request row, so a repeat changes nothing even before the caller
+        moves the execution to its terminal state in the same transaction.
+        """
+        scope, capacity, execution = self._release_rows(db, execution_id)
+        key = "capacity.pending-release:" + execution.id
+        if execution.state != "pending" or db.scalar(
+            scoped(ExecutionRequest, scope).where(ExecutionRequest.request_key == key)
+        ):
+            return
+        if capacity.pending < 1:
+            raise ExecutionError("conflict")
+        capacity.pending -= 1
+        db.add(
+            ExecutionRequest(
+                **scope.model_dump(),
+                execution_id=execution.id,
+                request_key=key,
+                digest=sha256(canonical_value({"execution_id": execution.id})).hexdigest(),
+            )
+        )
         db.flush()

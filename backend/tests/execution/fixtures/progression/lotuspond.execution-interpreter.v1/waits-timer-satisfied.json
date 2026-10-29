@@ -1,0 +1,41 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "failure": null,
+    "node_id": "pause",
+    "occurrence_path": "pause",
+    "type": "RecordPure",
+    "value": null
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "waits-timer-satisfied",
+ "now_ms": 1800000000000,
+ "package": "waits",
+ "sources": [
+  "waits.policy"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": null,
+  "occurrences": [
+   {
+    "attempts": [],
+    "path": "pause",
+    "signals": [],
+    "wait": {
+     "deadline_ms": 1800000060000,
+     "id": "w-pause",
+     "state": "satisfied"
+    }
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

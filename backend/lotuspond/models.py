@@ -1543,6 +1543,15 @@ class Execution(FleetScoped, Base):
     requested_state: Mapped[str] = mapped_column(String(20), default="running")
     reason: Mapped[str | None] = mapped_column(String(40))
     next_event_sequence: Mapped[int] = mapped_column(BigInteger, default=1)
+    # Schema v15: orchestrator work due at or after this time; NULL when none or terminal.
+    # Sorted last so a fresh schema matches the additive v15 column position.
+    runnable_at_ms: Mapped[int | None] = mapped_column(BigInteger, sort_order=1000)
+    # Schema v15: the recovery epoch its rows are current under, from admission or an
+    # owner's release; NULL while it is held after a restore (owner decision,
+    # 2026-10-28). Rows written before v15 read 0, as rows from before any restore.
+    recovery_epoch: Mapped[int | None] = mapped_column(
+        BigInteger, server_default=text("0"), sort_order=1001
+    )
     __table_args__ = fleet_scoped(
         fleet_parent("execution_deployment_revisions", "deployment_revision_id"),
         within("api_keys", "initiating_api_key_id"),
@@ -1565,6 +1574,31 @@ class Execution(FleetScoped, Base):
         UniqueConstraint(*FLEET_SCOPE, "admission_sequence"),
         Index("execution_queue_idx", *FLEET_SCOPE, "state", "admission_sequence", "id"),
         Index("execution_deadline_idx", "state", "deadline_ms", "id"),
+        CheckConstraint(
+            "runnable_at_ms BETWEEN 0 AND 9007199254740991",
+            name="executions_runnable_at_ms_check",
+        ),
+        CheckConstraint(
+            "runnable_at_ms IS NULL OR state NOT IN ('succeeded','failed','cancelled')",
+            name="executions_runnable_terminal_check",
+        ),
+        Index(
+            "execution_runnable_idx",
+            "interpreter_id",
+            "runnable_at_ms",
+            "id",
+            postgresql_where=text("runnable_at_ms IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "recovery_epoch BETWEEN 0 AND 9007199254740991",
+            name="executions_recovery_epoch_check",
+        ),
+        Index(
+            "execution_restored_idx",
+            "recovery_epoch",
+            "id",
+            postgresql_where=text("state NOT IN ('succeeded','failed','cancelled')"),
+        ),
     )
 
 
@@ -1632,6 +1666,7 @@ class ExecutionWait(FleetScoped, Base):
         CheckConstraint("state IN ('open','satisfied','expired','cancelled')"),
         *execution_safe("deadline_ms"),
         Index("execution_wait_deadline_idx", *FLEET_SCOPE, "state", "deadline_ms", "id"),
+        Index("execution_wait_due_idx", "deadline_ms", "id", postgresql_where=text("state = 'open'")),
     )
 
 
@@ -1889,6 +1924,12 @@ class ExecutionActivityDelivery(FleetMachine, Base):
         CheckConstraint("expires_at_ms > issued_at_ms AND expires_at_ms <= issued_at_ms + 300000"),
         CheckConstraint("retain_until_ms >= expires_at_ms + 30000"),
         Index("execution_delivery_retention_idx", *FLEET_SCOPE, "retain_until_ms", "id"),
+        Index(
+            "execution_delivery_due_idx",
+            "expires_at_ms",
+            "id",
+            postgresql_where=text("status = 'pending'"),
+        ),
     )
 
 
@@ -1918,6 +1959,9 @@ class ExecutionLease(FleetScoped, Base):
             "renewed_at_ms >= claimed_at_ms AND expires_at_ms > renewed_at_ms AND expires_at_ms <= renewed_at_ms + 60000"
         ),
         Index("execution_lease_expiry_idx", *FLEET_SCOPE, "status", "expires_at_ms", "id"),
+        Index(
+            "execution_lease_due_idx", "expires_at_ms", "id", postgresql_where=text("status = 'active'")
+        ),
     )
 
 

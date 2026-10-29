@@ -9,6 +9,7 @@ from sqlalchemy import inspect, select, text
 from lotuspond import initialize
 from lotuspond.config import Settings
 from lotuspond.models import EXECUTION_TABLES, Base, SchemaVersion, new_id
+from lotuspond.schema_version import SCHEMA_VERSION
 from tests.fleet.test_migration import rows, seed, signature
 from tests.fleet.test_schema import load
 
@@ -45,7 +46,8 @@ def test_v13_upgrade_preserves_all_rows(execution_database, monkeypatch):
         after_legacy_rows = {name: rows(connection)[name] for name in before_legacy_rows}
         assert after_legacy_rows == before_legacy_rows
         assert connection.scalar(select(SchemaVersion.installed_at)) == installed_at
-        assert connection.scalar(select(SchemaVersion.version)) == 14
+        # The chain continues through every later reviewed step (v15 since Task 7).
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION == 15
 
 
 def test_fresh_upgrade_signature_equal(execution_database, monkeypatch):

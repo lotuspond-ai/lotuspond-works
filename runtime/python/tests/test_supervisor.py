@@ -976,3 +976,53 @@ assert all(server == worker == 2 for _, server, worker in observed)
     )
     venv, env = installed_runtime
     artifact_run([str(venv / "bin/python"), "-I", "-c", script], tmp_path, env)
+
+
+def test_session_and_heartbeat_responses_reanchor_the_activity_clock(tmp_path):
+    from lotuspond_runtime.activity_worker import ServerClock
+
+    clock, stop = Clock(), threading.Event()
+    authority = Authority(clock, stop)
+    activity = ServerClock(monotonic=clock.monotonic, wall_ms=clock.wall)
+    anchored, original = [], activity.anchor
+
+    def anchor(server_time_ms, *, sent, received):
+        anchored.append(server_time_ms)
+        original(server_time_ms, sent=sent, received=received)
+
+    activity.anchor = anchor
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        assert supervisor(authority, store, clock, activity_clock=activity).run(stop) == 0
+        # The worker's clock is re-anchored by every session and heartbeat response,
+        # so a long provider call never outlives its anchor.
+        assert len(anchored) >= authority.calls.count("heartbeat") + 1
+        assert activity.now_ms() >= anchored[-1]
+        # A clock on another monotonic source would read other instants: refused.
+        with pytest.raises(ValueError):
+            supervisor(authority, store, clock, activity_clock=ServerClock())
+
+
+def test_the_activity_worker_follows_the_live_session_and_loses_it_on_exit(tmp_path):
+    """Task 13: the worker's own transport takes the supervisor's current credential."""
+    clock, stop = Clock(), threading.Event()
+    authority = Authority(clock, stop)
+    seen, original = [], authority.heartbeat
+
+    def heartbeat(token, session):
+        shared = runner.activity_session()
+        seen.append((shared[0].get_secret_value(), shared[1].get_secret_value(), shared[2]))
+        return original(token, session)
+
+    authority.heartbeat = heartbeat
+    with state_module().CredentialStore(private_dir(tmp_path)) as store:
+        store.save(None, credential())
+        runner = supervisor(authority, store, clock)
+        assert runner.activity_session() is None  # nothing before a session exists
+        assert runner.run(stop) == 0
+    tokens = [token for token, _, _ in seen]
+    # Rotation replaces the credential the worker uses; the session stays the same.
+    assert tokens[0] == TOKEN.get_secret_value() and tokens[-1] == P
+    assert {secret for _, secret, _ in seen} == {SESSION.get_secret_value()}
+    assert all(identity.generation == seen[0][2].generation for _, _, identity in seen)
+    assert runner.activity_session() is None  # cleared when the loop ends

@@ -1,0 +1,47 @@
+{
+ "derivation": {
+  "actions": [
+   {
+    "input": {
+     "input": null,
+     "target": null
+    },
+    "node_id": "read",
+    "occurrence_path": "read",
+    "ordinal": 2,
+    "type": "CreateAttempt"
+   }
+  ],
+  "regions": [],
+  "wake_at_ms": null
+ },
+ "interpreter": "lotuspond.execution-interpreter.v1",
+ "name": "activities-retry",
+ "now_ms": 1800000000000,
+ "package": "activities",
+ "sources": [
+  "catalog:0",
+  "catalog:1"
+ ],
+ "state": {
+  "deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000001",
+  "input": null,
+  "occurrences": [
+   {
+    "attempts": [
+     {
+      "failed_at_ms": 1799999995000,
+      "failure": "unavailable",
+      "id": "a-read",
+      "ordinal": 1,
+      "state": "failed"
+     }
+    ],
+    "path": "read"
+   }
+  ],
+  "region_path": "",
+  "requested_state": "running"
+ }
+}

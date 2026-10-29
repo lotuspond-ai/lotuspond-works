@@ -20,7 +20,7 @@ from ..security import canonical, digest
 from .authorization import lock, reauthorize
 from .contracts import Contract
 from .errors import ExecutionError, execution_service
-from .publication import DEFAULT_DEPENDENCIES, load_publication
+from .publication import DEFAULT_DEPENDENCIES, current_snapshot, load_publication
 
 
 class AssuranceEvidence(Contract):
@@ -254,3 +254,5 @@ def check_release_binding(
         dependencies,
         sources,
     )
+    # The provider waits above may outlast the publisher snapshot (carried Task 3 Minor).
+    current_snapshot(db, snapshot)

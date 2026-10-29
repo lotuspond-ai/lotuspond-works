@@ -1,0 +1,178 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "literal",
+   "schema": {
+    "kind": "null"
+   },
+   "value": null
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "kind": "null"
+   }
+  },
+  "steps": [
+   {
+    "branches": [
+     {
+      "body": {
+       "result": {
+        "kind": "literal",
+        "schema": {
+         "kind": "null"
+        },
+        "value": null
+       },
+       "result_schema": {
+        "kind": "data",
+        "schema": {
+         "kind": "null"
+        }
+       },
+       "steps": [
+        {
+         "id": "think",
+         "input": {
+          "kind": "literal",
+          "schema": {
+           "kind": "null"
+          },
+          "value": null
+         },
+         "instructions": "Synthetic typed input only",
+         "kind": "agent",
+         "limits": {
+          "max_cost_microusd": 100000,
+          "max_input_tokens": 1000,
+          "max_output_tokens": 1000,
+          "max_steps": 10,
+          "timeout_seconds": 30
+         },
+         "model_ref": "model",
+         "output_schema": {
+          "kind": "null"
+         },
+         "retry": {
+          "backoff_seconds": 0,
+          "max_attempts": 1,
+          "retry_codes": [],
+          "timeout_seconds": 30
+         }
+        }
+       ]
+      },
+      "id": "slow"
+     },
+     {
+      "body": {
+       "result": {
+        "kind": "literal",
+        "schema": {
+         "kind": "null"
+        },
+        "value": null
+       },
+       "result_schema": {
+        "kind": "data",
+        "schema": {
+         "kind": "null"
+        }
+       },
+       "steps": [
+        {
+         "assignment_policy_ref": "admins",
+         "correlation": {
+          "kind": "literal",
+          "schema": {
+           "kind": "string",
+           "max_length": 20
+          },
+          "value": "synthetic"
+         },
+         "expiry_seconds": 3600,
+         "id": "hold",
+         "kind": "external_wait",
+         "signal_schema": {
+          "kind": "integer"
+         }
+        }
+       ]
+      },
+      "id": "held"
+     }
+    ],
+    "id": "both",
+    "join": "all",
+    "kind": "parallel"
+   }
+  ]
+ },
+ "connectors": [],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "kind": "integer"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [
+  {
+   "id": "model",
+   "ref": {
+    "kind": "model",
+    "name": "model-fixture",
+    "sha256": "347a2b1dd0f77511ca12f65b30b798b1f951dde5a7a150ba856a12794a098765",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "name": "Synthetic fixture-parallel-wait",
+ "output_schema": {
+  "kind": "null"
+ },
+ "package_id": "fixture-parallel-wait",
+ "policies": [
+  {
+   "id": "admins",
+   "ref": {
+    "kind": "policy",
+    "name": "policy-fixture",
+    "sha256": "332ffa11be1a1d472955b318c15a7b958eafc6946137065b72fd7cd90600112c",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

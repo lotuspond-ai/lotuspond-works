@@ -1,0 +1,186 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "fields": [
+    {
+     "name": "signal",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "callback",
+       "kind": "step"
+      }
+     }
+    },
+    {
+     "name": "form",
+     "value": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "review",
+       "kind": "step"
+      }
+     }
+    }
+   ],
+   "kind": "object"
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "fields": [
+     {
+      "name": "signal",
+      "required": true,
+      "schema": {
+       "kind": "integer"
+      }
+     },
+     {
+      "name": "form",
+      "required": true,
+      "schema": {
+       "fields": [
+        {
+         "name": "approved",
+         "required": true,
+         "schema": {
+          "kind": "boolean"
+         }
+        }
+       ],
+       "kind": "object"
+      }
+     }
+    ],
+    "kind": "object"
+   }
+  },
+  "steps": [
+   {
+    "delay_seconds": 60,
+    "id": "pause",
+    "kind": "timer"
+   },
+   {
+    "assignment_policy_ref": "admins",
+    "correlation": {
+     "kind": "literal",
+     "schema": {
+      "kind": "string",
+      "max_length": 20
+     },
+     "value": "synthetic"
+    },
+    "expiry_seconds": 3600,
+    "id": "callback",
+    "kind": "external_wait",
+    "signal_schema": {
+     "kind": "integer"
+    }
+   },
+   {
+    "assignment_policy_ref": "admins",
+    "form_schema": {
+     "fields": [
+      {
+       "name": "approved",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "id": "review",
+    "kind": "human_task",
+    "mode": "form",
+    "timeout_seconds": 3600
+   }
+  ]
+ },
+ "connectors": [],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "kind": "null"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [],
+ "name": "Synthetic fixture-waits",
+ "output_schema": {
+  "fields": [
+   {
+    "name": "signal",
+    "required": true,
+    "schema": {
+     "kind": "integer"
+    }
+   },
+   {
+    "name": "form",
+    "required": true,
+    "schema": {
+     "fields": [
+      {
+       "name": "approved",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "package_id": "fixture-waits",
+ "policies": [
+  {
+   "id": "admins",
+   "ref": {
+    "kind": "policy",
+    "name": "policy-fixture",
+    "sha256": "332ffa11be1a1d472955b318c15a7b958eafc6946137065b72fd7cd90600112c",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

@@ -177,6 +177,7 @@ def budget_harness(harness):
                 admission_sequence=capacity.next_admission_sequence - 1,
                 deadline_ms=now + 1000000,
                 admission_digest="b" * 64,
+                recovery_epoch=1,  # admitted under the harness's epoch, as admission records
             )
             db.add(execution)
             db.flush()
@@ -734,6 +735,11 @@ def test_subworkflow_attempts_share_one_root_reservation_ledger(budget_harness):
         )
         h.revision_id = view.revision_id
         first, execution = h.add(db)
+        # Task 8: an occurrence path names the exact subworkflow call, not a bare node ID.
+        db.get(
+            ExecutionStepInstance, db.get(ExecutionAttempt, first).step_instance_id
+        ).occurrence_path = "sub:call/generate"
+        db.flush()
         h.budgets.reserve_attempt(db, h.actor, first, demand())
         h.stop(db, first, "sub-stop")
         second, _ = h.add(db, execution, ordinal=2)
@@ -897,3 +903,30 @@ def test_postgresql_timezone_preserves_running_and_stopped_liability(budget_harn
         h.stop(db, attempt, "timezone-stop")
         assert 40000 <= row.active_ms < 41000
         assert active_liability(row, database_now_ms(db) + 60000) == row.active_ms
+
+
+def test_shared_child_takes_no_slot_only_inside_running_parent(budget_harness):
+    """Task 9: an agent's child shares its running parent's compute slot."""
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        parent, execution = h.add(db)
+        h.budgets.reserve_attempt(db, h.actor, parent, demand(1))
+        child, _ = h.add(db, execution, parent, 11)
+        h.budgets.reserve_attempt(db, h.actor, child, demand(1), shared=True)
+        # One slot for both; the child's stop returns none, the parent's returns it.
+        assert db.scalar(select(ExecutionCapacity.active)) == 1
+        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 1
+        h.stop(db, parent, "parent-stop")
+        assert db.scalar(select(ExecutionCapacity.active)) == 0
+        # The pool count leaves the still-unstopped shared child out: another root
+        # fits the pool's single concurrent slot.
+        other, _ = h.add(db)
+        h.budgets.reserve_attempt(db, h.actor, other, demand(1))
+        assert db.scalar(select(ExecutionCapacity.active)) == 1
+        h.stop(db, child, "child-stop")
+        assert db.scalar(select(ExecutionCapacity.active)) == 1  # a shared stop returns none
+        late, _ = h.add(db, execution, parent, 12)
+        # A stopped parent has no compute to share: refused, nothing reserved.
+        with pytest.raises(ExecutionError, match="conflict"):
+            h.budgets.reserve_attempt(db, h.actor, late, demand(1), shared=True)
+        assert db.scalar(select(ExecutionCapacity.active)) == 1
