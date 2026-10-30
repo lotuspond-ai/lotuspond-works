@@ -127,20 +127,41 @@ def test_classify_reads_lock_modes_and_writes():
     }
 
 
-# Today's table (8aa0ff9 plus part 7): every execution and runtime path takes its
-# authority rows FOR UPDATE, and none writes one. Option C step 2 changes the
-# execution and runtime rows to FOR SHARE; authority changes keep FOR UPDATE.
-EXCLUSIVE_ACCOUNT = [
-    ("api_keys", "FOR UPDATE"),
-    ("memberships", "FOR UPDATE"),
-    ("users", "FOR UPDATE"),
-    ("workspaces", "FOR UPDATE"),
-]
-RUNTIME = [
-    ("connections", "FOR UPDATE"),
-    ("runtime_pools", "FOR UPDATE"),
-    ("workspaces", "FOR UPDATE"),
-]
+# Today's authority rows by path (step 1, 30 October 2026, at 17b40b0): every
+# execution and runtime path takes them FOR UPDATE, and none writes one. Step 2
+# shares them in execution and runtime paths; authority changes keep FOR UPDATE.
+X = "FOR UPDATE"
+ACCOUNT = {"workspaces": {X}, "users": {X}, "memberships": {X}}
+DEPLOYMENT = {
+    "runtime_pools": {X},
+    "connections": {X},
+    "execution_deployments": {X},
+    "execution_deployment_revisions": {X},
+}
+RUNTIME = {"workspaces": {X}, "runtime_pools": {X}, "connections": {X}}
+EXPECTED = {
+    "admit (route)": ACCOUNT | DEPLOYMENT,
+    "progress (orchestrator)": {"workspaces": {"FOR KEY SHARE", X}},
+    "schedule (sweeper)": ACCOUNT | DEPLOYMENT,
+    "poll (runtime route)": ACCOUNT | DEPLOYMENT,
+    "claim (runtime route)": ACCOUNT | DEPLOYMENT,
+    "store value (runtime route)": RUNTIME,
+    "renew (runtime route)": ACCOUNT | DEPLOYMENT,
+    "result (runtime route)": RUNTIME,
+    "signal (route)": ACCOUNT | DEPLOYMENT | {"api_keys": {X}},
+    "control (route)": ACCOUNT,
+    "revoke key (route)": {"api_keys": {X, "UPDATE"}},
+    "disable pool (fleet route)": {"workspaces": {X}, "runtime_pools": {X, "UPDATE"}},
+    "suspend workspace (admin route)": {"workspaces": {X, "UPDATE"}},
+}
+
+
+def authority(found):
+    by_table = defaultdict(set)
+    for table, mode in found:
+        if table in AUTHORITY:
+            by_table[table].add(mode)
+    return dict(by_table)
 
 
 def test_every_authority_lock_and_write_by_path(api):
@@ -199,11 +220,12 @@ def test_every_authority_lock_and_write_by_path(api):
         h.sweep()
         h.run()
         callback = wait_of(h, waiting, "callback")
+        signaller = key(h, ["execution_signal"])
         with audit.on("signal (route)"):
             response = h.client.post(
                 h.M + f"/executions/{waiting}/signals",
                 json={"signal_id": "callback", "wait_id": callback.id, "payload": 7},
-                headers=key(h, ["execution_signal"]),
+                headers=signaller,
             )
             assert response.status_code == 200, response.text
         response = h.client.post(
@@ -253,3 +275,5 @@ def test_every_authority_lock_and_write_by_path(api):
     for path, found in table.items():
         if not path.startswith(("revoke", "disable", "suspend")):
             assert not [row for row in found if not row[1].startswith("FOR ")], (path, found)
+    observed = {path: authority(found) for path, found in table.items()}
+    assert {path: rows for path, rows in observed.items() if rows} == EXPECTED

@@ -163,3 +163,30 @@ Step 1 (the lock audit test) goes ahead, since it changes no locks.
   - the 2 s bound for the allocators as for revocations: under sustained runtime polling in one pool, an enrollment completes within it. Tier 3 reports that wait.
 - E03's lock section carries the amendment.
 
+
+## Step 1: the lock audit (30 October 2026)
+
+`backend/tests/execution/test_authority_locks.py` runs 13 paths through the real routes and workers, and records every row each statement locks and every authority row it writes. The paths:
+- admission;
+- orchestrator progression;
+- the sweeper's scheduling and sweep;
+- runtime poll, claim, stored value, renewal and result;
+- signal and control;
+- key revocation, pool disable and workspace suspension.
+
+The authority rows are workspace, user, API key, membership, runtime pool, connection, deployment and deployment revision. Today's table is pinned in the test (`EXPECTED`). Raw output: `cursor-evidence/suites/authority-locks-step1.txt`.
+
+- **Every execution and runtime path takes its authority rows `FOR UPDATE`.**
+  - Admission, scheduling, poll, claim and renewal take all seven: workspace, user, membership, pool, connection, deployment and revision.
+  - A signal with an API key adds the key.
+  - Stored values and results take the workspace, pool and connection. They record an outcome, which grants nothing, so they skip the initiator's reauthorization.
+  - Controls take the account rows.
+- **No execution or runtime path writes an authority row.** Only the three authority changes write one, each after its own `FOR UPDATE`. This confirms the review's finding that the authority tables have no bookkeeping columns.
+- **The deployment revision row is an authority row too.** `load_deployment` locks it `FOR UPDATE` on every execution path. The earlier list missed it; step 2 shares it with the deployment row.
+- **The orchestrator takes the workspace `FOR KEY SHARE` for its claim and `FOR UPDATE` for the capacity step, in separate transactions** (`PostgresExecutionEngine._capacity`). So there is no upgrade today. After step 2 the capacity step shares the row.
+- **The exclusive rows that remain after step 2,** where queues can move:
+  - `execution_capacities` (admission, reservation, result, capacity step);
+  - the execution, attempt, step, lease, delivery and reservation rows;
+  - the runtime instance, session and credential;
+  - the cursor.
+- **Pool concurrency.** It is counted under the pool row today (Task 5's guarantee). After step 2 it is serialized by the environment's capacity row, because every slot-taking reservation locks that row `FOR UPDATE` before counting, and a pool belongs to one environment. Step 2 adds a concurrency test for it at the limit minus one.
