@@ -221,6 +221,19 @@ Found while qualifying the installation cursor redesign (finding 11, 29 October)
       - **Test-only fix (owner decision, 2026-10-29: option A).** ENG-4 keeps 12 executions and two orchestrators, with a copy of `waits_fast` whose `retained_waits` is 24, covering both waits of all 12. The case is about event order, not quota.
     - **For the owner:** whether a package's `retained_waits` should cap each execution or the whole environment, and whether the retained-wait quota should be granted in admission order.
 
+Found in the overload diagnostic (finding 11, 30 October):
+
+26. **Admission accepts work the queue cannot serve before its deadline (open for the owner; owner decision, 2026-10-30: record it, decide later; admission unchanged).** Admission refuses only when an environment's pending count reaches its limit, 1,000 by default. It does not consider how old the queue already is, or how fast it is being served.
+    - **Measured in the 32-minute diagnostic** (`diag1`, at `8aa0ff9`):
+      - The setup: 8 environments of 3 runtimes, 3 API processes, 5 admissions per second. The machine ran at about 2.1× full1's per-call CPU.
+      - Reservations kept pace with about 0.7 executions a second (two steps each), against 5 arriving.
+      - Admission kept accepting: about 9,600 in 32 minutes, p95 1.9 s, none refused. Meanwhile queue age grew by about 50 s every minute.
+      - From minute 18, nothing admitted could run before its deadline. All 3,532 executions admitted from minute 3 to minute 14 were failed with `deadline_exceeded` without running a single step, after about 16 minutes (1,000 s) in the queue. Another 228 were failed partway through.
+      - Only the 575 admitted in the first 3 minutes succeeded.
+    - **Part 7 of the [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md) does not change this.** It fails an execution as soon as its next step no longer fits before the deadline. So under sustained overload, queue age stays about one step's reserved time short of the deadline (30 s in the load world), and clients still wait about 16 minutes to be failed. What part 7 changes is that work that can still run keeps being served.
+    - **For the owner:** whether admission should refuse, with `capacity_unavailable`, work that an environment's queue cannot serve before its deadline. For example, it could bound pending by the measured service rate times the deadline, or refuse while the oldest runnable execution is older than some share of the deadline.
+    - Evidence: `~/Downloads/LotusPond-worktrees/cursor-evidence/diag1/results.md`, with its snapshots, scheduling probes and table copies.
+
 ## Runs
 
 Results are recorded below as each run completes. Every run is a local Linux container on Docker Desktop (arm64, 4 CPUs, 6 GB), PostgreSQL 18.6, Python 3.14.9. The worktree is mounted read-only. Raw output stays in the local evidence folder outside the repository.
