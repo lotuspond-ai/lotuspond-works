@@ -1,6 +1,6 @@
 # Execution throughput: options for the owner (30 October 2026)
 
-**Status: for approval. No throughput code is written until one option is approved** (owner decision, 30 October 2026: "Write up options").
+**Status: option C approved (owner decision, 30 October 2026), staged as below, with A as the fallback.** See [Owner decision](#owner-decision-30-october-2026).
 
 Context:
 - The [installation capacity amendment](2026-10-29-installation-capacity-lock.md) removed the installation-wide cursor wait (finding 11).
@@ -108,3 +108,48 @@ C is the only option that removes that cause. It helps every path, including adm
 
 **For the owner:**
 - C changes E03's runtime authentication. A changes "one sweeper per installation". Approve one, or neither.
+
+## Owner decision (30 October 2026)
+
+**Option C is approved:** authority rows `FOR SHARE` in execution and runtime paths, staged as recommended, with A as the fallback. The four steps run in order, each measured before the next:
+1. the lock audit test;
+2. the switch in every path at once, with the upgrade, order, fence and revocation-under-load tests;
+3. a calibration that records MultiXact growth and lock waits by relation;
+4. the planning target, with the busy apps closed and the Mac on AC.
+
+The owner added four conditions:
+- **The audit counts writes, not only `FOR UPDATE`.** A plain `UPDATE` of a shared row after a `FOR SHARE` of it in the same transaction is the same upgrade deadlock. Candidates are bookkeeping columns written during authentication or a call: last-used or last-seen times on API keys or runtime pools, connection health, and counters on workspace or membership rows. Each write found either moves out of the execution transaction or keeps its row exclusive, and this document records which.
+- **The revocation wait is bounded.**
+  - In the test: under sustained overlapping execution transactions that share the row, a revocation's `FOR UPDATE` is granted within **2 s**.
+  - In tier 3: a revocation probe takes the same locks as a revocation and rolls back. It reports its wait p95 and max, with a pass at **p95 ≤ 1 s and max ≤ 5 s** at the planning target.
+- **E03 is checked before `lock_pool` changes.** E03's revocation and runtime-authentication tests, and its plan's lock section, are read first. If any E03 guarantee relies on the exclusive lock beyond the revocation fence, the work stops and is reported. It is not worked around.
+- **A starts only through the owner.** That happens only if the step 2 review finds a revocation path that cannot share safely, and it is reported before anything is switched.
+
+
+## E03 check before `lock_pool` (30 October 2026): stopped, for the owner
+
+**What E03 promises.** The E03 plan ([connections and fleet](2026-10-14-connections-fleet.md), Task 3's lock section) says:
+- "Lock order is workspace → pool → connection/reference rows sorted by ID; later identity tasks add instance → session → credential."
+- "Limit/idempotency allocation shares the same parent lock."
+
+So in E03 the exclusive workspace and pool locks serialize limit counting as well as fencing revocation.
+
+**What each `lock_pool` caller relies on:**
+
+| Caller | What it does under the lock | Relies on exclusivity beyond the fence |
+| --- | --- | --- |
+| `authenticate_runtime`, on every runtime call: poll, claim, renew, result, stored value, child request | Checks statuses and expiry. Its own writes are on the instance, session and credential rows, which it locks `FOR UPDATE` per instance | No |
+| `locked_identity`, the session and self-state paths | Checks statuses and expiry | No |
+| `activate_rotation` | Checks statuses and expiry; its allocation is per instance, under the instance lock | No |
+| `issue_enrollment` (admin) | Counts outstanding issued enrollments, refuses at 100, then inserts one | **Yes:** under `FOR SHARE`, two concurrent issuances in one pool could both pass the count |
+| `exchange_enrollment` (runtime enrollment) | Counts instances against `policy.max_instances`, then inserts one | **Yes:** two concurrent exchanges could exceed `max_instances` |
+
+**No bookkeeping writes.** None of the shared rows has a bookkeeping column: no last-used or last-seen time, health or counter. The only writes to them are authority changes: workspace status, user disable, key revocation, and pool, connection and deployment status. Those keep `FOR UPDATE`. The lock audit test confirms this by statement, path by path.
+
+**`lock_pool` is unchanged.** Per the owner's condition, nothing has been worked around. For the owner:
+1. `lock_pool` takes its rows `FOR SHARE` only for the callers that rely on nothing but the fence: runtime authentication and identity reads. The two allocators keep `FOR UPDATE`, so their limits still serialize. E03's limit and revocation tests are rerun.
+   - Like revocations, the allocators then wait for share holders. The 2 s bound and the tier 3 probe cover them too.
+2. Or `lock_pool` stays exclusive and only E04's `authorize_execution` rows share. Every runtime call, polls included, then still serializes on the workspace and pool rows, so much of the expected gain is lost.
+3. Or the fallback, A.
+
+Step 1 (the lock audit test) goes ahead, since it changes no locks.
