@@ -57,7 +57,7 @@ from .contracts import Contract
 from .engine import MAX_RETRY_MS
 from .engine_contracts import SweepReport, WorkerIdentity
 from .errors import ExecutionError
-from .orchestrator import TERMINAL, clear_runnable, mark_runnable
+from .orchestrator import OUT_OF_TIME, TERMINAL, clear_runnable, mark_runnable
 from .program import ProgramError, load_program, resolve_occurrence
 from .recovery import fence_restored, hold_restored, restored
 
@@ -272,6 +272,7 @@ def _schedulable(db) -> bool:
                     Execution.requested_state == "running",
                     Execution.state.in_(("pending", "running")),
                     Execution.deadline_ms > now,  # never a head (`schedule_batch`)
+                    or_(Execution.reason.is_(None), Execution.reason != OUT_OF_TIME),
                     ~select(ExecutionUsageReservation.id)
                     .where(ExecutionUsageReservation.attempt_id == ExecutionAttempt.id)
                     .exists(),

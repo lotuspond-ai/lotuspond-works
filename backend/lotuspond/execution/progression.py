@@ -79,7 +79,7 @@ from .expressions import (
     plain,
     typed_export,
 )
-from .orchestrator import TERMINAL, clear_runnable, mark_runnable
+from .orchestrator import TERMINAL, clear_runnable, mark_runnable, past_deadline
 from .program import (
     MAX_PATH,
     Program,
@@ -1733,7 +1733,7 @@ class InterpreterV1:
         while stack and applied < remaining:
             region = stack.pop()
             now = database_now_ms(db)
-            if region == "" and now >= execution.deadline_ms:
+            if region == "" and past_deadline(execution, now):
                 # Checked before any load, so even unreadable inputs end at the deadline.
                 derivation = Derivation(actions=(CancelUndispatched(""), Fail("deadline_exceeded")))
             elif region == "" and execution.requested_state == "cancelled":
@@ -1928,7 +1928,7 @@ class InterpreterV1:
         # the execution row: a program that cannot be loaded never holds them up.
         program = (
             load_program(db, _scope(execution), execution)
-            if _progressing(execution) and database_now_ms(db) < execution.deadline_ms
+            if _progressing(execution) and not past_deadline(execution, database_now_ms(db))
             else None
         )
         transitions, wake, terminal = int(observed) + released, None, None
@@ -2127,7 +2127,7 @@ class InterpreterV1:
             return self._outcome(execution, 0)
         changes = 0
         program = None
-        if database_now_ms(db) >= execution.deadline_ms:
+        if past_deadline(execution, database_now_ms(db)):
             derivation = Derivation(actions=(CancelUndispatched(""), Fail("deadline_exceeded")))
         elif execution.requested_state == "cancelled":
             derivation = Derivation(actions=(CancelUndispatched(""), Fail("cancelled")))

@@ -754,3 +754,188 @@ def test_a_refused_head_does_not_end_the_scheduling_pass_for_other_environments(
             assert db.get(Execution, refused_execution).reason == "provider_unavailable"
     finally:
         scheduler.close()
+
+
+class Late:
+    """Demands that need more active time than `late` attempts have left (1,000 s)."""
+
+    test_only = True
+
+    def __init__(self, late=()):
+        self.late, self.seen = set(late), []
+
+    def demand(self, attempt_id):
+        self.seen.append(attempt_id)
+        return demand(1, active=2_000_000) if attempt_id in self.late else demand(1)
+
+
+def test_an_out_of_time_front_is_retired_and_the_first_head_that_fits_is_reserved(
+    budget_harness,
+):
+    """diag1: a head whose step no longer fits before its deadline is refused on every
+    turn, and blocked its environment until it expired; under overload every head did."""
+    from lotuspond.execution.sweeper import _schedulable
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import Execution, ExecutionAttempt
+
+    from .test_budgets import set_concurrency
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        first, first_execution = h.add(db)
+        second, second_execution = h.add(db)
+        current, _ = h.add(db)
+    pricing = Late({first, second})
+    scheduler = Scheduler(h.budgets, pricing, test_mode=True)
+    try:
+        with Session(h.engine) as db, db.begin():
+            scheduled = scheduler.schedule_batch(db, "test-installation")
+            assert [item.attempt_id for item in scheduled] == [current]
+        with Session(h.engine) as db:
+            for execution_id in (first_execution, second_execution):
+                row = db.get(Execution, execution_id)
+                assert (row.state, row.reason) == ("pending", "deadline_exceeded")
+                # Due now: progression fails it at once (test_sweeper), not at its deadline.
+                assert row.runnable_at_ms <= database_now_ms(db) < row.deadline_ms
+            assert db.get(ExecutionAttempt, first).state == "reserved"
+            assert not _schedulable(db)  # retired: nothing waits for a reservation
+        assert pricing.seen == [first, second, current]  # each looked up once
+        # Never a candidate again: a later turn looks up only what came after.
+        with Session(h.engine) as db, db.begin():
+            later, _ = h.add(db)
+        with Session(h.engine) as db, db.begin():
+            scheduled = scheduler.schedule_batch(db, "test-installation")
+            assert [item.attempt_id for item in scheduled] == [later]
+        assert pricing.seen[3:] == [later]
+    finally:
+        scheduler.close()
+
+
+def test_an_out_of_time_front_longer_than_a_turn_is_retired_over_passes(
+    budget_harness, monkeypatch
+):
+    """`FRONT` per transaction, one environment's rows each; a pass ends once every
+    environment has had a turn that reserved nothing, and the next one goes on."""
+    from sqlalchemy.orm import sessionmaker
+
+    from lotuspond.execution import scheduler as module
+    from lotuspond.execution.sweeper import ExecutionSweeper
+    from lotuspond.models import Execution, ExecutionUsageReservation
+
+    from .test_budgets import set_concurrency
+
+    FRONT = 3  # within the fixture deployment's pending limit
+    monkeypatch.setattr(module, "FRONT", FRONT, raising=False)  # absent before part 7
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        late = [h.add(db) for _ in range(FRONT + 2)]
+        current, _ = h.add(db)
+        epoch = db.get(Execution, late[0][1]).recovery_epoch
+        other = clone_environment(h, db)[current]  # a head that fits, elsewhere
+        environments = sorted(db.scalars(select(ExecutionCapacity.environment_id)))
+        # The out-of-time front's environment has the first turn.
+        db.scalar(select(ExecutionSchedulerCursor)).cursor = environments.index(
+            h.scope.environment_id
+        )
+
+    class Pricing(Late):
+        def demand(self, attempt_id):
+            # The clone's copies of the late attempts are late too.
+            fits = attempt_id in {current, other}
+            return demand(1) if fits else demand(1, active=2_000_000)
+
+    class Fence:
+        def current(self, db):
+            return epoch
+
+    scheduler = Scheduler(h.budgets, Pricing(), test_mode=True)
+    sweeper = ExecutionSweeper(leases=object(), recovery=Fence(), scheduler=scheduler)
+    try:
+        # Each environment's first `FRONT` are retired, with no head in reach.
+        assert sweeper._schedule(sessionmaker(h.engine), 100) == 0
+        with Session(h.engine) as db:
+            reasons = [db.get(Execution, execution).reason for _, execution in late]
+            assert reasons == ["deadline_exceeded"] * FRONT + [None, None]
+        # The rest are retired, and each environment's head is reserved.
+        assert sweeper._schedule(sessionmaker(h.engine), 100) == 2
+        with Session(h.engine) as db:
+            reserved = set(db.scalars(select(ExecutionUsageReservation.attempt_id)))
+            assert reserved == {current, other}
+            reasons = {db.get(Execution, execution).reason for _, execution in late}
+            assert reasons == {"deadline_exceeded"}
+    finally:
+        scheduler.close()
+
+
+def test_a_head_out_of_time_by_its_reservation_is_retired(budget_harness, monkeypatch):
+    """Chosen while its step still fitted, refused by `reserve_attempt` once it did not."""
+    from lotuspond.execution import scheduler as module
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import Execution
+
+    from .test_budgets import set_concurrency
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        attempt, execution_id = h.add(db)
+        execution = db.get(Execution, execution_id)
+        execution.deadline_ms = database_now_ms(db) + 30_000
+
+    class Pricing:
+        test_only = True
+
+        def demand(self, attempt_id):
+            return demand(1, active=50_000)
+
+    # The head is chosen a minute early, when 90 s were left for its 50 s step.
+    real, calls = module.database_now_ms, []
+
+    def earlier(db):
+        calls.append(None)
+        return real(db) - 60_000 if len(calls) == 1 else real(db)
+
+    monkeypatch.setattr(module, "database_now_ms", earlier)
+    scheduler = Scheduler(h.budgets, Pricing(), test_mode=True)
+    try:
+        with Session(h.engine) as db, db.begin():
+            assert scheduler.schedule_batch(db, "test-installation") == ()
+        with Session(h.engine) as db:
+            assert db.get(Execution, execution_id).reason == "deadline_exceeded"
+            assert installation_active(db) == 0
+    finally:
+        scheduler.close()
+
+
+def test_a_head_with_just_enough_time_left_is_reserved_not_retired(budget_harness):
+    """Retiring is never early failure: a step that still fits is reserved as before."""
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import Execution
+
+    from .test_budgets import set_concurrency
+
+    h = budget_harness
+    with Session(h.engine) as db, db.begin():
+        set_concurrency(db, h, 5)
+        attempt, execution_id = h.add(db)
+        db.get(Execution, execution_id).deadline_ms = database_now_ms(db) + 25_000
+
+    class Pricing:
+        test_only = True
+
+        def demand(self, attempt_id):
+            return demand(1, active=20_000)  # 20 s of 25 s left; at most 30 s here
+
+    scheduler = Scheduler(h.budgets, Pricing(), test_mode=True)
+    try:
+        with Session(h.engine) as db, db.begin():
+            scheduled = scheduler.schedule_batch(db, "test-installation")
+            assert [item.attempt_id for item in scheduled] == [attempt]
+        with Session(h.engine) as db:
+            row = db.get(Execution, execution_id)
+            assert (row.state, row.reason) == ("running", None)
+            assert installation_active(db) == 1
+    finally:
+        scheduler.close()

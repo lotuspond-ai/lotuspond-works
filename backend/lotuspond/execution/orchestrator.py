@@ -28,6 +28,15 @@ CANDIDATES = 25
 # tenant's due work filling a round cannot hide another tenant's (whole-branch
 # review, 27 October 2026). Bounded: a claim reads at most ROUNDS * CANDIDATES.
 ROUNDS = 4
+# The reason the scheduler gives an execution it retires because one of its steps no
+# longer fits before the deadline (`scheduler._out_of_time`): it can never run, so
+# progression ends it at once, as at its deadline.
+OUT_OF_TIME = "deadline_exceeded"
+
+
+def past_deadline(execution: Execution, now_ms: int) -> bool:
+    """At its deadline, or retired by the scheduler as unable to meet it."""
+    return now_ms >= execution.deadline_ms or execution.reason == OUT_OF_TIME
 
 
 def _held(db, execution):

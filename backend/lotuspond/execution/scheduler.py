@@ -1,9 +1,10 @@
 """Bounded per-environment FIFO, persistent round-robin and no dispatch authority."""
 
 import json
+from time import monotonic
 
 from lotuspond_runtime.protocol import CanonicalUUID, Scope
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from ..fleet.authority import database_now_ms
 from ..models import (
@@ -24,11 +25,35 @@ from .budgets import BudgetDemand, installation_active
 from .contracts import Contract
 from .deployments import _pool, load_deployment
 from .errors import ExecutionError, execution_service
+from .orchestrator import OUT_OF_TIME, mark_runnable
 from .publication import _Lookup
 
 
 class ScheduledAttempt(Contract):
     attempt_id: CanonicalUUID
+
+
+# Candidates read from one environment's front per transaction: the out-of-time ones
+# it can retire before reaching a head.
+FRONT = 25
+
+
+def _out_of_time(deadline_ms, demand, now) -> bool:
+    """Its step's reserved active time no longer fits before the deadline.
+
+    `reserve_attempt` refuses such a step (`budget_exceeded`) now and on every later
+    turn: time only shrinks and the attempt's demand is its own. Nothing in a program
+    proceeds past a step that never runs, so the execution can only fail.
+    """
+    remaining = deadline_ms - now
+    return remaining <= 0 or demand.active_ms > remaining
+
+
+def _retire(db, execution) -> None:
+    """Never a candidate again (`OUT_OF_TIME`), and due now: progression fails it at
+    once (`past_deadline`), as at its deadline. The caller holds its row lock."""
+    execution.reason = OUT_OF_TIME
+    mark_runnable(db, execution, database_now_ms(db))
 
 
 class Scheduler:
@@ -40,6 +65,22 @@ class Scheduler:
 
     def close(self):
         self._slot.closed = True
+
+    def _demand(self, attempt_id):
+        """The attempt's demand, or the error its lookup raised: raised again under the
+        head's locks, where its reason is written, as when it was looked up there."""
+        try:
+            return BudgetDemand.model_validate(
+                self._slot.call(
+                    self.demand_provider,
+                    "demand",
+                    (attempt_id,),
+                    self.budgets.timeout_seconds,
+                    "price_unavailable",
+                )
+            )
+        except Exception as error:
+            return error
 
     @execution_service
     def schedule_batch(self, db, installation_id, limit=1, *, epoch=None):
@@ -53,6 +94,14 @@ class Scheduler:
         and written at the leaf; a visibly full installation takes no lock at all.
         A restored execution is held until an owner releases it (`recovery.py`), and
         `reserve_attempt` refuses one whatever the caller passes.
+
+        Demands are looked up before the first lock, for up to `FRONT` candidates
+        from the front of one environment's queue. Each one whose step no longer fits
+        before its deadline (`_out_of_time`) is retired (`_retire`), under the same
+        locks and in the same order as the head: it is never a candidate again, and
+        progression fails it at once. The first that fits is the head. Under overload
+        the front is all out of time, and retiring it one turn at a time would never
+        reach a head that can still run.
         """
         if installation_id != self.budgets.installation_id or type(limit) is not int or limit != 1:
             raise ExecutionError("invalid_request")
@@ -62,8 +111,9 @@ class Scheduler:
         # IDs only, bounded to eligible environment heads. A full environment
         # cannot conceal another behind its queue. A head failure never bypasses
         # FIFO within that environment. An execution past its deadline is not a
-        # head: it can never run, and the sweeper fails it (`deadline_exceeded`), so
-        # under overload the queue serves what can still run instead of stalling.
+        # head, nor is one retired as out of time: it can never run, and it is failed
+        # (`deadline_exceeded`), so under overload the queue serves what can still run
+        # instead of stalling.
         now = database_now_ms(db)
         count = db.scalar(select(func.count()).select_from(ExecutionCapacity))
         if not count:
@@ -73,9 +123,10 @@ class Scheduler:
         ordered = list(db.scalars(query.offset(start).limit(25)))
         if len(ordered) < min(25, count):
             ordered += list(db.scalars(query.limit(min(25, count) - len(ordered))))
-        heads = []
+        heads, retired, demands = [], {}, {}
         positions = {}
         traversed = 0
+        began = monotonic()
         for offset, capacity in enumerate(ordered):
             traversed = offset + 1
             positions[capacity.environment_id] = (start + offset) % count
@@ -86,8 +137,8 @@ class Scheduler:
                 project_id=capacity.project_id,
                 environment_id=capacity.environment_id,
             )
-            candidate = db.execute(
-                select(ExecutionAttempt.id, Execution.id)
+            candidates = db.execute(
+                select(ExecutionAttempt.id, Execution.id, Execution.deadline_ms)
                 .join(Execution, Execution.id == ExecutionAttempt.execution_id)
                 .where(
                     Execution.workspace_id == scope.workspace_id,
@@ -96,6 +147,7 @@ class Scheduler:
                     Execution.requested_state == "running",
                     Execution.state.in_(("pending", "running")),
                     Execution.deadline_ms > now,
+                    or_(Execution.reason.is_(None), Execution.reason != OUT_OF_TIME),
                     *(() if epoch is None else (Execution.recovery_epoch == epoch,)),
                     ExecutionAttempt.state == "reserved",
                     ~select(ExecutionUsageReservation.id)
@@ -108,16 +160,27 @@ class Scheduler:
                     ExecutionAttempt.ordinal,
                     ExecutionAttempt.id,
                 )
-                .limit(1)
-            ).first()
-            if candidate:
-                execution = record(db, Execution, scope, candidate[1])
-                heads.append((scope, candidate[0], execution))
-            if len(heads) >= limit:
+                .limit(FRONT)
+            ).all()
+            for attempt_id, execution_id, deadline_ms in candidates:
+                if execution_id in retired:
+                    continue  # another attempt of one already retired
+                if retired and monotonic() - began > self.budgets.timeout_seconds:
+                    break  # a slow provider: retire these, look further next turn
+                demands[attempt_id] = self._demand(attempt_id)
+                if not isinstance(demands[attempt_id], Exception) and _out_of_time(
+                    deadline_ms, demands[attempt_id], now
+                ):
+                    retired[execution_id] = scope
+                    continue
+                heads.append((scope, attempt_id, record(db, Execution, scope, execution_id)))
                 break
+            if heads or retired:
+                break  # one environment's rows per transaction
         # Pre-acquire every shared parent before the first execution child. This
         # prevents cross-scope batches from inverting E03's parent order.
-        for workspace_id in sorted({scope.workspace_id for scope, _, _ in heads}):
+        scopes = [scope for scope, _, _ in heads] + list(retired.values())
+        for workspace_id in sorted({scope.workspace_id for scope in scopes}):
             lock(db, select(Workspace).where(Workspace.id == workspace_id))
         actors = {}
         eligible = []
@@ -179,8 +242,15 @@ class Scheduler:
                 blocked.add(scope.environment_id)
         # All same-kind child IDs are acquired in sorted order, regardless of
         # the round-robin traversal used to make scheduling decisions.
-        for scope, _, execution in sorted(heads, key=lambda item: item[2].id):
-            record(db, Execution, scope, execution.id, locked=True)
+        rows = dict(retired) | {execution.id: scope for scope, _, execution in heads}
+        locked = {
+            identifier: record(db, Execution, rows[identifier], identifier, locked=True)
+            for identifier in sorted(rows)
+        }
+        for identifier in retired:
+            execution = locked[identifier]
+            if execution.requested_state == "running" and execution.state in {"pending", "running"}:
+                _retire(db, execution)
         attempts = [
             (scope, record(db, ExecutionAttempt, scope, identifier))
             for scope, identifier, _ in heads
@@ -197,16 +267,10 @@ class Scheduler:
             if attempt_id not in actors or scope.environment_id in blocked:
                 execution.reason = "authority_revoked"
                 continue
+            demand = demands[attempt_id]
             try:
-                demand = BudgetDemand.model_validate(
-                    self._slot.call(
-                        self.demand_provider,
-                        "demand",
-                        (attempt_id,),
-                        self.budgets.timeout_seconds,
-                        "price_unavailable",
-                    )
-                )
+                if isinstance(demand, Exception):
+                    raise demand
                 # Written before the reservation, which ends at the leaf.
                 execution.reason = None
                 # Refusal leaves no partial reservation/counter writes.
@@ -217,6 +281,12 @@ class Scheduler:
                 if error.code == "forbidden" and execution.deadline_ms <= database_now_ms(db):
                     # Expired since the head was chosen: not a revoked authority.
                     execution.reason = "deadline_exceeded"
+                    continue
+                if error.code == "budget_exceeded" and _out_of_time(
+                    execution.deadline_ms, demand, database_now_ms(db)
+                ):
+                    # Out of time since its demand was looked up: retired like the rest.
+                    _retire(db, execution)
                     continue
                 execution.reason = {
                     "capacity_unavailable": "capacity",

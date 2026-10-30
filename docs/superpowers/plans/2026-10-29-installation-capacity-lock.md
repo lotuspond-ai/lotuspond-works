@@ -173,9 +173,34 @@ Approved changes:
 
 Not changed: one sweeper per installation, one head per transaction, and the cursor as a leaf.
 
+### 7. After the diagnostic run: a head whose step no longer fits before its deadline fails at once (approved 30 October 2026)
+
+The 32-minute diagnostic on 8aa0ff9 (`diag1`, 30 October) showed why goodput still fell to zero once queue age neared the deadline. Part 6 was not enough.
+
+1. **Each step reserves its active time.** In the load world that is 30 s (`active_ms`), against a 1,000 s deadline. `reserve_attempt` refuses a step that no longer fits before the deadline, as `budget_exceeded`.
+2. **A refused head stays the head.** It is not past its deadline, so part 6 does not skip it, and FIFO blocks its environment until it expires. The next head is in the same position.
+3. **So nothing is ever reserved again.** From minute 18 on, every head had less than 30 s left. Three scheduling probes each refused a live head that still had 0.5–1.9 s left. The capacity counters were exact throughout, and the installation never had more than 12 of 25 slots active.
+
+Approved change:
+
+- **An execution that can never run fails at once, instead of being refused on every turn.**
+  - `schedule_batch` looks up demands before its first lock, for up to `FRONT` (25) candidates from one environment's front, in FIFO order.
+  - Each one whose step no longer fits before its deadline (`_out_of_time`) is retired. Time only shrinks and an attempt's demand is its own, so it can never be reserved. No program step proceeds past a step that never runs, so the execution can only fail.
+  - A retired execution is locked with the head's rows, in the same order. It carries reason `deadline_exceeded` and is marked due now.
+  - The candidate query and the sweeper's plain pre-check never return it again.
+  - Progression treats it as at its deadline (`orchestrator.past_deadline`), so the next orchestrator pass fails it with `deadline_exceeded`, as it would at the deadline, instead of when the deadline comes. Its pending place is freed, and its client learns the outcome, at once. In production a step may reserve far more than 30 s.
+  - The first candidate that fits is the head, and is reserved with the demand already looked up.
+  - A head that runs out of time between the lookup and its reservation is retired the same way.
+- **Retiring is cheap enough to keep up.** Under overload, executions run out of time at about the arrival rate minus the service rate, about 4 a second in the diagnostic. Retiring one per transaction would never reach a head that can still run, because the sweeper makes only about 1.4 transactions a second there. Up to 25 per transaction can keep up.
+- **The scan is bounded by time.** If lookups run slow, a transaction that has already retired some stops scanning after the provider timeout, and the next turn goes on.
+
+Not changed: FIFO among executions that can still run; one environment's rows per transaction; the cursor as a leaf. A transaction that only retires still counts as one that reserved nothing, so a pass stays bounded.
+
+Not decided here: whether admission should refuse work an environment's queue cannot serve before its deadline.
+
 ## Why Task 5's guarantees still hold
 
-- **FIFO by admission sequence.** Admission sequences come from `next_admission_sequence` under the environment row lock. That lock is held to commit, so sequences commit in order within an environment. The scheduler still takes the lowest admission sequence, then execution ID, among each environment's unreserved attempts.
+- **FIFO by admission sequence.** Admission sequences come from `next_admission_sequence` under the environment row lock. That lock is held to commit, so sequences commit in order within an environment. The scheduler still takes the lowest admission sequence, then execution ID, among each environment's unreserved attempts that can still run (parts 6 and 7: not past their deadline, and not retired as out of time).
 - **Quota and capacity.**
   - Pending, retained waits and environment active are checked and changed under their environment row lock, as today.
   - Pool concurrency is checked and taken under the pool row lock, which every slot-taking reservation holds. A stop only lowers that count, so one that commits concurrently leaves the check conservative.
@@ -293,3 +318,7 @@ Existing tests that hold the cursor to make a transaction wait (the expired-enti
    - an expired execution is never a head and is labelled `deadline_exceeded`.
 
    Not chosen: reserving the first attempt at admission, more than one sweeper, or accepting the measured ceiling.
+5. **Part 7: approved after the diagnostic run** ("go ahead with the engine fix"; the owner's decisions of 30 October: "Fail unfittable heads"): a head whose step no longer fits before its deadline is failed at once as `deadline_exceeded`, up to 25 per transaction, instead of being refused on every turn.
+   - Tests: an overload test in PostgreSQL that fails on 8aa0ff9 and passes with the fix, and a test that a head with enough time left is still reserved.
+   - Admission shedding: recorded as an open finding, to decide later.
+   - Throughput: options written up for approval before any code.
