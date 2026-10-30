@@ -190,3 +190,34 @@ The authority rows are workspace, user, API key, membership, runtime pool, conne
   - the runtime instance, session and credential;
   - the cursor.
 - **Pool concurrency.** It is counted under the pool row today (Task 5's guarantee). After step 2 it is serialized by the environment's capacity row, because every slot-taking reservation locks that row `FOR UPDATE` before counting, and a pool belongs to one environment. Step 2 adds a concurrency test for it at the limit minus one.
+
+## Step 2 review: stopped before switching (30 October 2026)
+
+The switch is written. It is not committed or switched in, per the owner's condition: "A starts only if the step 2 review finds a revocation path that can't share safely, and you report that before switching."
+
+**What passes, with the switch in place:**
+- Only the three authority changes still take authority rows `FOR UPDATE` (`cursor-evidence/suites/authority-locks-step2-switched.txt`).
+- Two execution writes in one workspace hold its rows together.
+- An authority change still fences an in-flight write, and the next write is refused.
+- Authority changes and execution writes never deadlock: 40 changes against three write loops.
+- Pool concurrency holds at its limit minus one, serialized by the capacity row.
+- Enrollment issue and exchange admit one at their limit minus one, and both in the forced-shared variant, which shows the race is real.
+
+**What fails: the owner's 2 s bound.**
+- **Measured.**
+  - Under four overlapping execution writes, a workspace `FOR UPDATE` waited 5.4 s, 0.13 s, 0.14 s, 0.36 s and 0.57 s.
+  - Under four overlapping runtime authentications on one pool, `issue_enrollment`'s exclusive `lock_pool` waited more than 60 s; in the first run, more than 9 minutes.
+- **Cause: PostgreSQL row locks are not fair to a waiting exclusive request.** A new `FOR SHARE` that is compatible with the current holders is granted at once, even while a `FOR UPDATE` waits. So an exclusive request gets in only when the shared holds leave a gap, and under sustained load there may be none.
+- **Shown with plain SQL** (`cursor-evidence` scratch scripts, PostgreSQL 18.6): four persistent sessions loop 200 ms shared holds, staggered 50 ms, and an exclusive request is timed.
+  - Row locks: the first exclusive was still waiting at 12 s and timed out; the next waited 2.4 s.
+  - Advisory locks, which use PostgreSQL's regular lock manager: every exclusive waited 198–205 ms, one hold, because a new shared request that conflicts with a waiting one queues behind it.
+- **Correctness is not affected.** A revocation still fences every write, and nothing deadlocks. What is lost is a bound on how long a revocation or enrollment waits.
+
+**For the owner:**
+1. **C with a fair gate.** Execution and runtime paths also take a shared transaction-level advisory lock, keyed by workspace (and by pool for runtime authentication), before their first authority row. Every authority change and both allocators take it exclusive first.
+   - Authority changes are workspace status, user disable, key revocation, membership change, and pool, connection and deployment status.
+   - A waiting change then blocks new shared requests, so it waits for in-flight writes only. The SQL check shows about one hold.
+   - The row locks stay `FOR SHARE` as a second fence.
+   - Cost: one or two heavyweight locks per execution transaction, and every authority-change path must take the gate. A missed one is still fenced, but its wait is unbounded.
+2. **A, one scheduler per group**, as the fallback.
+3. **Neither:** the locks stay exclusive.
