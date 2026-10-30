@@ -153,3 +153,13 @@ So in E03 the exclusive workspace and pool locks serialize limit counting as wel
 3. Or the fallback, A.
 
 Step 1 (the lock audit test) goes ahead, since it changes no locks.
+
+**Owner decision (30 October 2026): "Split by caller"**, option 1 above.
+- **Shared:** `authenticate_runtime`, `locked_identity` and `activate_rotation` take the authority rows `FOR SHARE`.
+- **Exclusive:** `issue_enrollment` and `exchange_enrollment` keep `FOR UPDATE` on the pool row from their first lock of it. Neither may share the row earlier in the same transaction, which would be an upgrade deadlock. The audit checks that neither runs in a transaction that went through a shared path.
+- **Added to step 2:**
+  - a PostgreSQL concurrency test for each allocator: two concurrent calls on one pool, at the limit minus one, never both succeed. Each test is shown to fail against a shared-lock variant.
+  - E03's limit, enrollment and revocation tests, rerun in full.
+  - the 2 s bound for the allocators as for revocations: under sustained runtime polling in one pool, an enrollment completes within it. Tier 3 reports that wait.
+- E03's lock section carries the amendment.
+
