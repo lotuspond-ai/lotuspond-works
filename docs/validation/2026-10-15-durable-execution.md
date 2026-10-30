@@ -584,3 +584,24 @@ At `9d97c50`, 11:52–13:48 UTC, alone, with 3 API processes. The workload match
 - `interim-diagnosis.md`;
 - `run/load-report.json`;
 - `live/`: the logs and table copies taken during the run.
+
+### Suites for part 7 of the amendment, 30 October 2026
+
+Part 7 fails at once a head whose step no longer fits before its deadline (`2fd8904`). Each suite ran alone through the local CI runner, on the Mac on battery.
+
+| Suite | Head | Result |
+| --- | --- | --- |
+| validate | `0f04ec2` | 1 failed, 1,142 passed, 195 skipped (the lease cap, below) |
+| validate | `9e7a085`, same engine code | passed |
+| Tier 1 | `9e7a085` | 47 passed, 1 failed (REG-5, below) |
+| Tier 2 | `9e7a085` | 6 passed |
+
+- **The lease cap** (`test_leases.py::test_a_lease_is_at_most_sixty_seconds_even_with_a_longer_deadline`).
+  - The case reads the time, then renews and checks that the lease ends within 61 s. Under the full suite the renewal landed more than a second after the read: 61.25 s.
+  - Alone it passed 6 of 6 on battery, and it passed in the rerun of validate. Part 7 does not touch leases.
+  - It is still to be rerun alone on AC.
+- **REG-5** (`test_waits.py::test_duplicate_conflicting_out_of_order_and_late_signals`).
+  - The case signals, then sends an equal retry, and compared the two receipts whole. A signal's replay is its receipt with the signal's current status: `accept_signal` replays it "whatever the wait's state now" (Task 13). So when an orchestrator consumed the first signal between the two calls, the retry answered `delivered` where the first said `pending`.
+  - The engine behaved as designed: the same receipt ID and one inbox row. It passed in every earlier tier 1 run, and alone 3 of 3.
+  - **Test-only fix (`4d7ba2c`).** The case asserts the same ID, and a status no earlier than the first: pending, leased, delivered. It still counts the single inbox row. The plan's API section now says what a signal's replayed answer is. With the fix it passed alone 3 of 3.
+- Evidence: `~/Downloads/LotusPond-worktrees/cursor-evidence/suites/`, the `*-part7*` logs, `lease-cap-alone-battery.txt`, `reg5-alone-*.log` and `reg5-fixed-*.log`.
