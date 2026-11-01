@@ -4,8 +4,8 @@ Throughput option C (`docs/superpowers/plans/2026-10-30-execution-throughput-
 options.md`, owner decisions of 30 October 2026) has execution and runtime writes
 take the authority rows `FOR SHARE` under a shared fair gate (`lotuspond.
 authority_gate`), and authority changes take the gate exclusive before locking or
-writing the rows. Every statement on every engine is watched, per transaction, and a
-transaction that does any of these is recorded:
+writing the rows. Every statement on every PostgreSQL engine is watched, per
+transaction, and a transaction that does any of these is recorded:
 - shares an authority table, then locks it `FOR UPDATE` or writes it (an upgrade:
   two such transactions deadlock);
 - takes a gate after any row lock, or a gate exclusive after holding it shared;
@@ -16,7 +16,8 @@ transaction that does any of these is recorded:
 The test then fails at teardown (`conftest.py`). Recording, not raising, so
 application code that catches broad errors cannot hide one. Tables are matched, not
 rows, which is conservative. Only statements that product code issues are judged:
-test fixtures that write authority rows directly are not authority changes.
+test fixtures that write authority rows directly are not authority changes. SQLite
+has neither row locks nor gates (`authority_gate` skips it), so it is not judged.
 """
 
 import re
@@ -146,6 +147,8 @@ def _savepoint(state, verb, name):
 
 
 def _statement(conn, cursor, statement, parameters, context, executemany):
+    if conn.dialect.name != "postgresql":
+        return
     key = id(conn.connection.dbapi_connection)
     state = _state.setdefault(key, _fresh())
     savepoint = _SAVEPOINT.match(statement)
