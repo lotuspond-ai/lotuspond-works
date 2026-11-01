@@ -42,7 +42,8 @@ What they do change is environment-scoped: `pending`, `retained_waits`, `active`
 
 The order every E04 mutator follows becomes:
 
-1. workspace row (`FOR UPDATE`);
+0. **the fair gates** (throughput option C, owner decisions 2026-10-30 and 2026-11-01): the workspace's, then the users' (by key), then each pool's, before any row lock. They are transaction-level advisory locks (`lotuspond.authority_gate`), shared by execution and runtime writes and exclusive for authority changes and the enrollment allocators. No transaction takes a gate after a row lock, or a gate exclusive after holding it shared. See the [throughput options](2026-10-30-execution-throughput-options.md);
+1. workspace row (`FOR SHARE` under option C for execution and runtime writes; `FOR UPDATE` for authority changes);
 2. the initiating principal's account rows (only while that workspace row is held, as today);
 3. E03 fleet rows: pool, connections, instance, sessions, credentials, in E03's order;
 4. environment capacity;
@@ -203,7 +204,7 @@ Not decided here: whether admission should refuse work an environment's queue ca
 - **FIFO by admission sequence.** Admission sequences come from `next_admission_sequence` under the environment row lock. That lock is held to commit, so sequences commit in order within an environment. The scheduler still takes the lowest admission sequence, then execution ID, among each environment's unreserved attempts that can still run (parts 6 and 7: not past their deadline, and not retired as out of time).
 - **Quota and capacity.**
   - Pending, retained waits and environment active are checked and changed under their environment row lock, as today.
-  - Pool concurrency is checked and taken under the pool row lock, which every slot-taking reservation holds. A stop only lowers that count, so one that commits concurrently leaves the check conservative.
+  - Pool concurrency is checked and taken under the environment's capacity row, which every slot-taking reservation locks `FOR UPDATE` before it counts; a pool belongs to one environment. Until throughput option C it was also taken under the pool row lock, which reservations now share (see the [throughput options](2026-10-30-execution-throughput-options.md)). A stop only lowers that count, so one that commits concurrently leaves the check conservative.
   - The installation limit holds as shown in section 2.
 - **Reservations never oversubscribed.** Budget checks still run under the execution row lock with the same liability rules. Nothing here changes them.
 - **No deadlocks.** These hold for the new order:

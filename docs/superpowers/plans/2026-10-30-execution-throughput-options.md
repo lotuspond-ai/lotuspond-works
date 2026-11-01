@@ -221,3 +221,59 @@ The switch is written. It is not committed or switched in, per the owner's condi
    - Cost: one or two heavyweight locks per execution transaction, and every authority-change path must take the gate. A missed one is still fenced, but its wait is unbounded.
 2. **A, one scheduler per group**, as the fallback.
 3. **Neither:** the locks stay exclusive.
+
+## Option C with the fair gate, as built (approved 30 October 2026)
+
+**The gate** (`backend/lotuspond/authority_gate.py`) is a transaction-level advisory lock.
+- **Keys.** It uses PostgreSQL's two-integer form, `pg_advisory_xact_lock(namespace, key)`, whose key space is separate from the single-bigint keys used elsewhere (736183 and 736184, for initialization and offline provisioning).
+  - The namespace is fixed per kind: `0x4C505701` for workspaces and `0x4C505002` for pools.
+  - The key is the first four bytes of SHA-256 over `lotuspond.authority-gate.<kind>:<id>`, read as a signed big-endian integer.
+  - **A collision costs only extra serialization.** Two identifiers that share a key wait on each other's exclusive gate. The row locks still fence, so nothing is missed.
+- **Order.** Every gate comes before any row lock, and the workspace gate before the pool gate; then today's row order. No transaction takes a gate after a row lock, or a gate exclusive after holding it shared. The gate refuses that and raises.
+  - Entry points find their gates' keys by plain reads and take the gates first: admission, `_parents`, `load_deployment`, the scheduler, signals, controls, the capacity step, settlement, release, leases and runtime authentication.
+  - Calls nested inside find the gates already held. They are remembered per transaction, at the top of the transaction, outside savepoints.
+- **Shared gates:** execution and runtime writes. The orchestrator's and the sweeper's claims try the workspace gate shared and skip the workspace when it is held or awaited exclusive, as they skip a locked row.
+- **Exclusive gates.**
+  - Workspace gate: every authority change, including key revocation, workspace status and plan, settings, the authenticator policy, invitations, fleet management (`require_fleet_admin` and `ManagementService.lock_scope`) and deployment management. Also the workspace's own limit counters: the gateway's budget, monitoring's trace quota and evaluation job completion.
+  - Pool gate, with the workspace gate shared: enrollment issue and exchange.
+- **Locks that never wait** (`SKIP LOCKED`, `NOWAIT`: the alert and evaluation-job claims) take no gate. They skip, as they do today.
+
+**Measured** under the loads that defeated shared row locks alone (`tests/execution/test_authority_sharing.py`, `tests/fleet/test_allocation_locks.py`; bound 2 s):
+
+| Exclusive operation, under sustained overlapping holds | Waits | Shared row locks alone |
+| --- | --- | --- |
+| Workspace revocation, under four execution writes | 0.13–0.22 s | 5.4 s once |
+| `issue_enrollment`, under four runtime authentications on one pool | 0.78–0.81 s | over 60 s |
+| `exchange_enrollment`, likewise | 0.77–0.82 s | — |
+
+**Coverage.** Two tests check it.
+- The lock audit pins, path by path, each path's gates beside its row locks. It asserts that each shared authority lock is under its gate and each exclusive lock or write is under the gate held exclusive.
+- A suite-wide guard (`backend/tests/authority_lock_guard.py`) fails any test whose product code does one of these:
+  - takes a gate after a row lock;
+  - takes a gate exclusive after holding it shared;
+  - shares an authority row without its gate, or locks or writes one exclusively without the gate held exclusive;
+  - shares an authority table and then locks or writes it exclusively.
+
+**User rows: a gate per user (owner decision, 1 November 2026; option 2 of the user-row question).**
+- **Why per user.** Users are not workspace-scoped. A login's exclusive gate, under option 1, would have stalled execution in every one of the user's workspaces. With a gate per user, a login waits only on that user's own requests, as today, within the bound.
+- **Order.** The workspace gate, then user gates in key order, then the pool gate, then today's rows. The user namespace is `0x4C505503`, keyed like the others: `lotuspond.authority-gate.user:<id>`.
+- **Execution and runtime writes take the user gate shared.**
+  - `authorize_execution` finds the acting user by a plain read, an API key's creator included.
+  - `gates` and `execution_gates` take the users each transaction acts for: the actor, and the execution's initiator for signals, controls, the scheduler and the capacity step.
+- **The runtime path.**
+  - The route reads the runtime (`runtime_hint`) and the initiators of the attempts the call names by plain reads. For a poll, those are its candidates' initiators. It takes the gates, then authenticates under its locks.
+  - A service called directly takes the same gates first (`ActivityService.runtime_gates`).
+  - `_locked` re-checks after locking that the execution's initiator is the one it read.
+  - A candidate whose initiator was not gated, because it appeared after the read, is refused with `conflict`: a poll skips it, and the next poll gates it. `initiating_user_id` never changes, so a named attempt never meets this.
+- **User-row lockers take the user gate exclusive first:** login; the multi-factor sign-in challenge; password change; email verification request and confirm; password reset request and confirm; invitation acceptance; authenticator enrollment start and confirm, and factor management; an organization's authenticator reset (both users' gates, in key order); the authenticator policy; offline enrollment, reissue and completion; and `revoke_identity`. The last two also take the exclusive gates of the workspaces of the user's live API keys and personal workspace, before the user's.
+- **The guard** applies the gate rules to user rows (the user gate alone bounds them), and checks the order of gate kinds.
+- **Measured** (1 November 2026, `backend/tests/execution/test_user_gate.py`, in the Linux container on a loaded host). Four runtime calls of the user's own executions ran without a gap, each holding its transaction 0.2 s. Against them:
+  - login: 0.96–1.05 s (0.07–0.10 s uncontended);
+  - password reset request: 0.89–0.98 s (0.015 s uncontended);
+  - identity revocation: 0.80–1.0 s.
+  - A login racing three execution writers for the same user, ten times: no deadlock.
+- **What bounds the wait.** An exclusive gate waits for every transaction that already holds the gate when it arrives, including any queued on a row lock while holding it.
+  - One runtime instance's calls serialize on its instance row (E03's fence, unchanged). Each call holds the user gate shared while it queues, so the login waited for the whole queue, about 4 × 0.2 s.
+  - Calls that arrive later queue behind the login (they waited 0.06–0.94 s on the user gate).
+  - The bound is the calls in flight at arrival times each call's hold. Real calls hold milliseconds; the test's 0.2 s hold is synthetic.
+  - The workspace gate's revocation, against execution writes that share their rows and so don't queue on one another, waited 0.13–0.21 s.
