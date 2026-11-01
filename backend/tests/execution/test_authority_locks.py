@@ -20,8 +20,10 @@ from lotuspond_runtime.activity_protocol import ActivityResult
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
+from lotuspond import authority_gate
 from lotuspond.execution.scheduler import Scheduler
 from lotuspond.models import ApiKey, User
+from lotuspond.offline_identity import RevocationRequest, revoke_identity
 
 from .activity_fixtures import Demand, attempt_at, deploy
 from .activity_fixtures import activity as activity
@@ -35,6 +37,7 @@ from .test_progression import flows as flows
 from .test_publication import harness as harness
 from .test_runtime_routes import runtime_client, usage
 from .test_sweeper import wait_of
+from .test_user_gate import PASSWORD, account
 
 AUTHORITY = frozenset(
     {
@@ -54,6 +57,12 @@ _FROM = re.compile(
     r"\bFROM\s+(\w+)(.*?)(?:\bWHERE\b|\bORDER BY\b|\bLIMIT\b|\bFOR\b|$)", re.I | re.S
 )
 _JOIN = re.compile(r"\bJOIN\s+(\w+)", re.I)
+_GATE = re.compile(r"\bpg_(try_)?advisory_xact_lock(_shared)?\s*\(", re.I)
+GATES = {
+    authority_gate.WORKSPACE: "gate:workspace",
+    authority_gate.USER: "gate:user",
+    authority_gate.POOL: "gate:pool",
+}
 
 
 def classify(statement):
@@ -99,8 +108,15 @@ class Audit:
             self.path = None
 
     def _statement(self, conn, cursor, statement, parameters, context, executemany):
-        if self.path is not None:
-            self.seen[self.path] |= classify(statement)
+        if self.path is None:
+            return
+        gate = _GATE.search(statement)
+        if gate is not None and isinstance(parameters, dict) and "namespace" in parameters:
+            if parameters["namespace"] in GATES:
+                mode = "SHARED" if gate.group(2) else "EXCLUSIVE"
+                self.seen[self.path].add((GATES[parameters["namespace"]], mode))
+            return
+        self.seen[self.path] |= classify(statement)
 
     def table(self):
         return {path: sorted(found) for path, found in sorted(self.seen.items())}
@@ -127,39 +143,54 @@ def test_classify_reads_lock_modes_and_writes():
     }
 
 
-# Today's authority rows by path (step 1, 30 October 2026, at 17b40b0): every
-# execution and runtime path takes them FOR UPDATE, and none writes one. Step 2
-# shares them in execution and runtime paths; authority changes keep FOR UPDATE.
-X = "FOR UPDATE"
-ACCOUNT = {"workspaces": {X}, "users": {X}, "memberships": {X}}
+# Authority rows and gates by path. Step 1 (30 October 2026, at 17b40b0) pinned every
+# execution and runtime path taking its authority rows FOR UPDATE, with no gate. Step 2
+# (owner decisions "C with the fair gate", and a gate per user on 1 November 2026):
+# execution and runtime paths take the workspace, user and pool gates shared and share
+# the rows; authority changes take the workspace gate exclusive, then lock and write
+# their rows; user-row lockers take the user's gate exclusive, then lock the row. No
+# execution or runtime path writes an authority row.
+S, X = "FOR SHARE", "FOR UPDATE"
+SHARED_GATES = {"gate:workspace": {"SHARED"}, "gate:user": {"SHARED"}, "gate:pool": {"SHARED"}}
+EXCLUSIVE_GATE = {"gate:workspace": {"EXCLUSIVE"}}
+USER_GATE = {"gate:user": {"EXCLUSIVE"}}
+ACCOUNT = {"workspaces": {S}, "users": {S}, "memberships": {S}}
 DEPLOYMENT = {
-    "runtime_pools": {X},
-    "connections": {X},
-    "execution_deployments": {X},
-    "execution_deployment_revisions": {X},
+    "runtime_pools": {S},
+    "connections": {S},
+    "execution_deployments": {S},
+    "execution_deployment_revisions": {S},
 }
-RUNTIME = {"workspaces": {X}, "runtime_pools": {X}, "connections": {X}}
+RUNTIME = {"workspaces": {S}, "runtime_pools": {S}, "connections": {S}}
 EXPECTED = {
-    "admit (route)": ACCOUNT | DEPLOYMENT,
-    "progress (orchestrator)": {"workspaces": {"FOR KEY SHARE", X}},
-    "schedule (sweeper)": ACCOUNT | DEPLOYMENT,
-    "poll (runtime route)": ACCOUNT | DEPLOYMENT,
-    "claim (runtime route)": ACCOUNT | DEPLOYMENT,
-    "store value (runtime route)": RUNTIME,
-    "renew (runtime route)": ACCOUNT | DEPLOYMENT,
-    "result (runtime route)": RUNTIME,
-    "signal (route)": ACCOUNT | DEPLOYMENT | {"api_keys": {X}},
-    "control (route)": ACCOUNT,
-    "revoke key (route)": {"api_keys": {X, "UPDATE"}},
-    "disable pool (fleet route)": {"workspaces": {X}, "runtime_pools": {X, "UPDATE"}},
-    "suspend workspace (admin route)": {"workspaces": {X, "UPDATE"}},
+    "admit (route)": SHARED_GATES | ACCOUNT | DEPLOYMENT,
+    "progress (orchestrator)": SHARED_GATES | {"workspaces": {"FOR KEY SHARE", S}},
+    "schedule (sweeper)": SHARED_GATES | ACCOUNT | DEPLOYMENT,
+    "poll (runtime route)": SHARED_GATES | ACCOUNT | DEPLOYMENT,
+    "claim (runtime route)": SHARED_GATES | ACCOUNT | DEPLOYMENT,
+    "store value (runtime route)": SHARED_GATES | RUNTIME,
+    "renew (runtime route)": SHARED_GATES | ACCOUNT | DEPLOYMENT,
+    "result (runtime route)": SHARED_GATES | RUNTIME,
+    "signal (route)": SHARED_GATES | ACCOUNT | DEPLOYMENT | {"api_keys": {S}},
+    "control (route)": SHARED_GATES | ACCOUNT,
+    "revoke key (route)": EXCLUSIVE_GATE | {"api_keys": {X, "UPDATE"}},
+    "disable pool (fleet route)": EXCLUSIVE_GATE
+    | {"workspaces": {X}, "runtime_pools": {X, "UPDATE"}},
+    "suspend workspace (admin route)": EXCLUSIVE_GATE | {"workspaces": {X, "UPDATE"}},
+    "login (route)": USER_GATE | {"users": {X}},
+    "password reset request (route)": USER_GATE | {"users": {X}},
+    "verification request (route)": USER_GATE | {"users": {X}},
+    "revoke identity (service)": EXCLUSIVE_GATE
+    | USER_GATE
+    | {"users": {X, "UPDATE"}, "api_keys": {X, "UPDATE"}},
 }
 
 
 def authority(found):
+    """The authority rows a path locks or writes, and the gates it takes."""
     by_table = defaultdict(set)
     for table, mode in found:
-        if table in AUTHORITY:
+        if table in AUTHORITY or table.startswith("gate:"):
             by_table[table].add(mode)
     return dict(by_table)
 
@@ -241,6 +272,21 @@ def test_every_authority_lock_and_write_by_path(api):
                 headers=h.owner,
             )
             assert response.status_code == 200, response.text
+        # User-row lockers: each takes the user's gate exclusive before the row.
+        email = account(h.engine, owner_id)
+        with audit.on("login (route)"):
+            response = h.client.post(
+                "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
+            )
+            assert response.status_code in (200, 202), response.text
+        h.client.cookies.clear()
+        with audit.on("password reset request (route)"):
+            response = h.client.post("/api/v1/auth/password/reset/request", json={"email": email})
+            assert response.status_code == 202, response.text
+        with audit.on("verification request (route)"):
+            response = h.client.post("/api/v1/auth/verification/request", json={}, headers=h.owner)
+            # Without a mailbox the request is refused, after its locks.
+            assert response.status_code in (202, 503), response.text
         # Authority changes, last: each keeps its rows exclusive.
         revoked = key(h, ["read"])
         with Session(h.engine) as db:
@@ -265,6 +311,8 @@ def test_every_authority_lock_and_write_by_path(api):
                 headers=h.owner,
             )
             assert response.status_code == 200, response.text
+        with audit.on("revoke identity (service)"), Session(h.engine) as db, db.begin():
+            revoke_identity(db, RevocationRequest(owner_id, email, "operator-1", "Lock audit"))
     table = audit.table()
     print("\nlocks (authority rows marked *) and authority writes by path:")
     for path, found in table.items():
@@ -273,7 +321,29 @@ def test_every_authority_lock_and_write_by_path(api):
             print(f"    {'*' if name in AUTHORITY else ' '} {name}: {mode}")
     # No execution or runtime path writes an authority row.
     for path, found in table.items():
-        if not path.startswith(("revoke", "disable", "suspend")):
-            assert not [row for row in found if not row[1].startswith("FOR ")], (path, found)
+        if not path.startswith(
+            ("revoke", "disable", "suspend", "login", "password", "verification")
+        ):
+            writes = [row for row in found if not row[0].startswith("gate:")]
+            assert not [row for row in writes if not row[1].startswith("FOR ")], (path, found)
+    # The owner's coverage rule, per path: a shared authority lock under its gate, an
+    # exclusive lock or write under the gate exclusive.
+    for path, found in table.items():
+        rows = authority(found)
+        held = defaultdict(set)
+        for name, mode in found:
+            if name.startswith("gate:"):
+                held[name].add(mode)
+        for name, modes in rows.items():
+            if name.startswith("gate:"):
+                continue
+            gate = {"runtime_pools": "gate:pool", "users": "gate:user"}.get(name, "gate:workspace")
+            exclusive = modes - {"FOR SHARE", "FOR KEY SHARE"}
+            # User rows span workspaces: only their own gate bounds them.
+            wide = set() if name == "users" else held["gate:workspace"]
+            if exclusive:
+                assert "EXCLUSIVE" in held[gate] | wide, (path, name, found)
+            else:
+                assert held[gate] or "EXCLUSIVE" in wide, (path, name, found)
     observed = {path: authority(found) for path, found in table.items()}
     assert {path: rows for path, rows in observed.items() if rows} == EXPECTED

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from .deps import DB
 from .identity_status import enrollment_pending
 from .models import (
@@ -194,12 +195,35 @@ def provision_identity(db: Session, request: ProvisioningRequest) -> Provisionin
     )
 
 
+def _gates(db: Session, user_id: str) -> None:
+    """The fair gates before any row lock (`authority_gate`): the workspaces of the
+    user's live API keys and personal workspace, exclusive, by key; then the user's,
+    exclusive. Plain reads; the locked rows below decide."""
+    workspaces = set(
+        db.scalars(
+            select(ApiKey.workspace_id).where(
+                ApiKey.created_by_user_id == user_id, ApiKey.revoked_at.is_(None)
+            )
+        )
+    ) | set(
+        db.scalars(
+            select(Workspace.id).where(Workspace.owner_id == user_id, Workspace.kind == "personal")
+        )
+    )
+    for workspace_id in sorted(
+        workspaces, key=lambda w: authority_gate.key(authority_gate.WORKSPACE, w)
+    ):
+        authority_gate.workspace(db, workspace_id, exclusive=True)
+    authority_gate.users(db, [user_id], exclusive=True)
+
+
 def reissue_enrollment(db: Session, request: ReissueRequest) -> ProvisioningResult:
     if not 1 <= request.expires_hours <= 72:
         raise ValueError("Enrollment expiry must be between 1 and 72 hours")
     email = str(EMAIL_ADAPTER.validate_python(request.email)).lower()
     user_id = str(UUID(request.user_id))
     operator_reference = NAME_ADAPTER.validate_python(request.operator_reference)
+    _gates(db, user_id)
     user = db.scalar(select(User).where(User.id == user_id).with_for_update())
     if not user or user.email != email:
         raise ValueError("Exact pending user ID and matching email are required")
@@ -207,9 +231,7 @@ def reissue_enrollment(db: Session, request: ReissueRequest) -> ProvisioningResu
         raise ValueError("Disabled accounts cannot receive a new enrollment token")
     enrollments = list(
         db.scalars(
-            select(OfflineEnrollment)
-            .where(OfflineEnrollment.user_id == user.id)
-            .with_for_update()
+            select(OfflineEnrollment).where(OfflineEnrollment.user_id == user.id).with_for_update()
         )
     )
     if not enrollments or any(item.consumed_at is not None for item in enrollments):
@@ -227,10 +249,7 @@ def reissue_enrollment(db: Session, request: ReissueRequest) -> ProvisioningResu
     if (
         not attestation
         or utc(attestation.attested_at) > now()
-        or (
-            attestation.expires_at is not None
-            and utc(attestation.expires_at) <= now()
-        )
+        or (attestation.expires_at is not None and utc(attestation.expires_at) <= now())
     ):
         raise ValueError("The offline identity attestation is no longer active")
     revoked_at = now()
@@ -283,6 +302,7 @@ def revoke_identity(db: Session, request: RevocationRequest) -> dict[str, object
     user_id = str(UUID(request.user_id))
     operator_reference = NAME_ADAPTER.validate_python(request.operator_reference)
     reason = NAME_ADAPTER.validate_python(request.reason)
+    _gates(db, user_id)
     user = db.scalar(select(User).where(User.id == user_id).with_for_update())
     if not user or user.email != email:
         raise ValueError("Exact offline user ID and matching email are required")
@@ -317,9 +337,7 @@ def revoke_identity(db: Session, request: RevocationRequest) -> dict[str, object
             revoked_enrollments += 1
     user.disabled_at = revoked_at
     sessions = db.execute(delete(LoginSession).where(LoginSession.user_id == user.id)).rowcount
-    factor = db.scalar(
-        select(MfaFactor).where(MfaFactor.user_id == user.id).with_for_update()
-    )
+    factor = db.scalar(select(MfaFactor).where(MfaFactor.user_id == user.id).with_for_update())
     db.execute(delete(MfaLoginChallenge).where(MfaLoginChallenge.user_id == user.id))
     db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user.id))
     db.execute(delete(MfaEnrollment).where(MfaEnrollment.user_id == user.id))
@@ -379,10 +397,7 @@ def _validate_enrollment(enrollment, attestation, user):
         or attestation.user_id != enrollment.user_id
         or utc(attestation.attested_at) > now()
         or attestation.revoked_at is not None
-        or (
-            attestation.expires_at is not None
-            and utc(attestation.expires_at) <= now()
-        )
+        or (attestation.expires_at is not None and utc(attestation.expires_at) <= now())
     ):
         fail(409, "enrollment_unavailable", "The enrollment is no longer authorized.")
     if not user or user.disabled_at is not None:
@@ -391,9 +406,7 @@ def _validate_enrollment(enrollment, attestation, user):
 
 
 def _load_enrollment(db: Session, raw_token: str):
-    query = select(OfflineEnrollment).where(
-        OfflineEnrollment.token_hash == digest(raw_token)
-    )
+    query = select(OfflineEnrollment).where(OfflineEnrollment.token_hash == digest(raw_token))
     enrollment = db.scalar(query)
     if not enrollment:
         fail(400, "invalid_enrollment", "The enrollment token is invalid.")
@@ -405,12 +418,12 @@ def _load_enrollment(db: Session, raw_token: str):
 def _locked_enrollment(db: Session, raw_token: str):
     token_hash = digest(raw_token)
     initial = db.scalar(
-        select(OfflineEnrollment.user_id).where(
-            OfflineEnrollment.token_hash == token_hash
-        )
+        select(OfflineEnrollment.user_id).where(OfflineEnrollment.token_hash == token_hash)
     )
     if not initial:
         fail(400, "invalid_enrollment", "The enrollment token is invalid.")
+    if initial is not None:
+        _gates(db, initial)
     user = db.scalar(select(User).where(User.id == initial).with_for_update())
     enrollments = list(
         db.scalars(

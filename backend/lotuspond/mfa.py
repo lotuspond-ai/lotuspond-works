@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from . import schemas as s
 from .deps import DB, audit, require
 from .identity_status import enrollment_pending
@@ -56,9 +57,7 @@ def _key(settings) -> bytes:
     if not configured:
         fail(503, "mfa_unavailable", "Multi-factor authentication is unavailable.")
     try:
-        key = base64.b64decode(
-            configured.get_secret_value(), altchars=b"-_", validate=True
-        )
+        key = base64.b64decode(configured.get_secret_value(), altchars=b"-_", validate=True)
     except (ValueError, binascii.Error):
         fail(503, "mfa_unavailable", "Multi-factor authentication is unavailable.")
     if len(key) != 32:
@@ -156,13 +155,15 @@ def _revoke_login_challenges(db: Session, user_id: str):
     current = now()
     rows = list(
         db.scalars(
-            select(MfaLoginChallenge)
-            .where(MfaLoginChallenge.user_id == user_id)
-            .with_for_update()
+            select(MfaLoginChallenge).where(MfaLoginChallenge.user_id == user_id).with_for_update()
         )
     )
     for row in rows:
-        if row.consumed_at is not None or row.revoked_at is not None or utc(row.expires_at) <= current:
+        if (
+            row.consumed_at is not None
+            or row.revoked_at is not None
+            or utc(row.expires_at) <= current
+        ):
             db.delete(row)
         else:
             row.revoked_at = current
@@ -261,11 +262,11 @@ def complete_challenge(
     token_hash = digest(body.challenge_token)
     request.app.state.limiter.check(f"mfa-challenge-ip:{request.client.host}", 40, 900)
     request.app.state.limiter.check(f"mfa-challenge:{token_hash}", 12, 900)
-    hint = db.scalar(
-        select(MfaLoginChallenge).where(MfaLoginChallenge.token_hash == token_hash)
-    )
+    hint = db.scalar(select(MfaLoginChallenge).where(MfaLoginChallenge.token_hash == token_hash))
     if not hint:
         fail(400, "invalid_mfa_challenge", "The sign-in challenge is invalid or expired.")
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [hint.user_id], exclusive=True)
     user = db.scalar(
         select(User)
         .where(User.id == hint.user_id)
@@ -322,6 +323,8 @@ def start_enrollment(
     user = session_user(db, request)
     request.app.state.limiter.check(f"mfa-enrollment:{user.id}", 8, 900)
     _key(request.app.state.settings)
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [user.id], exclusive=True)
     user = db.scalar(
         select(User)
         .where(User.id == user.id)
@@ -375,6 +378,8 @@ def confirm_enrollment(
     user = session_user(db, request)
     request.app.state.limiter.check(f"mfa-enrollment-confirm:{user.id}", 12, 900)
     _key(request.app.state.settings)
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [user.id], exclusive=True)
     user = db.scalar(
         select(User)
         .where(User.id == user.id)
@@ -448,6 +453,8 @@ def _management_context(
 ) -> tuple[User, MfaFactor]:
     user = session_user(db, request)
     request.app.state.limiter.check(f"mfa-management:{user.id}", 10, 900)
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [user.id], exclusive=True)
     user = db.scalar(
         select(User)
         .where(User.id == user.id)
@@ -495,13 +502,13 @@ def regenerate_recovery_codes(
 
 
 @router.post("/disable")
-def disable_mfa(
-    body: s.MfaManagement, request: Request, response: Response, db: Session = DB
-):
+def disable_mfa(body: s.MfaManagement, request: Request, response: Response, db: Session = DB):
     request.app.state.limiter.check(f"mfa-management-ip:{request.client.host}", 30, 900)
     user, factor = _management_context(body, request, db)
     if request.app.state.settings.env == "production" and user.is_platform_admin:
-        fail(403, "mfa_required", "Platform operators must keep multi-factor authentication enabled.")
+        fail(
+            403, "mfa_required", "Platform operators must keep multi-factor authentication enabled."
+        )
     db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
     db.execute(delete(MfaLoginChallenge).where(MfaLoginChallenge.user_id == user.id))
     db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user.id))
@@ -539,6 +546,8 @@ def reset_member_authenticator(
             "organization_required",
             "Only an organization administrator can reset another member's authenticator.",
         )
+    # The fair gates of both users first, exclusive, in key order (`authority_gate`).
+    authority_gate.users(db, [p.user_id, identifier], exclusive=True)
     actor = db.scalar(
         select(User)
         .where(User.id == p.user_id)

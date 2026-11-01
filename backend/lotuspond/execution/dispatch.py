@@ -42,7 +42,9 @@ from lotuspond_sdk.trust import TrustSet
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
+from .. import authority_gate
 from ..fleet.authentication import RuntimePrincipal, machine_fields, machine_query
+from ..fleet.authority import database_now_ms
 from ..fleet.identity import locked_identity
 from ..fleet.rotation import final_time, require_live, require_process
 from ..models import (
@@ -439,16 +441,63 @@ class ActivityService:
 
     # ------------------------------------------------------------ rows
 
+    def runtime_gates(self, db, principal, *, attempts=(), deliveries=()):
+        """A runtime call's fair gates, before any row lock (`authority_gate`): the
+        workspace's, the initiating users' of the attempts it names, then the pool's.
+
+        Plain reads find the users; they grant nothing. The route takes these before
+        its locked authentication; a service called directly takes them itself."""
+        identity = principal.identity
+        scope = identity.scope
+        names = [a for a in attempts if a]
+        if deliveries:
+            names += db.scalars(
+                scoped(ExecutionActivityDelivery, scope)
+                .where(ExecutionActivityDelivery.id.in_([d for d in deliveries if d]))
+                .with_only_columns(ExecutionActivityDelivery.attempt_id)
+            )
+        users = []
+        if names:
+            users = db.scalars(
+                select(Execution.initiating_user_id)
+                .join(ExecutionAttempt, ExecutionAttempt.execution_id == Execution.id)
+                .where(
+                    *(getattr(Execution, k) == v for k, v in scope.model_dump().items()),
+                    ExecutionAttempt.id.in_(names),
+                )
+            ).all()
+        authority_gate.pool(db, scope.workspace_id, identity.pool_id, users_=users)
+
     def _locked(self, db, principal, attempt_id, *, counters=False, authority=True):
         """Lock one attempt's rows in the documented order; returns them by name.
 
         `authority` reauthorizes the initiator and reloads the deployment. Recording
         an outcome (a result or a stored value) grants nothing and skips it, so a
         revoked initiator cannot discard a known outcome; renewal and new work keep it.
+
+        The initiator's gate comes before any row lock (`authority_gate`). It is read
+        here, plainly; when this transaction already holds the pool's gate, rows may be
+        locked, so an ungated initiator is refused (`conflict`) instead of gated late:
+        a poll skips that candidate, and its next poll gates it. Under the locks the
+        execution's initiator is checked against the one read.
         """
-        locked = self._identity(db, principal)
+        if type(principal) is not RuntimePrincipal or principal.session_id is None:
+            raise FleetError("unauthenticated")
         identity = principal.identity
         scope = identity.scope
+        initiating = db.scalar(
+            select(Execution.initiating_user_id)
+            .join(ExecutionAttempt, ExecutionAttempt.execution_id == Execution.id)
+            .where(
+                *(getattr(Execution, k) == v for k, v in scope.model_dump().items()),
+                ExecutionAttempt.id == attempt_id,
+            )
+        )
+        if initiating is not None and not authority_gate.held(db, authority_gate.USER, initiating):
+            if authority_gate.held(db, authority_gate.POOL, identity.pool_id):
+                raise ExecutionError("conflict")
+            self.runtime_gates(db, principal, attempts=[attempt_id])
+        locked = self._identity(db, principal)
         hint = record(db, ExecutionAttempt, scope, attempt_id)
         execution_hint = record(db, Execution, scope, hint.execution_id)
         revision = record(
@@ -465,6 +514,8 @@ class ActivityService:
                 db, actor, revision.id, dependencies=self.budgets.deployments
             )
         execution = record(db, Execution, scope, hint.execution_id, locked=True)
+        if execution.initiating_user_id != initiating:
+            raise ExecutionError("conflict")  # not the initiator whose gate is held
         step = record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
         ids = sorted({hint.id, *([hint.parent_attempt_id] if hint.parent_attempt_id else [])})
         attempts = {i: record(db, ExecutionAttempt, scope, i, locked=True) for i in ids}
@@ -695,11 +746,32 @@ class ActivityService:
             self.fleet.limit("activity-poll:" + instance, 60)
         else:
             self.fleet.limit("activity-child-poll:" + instance, 600)
-        locked = self._identity(db, principal)
         identity = principal.identity
-        now = locked[-1]
         if parent_attempt_id is not None:
             parent_attempt_id = record(db, ExecutionAttempt, identity.scope, parent_attempt_id).id
+        # The fair gates first, before any row lock (`authority_gate`): the candidates'
+        # initiators, read now; a candidate that appears under the locks with another
+        # initiator is skipped (`_locked`), and the next poll gates it.
+        self.runtime_gates(
+            db,
+            principal,
+            attempts=self._poll_candidates(db, principal, parent_attempt_id, database_now_ms(db)),
+        )
+        locked = self._identity(db, principal)
+        now = locked[-1]
+        for attempt_id in self._poll_candidates(db, principal, parent_attempt_id, now):
+            try:
+                with db.begin_nested():
+                    return self._dispatch(db, principal, attempt_id)
+            except (ExecutionError, FleetError) as error:
+                # Locks taken for a refused candidate were released with its savepoint.
+                logger.info("Activity candidate skipped: %s", error.code)
+        self._finish(db, locked)
+        return None
+
+    def _poll_candidates(self, db, principal, parent_attempt_id, now):
+        """A poll's candidates, in order: plain reads (`poll_activity`)."""
+        identity = principal.identity
         targeted = (
             []
             if parent_attempt_id is None
@@ -786,15 +858,7 @@ class ActivityService:
                 )
             )
         )
-        for attempt_id in [*pending, *children, *roots]:
-            try:
-                with db.begin_nested():
-                    return self._dispatch(db, principal, attempt_id)
-            except (ExecutionError, FleetError) as error:
-                # Locks taken for a refused candidate were released with its savepoint.
-                logger.info("Activity candidate skipped: %s", error.code)
-        self._finish(db, locked)
-        return None
+        return [*pending, *children, *roots]
 
     # ------------------------------------------------------------ claim
 

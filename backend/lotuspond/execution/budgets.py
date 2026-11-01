@@ -27,6 +27,7 @@ from lotuspond_sdk.executable.package import ArtifactRef
 from pydantic import TypeAdapter
 from sqlalchemy import func, literal, select
 
+from .. import authority_gate
 from ..fleet.authority import RecoverySnapshot, database_now_ms
 from ..models import (
     ExecutableDependency,
@@ -46,9 +47,16 @@ from ..models import (
 )
 from . import memo
 from .assurance import check_assurance_current
-from .authorization import lock, reauthorize, record, scoped
+from .authorization import lock, reauthorize, record, scoped, share
 from .contracts import Contract, DeploymentConfig, canonical_value
-from .deployments import _body_steps, _configuration, _pool, _stored_configuration, load_deployment
+from .deployments import (
+    _body_steps,
+    _configuration,
+    _pool,
+    _stored_configuration,
+    gates,
+    load_deployment,
+)
 from .entitlement import EntitlementGrant, PolicyGrant
 from .errors import ExecutionError, execution_service
 from .program import ProgramError, program_from, resolve_occurrence
@@ -207,6 +215,7 @@ class BudgetService:
 
     def _parents(self, db, actor, revision_id, *, snapshot=None):
         installation = self._installation(db)
+        gates(db, actor.scope, revision_id, users=[actor.user_id])  # before any row lock
         actor = reauthorize(db, actor, "execute")
         hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
         policy = _pool(db, actor.scope, hint.pool_id)
@@ -587,7 +596,8 @@ class BudgetService:
         )
         from ..models import Workspace
 
-        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        authority_gate.workspace(db, scope.workspace_id)  # before any row lock
+        share(db, select(Workspace).where(Workspace.id == scope.workspace_id))
         capacity = lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, hint.execution_id, locked=True)
         record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
@@ -807,7 +817,8 @@ class BudgetService:
         )
         from ..models import Workspace
 
-        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        authority_gate.workspace(db, scope.workspace_id)  # before any row lock
+        share(db, select(Workspace).where(Workspace.id == scope.workspace_id))
         capacity = lock(db, scoped(ExecutionCapacity, scope))
         if capacity is None:
             raise ExecutionError("capacity_unavailable")

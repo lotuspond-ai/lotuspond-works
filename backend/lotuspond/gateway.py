@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, field_validator
 from sqlalchemy import func, select
 
+from . import authority_gate
 from .config import ProviderModel, Settings
 from .deps import require
 from .models import GatewayUsage, Workspace, new_id, now
@@ -139,6 +140,8 @@ def _workspace_lock(workspace_id: str):
 def reserve_usage(sessions, workspace_id: str, model: str, maximum_cost: Decimal) -> str:
     """Serialize budget decisions on the workspace row and commit before provider traffic."""
     with sessions() as db, db.begin():
+        # The fair gate first, exclusive, before any row lock (`authority_gate`).
+        authority_gate.workspace(db, workspace_id, exclusive=True)
         workspace = db.scalar(_workspace_lock(workspace_id))
         if workspace is None or workspace.status != "active":
             fail(403, "workspace_suspended", "Workspace access is suspended.")

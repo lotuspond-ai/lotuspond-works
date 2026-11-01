@@ -18,6 +18,7 @@ from lotuspond_runtime.activity_protocol import MAX_LEASE_MS, ActivityLease
 from lotuspond_runtime.errors import FleetError
 from sqlalchemy import select
 
+from .. import authority_gate
 from ..fleet.authority import RecoverySnapshot, database_now_ms
 from ..models import (
     Execution,
@@ -32,7 +33,7 @@ from ..models import (
     Workspace,
 )
 from .activity_records import lease_revision, lease_view, reserved_until, scope_of
-from .authorization import lock, record, scoped
+from .authorization import lock, record, scoped, share
 from .dispatch import activity_service, failure_content
 from .errors import ExecutionError
 from .orchestrator import TERMINAL, mark_runnable
@@ -141,7 +142,8 @@ class LeaseService:
 
     def _rows(self, db, scope, attempt_id, *, counters):
         hint = record(db, ExecutionAttempt, scope, attempt_id)
-        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        authority_gate.workspace(db, scope.workspace_id)  # before any row lock
+        share(db, select(Workspace).where(Workspace.id == scope.workspace_id))
         if counters:
             lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, hint.execution_id, locked=True)

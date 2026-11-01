@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from .. import authority_gate
 from ..deps import DB, require
 from ..models import (
     Connection,
@@ -215,6 +216,8 @@ def require_fleet_admin(
     require_admin(principal)
     # Authenticate again after the shared parent lock: a request-key replay does
     # not bypass membership, workspace, verification or MFA changes while waiting.
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, principal.workspace_id, exclusive=True)
     db.scalar(select(Workspace).where(Workspace.id == principal.workspace_id).with_for_update())
     db.expire_all()
     principal = authenticate(db, request, "write")

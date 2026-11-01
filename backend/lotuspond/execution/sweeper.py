@@ -39,6 +39,7 @@ from lotuspond_sdk.executable.package import TimerStep
 from pydantic import Field
 from sqlalchemy import func, or_, select, text, union_all
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
@@ -372,7 +373,13 @@ class ExecutionSweeper:
 
     @staticmethod
     def _claim(db, scope, execution_id):
-        """The execution row as the orchestrator takes it; None while another holds it."""
+        """The execution row as the orchestrator takes it; None while another holds it.
+
+        The fair gate first, shared and tried only: while an authority change holds or
+        awaits it, the item waits for a later pass (`authority_gate`)."""
+        if not authority_gate.try_shared(db, authority_gate.WORKSPACE, scope.workspace_id):
+            return None
+        authority_gate.taken(db, authority_gate.WORKSPACE, scope.workspace_id)
         workspace = db.scalar(
             select(Workspace.id)
             .where(Workspace.id == scope.workspace_id)

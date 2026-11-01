@@ -6,6 +6,7 @@ from time import monotonic
 from lotuspond_runtime.protocol import CanonicalUUID, Scope
 from sqlalchemy import func, or_, select
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Connection,
@@ -20,10 +21,10 @@ from ..models import (
     Workspace,
 )
 from ..security import Principal
-from .authorization import authorize_execution, lock, record, scoped
+from .authorization import authorize_execution, lock, record, scoped, share
 from .budgets import BudgetDemand, installation_active
 from .contracts import Contract
-from .deployments import _pool, load_deployment
+from .deployments import _pool, gates, load_deployment
 from .errors import ExecutionError, execution_service
 from .orchestrator import OUT_OF_TIME, mark_runnable
 from .publication import _Lookup
@@ -180,8 +181,14 @@ class Scheduler:
         # Pre-acquire every shared parent before the first execution child. This
         # prevents cross-scope batches from inverting E03's parent order.
         scopes = [scope for scope, _, _ in heads] + list(retired.values())
+        # The fair gates come first, before any row lock (`authority_gate`): each
+        # workspace's, then each head's pool's.
         for workspace_id in sorted({scope.workspace_id for scope in scopes}):
-            lock(db, select(Workspace).where(Workspace.id == workspace_id))
+            authority_gate.workspace(db, workspace_id)
+        for scope, _, execution in heads:
+            gates(db, scope, execution.deployment_revision_id, users=[execution.initiating_user_id])
+        for workspace_id in sorted({scope.workspace_id for scope in scopes}):
+            share(db, select(Workspace).where(Workspace.id == workspace_id))
         actors = {}
         eligible = []
         for scope, attempt_id, execution in sorted(
@@ -210,7 +217,7 @@ class Scheduler:
         # All pools precede all connections, including overlapping policy sets.
         connections = {}
         for scope, _, revision in sorted(eligible, key=lambda item: item[2].pool_id):
-            pool = record(db, RuntimePool, scope, revision.pool_id, locked=True)
+            pool = record(db, RuntimePool, scope, revision.pool_id, shared=True)
             policy = db.scalar(
                 scoped(RuntimePoolPolicy, scope).where(
                     RuntimePoolPolicy.pool_id == pool.id,
@@ -221,7 +228,7 @@ class Scheduler:
                 for identifier in json.loads(policy.canonical_policy)["connection_ids"]:
                     connections[identifier] = scope
         for identifier, scope in sorted(connections.items()):
-            record(db, Connection, scope, identifier, locked=True)
+            record(db, Connection, scope, identifier, shared=True)
         for scope, _, revision in sorted(eligible, key=lambda item: item[2].pool_id):
             try:
                 _pool(db, scope, revision.pool_id)

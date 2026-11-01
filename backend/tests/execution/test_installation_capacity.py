@@ -354,9 +354,13 @@ def test_the_installation_limit_is_checked_at_the_leaf(budget_harness, monkeypat
     h = budget_harness
     with Session(h.engine) as db, db.begin():
         other = clone_workspace(h, db, shared_user=False)
-        first, first_execution = h.add(db)
-        second, _ = add(h, db, other)
         db.scalar(select(ExecutionSchedulerCursor)).active_limit = 1
+    # One workspace per transaction, as in production: its gates come before any row
+    # lock (throughput option C, `authority_gate`).
+    with Session(h.engine) as db, db.begin():
+        first, first_execution = h.add(db)
+    with Session(h.engine) as db, db.begin():
+        second, _ = add(h, db, other)
     paused, resume = threading.Event(), threading.Event()
     original, slow = h.budgets._leaf, {}
 
@@ -410,11 +414,11 @@ def test_reservations_racing_stops_never_exceed_the_installation_limit(budget_ha
     with Session(h.engine) as db, db.begin():
         widen(db, h)
         tenants = [home(h), clone_workspace(h, db, shared_user=False)]
-        attempts = {
-            i: [add(h, db, tenant)[0] for _ in range(per_tenant)]
-            for i, tenant in enumerate(tenants)
-        }
         db.scalar(select(ExecutionSchedulerCursor)).active_limit = limit
+    attempts = {}
+    for i, tenant in enumerate(tenants):  # one workspace per transaction (`authority_gate`)
+        with Session(h.engine) as db, db.begin():
+            attempts[i] = [add(h, db, tenant)[0] for _ in range(per_tenant)]
     done = threading.Event()
     observed, outcomes, reserved = [], [], []
     lock = threading.Lock()
@@ -480,8 +484,9 @@ def test_task5_entry_points_race_across_workspaces_without_deadlock(budget_harne
         widen(db, h)
         tenants = [home(h), clone_workspace(h, db, shared_user=True)]
         db.scalar(select(ExecutionSchedulerCursor)).active_limit = 4
-        work = []
-        for tenant in tenants:
+    work = []
+    for tenant in tenants:  # one workspace per transaction (`authority_gate`)
+        with Session(h.engine) as db, db.begin():
             for _ in range(rounds):
                 attempt, execution = add(h, db, tenant)
                 _, waiting = add(h, db, tenant)

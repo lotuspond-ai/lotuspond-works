@@ -14,6 +14,7 @@ from lotuspond_sdk.executable.package import (
 )
 from sqlalchemy import func, select
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..fleet.management import stored_config, stored_policy
 from ..models import (
@@ -21,6 +22,7 @@ from ..models import (
     ConnectionVersion,
     DeploymentAssuranceBinding,
     DeploymentBinding,
+    Execution,
     ExecutionContextSource,
     ExecutionContextVersion,
     ExecutionDeployment,
@@ -31,7 +33,7 @@ from ..models import (
 )
 from . import memo
 from .assurance import release_binding, validated_release_binding
-from .authorization import reauthorize, record, scoped
+from .authorization import SHARED_OPERATIONS, reauthorize, record, scoped
 from .contracts import (
     DeploymentConfig,
     DeploymentRequest,
@@ -59,8 +61,43 @@ def _view(deployment, revision):
     )
 
 
+def gates(db, scope, revision_id, operation="execute", users=()):
+    """The fair gates for a revision, before any row lock (`authority_gate`).
+
+    The workspace's, then each user's this transaction acts for, shared for an
+    operation that shares its rows or exclusive, then the revision's pool's, shared.
+    The revision is a plain read: one that is not found takes no pool gate, and is
+    refused at its usual place, after authorization.
+    """
+    exclusive = operation not in SHARED_OPERATIONS
+    authority_gate.workspace(db, scope.workspace_id, exclusive=exclusive)
+    authority_gate.users(db, users, exclusive=exclusive)
+    pool_id = db.scalar(
+        scoped(ExecutionDeploymentRevision, scope)
+        .where(ExecutionDeploymentRevision.id == revision_id)
+        .with_only_columns(ExecutionDeploymentRevision.pool_id)
+    )
+    if pool_id is not None:
+        authority_gate.pool(db, scope.workspace_id, pool_id)
+
+
+def execution_gates(db, scope, execution_id, operation="execute", users=()):
+    """`gates` for an execution, found by a plain read before any row lock: its
+    revision's, and its initiator's beside `users`. An execution that is not found
+    takes only the workspace and `users` gates, and is refused at its usual place,
+    after authorization."""
+    row = db.execute(
+        select(Execution.deployment_revision_id, Execution.initiating_user_id).where(
+            *(getattr(Execution, name) == value for name, value in scope.model_dump().items()),
+            Execution.id == execution_id,
+        )
+    ).first()
+    revision_id, initiator = row if row is not None else (None, None)
+    gates(db, scope, revision_id, operation, [*users, initiator])
+
+
 def _pool(db, scope, pool_id):
-    pool = record(db, RuntimePool, scope, pool_id, locked=True)
+    pool = record(db, RuntimePool, scope, pool_id, shared=True)
     if pool.status != "active" or pool.current_policy_version is None:
         raise ExecutionError("deployment_unavailable")
     row = db.scalar(
@@ -75,7 +112,7 @@ def _pool(db, scope, pool_id):
         policy = stored_policy(db, scope, row)
         # E03 parent order: workspace, pool, then sorted connection IDs.
         for identifier in sorted(policy.connection_ids):
-            if record(db, Connection, scope, identifier, locked=True).status != "active":
+            if record(db, Connection, scope, identifier, shared=True).status != "active":
                 raise ExecutionError("deployment_unavailable")
         return policy
     except ExecutionError:
@@ -424,6 +461,7 @@ def load_deployment(
     (admission). It is checked here exactly as one looked up now, its expiry again at
     the end, and the caller's final guard looks one up again.
     """
+    gates(db, actor.scope, revision_id, operation, [actor.user_id])
     actor = reauthorize(db, actor, operation)
     hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
     policy = _pool(db, actor.scope, hint.pool_id)
@@ -437,8 +475,15 @@ def load_deployment(
     )
     config = _stored_configuration(db, actor.scope, revision, links)
     _configuration(db, actor.scope, config, package, links, rows, sources, policy, snapshot)
-    deployment = record(db, ExecutionDeployment, actor.scope, hint.deployment_id, locked=True)
-    revision = record(db, ExecutionDeploymentRevision, actor.scope, revision_id, locked=True)
+    # Shared for an operation that shares its account rows; a management caller keeps
+    # them exclusive, and may then change them in this transaction.
+    shared = operation in SHARED_OPERATIONS
+    deployment = record(
+        db, ExecutionDeployment, actor.scope, hint.deployment_id, locked=True, shared=shared
+    )
+    revision = record(
+        db, ExecutionDeploymentRevision, actor.scope, revision_id, locked=True, shared=shared
+    )
     if (
         deployment.status == "revoked"
         or revision.status == "revoked"

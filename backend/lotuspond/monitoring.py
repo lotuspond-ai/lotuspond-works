@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from . import schemas as s
 from .deps import DB, audit, record, require
 from .entitlements import month_start, plan_for
@@ -88,6 +89,8 @@ class TraceAdmission:
     """
 
     def __init__(self, db: Session, workspace_id: str):
+        # The fair gate first, exclusive, before any row lock (`authority_gate`).
+        authority_gate.workspace(db, workspace_id, exclusive=True)
         workspace = db.scalar(
             select(Workspace).where(Workspace.id == workspace_id).with_for_update()
         )
@@ -219,9 +222,7 @@ def export_traces(
     if project_id:
         _project(db, principal, project_id)
         query = query.where(Trace.project_id == project_id)
-    rows = list(
-        db.scalars(query.order_by(Trace.created_at, Trace.id).limit(EXPORT_LIMIT + 1))
-    )
+    rows = list(db.scalars(query.order_by(Trace.created_at, Trace.id).limit(EXPORT_LIMIT + 1)))
     truncated = len(rows) > EXPORT_LIMIT
     traces = [serialize(row) for row in rows[:EXPORT_LIMIT]]
     workspace = db.get(Workspace, principal.workspace_id)
@@ -236,9 +237,7 @@ def export_traces(
         "traces": traces,
         "truncated": truncated,
     }
-    response.headers["content-disposition"] = (
-        'attachment; filename="lotuspond-traces.json"'
-    )
+    response.headers["content-disposition"] = 'attachment; filename="lotuspond-traces.json"'
     return {**payload, "export_sha256": hashlib.sha256(canonical(payload).encode()).hexdigest()}
 
 

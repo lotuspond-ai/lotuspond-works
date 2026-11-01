@@ -32,7 +32,7 @@ from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
 from .authorization import ExecutionActor, lock, mark_replay, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
-from .deployments import _configuration, _pool, _stored_configuration, load_deployment
+from .deployments import _configuration, _pool, _stored_configuration, gates, load_deployment
 from .errors import ExecutionError, execution_service
 from .interpreters import require_interpreter
 from .orchestrator import mark_runnable
@@ -156,6 +156,10 @@ class AdmissionService:
         # Finding 11, part 6: look up first, so the tenant's workspace row is held for
         # one load of the deployment and the final guard (`_final`), not four of each.
         snapshot, grants, artifact_key = self._lookups(db, actor)
+        # The fair gates, before the first row lock (`authority_gate`).
+        gates(
+            db, actor.scope, getattr(request, "deployment_revision_id", None), users=[actor.user_id]
+        )
         actor = reauthorize(db, actor, "execute")  # first lock: the workspace row
         request = copied if copied is not None else _copy(request)
         key = request_identity(request_key)
@@ -184,7 +188,7 @@ class AdmissionService:
             mark_replay(db)
             return execution_view(row)
         deployment = record(
-            db, ExecutionDeployment, actor.scope, revision.deployment_id, locked=True
+            db, ExecutionDeployment, actor.scope, revision.deployment_id, shared=True
         )
         if deployment.active_revision_id != revision.id:
             raise ExecutionError("deployment_unavailable")

@@ -46,6 +46,7 @@ from lotuspond_sdk.executable.types import ArrayExport, ExportField, ObjectExpor
 from sqlalchemy import String, any_, bindparam, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import ARRAY
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
@@ -64,8 +65,9 @@ from ..models import (
 )
 from ..security import Principal
 from .artifacts import ArtifactPolicy
-from .authorization import authorize_execution, lock, record, scoped
+from .authorization import authorize_execution, lock, record, scoped, share
 from .contracts import canonical_value
+from .deployments import gates
 from .engine_contracts import INTERPRETER_V1, AdvanceOutcome
 from .errors import ExecutionError
 from .expressions import (
@@ -2100,6 +2102,9 @@ class InterpreterV1:
             raise ExecutionError("not_found")
         if hint.state in TERMINAL:
             return self._outcome(hint, 0)
+        # The fair gates first, before any row lock and outside the savepoints below,
+        # so each lock under them finds them held (`authority_gate`).
+        gates(db, _scope(hint), hint.deployment_revision_id, users=[hint.initiating_user_id])
         epoch = self._epoch(db, epoch)
         retain, _, _, _ = self._capacity_work(db, hint)
         actor = None
@@ -2120,7 +2125,8 @@ class InterpreterV1:
                     logger.warning("Execution wait retention deferred: %s", error.code)
                     actor = None
         scope = _scope(hint)
-        lock(db, select(Workspace).where(Workspace.id == hint.workspace_id))
+        authority_gate.workspace(db, hint.workspace_id)  # before any row lock
+        share(db, select(Workspace).where(Workspace.id == hint.workspace_id))
         lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, execution_id, locked=True)
         if execution.state in TERMINAL:

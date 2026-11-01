@@ -23,6 +23,7 @@ from .admission import _current_deployment
 from .artifacts import ArtifactPolicy
 from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .contracts import SignalReceipt, SignalRequest, canonical_value
+from .deployments import execution_gates
 from .errors import ExecutionError, execution_service
 from .orchestrator import mark_runnable
 from .program import ProgramError, program_from, resolve_occurrence
@@ -72,7 +73,9 @@ class InboxService:
 
     @execution_service
     def accept_signal(self, db, actor, execution_id: str, request: SignalRequest) -> SignalReceipt:
-        actor = reauthorize(db, actor, "signal")  # first lock: the workspace row
+        # The fair gates first, before any row lock (`authority_gate`).
+        execution_gates(db, actor.scope, execution_id, "signal", [actor.user_id])
+        actor = reauthorize(db, actor, "signal")  # first row lock: the workspace row
         request = SignalRequest.model_validate(request)
         # Own the nested JSON graph before provider waits, preserving exact numeric
         # types until the declared wait schema validates them (including replays).

@@ -218,7 +218,8 @@ class CommandService:
         policy = stored_policy(db, scope, revision)
         if pins.connection_id not in policy.connection_ids:
             raise FleetError("forbidden")
-        connection = record(db, Connection, scope, pins.connection_id, lock=True)
+        # Shared, as `locked_identity` shared it: a status fence only (option C).
+        connection = record(db, Connection, scope, pins.connection_id, lock=True, share=True)
         if connection.status != "active":
             raise FleetError("forbidden")
         version = lock(

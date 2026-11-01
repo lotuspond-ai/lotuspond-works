@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 
-from lotuspond import models
+from lotuspond import authority_gate, models
 from tests.fleet.identity_fixtures import auth
 from tests.fleet.test_rotation import ROOT, prepare, ready, request, rows
 
@@ -19,7 +19,7 @@ def race(env, operations):
     gate, reached, connections = Barrier(2), Condition(), set()
 
     def before(connection, cursor, statement, parameters, context, many):
-        if "workspaces" in statement and "FOR UPDATE" in statement:
+        if "pg_advisory_xact_lock" in statement:  # its first lock: the fair gate
             with reached:
                 connections.add(id(connection.connection.driver_connection))
                 reached.notify_all()
@@ -33,6 +33,8 @@ def race(env, operations):
 
     with ThreadPoolExecutor(max_workers=2) as workers:
         with env.db.begin() as holder:
+            # An authority change holds the parent: its gate first, exclusive.
+            authority_gate.workspace(holder, env.workspace, exclusive=True)
             holder.scalar(
                 select(models.Workspace)
                 .where(models.Workspace.id == env.workspace)

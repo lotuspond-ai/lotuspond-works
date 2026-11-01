@@ -11,6 +11,7 @@ from lotuspond_runtime.protocol import RuntimeIdentity, RuntimeObservation, Scop
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import authority_gate
 from ..models import (
     Connection,
     RuntimeCredential,
@@ -77,16 +78,34 @@ def machine_query(model, row):
     )
 
 
-def lock(query, db):
-    return db.scalar(query.with_for_update().execution_options(populate_existing=True))
+def lock(query, db, *, share=False):
+    query = query.with_for_update(read=share)
+    return db.scalar(query.execution_options(populate_existing=True))
 
 
-def lock_pool(db, scope, pool_id, dependencies):
+def lock_pool(db, scope, pool_id, dependencies, *, share=False, users=()):
+    """The workspace, pool and connection rows, in E03's parent order.
+
+    E04 throughput option C (owner decisions 2026-10-30, "Split by caller" and "C with
+    the fair gate"). The fair gates come first, before any row lock
+    (`authority_gate`): the workspace's shared, then the pool's. Then the workspace
+    and connection rows are taken FOR SHARE, which still fences their revocation: an
+    authority change takes its gate exclusive and the rows FOR UPDATE.
+    - `share`, for callers that need the rows only to fence a revocation: the pool's
+      gate shared and its row FOR SHARE.
+    - Otherwise, for a caller that counts or allocates under the pool row (enrollment
+      issue and exchange): the pool's gate exclusive and its row FOR UPDATE, from the
+      first lock of it.
+    `users` are the users whose rows the caller's transaction will lock (an
+    activity's initiator): their gates, shared, come between the workspace's and the
+    pool's.
+    """
     scope = Scope.model_validate(scope)
-    workspace = lock(select(Workspace).where(Workspace.id == scope.workspace_id), db)
+    authority_gate.pool(db, scope.workspace_id, pool_id, exclusive=not share, users_=users)
+    workspace = lock(select(Workspace).where(Workspace.id == scope.workspace_id), db, share=True)
     if workspace is None or workspace.status != "active":
         raise FleetError("unauthenticated")
-    pool = record(db, RuntimePool, scope, pool_id, lock=True)
+    pool = record(db, RuntimePool, scope, pool_id, lock=True, share=share)
     if pool.status != "active" or pool.current_policy_version is None:
         raise FleetError("unauthenticated")
     revision = db.scalar(
@@ -101,7 +120,7 @@ def lock_pool(db, scope, pool_id, dependencies):
     # Serialize with current connection revocation without reversing the
     # management lock order. Historical pins alone never grant current authority.
     for identifier in sorted(policy.connection_ids):
-        row = record(db, Connection, scope, identifier, lock=True)
+        row = record(db, Connection, scope, identifier, lock=True, share=True)
         if row.status != "active":
             raise FleetError("unauthenticated")
     # Identity does not resolve connection secrets. Their current revocation is
@@ -141,6 +160,39 @@ def identity_for(instance, credential):
     )
 
 
+def runtime_hint(db: Session, token: str, session_secret: str | None):
+    """The runtime a request names, by plain reads before any lock: grants nothing.
+
+    For the fair gates its call takes first (`authority_gate`); the locked
+    authentication after them still decides."""
+    try:
+        digest = token_digest(token, "lpr_")
+        session_digest = (
+            token_digest(session_secret, "lps_") if session_secret is not None else None
+        )
+    except Exception:
+        return None
+    credential = db.scalar(
+        select(RuntimeCredential).where(RuntimeCredential.token_digest == digest)
+    )
+    if credential is None:
+        return None
+    instance = db.scalar(
+        select(RuntimeInstance).where(RuntimeInstance.id == credential.instance_id)
+    )
+    if instance is None:
+        return None
+    session_id = None
+    if session_digest is not None:
+        session_id = db.scalar(
+            select(RuntimeSession.id).where(
+                RuntimeSession.instance_id == instance.id,
+                RuntimeSession.token_digest == session_digest,
+            )
+        )
+    return RuntimePrincipal(identity_for(instance, credential), credential.id, session_id)
+
+
 def authenticate_runtime(
     db: Session,
     token: str,
@@ -148,6 +200,7 @@ def authenticate_runtime(
     session_secret: str | None,
     require_session: bool,
     dependencies: FleetDependencies,
+    users=(),
 ) -> RuntimePrincipal:
     digest = token_digest(token, "lpr_")
     session_digest = token_digest(session_secret, "lps_") if session_secret is not None else None
@@ -155,7 +208,7 @@ def authenticate_runtime(
     if hint is None:
         raise FleetError("unauthenticated")
     scope = row_scope(hint)
-    _, policy = lock_pool(db, scope, hint.pool_id, dependencies)
+    _, policy = lock_pool(db, scope, hint.pool_id, dependencies, share=True, users=users)
     instance = lock(
         machine_query(RuntimeInstance, hint).where(RuntimeInstance.id == hint.instance_id), db
     )

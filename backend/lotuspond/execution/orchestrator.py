@@ -13,6 +13,7 @@ transaction; nothing here commits or calls the network.
 
 from sqlalchemy import select
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import Execution, ExecutionOutbox, Workspace
 from .engine_contracts import WorkerIdentity
@@ -125,6 +126,13 @@ def claim_runnable(db, worker: WorkerIdentity) -> Execution | None:
                 continue
             savepoint = db.begin_nested()
             try:
+                # The fair gate, shared, before any row lock (`authority_gate`). Held or
+                # awaited exclusive, an authority change is under way in the workspace,
+                # which is skipped like a locked row, never waited for.
+                if not authority_gate.try_shared(db, authority_gate.WORKSPACE, workspace_id):
+                    savepoint.rollback()
+                    skipped_workspaces.add(workspace_id)
+                    continue
                 parent = db.scalar(
                     select(Workspace.id)
                     .where(Workspace.id == workspace_id)
@@ -153,6 +161,7 @@ def claim_runnable(db, worker: WorkerIdentity) -> Execution | None:
                     and row.state not in TERMINAL
                 ):
                     savepoint.commit()
+                    authority_gate.taken(db, authority_gate.WORKSPACE, workspace_id)
                     return row
                 savepoint.rollback()
                 skipped_executions.add(execution_id)

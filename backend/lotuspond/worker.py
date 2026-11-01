@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from .config import Settings
 from .evaluation import (
     CompositeEvaluator,
@@ -343,6 +344,8 @@ def complete_job(
     *,
     alert_destinations: tuple[str, ...] = (),
 ) -> Assessment | None:
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, claim.workspace_id, exclusive=True)
     current = now()
     job = db.scalar(
         select(EvaluationJob)

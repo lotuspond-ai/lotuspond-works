@@ -153,7 +153,7 @@ def activate_rotation(
         raise FleetError("unauthenticated")
     rotation_limit(dependencies, hint.instance_id)
     scope = row_scope(hint)
-    pool, policy = lock_pool(db, scope, hint.pool_id, dependencies)
+    pool, policy = lock_pool(db, scope, hint.pool_id, dependencies, share=True)
     instance = lock(
         machine_query(RuntimeInstance, hint).where(RuntimeInstance.id == hint.instance_id), db
     )
