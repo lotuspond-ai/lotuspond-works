@@ -26,6 +26,33 @@ OPERATIONS = frozenset(
 # `FOR UPDATE`.
 SHARED_OPERATIONS = frozenset({"execute", "signal", "human_form", "control"})
 _SEAL = object()
+_UUID = TypeAdapter(CanonicalUUID)
+_CHECKED = "lotuspond.execution.checked"
+
+
+def checked(db) -> dict | None:
+    """Checks this transaction made at its top level, for reuse later in it (owner
+    decision, 2 November 2026: each lookup and permission check once per item).
+
+    A caller keeps only a success it checked against rows this transaction holds to
+    its end: taken at the top level (a savepoint's rollback releases what was locked
+    inside it), shared, so this transaction never writes them (`share`), behind the
+    gates that fence their unlocked inputs (`authority_gate`). Nothing is kept across
+    transactions, and on SQLite, which has neither, nothing is kept at all."""
+    transaction = db.get_transaction()
+    if transaction is None or db.get_bind().dialect.name != "postgresql":
+        return None
+    state = db.info.get(_CHECKED)
+    if state is None or state[0] is not transaction:
+        state = (transaction, {})
+        db.info[_CHECKED] = state
+    return state[1]
+
+
+def keep(db, entries, name, value) -> None:
+    """Keep a check's success for this transaction, if it was made at its top level."""
+    if entries is not None and not db.in_nested_transaction():
+        entries[name] = value
 
 
 @dataclass(frozen=True)
@@ -69,7 +96,7 @@ def scoped(model, scope):
 
 
 def record(db, model, scope, identifier, *, locked=False, shared=False):
-    identifier = TypeAdapter(CanonicalUUID).validate_python(identifier, strict=True)
+    identifier = _UUID.validate_python(identifier, strict=True)
     query = scoped(model, scope).where(model.id == identifier)
     if shared:
         row = share(db, query)
@@ -111,6 +138,10 @@ def authorize_execution(
     without locks and never queues behind writers or other readers (Task 12).
     `locked=False` makes any operation such a lock-free pre-check: the API's,
     before a service reauthorizes under its own lock order.
+
+    A shared operation's locked check is made once per transaction (`checked`): its
+    rows stay shared and its gates held to the end, so a repeat would read the same
+    rows. An API key's expiry is a time, so a repeat checks it again on the clock.
     """
     if locked is None:
         locked = operation != "read"
@@ -120,6 +151,13 @@ def authorize_execution(
     scope = Scope.model_validate(scope)
     if principal.workspace_id != scope.workspace_id:
         raise ExecutionError("forbidden")
+    entries = checked(db) if locked and operation in SHARED_OPERATIONS else None
+    name = ("authority", operation, principal, scope.model_dump_json())
+    if entries is not None and name in entries:
+        actor, expires_ms = entries[name]
+        if expires_ms is not None and expires_ms <= database_now_ms(db):
+            raise ExecutionError("forbidden")
+        return actor
     if locked:
         # The fair gates first, before any row lock (`authority_gate`): the
         # workspace's, then the acting user's, shared with the rows or exclusive, so
@@ -215,7 +253,10 @@ def authorize_execution(
         raise ExecutionError("forbidden")
     if operation != "read" and member.role == "viewer":
         raise ExecutionError("forbidden")
-    return ExecutionActor(user.id, key.id if key else None, scope, member.role, principal, _SEAL)
+    actor = ExecutionActor(user.id, key.id if key else None, scope, member.role, principal, _SEAL)
+    if locked and operation in SHARED_OPERATIONS:
+        keep(db, checked(db), name, (actor, int(expires.timestamp() * 1000) if key else None))
+    return actor
 
 
 @execution_service

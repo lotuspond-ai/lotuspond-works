@@ -229,20 +229,23 @@ class Scheduler:
                     connections[identifier] = scope
         for identifier, scope in sorted(connections.items()):
             record(db, Connection, scope, identifier, shared=True)
-        for scope, _, revision in sorted(eligible, key=lambda item: item[2].pool_id):
+        # What is checked here, under these locks, `reserve_attempt` reuses in this
+        # transaction (`held_parents`) instead of checking it again.
+        policies, capacities, loaded = {}, {}, {}
+        for scope, attempt_id, revision in sorted(eligible, key=lambda item: item[2].pool_id):
             try:
-                _pool(db, scope, revision.pool_id)
+                policies[attempt_id] = _pool(db, scope, revision.pool_id)
             except ExecutionError:
                 blocked.add(scope.environment_id)
         for scope, _, _ in sorted(eligible, key=lambda item: item[0].environment_id):
-            lock(db, scoped(ExecutionCapacity, scope))
+            capacities[scope.environment_id] = lock(db, scoped(ExecutionCapacity, scope))
         for scope, attempt_id, revision in sorted(
             eligible, key=lambda item: (item[2].deployment_id, item[2].id)
         ):
             if scope.environment_id in blocked:
                 continue
             try:
-                load_deployment(
+                _, loaded[attempt_id] = load_deployment(
                     db, actors[attempt_id], revision.id, dependencies=self.budgets.deployments
                 )
             except ExecutionError:
@@ -280,9 +283,21 @@ class Scheduler:
                     raise demand
                 # Written before the reservation, which ends at the leaf.
                 execution.reason = None
+                parents = None
+                if capacities.get(scope.environment_id) is not None:
+                    parents = self.budgets.held_parents(
+                        db,
+                        actors[attempt_id],
+                        installation,
+                        capacities[scope.environment_id],
+                        loaded[attempt_id],
+                        policies[attempt_id],
+                    )
                 # Refusal leaves no partial reservation/counter writes.
                 with db.begin_nested():
-                    self.budgets.reserve_attempt(db, actors[attempt_id], attempt_id, demand)
+                    self.budgets.reserve_attempt(
+                        db, actors[attempt_id], attempt_id, demand, parents=parents
+                    )
                 selected.append(ScheduledAttempt(attempt_id=attempt_id))
             except ExecutionError as error:
                 if error.code == "forbidden" and execution.deadline_ms <= database_now_ms(db):

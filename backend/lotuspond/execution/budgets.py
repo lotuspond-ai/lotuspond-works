@@ -66,6 +66,16 @@ MAX_SAFE = 9007199254740991
 SHARED = "capacity.shared:"
 
 
+class HeldParents:
+    """Parents one transaction checked and still holds (`BudgetService.held_parents`)."""
+
+    __slots__ = ("transaction", "actor", "revision_id", "values")
+
+    def __init__(self, transaction, actor, revision_id, values):
+        self.transaction, self.actor = transaction, actor
+        self.revision_id, self.values = revision_id, values
+
+
 class BudgetDemand(Contract):
     input_tokens: SafeInt
     output_tokens: SafeInt
@@ -226,6 +236,17 @@ class BudgetService:
             db, actor, revision_id, dependencies=self.deployments, snapshot=snapshot
         )
         return installation, capacity, revision, policy
+
+    def held_parents(self, db, actor, installation, capacity, revision, policy):
+        """`_parents`' work, done by a scheduling transaction at its top level, for
+        `reserve_attempt` in the same transaction (owner decision, 2 November 2026:
+        each lookup and permission check once per item). The rows stay locked to its
+        end; `_final` still checks everything again after the grant lookups."""
+        if db.in_nested_transaction() or db.get_transaction() is None:
+            raise ExecutionError("invalid_request")
+        return HeldParents(
+            db.get_transaction(), actor, revision.id, (installation, capacity, revision, policy)
+        )
 
     def _grants(self, db, scope):
         now = database_now_ms(db)
@@ -415,7 +436,7 @@ class BudgetService:
         return [ArtifactRef.model_validate(ref) for ref in references]
 
     @execution_service
-    def reserve_attempt(self, db, actor, attempt_id, demand, *, shared=False):
+    def reserve_attempt(self, db, actor, attempt_id, demand, *, shared=False, parents=None):
         """Reserve one attempt under the root execution budget.
 
         `shared` (Task 9) admits an agent's child attempt into its parent's running
@@ -427,15 +448,28 @@ class BudgetService:
         every lookup, lock and write. A visibly full installation refuses before any
         provider lookup; one that fills meanwhile refuses at the leaf, and the caller
         rolls the reservation back.
+
+        `parents` (`held_parents`) is the scheduler's: this transaction checked and
+        still holds them for this actor and revision, so they are not checked twice.
         """
         demand = BudgetDemand.model_validate(demand)
         if type(shared) is not bool:
             raise ExecutionError("invalid_request")
         hint = record(db, ExecutionAttempt, actor.scope, attempt_id)
         execution_hint = record(db, Execution, actor.scope, hint.execution_id)
-        installation, capacity, revision, pool = self._parents(
-            db, actor, execution_hint.deployment_revision_id
-        )
+        if parents is None:
+            installation, capacity, revision, pool = self._parents(
+                db, actor, execution_hint.deployment_revision_id
+            )
+        elif (
+            type(parents) is not HeldParents
+            or parents.transaction is not db.get_transaction()
+            or parents.actor is not actor
+            or parents.revision_id != execution_hint.deployment_revision_id
+        ):
+            raise ExecutionError("invalid_request")
+        else:
+            installation, capacity, revision, pool = parents.values
         execution = record(db, Execution, actor.scope, hint.execution_id, locked=True)
         step = record(db, ExecutionStepInstance, actor.scope, hint.step_instance_id, locked=True)
         attempt = record(db, ExecutionAttempt, actor.scope, attempt_id, locked=True)

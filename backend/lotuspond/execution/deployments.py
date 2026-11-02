@@ -33,7 +33,7 @@ from ..models import (
 )
 from . import memo
 from .assurance import release_binding, validated_release_binding
-from .authorization import SHARED_OPERATIONS, reauthorize, record, scoped
+from .authorization import SHARED_OPERATIONS, checked, keep, reauthorize, record, scoped
 from .contracts import (
     DeploymentConfig,
     DeploymentRequest,
@@ -97,6 +97,20 @@ def execution_gates(db, scope, execution_id, operation="execute", users=()):
 
 
 def _pool(db, scope, pool_id):
+    """The pool's current policy, its pool and connections shared and active.
+
+    Once per transaction (`checked`): the pool row stays shared to the end, so its
+    policy version cannot change, and a version's policy rows never do."""
+    entries = checked(db)
+    name = ("pool", scope.model_dump_json(), pool_id)
+    if entries is not None and name in entries:
+        return entries[name]
+    policy = _current_pool(db, scope, pool_id)
+    keep(db, checked(db), name, policy)
+    return policy
+
+
+def _current_pool(db, scope, pool_id):
     pool = record(db, RuntimePool, scope, pool_id, shared=True)
     if pool.status != "active" or pool.current_policy_version is None:
         raise ExecutionError("deployment_unavailable")
