@@ -259,7 +259,7 @@ No projection infers success from a receipt or presents `unknown` as a value.
 
 ## Capacity and budgets
 
-A review or form task is a retained wait: it uses the environment's wait quota, not a compute slot. A dispatch, a read-back and a verification read are attempts with reservations under E04's limits. They take compute slots, except read-backs of an uncertain write, as described above. Connector writes reserve their active time and the conservative maximum charge from the price authority. A missing price or maximum charge refuses dispatch.
+A review or form task is a retained wait: it uses the environment's wait quota, not a compute slot. It is listed, and can be claimed, decided or submitted, only once its wait is retained; until then those actions answer `conflict` (E04 finding 2, decided by the owner on 2 November 2026). A dispatch, a read-back and a verification read are attempts with reservations under E04's limits. They take compute slots, except read-backs of an uncertain write, as described above. Connector writes reserve their active time and the conservative maximum charge from the price authority. A missing price or maximum charge refuses dispatch.
 
 Unknown usage stays uncertain liability and is never measured as zero. E04's ceilings are unchanged: 25 active attempts per installation and 5 per environment, 1,000 pending executions and 10,000 retained waits per environment. Escalation and claim expiry are sweeper work; they use no compute.
 
@@ -305,7 +305,7 @@ Completion means locally verified action, review and reconciliation behaviour ag
 
 ## Review handoff
 
-This specification and its plan were reviewed together. On 29 October 2026 the owner accepted all 18 of the plan's recommended options, restating decisions 1 and 13. The approval permits implementation from `main` after the finding 11 redesign merges, with the owner's selected subagent-driven method and independent review after each task. Two E04 findings that are still open must be decided along the way: finding 2 before Task 5, and finding 21 for uncertain E04 reads. Nothing in either document is implemented, and no merge, deployment, production database access, provider or customer connection, or public distribution is requested.
+This specification and its plan were reviewed together. On 29 October 2026 the owner accepted all 18 of the plan's recommended options, restating decisions 1 and 13. The approval permits implementation from `main` after the finding 11 redesign merges, with the owner's selected subagent-driven method and independent review after each task. On 2 November 2026 the owner decided E04 finding 2: a wait or task is listed only once retained, and a signal or task action on one not yet retained answers 409 `conflict` instead of 403; the plan's Task 5 makes that fix. Finding 21, for uncertain E04 reads, is still open and must be decided along the way. Nothing in either document is implemented, and no merge, deployment, production database access, provider or customer connection, or public distribution is requested.
 
 Author review checks:
 
