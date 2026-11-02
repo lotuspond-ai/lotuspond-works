@@ -807,6 +807,8 @@ def serve_worker(world, role, worker_id, interpreters, timeout_ms, user=None) ->
         record_gate_waits(role, Path(os.environ[GATE_LOG]))
     if os.environ.get(PRIVILEGE_LOG):
         record_privileges(role, Path(os.environ[PRIVILEGE_LOG]))
+    if os.environ.get(PROFILE_DIRECTORY):
+        profile_process(role, Path(os.environ[PROFILE_DIRECTORY]))
     graph = build(world)
     url = scoped_url(world)
     if user is not None:  # ENG-4: a least-privilege worker role on the disposable cluster
