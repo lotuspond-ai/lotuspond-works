@@ -410,6 +410,7 @@ def _clean_environment() -> dict:
     keep.add("LOTUSPOND_CONFORMANCE_LOOKUP_LOG")  # provider lookups that waited (tier 3)
     keep |= {"LOTUSPOND_CONFORMANCE_CALL_LOG", "LOTUSPOND_CONFORMANCE_PROFILE_DIRECTORY"}
     keep.add("LOTUSPOND_CONFORMANCE_PRIVILEGE_LOG")  # the worker grants, measured
+    keep.add("LOTUSPOND_CONFORMANCE_GATE_LOG")  # fair gate requests by caller (tier 3)
     return {key: value for key, value in os.environ.items() if key in keep}
 
 

@@ -476,6 +476,8 @@ def _serve_on(world, listener, started) -> None:
         record_lookup_waits("api", Path(os.environ[LOOKUP_LOG]))
     if os.environ.get(CALL_LOG):
         record_service_calls("api", Path(os.environ[CALL_LOG]))
+    if os.environ.get(GATE_LOG):
+        record_gate_waits("api", Path(os.environ[GATE_LOG]))
     if os.environ.get(PROFILE_DIRECTORY):
         profile_process("api", Path(os.environ[PROFILE_DIRECTORY]))
     graph = build(world)
@@ -509,6 +511,7 @@ CURSOR_LOG = "LOTUSPOND_CONFORMANCE_CURSOR_LOG"
 CYCLE_LOG = "LOTUSPOND_CONFORMANCE_CYCLE_LOG"
 LOOKUP_LOG = "LOTUSPOND_CONFORMANCE_LOOKUP_LOG"
 CALL_LOG = "LOTUSPOND_CONFORMANCE_CALL_LOG"
+GATE_LOG = "LOTUSPOND_CONFORMANCE_GATE_LOG"
 PROFILE_DIRECTORY = "LOTUSPOND_CONFORMANCE_PROFILE_DIRECTORY"
 
 
@@ -564,6 +567,56 @@ def record_cursor_waits(role, path: Path):
     def refused(context):
         if context.connection is not None:
             finished(context.connection, True)
+
+
+def record_gate_waits(role, path: Path):
+    """Test-only (tier 3): every fair gate this process asked PostgreSQL for, timed.
+
+    `ms` runs from the request to the grant: the gate's wait plus one round trip. A
+    gate the transaction already holds asks nothing and records nothing. The caller is
+    the first two frames outside the gate module (`execution.dispatch.runtime_gates <
+    execution.runtime_routes.poll`). A claim's `try_shared` that is refused records
+    `skipped`.
+    """
+    from lotuspond import authority_gate
+
+    names = {
+        authority_gate.WORKSPACE: "workspace",
+        authority_gate.USER: "user",
+        authority_gate.POOL: "pool",
+    }
+
+    def caller():
+        frame, found = sys._getframe(2), []
+        while frame is not None and len(found) < 2:
+            module = frame.f_globals.get("__name__", "")
+            if module.startswith("lotuspond") and module != authority_gate.__name__:
+                found.append(f"{module.removeprefix('lotuspond.')}.{frame.f_code.co_name}")
+            frame = frame.f_back
+        return " < ".join(found) or "unknown"
+
+    gate, try_shared = authority_gate.gate, authority_gate.try_shared
+
+    def timed_gate(db, kind, identifier, *, exclusive=False):
+        asks = authority_gate._postgresql(db) and (
+            (kind, authority_gate.key(kind, identifier)) not in authority_gate._held(db)
+        )
+        began = time.monotonic()
+        gate(db, kind, identifier, exclusive=exclusive)
+        if asks:
+            entry = {"role": role, "gate": names[kind], "caller": caller()}
+            entry |= {"mode": "exclusive" if exclusive else "shared"}
+            entry |= {"ms": round((time.monotonic() - began) * 1000, 2)}
+            _append(path, entry | {"at": int(time.time() * 1000)})
+
+    def timed_try(db, kind, identifier):
+        taken = try_shared(db, kind, identifier)
+        if not taken:
+            entry = {"role": role, "gate": names[kind], "caller": caller()}
+            _append(path, entry | {"skipped": True, "at": int(time.time() * 1000)})
+        return taken
+
+    authority_gate.gate, authority_gate.try_shared = timed_gate, timed_try
 
 
 def record_lookup_waits(role, path: Path):
@@ -750,6 +803,8 @@ def serve_worker(world, role, worker_id, interpreters, timeout_ms, user=None) ->
         record_cursor_waits(role, Path(os.environ[CURSOR_LOG]))
     if os.environ.get(LOOKUP_LOG):
         record_lookup_waits(role, Path(os.environ[LOOKUP_LOG]))
+    if os.environ.get(GATE_LOG):
+        record_gate_waits(role, Path(os.environ[GATE_LOG]))
     if os.environ.get(PRIVILEGE_LOG):
         record_privileges(role, Path(os.environ[PRIVILEGE_LOG]))
     graph = build(world)
