@@ -5,7 +5,7 @@ import json
 import signal
 import time
 
-from driver import diagnose, reconcile_from_journal
+from driver import diagnose, patient_agent, reconcile_from_journal
 from processes import Processes, wait_for
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -47,9 +47,11 @@ def test_the_reference_agent_calls_its_model_and_tool_as_counted(system, linux):
     """Synthetic reference workflow: model round 1 asks for the read tool, round 2 ends."""
     w = system
     operator, customer = w.operator, w.customer
-    model = operator.model_document()
-    revision = operator.deploy(customer, "agent_tools", dependencies=[operator.documents[0], model])
-    operator.demand(7000)  # the root and its three children within the agent's 30 s
+    package, model = patient_agent()
+    revision = operator.deploy(
+        customer, "agent_tools_240", package=package, dependencies=[operator.documents[0], model]
+    )
+    operator.demand(50000)  # the root and its three children within the agent's 240 s
     rounds = [
         {
             "tool_calls": [
@@ -58,8 +60,10 @@ def test_the_reference_agent_calls_its_model_and_tool_as_counted(system, linux):
         },
         {"output": None},
     ]
-    runtime = operator.runtime(customer, "runtime-a", model={"rounds": rounds})
-    helper = operator.runtime(customer, "runtime-b", model={"rounds": rounds})
+    runtime = operator.runtime(
+        customer, "runtime-a", model_document=model, model={"rounds": rounds}
+    )
+    helper = operator.runtime(customer, "runtime-b", model_document=model, model={"rounds": rounds})
     execution_id = operator.start(customer, revision)["id"]
     view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 120)
     assert view["state"] == "succeeded", diagnose(w, execution_id)

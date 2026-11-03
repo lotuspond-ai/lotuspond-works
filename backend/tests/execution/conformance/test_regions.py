@@ -107,7 +107,7 @@ def test_an_iteration_keeps_order_bounds_concurrency_and_runs_each_item_once(sys
     """REG-2: 1,000 items, concurrency 5, the orchestrator killed mid-iteration."""
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
-    operator.demand(10000)
+    operator.demand(30000)  # each lease may run to its read's 30 s deadline
     runtimes = [operator.runtime(customer, f"runtime-{n}") for n in range(5)]
     revision = operator.deploy(
         customer,

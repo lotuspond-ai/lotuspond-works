@@ -761,6 +761,30 @@ def patient_read(timeout_seconds=30, flows=FLOWS):
     return package
 
 
+def patient_agent(timeout_seconds=240, flows=FLOWS):
+    """`agent_tools` and its model document with a longer agent deadline and budget.
+
+    The agent's 30 s bounds the active time of its root and every child together, each
+    charged at least its reservation, so the fixture leaves about 7 s per attempt. The
+    root's lease never outlives its reservation, and its children run inside it: on a
+    slow host they can outlast 7 s, and the root is then uncertain, as designed.
+    Returns the package and the model document its runtimes must install.
+    """
+    from lotuspond_sdk.executable.catalog import catalog_document_digest
+
+    model = json.loads((flows / "agent_tools.model.json").read_text())
+    model["name"] = f"model-tools-fixture-{timeout_seconds}"
+    model["definition"]["limits"]["timeout_seconds"] = timeout_seconds
+    package = copy.deepcopy(flow("agent_tools", flows))
+    package["package_id"] = f"agent-tools-{timeout_seconds}"
+    package["limits"]["active_seconds"] = timeout_seconds
+    package["models"][0]["ref"].update(name=model["name"], sha256=catalog_document_digest(model))
+    think = package["body"]["steps"][0]
+    think["limits"]["timeout_seconds"] = timeout_seconds
+    think["retry"]["timeout_seconds"] = timeout_seconds
+    return package, model
+
+
 def read_iteration(items, concurrency, flows=FLOWS):
     """Iteration over integer items: each item reads once, then yields itself (+0)."""
     package = copy.deepcopy(flow("wide", flows))
