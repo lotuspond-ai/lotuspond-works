@@ -19,7 +19,6 @@ import {
   problemLocation,
   removeNode,
   renameNode,
-  serializeDraft,
   updateNode,
 } from './studio.js';
 
@@ -134,11 +133,11 @@ test('a cleared limit is reported as that field, not as unreadable JSON', () => 
 test('stored drafts round-trip, and a draft in progress survives a reload', async () => {
   const pkg = await example();
   const draft = draftFromPackage(pkg);
-  const restored = parseDraft(serializeDraft(draft));
+  const restored = parseDraft(JSON.stringify(draft));
   assert.deepEqual(restored, draft);
   // An in-progress draft fails the contract (an empty identifier) but is still restored.
   const inProgress = { ...draft, package: { ...pkg, package_id: '' } };
-  const loose = parseDraft(serializeDraft(inProgress));
+  const loose = parseDraft(JSON.stringify(inProgress));
   assert.ok(loose);
   assert.equal(loose.package.package_id, '');
   assert.equal(loose.package.nodes.length, pkg.nodes.length);

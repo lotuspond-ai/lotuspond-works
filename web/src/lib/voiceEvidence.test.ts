@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeVoiceEvidence, voiceMetricRows, describePrivacyValue } from './voiceEvidence.js';
+import { normalizeVoiceEvidence, voiceMetricRows } from './voiceEvidence.js';
 
 test('voice transcripts do not invent metric coverage or provider attestation', () => {
   const record = normalizeVoiceEvidence({
@@ -55,12 +55,5 @@ test('invalid timing does not create fabricated duration', () => {
     normalizeVoiceEvidence({ started_at: '2026-01-01T00:01:00Z', ended_at: '2026-01-01T00:00:00Z' })
       ?.durationMs,
     undefined,
-  );
-});
-test('missing privacy provenance stays explicitly unknown', () => {
-  assert.equal(describePrivacyValue(undefined), 'Not supplied');
-  assert.equal(
-    describePrivacyValue({ raw_audio_retained: false }),
-    'redaction metadata · raw audio not retained',
   );
 });

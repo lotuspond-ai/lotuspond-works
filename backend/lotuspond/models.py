@@ -1217,7 +1217,6 @@ class FleetMutationRequest(FleetScoped, Base):
 
 # Durable execution records. Stored pins are evidence, never current authority.
 # Reuse the fleet's full scope and its normalized connection-version/secret links.
-EXECUTION_SCOPE = FLEET_SCOPE
 
 
 def execution_safe(*fields):
