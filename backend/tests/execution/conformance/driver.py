@@ -731,12 +731,18 @@ def reconcile_from_journal(world, customer, runtime, execution_id):
     return entry
 
 
-def timer_then_read(delay_seconds, flows=FLOWS):
-    """`activity_read` preceded by a timer: the read is dispatched only after it fires."""
-    package = copy.deepcopy(flow("activity_read", flows))
+def timer_then_read(delay_seconds, flows=FLOWS, *, timeout_seconds=None):
+    """`activity_read` preceded by a timer: the read is dispatched only after it fires.
+
+    With `timeout_seconds`, the read is `patient_read()`'s, for a read that must complete.
+    """
+    if timeout_seconds is None:
+        package, suffix = copy.deepcopy(flow("activity_read", flows)), ""
+    else:
+        package, suffix = patient_read(timeout_seconds, flows), f"-{timeout_seconds}"
     timer = next(s for s in flow("waits_fast", flows)["body"]["steps"] if s["kind"] == "timer")
     timer = {**copy.deepcopy(timer), "delay_seconds": delay_seconds}
-    package["package_id"] = f"timer-then-read-{delay_seconds}"
+    package["package_id"] = f"timer-then-read-{delay_seconds}{suffix}"
     package["body"]["steps"] = [timer, *package["body"]["steps"]]
     return package
 
