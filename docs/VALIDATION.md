@@ -1292,14 +1292,52 @@ Test-only, on branch `claude/hosted-conformance-budgets` from `main` at `533b3d6
 - **Earlier runs with the same agent and TEN-7 budgets**, two at the hosted-like setting and one at 0.5 CPU each: the reference agent and TEN-7 passed 3 of 3, and so did the installed reference scenario.
 - The Mac was on battery for most of these runs, and on AC from about 14:45 IST.
 
+**The first hosted run of these fixes**, run 41611114067 on PR #19 at `e05e313`: 3 failed, 45 passed, in 89 min.
+
+- Every case changed in `9f4b9e2` passed: the reference agent (16 s), TEN-7, REG-2 (3,025 s) and the installed journey (198 s, all scenarios).
+- This runner was slower again. The largest expansion took 373 s and the stalled orchestrator 370 s, against 285–289 s in the two earlier hosted runs.
+- **ENG-5** (`test_replaying_events_reproduces_the_projected_state`) and **REV-5** (`test_withdrawn_revisions_get_no_further_activities`) each ended `execution stayed reconciliation_required`, after `renew` answered `409 conflict`. Both read with the 2 s fixture read; REV-5's follows a timer (`timer_then_read`). This is the class the "Not changed" note below had left.
+- **ENG-4** (`test_event_sequences_are_gap_free_under_concurrent_transitions`) failed with `no open wait at callback` after 60 s. It took 21 s in both earlier hosted runs.
+
+**ENG-4's mechanism.** `waits_fast` is a 2 s timer, then `callback`, an external wait that expires after 3 s; with no signal, the execution fails at that expiry. An execution stays `pending` until the capacity step retains one of its waits, and retention refuses a wait past its deadline (`budgets.py`, `retain_wait`), as designed. The case started 12 executions on two orchestrators, then watched each in turn until its callback was open and the execution was out of `pending`.
+
+- A scratch probe, not committed, ran that workload at the unchanged code. Its observer moved on once a callback had closed. Afterwards it read every wait, retention and event. Runner and PostgreSQL containers were pinned to 2 CPUs, at these quotas:
+  - **0.5 CPU each:** timers fired 0.4–8.3 s after their deadlines, and callbacks opened out of admission order. The observer saw 11 of 12; it reached the ninth execution after that callback had expired.
+  - **0.3 CPU (two runs) and 0.2 CPU:** timers fired 15.7–82.3 s late. Every retention came after its wait's deadline, so no execution left `pending`, and the observer saw none.
+- The unchanged case at 0.5 CPU each failed 2 of 3, with the hosted message. At 0.7 CPU each it passed 3 of 3, in 14–16 s.
+
+**Second fixes, all in tests (`517f56f`).**
+
+- **ENG-4** waits up to 180 s for each execution to end, and checks that each reached its callback. Then it checks the same gap-free sequences, now over each execution's whole life: timer, callback and expiry. The fixture is unchanged, and the case no longer has to watch a 3 s window.
+- **Reads that must complete** deploy `patient_read()`, and each attempt reserves 30 s:
+  - ENG-5, and REV-5's continuing revision through `timer_then_read(3, timeout_seconds=30)`;
+  - `test_a_read_runs_once_on_a_real_runtime` and ENG-2's reads;
+  - DISC-3, and DISC-4's read after reconnection;
+  - the cancellation case's control (spike 26–27), spike 5–7's restart, REV-4's reactivated read (also through `timer_then_read`), and spike 33's control.
+  - Their checks are unchanged: retry bounds, call counts, deliveries, states.
+- **ENG-2's non-conforming model output** uses `patient_agent()`, with 50 s per attempt instead of 5 s. In the first run of the changed cases at 0.5 CPU each, its root's lease ended (`409` on `renew`) before the model's output was reported. Its checks are unchanged: failed, no result, one model call.
+
+**Runs of the second fixes**, in the local runner, one job at a time:
+
+- The three hosted failures, at 0.5 CPU each: passed 3 of 3. ENG-4 took 23–26 s, ENG-5 7–8 s and REV-5 35 s.
+- All 11 changed cases at the hosted-like setting: 11 passed, in 5 min 19 s.
+- The same 11 at 0.5 CPU each: 10 passed, and ENG-2's agent part failed as described above, before its fix.
+- ENG-2 with its agent fix: passed 3 of 3 at 0.5 CPU each, in 26 s, and 1 of 1 at the hosted-like setting, in 13 s.
+- The Mac was on AC, with a background media-analysis process using 2–3 cores for part of these runs.
+
 **Not changed.**
 
-- Engine, runtime and SDK code, and every case's assertions.
-- The other 2 s fixture reads. They passed on the hosted runner, and many depend on the short deadline on purpose. The ones that must complete can still lapse on a slow host, as `test_a_read_runs_once_on_a_real_runtime` did once above.
-- The privacy agent's 14 s per attempt (root and one child in 30 s). It passed on the hosted runner in 13–15 s.
+- Engine, runtime and SDK code. No check was removed or loosened; ENG-4 now waits for each execution's end instead of for each callback.
+- The 2 s reads whose short deadline is the point, or whose read is not meant to complete:
+  - DISC-1 and REV-2, where the delivery expires (their next ordinal must still complete within 2 s);
+  - the privacy case and the installed privacy scenario, whose provider raises;
+  - the projection rollback, whose hand-driven runtime only polls;
+  - REV-5's revoked and disabled revisions, which are never dispatched.
+- The privacy agent's 14 s per attempt (root and one child in 30 s). It passed on the hosted runner in 13–19 s.
+- Two single-execution cases watch `waits_fast`'s timer and callback with `open_wait`: `test_an_unregistered_interpreter_is_refused_and_never_claimed` and REG-4 (`test_a_timer_fires_once_at_its_deadline_across_kills`). They passed in all three hosted runs.
 
 **For the owner to decide, not changed here.**
 
 - **A runtime can exit on one refused lookup.** The API refuses a second, concurrent recovery-authority lookup with 503 (`_LookupSlot`), and the runtime supervisor treats that answer to its own calls as fatal. A starting runtime on a busy API can then exit. Polls already retry it. Making the slot wait, or the supervisor retry, would be a product change for E03's runtime.
 
-**Not done:** hosted CI, which needs the owner's approval to push.
+**Not done:** hosted `conformance` at the second fixes.
