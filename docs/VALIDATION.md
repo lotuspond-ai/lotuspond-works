@@ -1220,3 +1220,86 @@ Same branch, draft PR #17. This is local Linux evidence only: GitHub Actions sti
 **Residual, not changed here.** 16 deployments in 11 conformance files use the 2 s fixture read. Many depend on the short deadline on purpose, for lapse and expiry cases. A positive path among them can fail the same way on a loaded host.
 
 **Not done:** hosted CI, and merging into `main` (not requested).
+
+## Conformance budgets for GitHub's hosted runner, 2026-11-03
+
+Test-only, on branch `claude/hosted-conformance-budgets` from `main` at `533b3d6`. No engine, runtime or SDK code changes.
+
+**What failed.** GitHub Actions started this repository's jobs again on 2 November, after the billing block. Its required `conformance` job failed on `main`'s own code, while every other job passed:
+
+- Run 41399789367, `claude/e05-actions-spec` at `6fd0f3a` (documents only): 4 failed, 44 passed, in 87 min.
+- Run 41582129024, PR #18 (`533b3d6` plus unused-code removal): 3 failed, 45 passed, in 73 min.
+- Both runs failed the reference agent (`test_the_reference_agent_calls_its_model_and_tool_as_counted`), TEN-7 (`test_no_record_of_one_tenant_names_another`), and the installed journey's `reference_workflow_result_and_calls`, in both its `runtime` and `rebuilt` variants. The first run also failed REG-2, the 1,000-item iteration.
+- Each failure ended `execution stayed reconciliation_required`, after `POST /api/v1/runtime/activities/renew` (or `results`) answered `409 conflict`. A claimed attempt's lease ended before its outcome arrived, so the attempt was uncertain, as designed.
+- The local runner had passed all 48 cases at `7d2e97c`.
+
+**The hosted runner is slower.** The repository is private, so `ubuntu-latest` is GitHub's standard x86_64 runner, which GitHub documents as 2 vCPUs for private repositories. The job shares them with its PostgreSQL service. The job log prints no core count. The local runner is a 4-vCPU arm64 Docker VM on an M3 Pro. Cases that passed in both places took 1.5–1.9× as long on the hosted runner:
+
+| Case | Local, `7d2e97c` and `34de53a` | Hosted, the two runs |
+| --- | --- | --- |
+| REG-2, the iteration | 1,126 and 1,152 s | 3,053 s (failed) and 2,182 s |
+| The largest expansion | 166 and 191 s | 285 and 287 s |
+| The stalled orchestrator | 176 and 161 s | 288 and 289 s |
+
+**The budgets these cases had.** A lease ends at the earliest of 60 s, the step's deadline, and the attempt's reservation plus its reserved active time, `demand.active_ms` (`dispatch.py`, `leases.py`). Renewal never passes that end.
+
+- **The reference agent.** Its root and its three children (model, read, model) each reserve `demand.active_ms`. Each is charged at least that against the agent's active budget (`budgets.py`). That budget is the smallest `active_seconds` and agent or model `timeout_seconds` among the limits that apply: 30 s here. A stopped attempt keeps the larger of its reservation and its actual time. So the case could reserve at most 7.5 s per attempt, and it used 7 s. The children run inside the root's lease, so the root, its three children and the root's own report had 7 s in all.
+- **TEN-7.** Its reads used the fixture `activity_read`, whose 2 s step deadline is also its lease. This is the class `34de53a` fixed for REV-6 and RESTORE-1, and the "Residual" note of 28 October.
+- **REG-2.** Each of its 1,000 reads reserved 10 s, under a 30 s step deadline, with five in flight.
+
+**How it was measured.** A scratch probe, not committed, ran each workload and read every attempt's reservation and lease rows. It ran in the local runner, one job at a time. To stand in for the hosted runner, the runner container and its PostgreSQL container were pinned to the same 2 CPUs with a quota of 1 CPU each (`--cpuset-cpus 0,1 --cpus 1.0`). At that setting the installed journey took 137 s when it passed. The hosted runs took 373–378 s, which includes two 122 s failures, so about 128 s of passing work. The Mac was on battery, with a load average of 4–7, for every probe run.
+
+**Measured at `533b3d6`.** Times are from the attempt's reservation.
+
+- **The reference agent.** In seven probe runs across four settings, its root was uncertain six times, each time with its lease ending at exactly 7,000 ms.
+  - Unpinned, the second child finished at 6,207 and 6,590 ms, and the third had not started.
+  - At the hosted-like setting, the third child was claimed at 6,627 and 6,808 ms.
+  - The one success, pinned to 2 CPUs without a quota, used 6,499 ms of the 7,000.
+- **TEN-7.** Seven of its eight reads across four settings ended uncertain. They were claimed 1.2–3.4 s after reservation, with 27–1,572 ms of their 2 s deadline left. At 0.5 CPU each, both reads also failed twice before dispatch.
+- **REG-2**, at the hosted-like setting: a read's result answered `409 conflict`, the execution was held, and fewer than 300 of the 1,000 reads had run after 1,200 s, so the case reported "the iteration stalled".
+
+**Measured with the new budgets.**
+
+- **The reference agent.** With the 7 s cap gone, its root needed:
+  - 7,035 ms unpinned;
+  - 7,016–11,907 ms at the hosted-like setting;
+  - 19,238–20,585 ms at 0.5 CPU each, a harsher setting.
+- **TEN-7.** Its 30 s reads completed in 1.3 s, 3.0–3.6 s and 6.8–9.3 s at the same three settings.
+- **REG-2**, at the hosted-like setting with 30 s per read: it succeeded in 1,954 s, with no uncertain attempt.
+  - Reservation to claim: median 1.9 s, 99th percentile 4.5 s, maximum 12.1 s.
+  - Reservation to stop: median 4.7 s, 99th percentile 9.4 s, 99.9th percentile 16.6 s, maximum 17.7 s.
+  - 7 reads took longer than the old 10 s.
+
+**A second mechanism, not changed.** In two of six TEN-7 runs with 30 s reads, both before the wait became 180 s, one tenant's runtime exited at start. Its `GET /api/v1/runtime/self` answered 503 `authority_unavailable`.
+
+- The API runs at most one recovery-authority lookup per process and refuses a concurrent one (`fleet/authority.py`, `_LookupSlot`).
+- The runtime supervisor ends on an error from its own calls (`supervisor.py`, `run`). The activity worker's polls survive the same 503, and the hosted TEN-7 logs show those.
+- TEN-7 accepts `failed` as well as `succeeded`. A 2 s read with no runtime failed within seconds. A 30 s read takes three deadlines: a probe with no runtime for one tenant reached `failed` after 93–97 s, past the case's 90 s wait.
+
+**Fixes, all in tests (`9f4b9e2`).** No check was removed or loosened.
+
+- **`patient_agent()`** (`driver.py`): `agent_tools` with a 240 s agent deadline: the step's limit and retry timeout, the model document's limit and the package's `active_seconds`. The model document is renamed `model-tools-fixture-240`, because publications are unique by name and version.
+- **The reference agent**, the case and the installed scenario: it uses `patient_agent()` with 50 s per attempt (4 × 50 s = 200 s, within 240 s), and its runtimes install that model document. Its checks are unchanged: succeeded, two model calls, one read, four claimed attempts.
+- **TEN-7:** both tenants deploy `patient_read()`, each attempt reserves 30 s, and the case waits 180 s, which covers its accepted `failed` after three 30 s deadlines. The check for foreign IDs is unchanged.
+- **The installed journey's claim, result and transition rollbacks:** they deploy `patient_read()`. At the hosted-like setting, 2 of these 24 reads lapsed at the unchanged code, although they passed 24 of 24 on the hosted runner. Their checks are unchanged: one injected failure, succeeded, one provider call, gap-free events. The projection rollback keeps the 2 s read, because its hand-driven runtime only polls.
+- **REG-2:** each read reserves 30 s, its read's own step deadline. Its checks are unchanged: one call per item, output in input order, never more than five in flight.
+
+**Runs at `9f4b9e2`**, in the local runner, one job at a time, not hosted CI.
+
+- **The whole `conformance` job at the hosted-like setting**, on a clean clone: **47 passed, 1 failed**, in 53 min 44 s.
+  - Every changed case passed: the reference agent, TEN-7, REG-2 (1,765 s) and the installed journey (100 s, all 32 scenarios).
+  - The failure was `test_a_read_runs_once_on_a_real_runtime`, the session's first case: one unchanged 2 s read, uncertain. Alone at the same setting it then passed 5 of 5, in 5–16 s. It passed in both hosted runs.
+- **Earlier runs with the same agent and TEN-7 budgets**, two at the hosted-like setting and one at 0.5 CPU each: the reference agent and TEN-7 passed 3 of 3, and so did the installed reference scenario.
+- The Mac was on battery for most of these runs, and on AC from about 14:45 IST.
+
+**Not changed.**
+
+- Engine, runtime and SDK code, and every case's assertions.
+- The other 2 s fixture reads. They passed on the hosted runner, and many depend on the short deadline on purpose. The ones that must complete can still lapse on a slow host, as `test_a_read_runs_once_on_a_real_runtime` did once above.
+- The privacy agent's 14 s per attempt (root and one child in 30 s). It passed on the hosted runner in 13–15 s.
+
+**For the owner to decide, not changed here.**
+
+- **A runtime can exit on one refused lookup.** The API refuses a second, concurrent recovery-authority lookup with 503 (`_LookupSlot`), and the runtime supervisor treats that answer to its own calls as fatal. A starting runtime on a busy API can then exit. Polls already retry it. Making the slot wait, or the supervisor retry, would be a product change for E03's runtime.
+
+**Not done:** hosted CI, which needs the owner's approval to push.
