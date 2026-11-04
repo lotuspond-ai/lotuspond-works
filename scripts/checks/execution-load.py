@@ -24,6 +24,13 @@ waiters by role, MultiXact growth and its margin, the sweeper's time per
 reservation, and a revocation probe every few seconds: a revocation's locks under
 the load, then a rollback, whose wait p95 and max are a pass criterion. A result is evidence about this harness on this hardware, not hosted
 capacity or a service level. Needs Linux (runtime private state) and a Docker CLI.
+
+`--engine-cpus` and `--client-cpus` (test-only, both or neither) split the host's
+CPUs the way production separates them. The installation gets the first set: the API
+and the workers (through taskset) and PostgreSQL (`--cpuset-cpus`). Its clients get
+the second: this driver, the synthetic runtimes, and the processes they start. Each
+role's CPU includes children that have exited, such as a runtime's per-request
+resolver.
 """
 
 from __future__ import annotations
@@ -135,8 +142,9 @@ def docker(*args, check=True, timeout=120):
 class Cluster:
     """The run's own PostgreSQL; removed, and the removal confirmed, at the end."""
 
-    def __init__(self):
+    def __init__(self, cpus=None):
         self.name = "lotuspond-load-" + uuid4().hex[:12]
+        self.cpus = cpus  # test-only: the engine's CPU list (`--engine-cpus`)
         for _ in range(100):
             port = random.randint(20000, 60000)
             with socket.socket() as probe:
@@ -154,6 +162,7 @@ class Cluster:
         docker(
             "run", "--detach", "--name", self.name, "--label", LABEL,
             "--publish", f"127.0.0.1:{self.port}:5432",
+            *(["--cpuset-cpus", self.cpus] if self.cpus else []),
             "--env", "POSTGRES_USER=lotuspond", "--env", "POSTGRES_DB=lotuspond_platform_test",
             "--env", "POSTGRES_HOST_AUTH_METHOD=trust", "--env", f"PGDATA={DATA}",
             IMAGE, "-c", "max_connections=300", "-c", "log_lock_waits=on",
@@ -506,10 +515,11 @@ def activity_by_phase(world, timeline):
 
 
 def cpu_seconds(pid):
-    """User plus system CPU of one child, from /proc (Linux)."""
+    """User plus system CPU of one child and of its children that have exited, from
+    /proc (Linux). Live children are counted by `family`."""
     try:
         fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+        return sum(int(fields[i]) for i in (11, 12, 13, 14)) / os.sysconf("SC_CLK_TCK")
     except (OSError, IndexError, ValueError):
         return None
 
@@ -564,6 +574,15 @@ def api_cpu(processes):
         return {}
     serving = family(api.pid)
     return {str(pid): cpu_seconds(pid) for pid in serving[1:] or serving}
+
+
+def cpu_list(text):
+    """A Linux CPU list ("0-3", "4,6-7") as a set of CPU numbers."""
+    cpus = set()
+    for part in text.split(","):
+        low, _, high = part.partition("-")
+        cpus.update(range(int(low), int(high or low) + 1))
+    return cpus
 
 
 def hardware():
@@ -1399,7 +1418,25 @@ def main():
         action="store_true",
         help="test-only: write each API process's cProfile into the report directory",
     )
+    parser.add_argument(
+        "--engine-cpus", help="test-only: CPU list for the API, workers and PostgreSQL"
+    )
+    parser.add_argument(
+        "--client-cpus", help="test-only: CPU list for this driver and the runtimes"
+    )
     args = parser.parse_args()
+    if (args.engine_cpus is None) != (args.client_cpus is None):
+        raise SystemExit("--engine-cpus and --client-cpus go together")
+    if args.engine_cpus is not None:
+        engine, clients = cpu_list(args.engine_cpus), cpu_list(args.client_cpus)
+        if (
+            not engine
+            or not clients
+            or engine & clients
+            or not (engine | clients <= os.sched_getaffinity(0))
+        ):
+            raise SystemExit("the CPU sets must be disjoint, non-empty and available")
+        os.sched_setaffinity(0, clients)  # before any thread: they inherit it
     output = worlds.private_directory(args.output.absolute())
     report_path = output / "load-report.json"
     if report_path.exists():
@@ -1412,6 +1449,11 @@ def main():
         "hardware": hardware(),
         "outcome": "failed",
     }
+    if args.engine_cpus is not None:
+        report["hardware"]["cpu_split"] = {
+            "engine": args.engine_cpus,
+            "clients": args.client_cpus,
+        }
     # Test-only timing logs the harness's API and workers append to.
     work = worlds.private_directory(args.work.absolute())
     os.environ[CURSOR_LOG] = str(work / "cursor-waits.jsonl")
@@ -1429,13 +1471,15 @@ def main():
 
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, terminate)
-    cluster = Cluster()
+    cluster = Cluster(args.engine_cpus)
     load = None
     try:
         cluster.start()
         report["cluster"] = {"image": IMAGE, "port": cluster.port}
         with worlds.owned(cluster.url, args.work.absolute() / "world") as world:
-            processes = Processes(world, api_workers=args.api_workers)
+            processes = Processes(
+                world, api_workers=args.api_workers, engine_cpus=args.engine_cpus
+            )
             try:
                 processes.start_api()
                 workers = {
