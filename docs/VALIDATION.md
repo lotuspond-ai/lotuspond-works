@@ -1220,3 +1220,64 @@ Same branch, draft PR #17. This is local Linux evidence only: GitHub Actions sti
 **Residual, not changed here.** 16 deployments in 11 conformance files use the 2 s fixture read. Many depend on the short deadline on purpose, for lapse and expiry cases. A positive path among them can fail the same way on a loaded host.
 
 **Not done:** hosted CI, and merging into `main` (not requested).
+
+## E03 control transport: one kept connection instead of a resolver and handshake per request, 2026-11-04
+
+Branch `claude/control-transport-reuse`. Local Linux evidence only: no hosted CI, nothing pushed or deployed.
+
+**The problem.** During E04 tier 3 load runs, the runtimes' `ControlTransport` started an owned DNS interpreter and made a fresh TLS handshake (`Connection: close`) for every request. The resolver children alone used about 1.2–1.7 cores of the 4-vCPU VM.
+
+**The change** (`runtime/python/src/lotuspond_runtime/control_transport.py`). The verified connection is kept for the next request only while all of these hold:
+- it is under 60 s old (`CONNECTION_MAX_SECONDS`), so DNS is re-resolved and the server re-verified at least once a minute;
+- it has been idle under 2 s (`KEEPALIVE_IDLE_SECONDS`), well under uvicorn's 5 s keep-alive;
+- nothing is readable on it between responses (close_notify, EOF or stray bytes);
+- its peer certificate is unexpired;
+- the CA file, still read on every request, holds exactly the bytes the connection was verified with.
+
+Any error status, `Connection: close`, HTTP/1.0, or bytes past a response end the connection. The next request then goes through owned DNS and a fresh handshake against the current CA. A failed request is never resent.
+
+**Security properties, unchanged:**
+- Hostname and CA verification happen at every handshake, and changed trust is never reused.
+- Every request carries its own credential and session. The server authorizes each request: `authenticate_runtime` locks the credential, session and instance, and checks current recovery authority, with no connection-scoped state.
+- Rotation, revocation and reauthentication are therefore per request.
+- The ten-second whole-attempt deadline and the owned, killable DNS helper are unchanged.
+- One exception: a rotated server leaf certificate is picked up at the next reconnect, at most 60 s later, rather than on the next request.
+
+**Per-request cost** (`scripts/checks/control-transport-cost.py`; TLS uvicorn with a P-256 certificate, 300 requests, in the CI runner image with 4 CPUs; two interleaved runs per head; Mac on battery):
+
+| | `main` (`533b3d6`) | this branch |
+| --- | --- | --- |
+| Client CPU, back to back | 1.4–1.8 ms + resolver 18.5–19.5 ms | 0.05 ms + resolver 0 |
+| Client CPU, 0.2 s pace | 2.9 ms + resolver 33.6–34.3 ms | 0.9 ms + resolver 0.13 ms |
+| Server CPU, back to back | 0.65–0.86 ms | 0.05 ms |
+| Latency p50 / p95, back to back | 20–21 / 22–24 ms | 0.10 / 0.11–0.14 ms |
+| Latency p50 / p95, 0.2 s pace | 38–39 / 40–41 ms | 1.5–1.7 / 1.9–2.0 ms |
+
+At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominated by idle event-loop time, not by requests. Tier 3 was not rerun.
+
+**Tests:**
+- `runtime/python/tests/test_control_transport_reuse.py`, with a keep-alive `KeptServer` in `tls_fixtures.py`, covers:
+  - one connection and one resolution for many requests;
+  - revocation refused on the kept connection;
+  - a server restart;
+  - certificate rotation, which needs the rotated CA;
+  - a changed or missing CA file ending a kept connection;
+  - the idle, age and expiry bounds;
+  - responses that end the connection;
+  - unsolicited bytes and bytes past a response;
+  - `close()`.
+- **Real API.** The fleet acceptance journey adds `revocation_applies_on_a_kept_control_connection`: a heartbeat, a revocation, then a heartbeat on the same connection (the same client address at the server) answered 401.
+
+**Runs** (each `ci.yml` job alone, through the local runner, on a clean clone at `73c0b20`):
+- **`runtime`:** 746 passed on Python 3.14, and 746 passed on 3.13.
+- **`validate`:** passed.
+  - SQLite suite: 1,101 passed and 195 skipped (PostgreSQL-only).
+  - Required PostgreSQL suite: 1,242 passed, 102 subtests, 0 skipped, including the acceptance journey.
+- **`disruptive`** (tier 2): 6 passed.
+- **`conformance`** (tier 1): 47 passed, 1 failed. REG-2 (`test_an_iteration_keeps_order...`) ended `execution stayed reconciliation_required` after 2,733 s.
+  - Alone, REG-2 passed on this branch in 1,290 s.
+  - Alone on `main` (`533b3d6`), it failed with the same signature after 2,780 s.
+  - So this failure is pre-existing, consistent with the recorded 2 s fixture-read residual on a loaded host. It is not caused by connection reuse.
+- On macOS, the runtime suite fails exactly the cases `main` fails there (private-state refusals), and no others.
+
+**Not done:** hosted CI, a tier 3 rerun to measure the runtime CPU saving under load, and the same change for connector egress in `destination.py`, which still resolves and handshakes per request.
