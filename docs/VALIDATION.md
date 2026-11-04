@@ -1280,4 +1280,10 @@ At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominat
   - So this failure is pre-existing, consistent with the recorded 2 s fixture-read residual on a loaded host. It is not caused by connection reuse.
 - On macOS, the runtime suite fails exactly the cases `main` fails there (private-state refusals), and no others.
 
-**Not done:** hosted CI, a tier 3 rerun to measure the runtime CPU saving under load, and the same change for connector egress in `destination.py`, which still resolves and handshakes per request.
+**Tier 3 A/B, attempted on 4 November, inconclusive.** The shape was 8 environments × 3 runtimes and 3 API processes; 10 min at 5/s, 2 at 10/s, 2 at 5/s; no waiting phase. It ran `main` first, then this branch.
+- **`main`:** the host swapped 10,521 pages in 10 minutes. Only 15 provider calls happened in the whole run, and every load criterion failed.
+- **This branch:** stopped after 11 minutes, when the Mac switched to battery.
+- **CPU snapshots:** both were taken 580 s after container start, before steady admissions began.
+- **So no under-load numbers are claimed.** The rerun needs AC power, a host that isn't swapping, and a snapshot taken inside the steady phase.
+
+**Not done:** hosted CI, a valid tier 3 A/B, and the same change for connector egress in `destination.py`, which still resolves and handshakes per request.
