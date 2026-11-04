@@ -2,7 +2,7 @@
 
 import time
 
-from driver import form_package, timer_then_read
+from driver import form_package, patient_read, timer_then_read
 from processes import Processes
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -65,7 +65,10 @@ def test_a_runtime_without_the_activity_capability_never_receives_deliveries(sys
     """
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
-    revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # the lease may run to the read's 30 s deadline
+    revision = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     enrolled = operator.runtime(customer, "commands-only", start=False)
     home = enrolled["home"]
     processes._spawn(
@@ -96,8 +99,12 @@ def test_withdrawn_revisions_get_no_further_activities(system, linux):
     """REV-5: after activation pinned executions continue; after disable or revoke, none."""
     w = system
     operator, customer = w.operator, w.customer
+    operator.demand(30000)  # the continuing read's lease may run to its 30 s deadline
     first = operator.deploy(
-        customer, "timer-read", package=timer_then_read(3), dependencies=[operator.documents[0]]
+        customer,
+        "timer-read",
+        package=timer_then_read(3, timeout_seconds=30),
+        dependencies=[operator.documents[0]],
     )
     runtime = operator.runtime(customer, "runtime-a")
     continuing = operator.start(customer, first)["id"]

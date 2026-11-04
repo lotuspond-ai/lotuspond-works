@@ -4,7 +4,7 @@ import json
 from uuid import uuid4
 
 import pytest
-from driver import Refused, decoded_events, form_package
+from driver import Refused, decoded_events, form_package, patient_read
 from lotuspond_runtime.errors import FleetError
 from processes import wait_for
 from sqlalchemy import select, text
@@ -247,14 +247,19 @@ def test_no_record_of_one_tenant_names_another(system, linux):
     w = system
     operator, owner = w.operator, w.customer
     other = operator.tenant(w.engine, label="Other")
-    revision = operator.deploy(owner, "activity_read", dependencies=[operator.documents[0]])
-    foreign = operator.deploy(other, "activity_read", dependencies=[operator.documents[0]])
+    # Both reads must complete. The fixture read's 2 s step deadline is also its lease,
+    # which claim, read and report can outlast on a slow host, leaving it uncertain.
+    read, dependencies = patient_read(), [operator.documents[0]]
+    revision = operator.deploy(owner, "activity_read_30", package=read, dependencies=dependencies)
+    foreign = operator.deploy(other, "activity_read_30", package=read, dependencies=dependencies)
+    operator.demand(30000)  # each lease may run to its read's 30 s deadline
     operator.runtime(owner, "runtime-mine")
     operator.runtime(other, "runtime-theirs")
     mine = operator.start(owner, revision)["id"]
     theirs = operator.start(other, foreign)["id"]
+    # A runtime refused at startup leaves its read to fail after three 30 s deadlines.
     for customer, execution_id in ((owner, mine), (other, theirs)):
-        operator.settled(customer, execution_id, {"succeeded", "failed"}, 90)
+        operator.settled(customer, execution_id, {"succeeded", "failed"}, 180)
     foreign_ids = {*other.scope.values(), theirs, foreign}
     texts = [json.dumps(operator.execution(owner, mine)), json.dumps(operator.events(owner, mine))]
     texts += [json.dumps(content) for _, content in decoded_events(w, mine)]

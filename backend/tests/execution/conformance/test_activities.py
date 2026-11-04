@@ -5,7 +5,7 @@ import json
 import signal
 import time
 
-from driver import diagnose, reconcile_from_journal
+from driver import diagnose, patient_agent, patient_read, reconcile_from_journal
 from processes import Processes, wait_for
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -35,7 +35,10 @@ def attempts(world, execution_id):
 def test_a_read_runs_once_on_a_real_runtime(system, linux):
     w = system
     operator, customer = w.operator, w.customer
-    revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # the lease may run to the read's 30 s deadline
+    revision = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     runtime = operator.runtime(customer, "runtime-a")
     started = operator.start(customer, revision)
     view = operator.settled(customer, started["id"], {"succeeded", "failed"}, seconds=90)
@@ -47,9 +50,11 @@ def test_the_reference_agent_calls_its_model_and_tool_as_counted(system, linux):
     """Synthetic reference workflow: model round 1 asks for the read tool, round 2 ends."""
     w = system
     operator, customer = w.operator, w.customer
-    model = operator.model_document()
-    revision = operator.deploy(customer, "agent_tools", dependencies=[operator.documents[0], model])
-    operator.demand(7000)  # the root and its three children within the agent's 30 s
+    package, model = patient_agent()
+    revision = operator.deploy(
+        customer, "agent_tools_240", package=package, dependencies=[operator.documents[0], model]
+    )
+    operator.demand(50000)  # the root and its three children within the agent's 240 s
     rounds = [
         {
             "tool_calls": [
@@ -58,8 +63,10 @@ def test_the_reference_agent_calls_its_model_and_tool_as_counted(system, linux):
         },
         {"output": None},
     ]
-    runtime = operator.runtime(customer, "runtime-a", model={"rounds": rounds})
-    helper = operator.runtime(customer, "runtime-b", model={"rounds": rounds})
+    runtime = operator.runtime(
+        customer, "runtime-a", model_document=model, model={"rounds": rounds}
+    )
+    helper = operator.runtime(customer, "runtime-b", model_document=model, model={"rounds": rounds})
     execution_id = operator.start(customer, revision)["id"]
     view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 120)
     assert view["state"] == "succeeded", diagnose(w, execution_id)
@@ -122,7 +129,10 @@ def test_retries_stop_at_their_bound_and_bad_output_never_becomes_data(system, l
     """ENG-2."""
     w = system
     operator, customer = w.operator, w.customer
-    revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # each lease may run to its read's 30 s deadline
+    revision = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     failing = operator.runtime(
         customer, "runtime-failing", read={"read": {"failure": "unavailable", "not_reached": True}}
     )
@@ -160,10 +170,14 @@ def test_retries_stop_at_their_bound_and_bad_output_never_becomes_data(system, l
     w.processes.kill("runtime-bad")
     # A model's non-conforming output: the agent's output schema is null, the model
     # answers a string. The step fails; the string never becomes the result.
-    model = operator.model_document()
-    agent = operator.deploy(customer, "agent_tools", dependencies=[operator.documents[0], model])
-    operator.demand(5000)
-    talker = operator.runtime(customer, "runtime-model", model={"rounds": [{"output": "x"}]})
+    package, model = patient_agent()
+    agent = operator.deploy(
+        customer, "agent_tools_240", package=package, dependencies=[operator.documents[0], model]
+    )
+    operator.demand(50000)  # the root and its model child within the agent's 240 s
+    talker = operator.runtime(
+        customer, "runtime-model", model_document=model, model={"rounds": [{"output": "x"}]}
+    )
     execution_id = operator.start(customer, agent)["id"]
     view = operator.settled(customer, execution_id, {"failed", "succeeded"}, 120)
     assert view["state"] == "failed", view
