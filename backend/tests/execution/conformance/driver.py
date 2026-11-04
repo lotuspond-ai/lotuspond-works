@@ -731,12 +731,18 @@ def reconcile_from_journal(world, customer, runtime, execution_id):
     return entry
 
 
-def timer_then_read(delay_seconds, flows=FLOWS):
-    """`activity_read` preceded by a timer: the read is dispatched only after it fires."""
-    package = copy.deepcopy(flow("activity_read", flows))
+def timer_then_read(delay_seconds, flows=FLOWS, *, timeout_seconds=None):
+    """`activity_read` preceded by a timer: the read is dispatched only after it fires.
+
+    With `timeout_seconds`, the read is `patient_read()`'s, for a read that must complete.
+    """
+    if timeout_seconds is None:
+        package, suffix = copy.deepcopy(flow("activity_read", flows)), ""
+    else:
+        package, suffix = patient_read(timeout_seconds, flows), f"-{timeout_seconds}"
     timer = next(s for s in flow("waits_fast", flows)["body"]["steps"] if s["kind"] == "timer")
     timer = {**copy.deepcopy(timer), "delay_seconds": delay_seconds}
-    package["package_id"] = f"timer-then-read-{delay_seconds}"
+    package["package_id"] = f"timer-then-read-{delay_seconds}{suffix}"
     package["body"]["steps"] = [timer, *package["body"]["steps"]]
     return package
 
@@ -759,6 +765,30 @@ def patient_read(timeout_seconds=30, flows=FLOWS):
     step = package["body"]["steps"][0]
     package["body"]["steps"][0] = _read_step(step["id"], flows, timeout_seconds)
     return package
+
+
+def patient_agent(timeout_seconds=240, flows=FLOWS):
+    """`agent_tools` and its model document with a longer agent deadline and budget.
+
+    The agent's 30 s bounds the active time of its root and every child together, each
+    charged at least its reservation, so the fixture leaves about 7 s per attempt. The
+    root's lease never outlives its reservation, and its children run inside it: on a
+    slow host they can outlast 7 s, and the root is then uncertain, as designed.
+    Returns the package and the model document its runtimes must install.
+    """
+    from lotuspond_sdk.executable.catalog import catalog_document_digest
+
+    model = json.loads((flows / "agent_tools.model.json").read_text())
+    model["name"] = f"model-tools-fixture-{timeout_seconds}"
+    model["definition"]["limits"]["timeout_seconds"] = timeout_seconds
+    package = copy.deepcopy(flow("agent_tools", flows))
+    package["package_id"] = f"agent-tools-{timeout_seconds}"
+    package["limits"]["active_seconds"] = timeout_seconds
+    package["models"][0]["ref"].update(name=model["name"], sha256=catalog_document_digest(model))
+    think = package["body"]["steps"][0]
+    think["limits"]["timeout_seconds"] = timeout_seconds
+    think["retry"]["timeout_seconds"] = timeout_seconds
+    return package, model
 
 
 def read_iteration(items, concurrency, flows=FLOWS):

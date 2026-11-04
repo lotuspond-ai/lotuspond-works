@@ -119,9 +119,11 @@ def tls_authentication(journey):
 
 def reference_workflow(journey, operator, customer):
     """The synthetic reference agent: one tool read, two model rounds, each once."""
-    operator.demand(7000)  # the root and its three children within the agent's 30 s
-    model = operator.model_document()
-    revision = operator.deploy(customer, "agent_tools", dependencies=[operator.documents[0], model])
+    operator.demand(50000)  # the root and its three children within the agent's 240 s
+    package, model = drivers.patient_agent()
+    revision = operator.deploy(
+        customer, "agent_tools_240", package=package, dependencies=[operator.documents[0], model]
+    )
     rounds = [
         {
             "tool_calls": [
@@ -131,7 +133,9 @@ def reference_workflow(journey, operator, customer):
         {"output": None},
     ]
     runtimes = [
-        journey.runtime(operator, customer, f"reference-{n}", model={"rounds": rounds})
+        journey.runtime(
+            operator, customer, f"reference-{n}", model_document=model, model={"rounds": rounds}
+        )
         for n in range(2)
     ]
     try:
@@ -337,7 +341,14 @@ def rollback(journey, operator, customer, point, when):
             "accepted": accepted,
         }
     if point in ("claim", "result", "transition"):
-        revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+        # The read must complete after the injected failure. The fixture read's 2 s step
+        # deadline is also its lease, which a retried claim or report can outlast.
+        revision = operator.deploy(
+            customer,
+            "activity_read_30",
+            package=drivers.patient_read(),
+            dependencies=[operator.documents[0]],
+        )
         arm(world, point, when)
         runtime = journey.runtime(operator, customer, f"rollback-{point}-{when}")
         try:
