@@ -19,10 +19,6 @@ from .evaluation import (
     EvaluationInput,
     EvaluationProvenance,
     EvaluationResult,
-    JevConfig,
-    JevEvaluator,
-    LiveAssessmentAdapter,
-    TranscriptSegment,
 )
 from .evaluation.models import unknown_result
 from .incident_service import destination_names, incident_for_assessment
@@ -30,8 +26,6 @@ from .models import (
     Assessment,
     EvaluationJob,
     Trace,
-    VoiceSegment,
-    VoiceSession,
     Workspace,
     new_id,
     now,
@@ -54,6 +48,10 @@ class ClaimedEvaluationJob:
 
 class WorkspaceSuspendedError(RuntimeError):
     pass
+
+
+class RetiredEvidenceError(ValueError):
+    """A job queued for voice evidence before voice assessment was retired."""
 
 
 class UnavailableSemanticEvaluator:
@@ -179,25 +177,6 @@ def claim_next_job(
     )
 
 
-def _latest_voice_segments(
-    db: Session,
-    workspace_id: str,
-    session_id: str,
-) -> list[VoiceSegment]:
-    rows = db.scalars(
-        select(VoiceSegment)
-        .where(
-            VoiceSegment.workspace_id == workspace_id,
-            VoiceSegment.session_id == session_id,
-        )
-        .order_by(VoiceSegment.sequence, VoiceSegment.revision)
-    )
-    latest: dict[int, VoiceSegment] = {}
-    for row in rows:
-        latest[row.sequence] = row
-    return [latest[key] for key in sorted(latest)]
-
-
 def _trace_input(job: EvaluationJob, trace: Trace) -> EvaluationInput:
     attributes = trace.attributes if isinstance(trace.attributes, Mapping) else {}
     supplied_context = attributes.get("context")
@@ -221,34 +200,6 @@ def _trace_input(job: EvaluationJob, trace: Trace) -> EvaluationInput:
         context=context,
         output=attributes.get("output", attributes),
         expected=attributes.get("expected"),
-        modality="text",
-    )
-
-
-def _voice_input(
-    job: EvaluationJob,
-    session: VoiceSession,
-    segments: list[VoiceSegment],
-) -> EvaluationInput:
-    transcript = tuple(
-        TranscriptSegment(
-            segment_id=f"{segment.sequence}:{segment.revision}",
-            speaker=segment.speaker,
-            text=segment.text,
-            start_ms=segment.start_ms,
-            end_ms=segment.end_ms,
-            sequence=segment.sequence,
-            is_final=segment.is_final,
-        )
-        for segment in segments
-    )
-    return EvaluationInput(
-        criteria=job.criteria,
-        input={"voice_session_id": session.id, "provider": session.provider},
-        context={"session_status": session.status},
-        output={"transcript_segments": len(transcript)},
-        modality="voice",
-        transcript=transcript,
     )
 
 
@@ -266,55 +217,34 @@ def load_evaluation_input(db: Session, claim: ClaimedEvaluationJob) -> Evaluatio
         raise WorkspaceSuspendedError("workspace is not active")
     if bool(job.trace_id) == bool(job.voice_session_id):
         raise ValueError("evaluation job must reference exactly one evidence source")
-    if job.trace_id:
-        trace = db.scalar(
-            select(Trace).where(
-                Trace.id == job.trace_id,
-                Trace.workspace_id == job.workspace_id,
-                Trace.project_id == job.project_id,
-            )
-        )
-        if trace is None:
-            raise ValueError("trace evidence is missing or outside the job project")
-        return _trace_input(job, trace)
-    session = db.scalar(
-        select(VoiceSession).where(
-            VoiceSession.id == job.voice_session_id,
-            VoiceSession.workspace_id == job.workspace_id,
-            VoiceSession.project_id == job.project_id,
+    if not job.trace_id:
+        raise RetiredEvidenceError("voice evidence is no longer assessed")
+    trace = db.scalar(
+        select(Trace).where(
+            Trace.id == job.trace_id,
+            Trace.workspace_id == job.workspace_id,
+            Trace.project_id == job.project_id,
         )
     )
-    if session is None:
-        raise ValueError("voice evidence is missing or outside the job project")
-    return _voice_input(
-        job,
-        session,
-        _latest_voice_segments(db, job.workspace_id, session.id),
-    )
+    if trace is None:
+        raise ValueError("trace evidence is missing or outside the job project")
+    return _trace_input(job, trace)
 
 
-def evaluator_for(settings: Settings, evidence: EvaluationInput):
-    deterministic = DeterministicEvaluator()
+def evaluator_for(settings: Settings):
+    # No semantic provider ships with Lotuspond, so criteria the deterministic
+    # assertions cannot decide stay unknown rather than passing.
     if settings.network_mode == "airgap":
         semantic = UnavailableSemanticEvaluator(
             "Semantic evaluation is disabled in airgap mode.",
             "network-policy",
         )
     else:
-        semantic = JevEvaluator(
-            JevConfig(
-                base_url=settings.typesafe_base_url,
-                api_key=(
-                    settings.typesafe_api_key.get_secret_value()
-                    if settings.typesafe_api_key
-                    else None
-                ),
-                model=settings.typesafe_model,
-                timeout_seconds=settings.typesafe_timeout_seconds,
-            )
+        semantic = UnavailableSemanticEvaluator(
+            "No semantic evaluator is configured.",
+            "semantic-evaluator",
         )
-    evaluator = CompositeEvaluator(deterministic, semantic)
-    return LiveAssessmentAdapter(evaluator) if evidence.modality == "voice" else evaluator
+    return CompositeEvaluator(DeterministicEvaluator(), semantic)
 
 
 def _attach_evidence_provenance(
@@ -326,7 +256,6 @@ def _attach_evidence_provenance(
     details = {
         **result.provenance.details,
         "input_sha256": evidence_sha256,
-        "transcript_segment_revisions": [segment.segment_id for segment in evidence.transcript],
     }
     provenance = EvaluationProvenance(
         source=result.provenance.source,
@@ -409,10 +338,16 @@ async def run_once(
     try:
         with sessions() as db:
             evidence = load_evaluation_input(db, claim)
-        result = await evaluator_for(settings, evidence).evaluate(evidence)
+        result = await evaluator_for(settings).evaluate(evidence)
         result = _attach_evidence_provenance(result, evidence)
     except WorkspaceSuspendedError:
         return None
+    except RetiredEvidenceError:
+        result = unknown_result(
+            "Voice evidence is no longer assessed.",
+            provider="lotuspond-worker",
+            source="worker",
+        )
     except (ValueError, ValidationError):
         result = unknown_result(
             "Evaluation evidence was invalid or incomplete.",

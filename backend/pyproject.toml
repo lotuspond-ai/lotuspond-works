@@ -17,7 +17,6 @@ dependencies = [
   "httpx2>=2.13,<3",
   "redis>=6,<9",
   "email-validator>=2.3,<3",
-  "typesafe-sdk>=0.7,<0.8",
   "cryptography>=50,<51",
 ]
 

@@ -1,8 +1,4 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api.js';
-import { BillingCard } from '../components/BillingCard.js';
-import { Alert, Readiness } from '../components/ui.js';
-import type { Billing } from '../lib/billing.js';
+import { Readiness } from '../components/ui.js';
 
 // Set at build time, as on the public introduction; without it there is no contact action
 // rather than an invented address.
@@ -49,46 +45,19 @@ const services = [
   ],
 ] as const;
 
-export function License({ workspace }: { workspace: string }) {
-  const [billing, setBilling] = useState<Billing | null | undefined>(undefined);
-  const [error, setError] = useState('');
-  useEffect(() => {
-    const controller = new AbortController();
-    setBilling(undefined);
-    setError('');
-    api<{ billing?: Billing }>('/settings', workspace, undefined, 'GET', controller.signal)
-      .then((data) => setBilling(data.billing ?? null))
-      .catch((reason: Error) => {
-        if (!controller.signal.aborted) setError(reason.message);
-      });
-    return () => controller.abort();
-  }, [workspace]);
-
+export function License() {
   return (
     <div className="license">
       <div className="page-heading">
         <div>
           <p className="eyebrow">Administer</p>
-          <h1>License and plan</h1>
+          <h1>License</h1>
           <p>
-            What this workspace is entitled to today, and how the platform and services are proposed
-            to be licensed. Lotuspond collects no payment in the console.
+            How the platform and services are proposed to be licensed. Lotuspond collects no payment
+            in the console.
           </p>
         </div>
       </div>
-
-      <h2 className="license-heading">Current plan</h2>
-      {error ? (
-        <Alert>The plan could not be loaded: {error}</Alert>
-      ) : billing === undefined ? (
-        <p className="hint" role="status">
-          Loading the plan…
-        </p>
-      ) : billing === null ? (
-        <p className="panel">This installation does not report a plan for this workspace.</p>
-      ) : (
-        <BillingCard billing={billing} />
-      )}
 
       <section aria-labelledby="editions-title">
         <div className="license-section-head">

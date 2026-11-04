@@ -24,22 +24,19 @@ bundle="$stage/lotuspond-airgap-$version"
 mkdir -p "$bundle"
 
 api_image=${LOTUSPOND_BUNDLE_API_IMAGE:-lotuspond-api:$version}
-collector_image=${LOTUSPOND_BUNDLE_COLLECTOR_IMAGE:-lotuspond-collector:$version}
 postgres_image=${LOTUSPOND_BUNDLE_POSTGRES_IMAGE:-postgres:18.6-alpine3.24}
 redis_image=${LOTUSPOND_BUNDLE_REDIS_IMAGE:-redis:7.2.16-alpine3.21}
 
 if [ "${3:-}" != "--local-images" ]; then
   docker build -f "$repo_root/deploy/Dockerfile" -t "$api_image" "$repo_root"
-  docker build -f "$repo_root/collector/Dockerfile" -t "$collector_image" "$repo_root/collector"
   docker pull "$postgres_image"
   docker pull "$redis_image"
 fi
 # Resolve mutable input tags exactly once. Save and configure immutable image IDs.
 api_id=$(docker image inspect --format '{{.Id}}' "$api_image")
-collector_id=$(docker image inspect --format '{{.Id}}' "$collector_image")
 postgres_id=$(docker image inspect --format '{{.Id}}' "$postgres_image")
 redis_id=$(docker image inspect --format '{{.Id}}' "$redis_image")
-docker image save -o "$bundle/images.tar" "$api_id" "$collector_id" "$postgres_id" "$redis_id"
+docker image save -o "$bundle/images.tar" "$api_id" "$postgres_id" "$redis_id"
 
 cp "$repo_root/deploy/compose.onprem.yaml" "$bundle/compose.yaml"
 cp "$repo_root/deploy/example.env" "$bundle/runtime.env.example"
@@ -47,10 +44,8 @@ cp "$repo_root/deploy/airgap/INSTALL.md" "$bundle/INSTALL.md"
 cp "$repo_root/docs-site/docs/offline-identity.md" "$bundle/OFFLINE-IDENTITY.md"
 cp "$repo_root/docs-site/docs/mfa.md" "$bundle/MFA.md"
 cp "$repo_root/docs-site/docs/operations.md" "$bundle/OPERATIONS.md"
-mkdir "$bundle/monitoring"
-cp "$repo_root/deploy/monitoring/"*.yml "$bundle/monitoring/"
 cp "$repo_root/backend/schema.sql" "$bundle/schema.sql"
-python3 - "$bundle" "$api_id" "$collector_id" "$postgres_id" "$redis_id" <<'PY'
+python3 - "$bundle" "$api_id" "$postgres_id" "$redis_id" <<'PY'
 import json
 import re
 import sys
@@ -61,7 +56,7 @@ guide = bundle / 'OFFLINE-IDENTITY.md'
 guide.write_text(guide.read_text().replace('(deployment.md)', '(INSTALL.md)').replace('(mfa.md)', '(MFA.md)'))
 mfa_guide = bundle / 'MFA.md'
 mfa_guide.write_text(mfa_guide.read_text().replace('(offline-identity.md)', '(OFFLINE-IDENTITY.md)'))
-keys = ('LOTUSPOND_API_IMAGE', 'LOTUSPOND_COLLECTOR_IMAGE', 'POSTGRES_IMAGE', 'REDIS_IMAGE')
+keys = ('LOTUSPOND_API_IMAGE', 'POSTGRES_IMAGE', 'REDIS_IMAGE')
 images = dict(zip(keys, sys.argv[2:], strict=True))
 if not all(re.fullmatch(r'sha256:[0-9a-f]{64}', value) for value in images.values()):
     raise SystemExit('Every bundled image must have an immutable SHA-256 image ID')

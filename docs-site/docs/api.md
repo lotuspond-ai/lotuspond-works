@@ -18,7 +18,7 @@ Create `/releases`, then call `/releases/:id/evaluate`. A pass is the only deplo
 
 Create `/monitors` with a project, criteria, and `sample_basis_points` between 0 and 10000. Ingest traces via `/traces` or OTLP/HTTP, protobuf or JSON, at `/telemetry/otlp?project_id=...`. Identical external identifiers are idempotent retries; changed evidence conflicts.
 
-Manual `/traces/:id/assess` and `/voice/sessions/:id/assess` return HTTP 202 and a job. Poll `/evaluation-jobs/:id` for `{job,assessments}`. A completed job can contain an **unknown** assessment: completion means the attempt was recorded, not that the agent passed.
+Manual `/traces/:id/assess` returns HTTP 202 and a job. Poll `/evaluation-jobs/:id` for `{job,assessments}`. A completed job can contain an **unknown** assessment: completion means the attempt was recorded, not that the agent passed.
 
 Trace `cost_usd` is nullable. Supplied amounts, including zero, are marked `reported`; omitted amounts are `unavailable`. Historical values of uncertain provenance are `unknown`. `/overview` returns a reported-cost subtotal and counts for each measurement state. OTLP producers may supply the exact span attribute `lotuspond.cost_usd`. These are producer measurements, not reconciled billing.
 
@@ -26,13 +26,10 @@ Trace `cost_usd` is nullable. Supplied amounts, including zero, are marked `repo
 
 Airgap installations use `/auth/offline-enrollment/inspect` with `{token}` and `/auth/offline-enrollment/complete` with `{token,password}`. Completion consumes a pending token and requires normal login afterward. The `/me` identity source distinguishes mailbox verification from operator attestation. Read the [offline identity guide](offline-identity.md) before provisioning an account.
 
-## Voice evidence
-
-Create `/voice/sessions`, append `{segments:[...]}` at `/voice/sessions/:id/segments`, then close finalized evidence at `/voice/sessions/:id/close`. Segment fields are `sequence`, `speaker`, `text`, `start_ms`, `end_ms`, and `is_final`. Final segments cannot change. A transcription application supplies the text; the API does not claim to transcribe audio by recording a session.
 
 ## Errors and limits
 
-Errors contain `error` and `message`; input errors identify field paths without echoing submitted credentials. Requests default to a 2 MiB bound. Core workflow lists use `limit`, `before`, and `before_id`. API keys require explicit read/write/run/ingest/gateway scopes. Expired keys, suspended workspaces, stale leases, missing evidence, and missing provider configuration fail closed.
+Errors contain `error` and `message`; input errors identify field paths without echoing submitted credentials. Requests default to a 2 MiB bound. Core workflow lists use `limit`, `before`, and `before_id`. API keys require explicit read/write/run/ingest/execute/execution_signal scopes. Expired keys, suspended workspaces, stale leases, missing evidence, and missing provider configuration fail closed.
 
 ## Incidents
 

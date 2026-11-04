@@ -2,7 +2,6 @@ import { Suspense, lazy, useCallback, useEffect, useState, useRef, type FormEven
 import { api, ApiError, type Account, type Row } from './api.js';
 import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
-import { VoiceSessions } from './pages/VoiceSessions.js';
 import { Workspaces } from './pages/Workspaces.js';
 import { Monitors } from './pages/Monitors.js';
 import { Incidents } from './pages/Incidents.js';
@@ -19,8 +18,6 @@ import {
   saveOrganizationDraft,
 } from './lib/registration.js';
 import { AuthenticatorPolicy } from './components/AuthenticatorPolicy.js';
-import { type Billing } from './lib/billing.js';
-import { BillingCard } from './components/BillingCard.js';
 import {
   authenticatorRequirement,
   type AuthenticatorPolicy as AuthenticatorPolicyState,
@@ -223,7 +220,7 @@ const definitions: Record<string, Definition> = {
       { key: 'name', label: 'Key name' },
       {
         key: 'scopes',
-        label: 'Scopes: read, write, run, ingest, gateway',
+        label: 'Scopes: read, write, run, ingest',
         type: 'list',
         value: 'read',
       },
@@ -247,7 +244,6 @@ const projectScoped = [
   'traces',
   'monitors',
   'incidents',
-  'voice-sessions',
 ];
 // Records a reader can create from the command palette, with the verb the page uses.
 const creatable: Record<string, string> = {
@@ -691,13 +687,6 @@ export function App({
                 role={currentWorkspace?.role || 'viewer'}
               />
             </Suspense>
-          ) : page === 'voice-sessions' ? (
-            <VoiceSessions
-              key={`${workspace}-${projectId}`}
-              workspace={workspace}
-              projectId={projectId}
-              role={currentWorkspace?.role || 'viewer'}
-            />
           ) : page === 'settings' ? (
             <Settings
               workspace={workspace}
@@ -708,7 +697,7 @@ export function App({
           ) : page === 'changelog' ? (
             <Changelog />
           ) : page === 'license' ? (
-            <License key={workspace} workspace={workspace} />
+            <License />
           ) : plannedArea(page) ? (
             <Planned area={plannedArea(page)!} />
           ) : definitions[page] ? (
@@ -1734,15 +1723,7 @@ function Settings({
     setSaved(false);
     setSaving(true);
     try {
-      await api(
-        '/settings',
-        workspace,
-        {
-          name: String(form.get('name')),
-          monthly_budget_usd: form.get('budget') === '' ? null : Number(form.get('budget')),
-        },
-        'PATCH',
-      );
+      await api('/settings', workspace, { name: String(form.get('name')) }, 'PATCH');
       setSaved(true);
     } catch (e) {
       setError((e as Error).message);
@@ -1756,7 +1737,7 @@ function Settings({
         <div>
           <p className="eyebrow">Administer</p>
           <h1>Settings</h1>
-          <p>Manage your workspace name, access policy, and model usage budget.</p>
+          <p>Manage your workspace name and access policy.</p>
         </div>
       </div>
       <VerificationCard account={account} onRefresh={onRefresh} />
@@ -1777,24 +1758,6 @@ function Settings({
               Workspace name
               <input name="name" required disabled={!canEdit} defaultValue={String(data.name)} />
             </label>
-            <label>
-              Monthly model budget (USD)
-              <input
-                name="budget"
-                disabled={!canEdit}
-                type="number"
-                min="0"
-                step="0.01"
-                aria-describedby="budget-hint"
-                defaultValue={
-                  data.monthly_budget_usd === null ? '' : String(data.monthly_budget_usd)
-                }
-              />
-            </label>
-            <p className="hint" id="budget-hint">
-              Leave blank for no workspace budget. Model routing requires a configured provider and
-              pricing.
-            </p>
             {canEdit ? (
               <button disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</button>
             ) : (
@@ -1814,7 +1777,6 @@ function Settings({
               }}
             />
           )}
-          <BillingCard billing={data.billing as Billing | undefined} />
         </>
       ) : !error ? (
         <p role="status">Loading settings…</p>

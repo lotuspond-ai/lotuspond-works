@@ -9,7 +9,15 @@ from sqlalchemy.engine import make_url
 from lotuspond.app import create_app
 from lotuspond.config import Settings
 from lotuspond.database import engine_for, sessions_for
-from lotuspond.models import Base, SchemaVersion
+from lotuspond.models import (
+    Base,
+    EvaluationJob,
+    SchemaVersion,
+    VoiceSegment,
+    VoiceSession,
+    new_id,
+    now,
+)
 from lotuspond.schema_version import SCHEMA_VERSION
 
 
@@ -19,8 +27,6 @@ def settings():
         env="test",
         database_url="sqlite://",
         origin="http://testserver",
-        typesafe_base_url=None,
-        typesafe_api_key=None,
         redis_url=None,
         registration_enabled=True,
     )
@@ -68,6 +74,55 @@ def db_factory(engine):
 @pytest.fixture
 def fleet_dependencies():
     return None
+
+
+@pytest.fixture
+def retired_voice_job(db_factory):
+    """Store a closed voice session with a queued assessment, as an older installation holds it.
+
+    Voice ingestion is retired, so no route can create these rows any more; the worker and
+    incidents must still treat the stored ones correctly.
+    """
+
+    def queue(workspace_id: str, project_id: str, criteria: str) -> tuple[str, str]:
+        with db_factory() as db:
+            session = VoiceSession(
+                id=new_id(),
+                workspace_id=workspace_id,
+                project_id=project_id,
+                name="Support call",
+                provider="test",
+                status="closed",
+                closed_at=now(),
+            )
+            db.add(session)
+            db.flush()
+            db.add(
+                VoiceSegment(
+                    id=new_id(),
+                    workspace_id=workspace_id,
+                    session_id=session.id,
+                    sequence=0,
+                    revision=0,
+                    speaker="agent",
+                    text="Hello",
+                    start_ms=0,
+                    end_ms=100,
+                    is_final=True,
+                )
+            )
+            job = EvaluationJob(
+                id=new_id(),
+                workspace_id=workspace_id,
+                project_id=project_id,
+                voice_session_id=session.id,
+                criteria=criteria,
+            )
+            db.add(job)
+            db.commit()
+            return session.id, job.id
+
+    return queue
 
 
 @pytest.fixture

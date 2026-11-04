@@ -93,7 +93,7 @@ class SdkProofTests(unittest.TestCase):
                 "lotuspond_runtime": proof.tree_hash(repo / "runtime/python/src/lotuspond_runtime"),
             }
             args = SimpleNamespace(bundle=repo / "bundle", smoke_report=repo / "smoke",
-                                   api_image="api", collector_image="collector")
+                                   api_image="api")
             with patch.object(proof, "image_id", return_value="sha256:synthetic"), patch.object(
                 proof, "embedded_tree", side_effect=lambda image, root: embedded[root]
             ):
@@ -124,7 +124,7 @@ def test_runtime_distribution_is_part_of_api_image_content_proof(tmp_path):
                 "lotuspond_sdk": proof.tree_hash(tmp_path / "sdk/python/src/lotuspond_sdk"),
                 "lotuspond_runtime": proof.tree_hash(tmp_path / "runtime/python/src/lotuspond_runtime")}
     args = argparse.Namespace(bundle=tmp_path / "bundle", smoke_report=tmp_path / "smoke",
-                              api_image="api", collector_image="collector")
+                              api_image="api")
     with patch.object(proof, "image_id", return_value="sha256:synthetic"), patch.object(
             proof, "embedded_tree", side_effect=lambda image, root: embedded[root]):
         first = proof.build(tmp_path, args)

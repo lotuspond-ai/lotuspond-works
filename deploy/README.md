@@ -1,13 +1,13 @@
 # Deployment artifacts
 
-These files provide a portable single-host baseline for the Python API, its static React UI, the evaluation worker, optional identity-mail and incident-alert workers, PostgreSQL, Redis, and the Go telemetry collector.
+These files provide a portable single-host baseline for the Python API, its static React UI, the evaluation worker, optional identity-mail and incident-alert workers, PostgreSQL, and Redis.
 
 - `compose.yaml` builds application images from this checkout.
 - `compose.onprem.yaml` consumes prebuilt, preferably digest-pinned images.
-- `airgap/` creates and verifies an offline image bundle for the API, UI, evaluation worker, collector, PostgreSQL and Redis.
-- `execution/` creates a separate offline archive for the Node runner/voice image, the reviewed Gym real-application image, and a host-side Gym kit.
+- `airgap/` creates and verifies an offline image bundle for the API, UI, evaluation worker, PostgreSQL and Redis.
+- `execution/` creates a separate offline archive for the Node runner image.
 
-The API and collector ports bind to loopback by default. Put a reviewed HTTPS reverse proxy in front of the API, keep PostgreSQL and Redis unexposed, store configuration outside the repository, and restrict its permissions. Run `docker compose ... config --quiet` before startup; it detects missing required variables but does not prove credentials, TLS, migrations, backups, capacity, or external integration compatibility.
+The API port binds to loopback by default. Put a reviewed HTTPS reverse proxy in front of the API, keep PostgreSQL and Redis unexposed, store configuration outside the repository, and restrict its permissions. Run `docker compose ... config --quiet` before startup; it detects missing required variables but does not prove credentials, TLS, migrations, backups, capacity, or external integration compatibility.
 
 Both Compose variants forward `LOTUSPOND_REQUIRE_MFA` to the API and `LOTUSPOND_SMTP_CONVERSATION_SECONDS` to the API and mail worker. Set them in the private installation env file; the defaults are `false` and `45`. Installation-wide MFA requires the separately supplied MFA encryption key and fails startup without it. Production operator MFA remains mandatory regardless of this setting. The whole SMTP bound must be at least the socket timeout and at most 120 seconds. Background workers do not receive the MFA key.
 
@@ -17,7 +17,7 @@ These artifacts have no cloud side effects. They do not provision DNS, certifica
 
 ## Operational visibility
 
-Administration → Operations shows queue state and Redis-backed worker poll observations. Collector metrics are optional and require a distinct `COLLECTOR_METRICS_TOKEN`; an empty setting leaves `/metrics` disabled. Both Compose variants pass this setting only to the collector. `monitoring/` contains Prometheus scrape configuration, alert rules and timing tests; it does not start a monitoring service. Read the [operations runbook](../docs-site/docs/operations.md) before configuring credentials, HTTPS scraping and notification delivery.
+Administration → Operations shows queue state and Redis-backed worker poll observations. Read the [operations runbook](../docs-site/docs/operations.md) before configuring credentials and notification delivery.
 
 ## Identity mail
 
@@ -43,6 +43,6 @@ The API and evaluation worker enqueue metadata-only alerts for the operator's ex
 
 ## Offline installation drill
 
-`airgap/build-bundle.sh` records exact image IDs in `images.json` and the generated environment example. Its `--local-images` mode performs no build or pull. The separately trusted `checks/airgap-smoke.py` verifies a supplied bundle and exercises its API, evaluation worker, PostgreSQL, Redis, and collector on an internal-only disposable Docker network. Read [the installation procedure](airgap/INSTALL.md) for requirements, cleanup behavior, and the limits of this local proof.
+`airgap/build-bundle.sh` records exact image IDs in `images.json` and the generated environment example. Its `--local-images` mode performs no build or pull. The separately trusted `checks/airgap-smoke.py` verifies a supplied bundle and exercises its API, evaluation worker, PostgreSQL and Redis on an internal-only disposable Docker network. Read [the installation procedure](airgap/INSTALL.md) for requirements, cleanup behavior, and the limits of this local proof.
 
-`execution/build-bundle.sh` records exact execution and Gym image IDs. `checks/execution-smoke.py` verifies that archive, runs HTTP and MCP cases from the extracted Node image, checks voice airgap refusal, and runs the genuine xterm task from the extracted Gym kit. Read [the execution installation procedure](execution/INSTALL.md). These drills do not prove clean-host transfer or live provider behavior.
+`execution/build-bundle.sh` records the exact execution image ID. `checks/execution-smoke.py` verifies that archive and runs HTTP, MCP and A2A cases from the extracted Node image. Read [the execution installation procedure](execution/INSTALL.md). These drills do not prove clean-host transfer or live provider behavior.

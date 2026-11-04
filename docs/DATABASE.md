@@ -10,9 +10,11 @@ The authoritative model is `backend/lotuspond/models.py`, using SQLAlchemy 2 wit
 | Releases    | policies, releases, release_decisions, receipts                                              | Immutable policy versions, comparison, independent decisions, recorded outcomes                                                                               |
 | Governance  | approvals, integrations, audit_events                                                        | Different-person review, unverified endpoints, action history                                                                                                 |
 | Monitoring  | traces, incidents, incident_events, alert_deliveries, monitors, evaluation_jobs, assessments | Project traces, deterministic sampling, durable job and alert leases, incident lifecycle, model/input provenance                                              |
-| Voice       | voice_sessions, voice_segments                                                               | Session state, sequence/revision, immutable finalized transcripts                                                                                             |
-| Model usage | gateway_usage                                                                                | Additive budget reservation and provider settlement ledger                                                                                                    |
+| Voice       | voice_sessions, voice_segments                                                               | Retired 2026-11-05; stored sessions and transcripts are kept, nothing writes them                                                                               |
+| Model usage | gateway_usage                                                                                | Retired 2026-11-05 with the model gateway; existing rows are kept                                                                                                    |
 | Schema      | schema_version                                                                               | Explicit application schema version                                                                                                                           |
+
+The retired trace-plan ladder and gateway budget leave `workspaces.plan` and `workspaces.monthly_budget_usd` in place with their constraints, so the schema and `backend/schema.sql` are unchanged ([ADR-0012](architecture/0012-retire-assurance-extras.md)). Dropping these tables or columns needs its own reviewed, data-preserving plan.
 
 ## Safe local initialization
 

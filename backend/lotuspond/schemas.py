@@ -246,14 +246,13 @@ class MemberInput(Input):
 class KeyInput(Input):
     name: Name
     scopes: list[
-        Literal["read", "write", "run", "ingest", "gateway", "execute", "execution_signal"]
-    ] = Field(min_length=1, max_length=7)
+        Literal["read", "write", "run", "ingest", "execute", "execution_signal"]
+    ] = Field(min_length=1, max_length=6)
     days: int = Field(default=90, ge=1, le=365)
 
 
 class WorkspaceInput(Input):
     name: Name
-    monthly_budget_usd: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=6)
 
 
 class AuthenticatorPolicyInput(Input):
@@ -265,11 +264,6 @@ class AuthenticatorReset(Input):
     reason: str = Field(min_length=10, max_length=2000)
 
 
-class WorkspacePlan(Input):
-    plan: Literal["developer", "team", "enterprise"]
-    reason: str = Field(min_length=10, max_length=2000)
-
-
 class WorkspaceStatus(Input):
     status: Literal["active", "suspended"]
     reason: str = Field(min_length=10, max_length=2000)
@@ -278,31 +272,6 @@ class WorkspaceStatus(Input):
 class AuthorizationInput(Input):
     policy_id: Identifier
     tool: Name
-
-
-class VoiceSessionInput(Input):
-    project_id: Identifier
-    name: Name
-    provider: str = Field(min_length=1, max_length=80)
-
-
-class SegmentInput(Input):
-    sequence: int = Field(ge=0, le=100000)
-    speaker: Literal["user", "agent", "other"]
-    text: str = Field(max_length=32000)
-    start_ms: int = Field(ge=0, le=86400000)
-    end_ms: int = Field(ge=0, le=86400000)
-    is_final: bool
-
-    @model_validator(mode="after")
-    def time_order(self):
-        if self.end_ms < self.start_ms:
-            raise ValueError("Segment end must follow its start")
-        return self
-
-
-class SegmentBatch(Input):
-    segments: list[SegmentInput] = Field(min_length=1, max_length=100)
 
 
 class AssessmentInput(Input):

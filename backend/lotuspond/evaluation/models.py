@@ -4,27 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
-
-
-class TranscriptSegment(BaseModel):
-    """One replaceable partial or immutable final transcript segment."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
-
-    segment_id: str = Field(min_length=1, max_length=160)
-    speaker: Literal["caller", "agent", "system"]
-    text: str = Field(min_length=1, max_length=20_000)
-    start_ms: int | None = Field(default=None, ge=0)
-    end_ms: int | None = Field(default=None, ge=0)
-    sequence: int | None = Field(default=None, ge=0)
-    is_final: bool = True
-
-    @model_validator(mode="after")
-    def validate_interval(self) -> "TranscriptSegment":
-        if self.start_ms is not None and self.end_ms is not None and self.end_ms < self.start_ms:
-            raise ValueError("end_ms cannot precede start_ms")
-        return self
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 class EvaluationInput(BaseModel):
@@ -37,8 +17,6 @@ class EvaluationInput(BaseModel):
     context: JsonValue = None
     output: JsonValue = None
     expected: JsonValue = None
-    modality: Literal["text", "voice"] = "text"
-    transcript: tuple[TranscriptSegment, ...] = Field(default_factory=tuple, max_length=2_000)
 
 
 class EvaluationProvenance(BaseModel):

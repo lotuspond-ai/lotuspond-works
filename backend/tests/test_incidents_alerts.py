@@ -26,8 +26,8 @@ def configure_alert(settings):
     ]
 
 
-async def test_failed_trace_and_unknown_voice_create_distinct_incidents(
-    client, account, db_factory, settings
+async def test_failed_trace_and_retired_voice_create_distinct_incidents(
+    client, account, db_factory, settings, retired_voice_job
 ):
     project = client.post("/api/v1/projects", json={"name": "Incident project"}).json()
     monitor = client.post(
@@ -69,32 +69,7 @@ async def test_failed_trace_and_unknown_voice_create_distinct_incidents(
     assert [item["action"] for item in failed_detail["history"]] == ["created"]
     assert failed_detail["alerts"] == []
 
-    voice = client.post(
-        "/api/v1/voice/sessions",
-        json={"project_id": project["id"], "name": "Support call", "provider": "test"},
-    ).json()
-    assert client.post(
-        f"/api/v1/voice/sessions/{voice['id']}/segments",
-        json={
-            "segments": [
-                {
-                    "sequence": 0,
-                    "speaker": "agent",
-                    "text": "Hello",
-                    "start_ms": 0,
-                    "end_ms": 100,
-                    "is_final": True,
-                }
-            ]
-        },
-    ).status_code == 202
-    assert client.post(f"/api/v1/voice/sessions/{voice['id']}/close", json={}).status_code == 200
-    queued = client.post(
-        f"/api/v1/voice/sessions/{voice['id']}/assess",
-        json={"criteria": "The agent must be helpful."},
-    )
-    assert queued.status_code == 202
-    settings.network_mode = "airgap"
+    voice_session_id, _ = retired_voice_job(account, project["id"], "The agent must be helpful.")
     unknown_assessment_id = await run_evaluation_once(db_factory, settings)
     unknown_rows = client.get("/api/v1/incidents?category=assessment_unavailable").json()[
         "items"
@@ -103,7 +78,7 @@ async def test_failed_trace_and_unknown_voice_create_distinct_incidents(
     unknown = unknown_rows[0]
     assert unknown["source"] == "voice_assessment"
     assert unknown["assessment_id"] == unknown_assessment_id
-    assert unknown["voice_session_id"] == voice["id"]
+    assert unknown["voice_session_id"] == voice_session_id
     assert unknown["title"] == "Assessment unavailable"
     detail = client.get(f"/api/v1/incidents/{unknown['id']}").json()
     assert detail["voice_session"]["status"] == "closed"

@@ -32,11 +32,8 @@ class ExecutionBundleInputsTests(unittest.TestCase):
         self.assertEqual(smoke.image_inventory(path), self.inventory["images"])
         invalid = [
             {**self.inventory["images"], "LOTUSPOND_EXECUTION_IMAGE": "lotuspond-execution:latest"},
-            {
-                key: value
-                for key, value in self.inventory["images"].items()
-                if key != "LOTUSPOND_GYM_REAL_APP_IMAGE"
-            },
+            {},
+            {**self.inventory["images"], "LOTUSPOND_GYM_REAL_APP_IMAGE": "sha256:" + "c" * 64},
             {
                 **self.inventory["images"],
                 "LOTUSPOND_API_IMAGE": "sha256:" + "b" * 64,
@@ -48,13 +45,12 @@ class ExecutionBundleInputsTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     smoke.image_inventory(path)
 
-    def test_extracts_images_and_gym_kit_without_operator_docs(self):
+    def test_extracts_only_the_image_inputs(self):
         fixture = BundleFixture(self.root)
         files = {
             "images.json": json.dumps(self.inventory).encode(),
             "images.tar": b"synthetic-image-not-loaded",
             "INSTALL.md": b"This archive content is never executed by the drill.\n",
-            "gym-kit/real-app/manifest.json": b'{"runtime_image":"sha256:' + b"a" * 64 + b'"}\n',
             "gym-kit/src/lotuspond_sandbox/real_app.py": b"print('not executed')\n",
         }
         manifest = manifest_for(files)
@@ -73,12 +69,7 @@ class ExecutionBundleInputsTests(unittest.TestCase):
         self.assertEqual(proof.root, EXECUTION_ROOT)
         self.assertEqual(
             {path.relative_to(private).as_posix() for path in private.rglob("*") if path.is_file()},
-            {
-                "images.json",
-                "images.tar",
-                "gym-kit/real-app/manifest.json",
-                "gym-kit/src/lotuspond_sandbox/real_app.py",
-            },
+            {"images.json", "images.tar"},
         )
         self.assertFalse((private / "INSTALL.md").exists())
         self.assertEqual((private / "images.tar").read_bytes(), files["images.tar"])

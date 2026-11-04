@@ -21,8 +21,6 @@ nav:
   - Evaluations: evaluations.md
   - Runtime identity foundation: runtime-foundation.md
   - Evaluation runners: runners.md
-  - Application sandboxes: sandboxes.md
-  - Voice evidence: voice.md
   - Production monitoring: monitoring.md
   - Incidents and alerts: incidents.md
   - Administration: administration.md

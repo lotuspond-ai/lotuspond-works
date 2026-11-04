@@ -19,7 +19,6 @@ from .fleet.catalog import InstalledCatalog
 from .fleet.management_routes import FleetRequestBoundary
 from .fleet.management_routes import router as fleet_management_router
 from .fleet.runtime_routes import router as fleet_runtime_router
-from .gateway import router as gateway_router
 from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
 from .mfa import router as mfa_router
@@ -307,6 +306,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.3.0",
+                    "id": "retired-assurance-extras",
+                    "date": "2026-11-05",
+                    "title": "Six assurance-era components retired",
+                    "description": "Lotuspond no longer includes voice sessions and the voice bridge, Gym-Anything software sandboxes, the TypeSafe Jev semantic evaluator, the model gateway and its workspace budget, the trace-plan ladder with its monthly allowance and retention job, the Go telemetry collector, or the Rust artifact verifier. Their API routes, console pages, packages and images are gone. Traces still arrive directly over OTLP/HTTP and the JSON API; criteria the deterministic assertions cannot decide are reported as unknown. Stored voice, gateway and plan records stay in the database untouched.",
+                },
+                {
+                    "version": "0.3.0",
                     "id": "durable-execution-api",
                     "date": "2026-10-26",
                     "title": "Scoped durable execution API",
@@ -558,7 +564,6 @@ def create_app(
     app.include_router(execution_runtime_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)
-    app.include_router(gateway_router)
 
     @app.get("/{path:path}", include_in_schema=False)
     def frontend(path: str, request: Request):

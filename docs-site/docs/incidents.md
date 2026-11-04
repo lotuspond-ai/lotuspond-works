@@ -2,7 +2,7 @@
 
 An assessment that finishes with `failed` opens an **Agent assessment failed** incident. An `unknown` assessment opens an **Assessment unavailable** incident. The latter means the evaluation could not establish an outcome; it is not evidence that the agent failed. Successful assessments do not open incidents. The same behavior applies to monitored traces, manually requested trace assessments, closed voice-session assessments, and exhausted evaluation-job leases.
 
-Each automatic incident links its project, assessment, trace or voice session, and monitor when applicable. It records the evaluator's retained provenance. An assessment creates at most one incident, and a stale worker lease cannot create a second result. Existing assessments are not retrospectively converted during database migration.
+Each automatic incident links its project, assessment, trace, and monitor when applicable; one opened before voice was retired keeps its stored voice session link. It records the evaluator's retained provenance. An assessment creates at most one incident, and a stale worker lease cannot create a second result. Existing assessments are not retrospectively converted during database migration.
 
 ## Review and resolve
 

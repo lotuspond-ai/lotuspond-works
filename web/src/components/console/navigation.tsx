@@ -38,7 +38,6 @@ export const navigation: readonly NavSection[] = [
       { id: 'traces', label: 'Traces', icon: 'traces' },
       { id: 'monitors', label: 'Monitors', icon: 'monitors' },
       { id: 'incidents', label: 'Incidents', icon: 'incidents' },
-      { id: 'voice-sessions', label: 'Voice sessions', icon: 'voice' },
     ],
   },
   {

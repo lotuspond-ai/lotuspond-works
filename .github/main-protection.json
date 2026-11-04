@@ -3,10 +3,6 @@
     "strict": true,
     "contexts": [
       "validate",
-      "collector",
-      "monitoring-rules",
-      "voice",
-      "evidence",
       "protocols",
       "restore",
       "execution",
