@@ -116,6 +116,7 @@ class ObserveAndLose:
         self.app = app
         self.lose_activate = False
         self.events = []
+        self.peers = []  # (path, status, client address): which connection carried it
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -136,6 +137,7 @@ class ObserveAndLose:
 
         await self.app(scope, receive, observed)
         self.events.append((path, status, time.monotonic()))
+        self.peers.append((path, status, scope.get("client")))
         if lose:
             assert status == 200
             self.lose_activate = False
@@ -697,8 +699,26 @@ def main():
             assert restored_state_new_effect_count == 0
             assert measured["secret_resolution_count"] == positive_result["secret_resolution_count"]
             assert len(restore_observations) == 3
-            client.close()
             cases["restored_machine_records_fenced_new_epoch_no_regrant_no_new_effect"] = "passed"
+            # A kept control connection carries no authority of its own: revocation
+            # applies to the very next request on it, which the server authorizes anew.
+            import lotuspond_runtime.control_transport as control_transport
+
+            control_transport.KEEPALIVE_IDLE_SECONDS = 4.0  # under uvicorn's 5 s; slow hosts
+            heartbeat = "/api/v1/runtime/heartbeat"
+            client.heartbeat(fresh_credential.token, fresh_session.secret)
+            post(f"/runtime-instances/{fresh.instance_id}/revoke", {}, 200)
+            try:
+                client.heartbeat(fresh_credential.token, fresh_session.secret)
+            except FleetError as error:
+                assert error.code == "unauthenticated"
+            else:
+                raise AssertionError("revoked runtime accepted on a kept connection")
+            carried = [peer for path, status, peer in observer.peers if path == heartbeat]
+            assert [s for path, s, _ in observer.peers if path == heartbeat][-2:] == [200, 401]
+            assert carried[-1] == carried[-2] and carried[-1] is not None
+            client.close()
+            cases["revocation_applies_on_a_kept_control_connection"] = "passed"
     finally:
         process_cleanup = True
         for process in processes:
