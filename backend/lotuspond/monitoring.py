@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import schemas as s
@@ -74,6 +75,38 @@ def _enqueue_monitors(db: Session, trace: Trace) -> list[str]:
     return jobs
 
 
+def _existing_trace(db: Session, workspace_id: str, external_id: str) -> Trace | None:
+    return db.scalar(
+        select(Trace).where(
+            Trace.workspace_id == workspace_id,
+            Trace.external_id == external_id,
+        )
+    )
+
+
+def _same_trace(stored: Trace, body: s.TraceInput, cost_measurement: str) -> bool:
+    same = (
+        stored.project_id == body.project_id
+        and stored.name == body.name
+        and stored.status == body.status
+        and stored.latency_ms == body.latency_ms
+        and stored.cost_usd == body.cost_usd
+        and stored.cost_measurement == cost_measurement
+        and stored.attributes == redact(body.attributes)
+    )
+    if body.occurred_at is not None:
+        supplied_time = body.occurred_at.replace(tzinfo=body.occurred_at.tzinfo or UTC)
+        stored_time = stored.occurred_at.replace(tzinfo=stored.occurred_at.tzinfo or UTC)
+        same = same and supplied_time == stored_time
+    return same
+
+
+def _replay_or_conflict(stored: Trace, body: s.TraceInput, cost_measurement: str) -> Trace:
+    if not _same_trace(stored, body, cost_measurement):
+        fail(409, "trace_exists", "A trace with this external id already exists.")
+    return stored
+
+
 def _create_trace(
     db: Session,
     principal: Principal,
@@ -82,29 +115,9 @@ def _create_trace(
     if body.project_id:
         _project(db, principal, body.project_id)
     cost_measurement = "reported" if body.cost_usd is not None else "unavailable"
-    duplicate = db.scalar(
-        select(Trace).where(
-            Trace.workspace_id == principal.workspace_id,
-            Trace.external_id == body.external_id,
-        )
-    )
+    duplicate = _existing_trace(db, principal.workspace_id, body.external_id)
     if duplicate:
-        same = (
-            duplicate.project_id == body.project_id
-            and duplicate.name == body.name
-            and duplicate.status == body.status
-            and duplicate.latency_ms == body.latency_ms
-            and duplicate.cost_usd == body.cost_usd
-            and duplicate.cost_measurement == cost_measurement
-            and duplicate.attributes == redact(body.attributes)
-        )
-        if body.occurred_at is not None:
-            supplied_time = body.occurred_at.replace(tzinfo=body.occurred_at.tzinfo or UTC)
-            stored_time = duplicate.occurred_at.replace(tzinfo=duplicate.occurred_at.tzinfo or UTC)
-            same = same and supplied_time == stored_time
-        if same:
-            return duplicate, [], True
-        fail(409, "trace_exists", "A trace with this external id already exists.")
+        return _replay_or_conflict(duplicate, body, cost_measurement), [], True
     trace = Trace(
         id=new_id(),
         workspace_id=principal.workspace_id,
@@ -118,8 +131,17 @@ def _create_trace(
         attributes=redact(body.attributes),
         occurred_at=body.occurred_at or now(),
     )
-    db.add(trace)
-    db.flush()
+    try:
+        # Nested uniqueness recovery keeps the rest of this request. Concurrent
+        # identical inserts can both miss the lookup and lose the unique constraint.
+        with db.begin_nested():
+            db.add(trace)
+            db.flush()
+    except IntegrityError:
+        duplicate = _existing_trace(db, principal.workspace_id, body.external_id)
+        if duplicate is None:
+            raise
+        return _replay_or_conflict(duplicate, body, cost_measurement), [], True
     jobs = _enqueue_monitors(db, trace) if trace.project_id else []
     return trace, jobs, False
 
