@@ -27,7 +27,7 @@ Start the optional worker alongside the API:
 docker compose --env-file /secure/path/lotuspond.env -f deploy/compose.yaml --profile mail up -d
 ```
 
-Use `deploy/compose.onprem.yaml` for prebuilt images. Local development uses `npm run worker:mail`. The only plaintext SMTP exception is an independently verified loopback receiver in development or test. Mail configuration is rejected in airgap mode; do not enable the mail profile there.
+Set `LOTUSPOND_API_IMAGE` to a digest-pinned image for controlled releases. Local development uses `npm run worker:mail`. The only plaintext SMTP exception is an independently verified loopback receiver in development or test.
 
 ## Validate delivery
 

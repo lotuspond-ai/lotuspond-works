@@ -1,10 +1,8 @@
 # Lotuspond
 
-Lotuspond is being developed as a licensable enterprise agent automation platform, with transformation, implementation, training, and managed services across industries. Customers will be able to build, deploy, operate, and govern workflows combining agents, deterministic actions, and human tasks, using their own team, Lotuspond, or an implementation partner.
+Lotuspond runs AI-agent workflows inside a company's real processes: each version is proven before it is released, each consequential action waits for a person's decision, and every outcome is recorded. [What Lotuspond is for](docs/GOAL.md) states the problem, the core loop (Build, Prove, Run, Control, on a shared foundation) and what is out of scope; [capabilities](docs/CAPABILITIES.md) records what each step can do today.
 
-The implemented core tests AI agents and governs releases through Scenarios, Releases and Governance, and deployment admission requires a current release decision. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. Node tooling runs customer-controlled evaluation adapters and release gates.
-
-The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The registry adds immutable, tenant-scoped package storage with admission-validator metadata. A standalone Python SDK shares the v1 validator and canonical content behavior, with local differences, detached signatures against independent trust, and exact synthetic capability checks. The console Studio composes a v1 package as a graph, checks it against the same contract in the browser and publishes it to that registry. Production runtime, executable-v2 authoring in the Studio, hosted publisher trust, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
+Today the product proves agents before release (scenarios, evaluation runs, policies, releases and independent approval) and runs admitted executable packages on a durable PostgreSQL engine with customer-enrolled runtimes. The Studio composes workflow-package v1 drafts, and the standalone SDK authors, signs and compiles executable-v2 packages. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. Node tooling runs customer-controlled evaluation runners and release gates.
 
 ## Run locally
 
@@ -27,8 +25,6 @@ For development, run `LOTUSPOND_REGISTRATION_ENABLED=true LOTUSPOND_ORIGIN=http:
 
 Configure [identity mail](docs-site/docs/identity-mail.md) and run `npm run worker:mail` separately for verification, recovery, and invitations; mail is disabled by default.
 
-Air-gapped installations use [offline identity enrollment](docs-site/docs/offline-identity.md) to provision new individuals, deliberate organizations and explicit operators. A one-use link lets each person set their own password. Operator attestation stays separate from mailbox verification; pending-link reissue and account revocation are audited CLI operations.
-
 ## Work through a release
 
 1. Create a project, scenarios, and an immutable release policy.
@@ -39,9 +35,9 @@ Air-gapped installations use [offline identity enrollment](docs-site/docs/offlin
 6. If required, request the `release` approval action and have a different administrator approve it. Re-evaluate and export the evidence.
 7. Enforce the result in your delivery process with `npm run cli -- gate RELEASE_ID`.
 
-The [protocol adapters](protocol-adapters/README.md) evaluate an operator-selected HTTP or A2A agent or execute an explicit MCP tool, with read-only tool discovery kept separate. The package has its own lockfile; run `npm ci --ignore-scripts` in it before using it. Its local tests use synthetic endpoints.
+The [HTTP runner adapter](protocol-adapters/README.md) evaluates an operator-selected agent behind HTTP. The package has its own lockfile; run `npm ci --ignore-scripts` in it before using it. Its local tests use synthetic endpoints.
 
-Voice sessions, Gym-Anything sandboxes, the TypeSafe Jev evaluator, the model gateway, trace-plan billing, the Go collector and the Rust verifier were retired on 2026-11-05; see [ADR-0012](docs/architecture/0012-retire-assurance-extras.md). Trace ingestion, monitors and assessments, incidents and their alerts, receipt submission, endpoint registration and the License page followed on 2026-11-11; stored traces, incidents and receipts stay readable through the API. See [ADR-0013](docs/architecture/0013-trim-to-the-automation-core.md).
+Voice sessions, Gym-Anything sandboxes, the TypeSafe Jev evaluator, the model gateway, trace-plan billing, the Go collector and the Rust verifier were retired on 2026-11-05; see [ADR-0012](docs/architecture/0012-retire-assurance-extras.md). Trace ingestion, monitors and assessments, incidents and their alerts, receipt submission, endpoint registration and the License page followed on 2026-11-11; stored traces, incidents and receipts stay readable through the API. See [ADR-0013](docs/architecture/0013-trim-to-the-automation-core.md). Air-gapped operation, offline identity enrollment, the organization and installation authenticator requirements, tool authorization, the MCP and A2A runners, the Operations page and the on-premises Compose variant were retired the same day ([ADR-0014](docs/architecture/0014-focus-on-the-core-loop.md)).
 
 ## Validate
 
@@ -79,13 +75,11 @@ The validator checks the local declaration and emits a canonical content digest.
 
 ## Product and delivery
 
-Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and the [complete delivery goal](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
+Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and [what Lotuspond is for](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
 
-The canonical private repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Repository publication and hosted deployment are separate milestones. Production readiness requires the remaining identity, provider, deployment, and operational evidence listed in the capability register, as well as the new runtime and commercial capabilities required for the expanded platform. The separate local recovery archive is outside this project.
+The canonical private repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Repository publication and hosted deployment are separate milestones. Production readiness requires the remaining identity, provider, deployment, and operational evidence listed in the capability register, and the runtime capabilities still to build. The separate local recovery archive is outside this project.
 
-Use [Operations](docs-site/docs/operations.md) to inspect queue eligibility, expired leases and worker poll observations.
-
-[Evaluation runners](docs-site/docs/runners.md) execute reviewed adapters in supervised processes. Use the HTTP adapter for an operator-configured text agent or the MCP adapter for a specific tool; frozen scenarios, complete evidence and a current lease remain required.
+[Evaluation runners](docs-site/docs/runners.md) execute reviewed adapters in supervised processes. Use the HTTP adapter for an operator-configured text agent; frozen scenarios, complete evidence and a current lease remain required.
 
 Executable-v2 authoring is available through the standalone SDK's explicit
 `lotuspond-package v2` commands: bounded validation/JCS, explicit-source

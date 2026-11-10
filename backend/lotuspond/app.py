@@ -293,6 +293,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.3.0",
+                    "id": "core-loop-focus",
+                    "date": "2026-11-11",
+                    "title": "One direction: build, prove, run, control",
+                    "description": "Lotuspond now states one direction: run AI-agent workflows in real processes, with each version proven before release, each consequential action decided by a person, and every outcome recorded. Features outside that loop are gone: air-gapped operation and offline identity enrollment, the organization and installation authenticator requirements, the tool-authorization endpoint, the MCP and A2A evaluation runners, the Operations page and the on-premises Compose variant. Only a verified mailbox verifies an identity. Personal authenticators, recovery codes, the reset for a member who lost every factor, and the production operator requirement stay. Stored data is unchanged.",
+                },
+                {
+                    "version": "0.3.0",
                     "id": "automation-core-trim",
                     "date": "2026-11-11",
                     "title": "Console trimmed to the automation core",

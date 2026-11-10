@@ -7,8 +7,7 @@ Lotuspond connects three workflows: define agent scenarios, run evaluations, and
 - [Install](install.md) for a local source checkout.
 - [Projects and scenarios](projects.md) to define what should be tested.
 - [Evaluations](evaluations.md) to understand evidence and release gates.
-- [Deployment](deployment.md) for connected Docker, on-premises, and air-gapped operation.
-- [Pilot program](pilot.md) for a measured first engagement.
+- [Deployment](deployment.md) for the single-host Compose installation and the customer-side execution image.
 
 ## Evidence boundary
 

@@ -34,6 +34,6 @@ Read `docs/DATABASE.md` before `npm run db:migrate`. Reviewed additive upgrades 
 
 ## Additional runtimes
 
-Packaged HTTP, MCP, A2A and release-gate commands are in the separate execution image. The protocol adapters have their own lockfile and checks.
+Packaged HTTP runner and release-gate commands are in the separate execution image. The protocol adapters have their own lockfile and checks.
 
 A source installation or a container build does not establish hosted readiness. See [deployment](deployment.md) for the current packaging and remaining operator validation.

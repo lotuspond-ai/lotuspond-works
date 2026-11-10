@@ -18,10 +18,6 @@ Create `/releases`, then call `/releases/:id/evaluate`. A pass is the only deplo
 
 Trace ingestion, monitors and trace assessments were retired on 2026-11-11. Traces stored before then stay readable: `GET /traces`, `GET /traces/:id` (`{trace,assessments}`) and `GET /traces/export`. Their nullable `cost_usd` keeps its `reported`, `unavailable` or `unknown` marker, and `/overview` returns a reported-cost subtotal with counts for each state. These are producer measurements, not reconciled billing. `POST /traces` and `POST /telemetry/otlp` now return 405.
 
-## Offline identity
-
-Airgap installations use `/auth/offline-enrollment/inspect` with `{token}` and `/auth/offline-enrollment/complete` with `{token,password}`. Completion consumes a pending token and requires normal login afterward. The `/me` identity source distinguishes mailbox verification from operator attestation. Read the [offline identity guide](offline-identity.md) before provisioning an account.
-
 
 ## Errors and limits
 
@@ -30,10 +26,6 @@ Errors contain `error` and `message`; input errors identify field paths without 
 ## Stored incidents
 
 Incidents and their signed alerts were retired on 2026-11-11; nothing opens, resolves, reopens or delivers them. `GET /incidents` still supports project, state, category and cursor filters, and `GET /incidents/:id` returns linked evidence, lifecycle history and stored alert status.
-
-## Operational state
-
-`GET /api/v1/admin/operations` requires a platform-operator session, including MFA in production. It returns timestamped installation aggregates for the identity-mail queue, its worker poll observation, and database/Redis dependency state. It contains no tenant identifiers or customer evidence. See [Operations](operations.md) for field meanings, overlapping counts and failure handling.
 
 ## Workflow package registry
 

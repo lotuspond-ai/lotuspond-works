@@ -59,7 +59,7 @@ const lists: Record<string, Record<string, unknown>[]> = {
     {
       id: 'r1',
       name: 'runner-1',
-      capabilities: ['http', 'mcp'],
+      capabilities: ['http'],
       last_seen_at: ago(2),
       created_at: ago(5000),
     },
