@@ -1,12 +1,12 @@
 # ADR-0013: Trim the console to the automation core
 
-Date: 2026-11-10. Status: **proposed; awaiting the owner's decision.** It builds on [ADR-0012](0012-retire-assurance-extras.md), which is still under review in PR #20, and applies only after that PR merges.
+Date: 2026-11-10. Status: **accepted on 2026-11-11. The owner delegated the decisions to Claude, which settled the three questions the proposal left open (see [Resolved questions](#resolved-questions)).** It builds on [ADR-0012](0012-retire-assurance-extras.md), which is still under review in PR #20. Implementation starts after that PR merges.
 
-If accepted, this record:
+This record:
 
-- narrows the [ADR-0009](0009-agent-automation-platform.md) instruction to keep "approvals, production evidence, and governance": release approvals and stored production evidence stay, but monitoring of agents running outside Lotuspond goes;
-- narrows ADR-0012's list of assurance contracts that stay in force: receipts, monitors, incidents and alerts leave it, approvals are limited to release approvals, and traces stay;
-- retires the monitoring, incident-alert and endpoint-registration parts of [ADR-0002](0002-agent-assurance-platform.md), and the evaluation and alert worker roles of [ADR-0005](0005-operational-observations.md);
+- narrows the [ADR-0009](0009-agent-automation-platform.md) instruction to keep "approvals, production evidence, and governance". Release approvals and governance stay. Collecting and monitoring evidence from agents that run outside Lotuspond goes, and the evidence already stored stays readable;
+- narrows ADR-0012's list of assurance contracts that stay in force: traces, receipts, monitors, incidents and alerts leave it, and approvals are limited to release approvals;
+- retires the trace ingestion, monitoring, incident-alert and endpoint-registration parts of [ADR-0002](0002-agent-assurance-platform.md), and the evaluation and alert worker roles of [ADR-0005](0005-operational-observations.md). The trace cost rules of [ADR-0003](0003-offline-identity-and-cost-provenance.md) keep governing the stored rows, but no new costs are recorded;
 - makes executable-v2 the only package format the product develops further.
 
 ## Context
@@ -19,6 +19,7 @@ ADR-0009 defines the product as one licensable platform to build, deploy, run an
 | Receipts                                        | `POST /receipts` and `npm run cli -- receipt` store a CI outcome against a release (`workflows.py:657`, `scripts/cli.mjs:25`). The only reader copies them into the release evidence export (`workflows.py:636`). The release gate never reads them. Verified business outcomes are E06's planned work.                                                                                                                                                                                                                                                                                                                                           |
 | Approvals for other actions                     | `POST /approvals` accepts any `action` name (`workflows.py:672`). Only `action == "release"` is ever read (`workflows.py:586`, `execution/assurance.py:148`), so an approval for any other action authorizes nothing. Approving exact actions is E05's Human tasks.                                                                                                                                                                                                                                                                                                                                                                               |
 | Monitors, trace assessments and their incidents | Monitors sample customer traces into evaluation jobs, and `POST /traces/{id}/assess` queues one by hand (`monitoring.py:538`, `:231`). With no semantic evaluator after ADR-0012, the worker decides only producer-supplied assertions and returns **unknown** for everything else (`worker.py:234`). Every assessment that does not pass opens an incident (`incident_service.py:102`), so a monitor with ordinary criteria opens an "assessment unavailable" incident for each sampled trace. The incidents then feed the signed alert outbox (`alerts.py`). None of `execution/` or `fleet/` reads monitors, assessments, incidents or alerts. |
+| Trace ingestion                                 | `POST /traces` and `POST /telemetry/otlp` store spans from agents that run outside Lotuspond (`monitoring.py:164`, `:410`). Nothing in `execution/`, `fleet/`, the runtime or the SDK sends or reads traces. After ADR-0012 there is no retention job, so Lotuspond deletes no trace on its own. Once monitors go, only the trace views, the trace export and the workspace `GET /overview` cost summary read them, and the console does not display that summary.                                                                                                                                                                                |
 | License page                                    | After ADR-0012 removes the plan card, the page shows only proposed editions, services and planned delegated access (`web/src/pages/License.tsx`). It describes no entitlement the workspace has, and the public page already presents services.                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Workflow-package v1                             | The Studio publishes v1 packages to `POST /projects/{id}/packages` (`packages.py:188`). The runtime admits only executable-v2 packages from `/executable-packages` (`execution/routes.py:141`, `execution/admission.py:151`). The only authoring path in the console therefore produces packages that cannot be deployed.                                                                                                                                                                                                                                                                                                                         |
 
@@ -30,24 +31,28 @@ Retire these features:
 
 | Feature                        | Retired                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Integrations                   | The Integrations page and nav entry, `GET/POST /integrations`, the endpoint-registration rows on the API reference. The Planned Connections page stops pointing to Integrations as the thing to use today.                                                                                                                                                                                                             |
+| Integrations                   | The Integrations page and nav entry, `GET/POST /integrations`, the endpoint-registration rows on the API reference.                                                                                                                                                                                                                                                                                                    |
 | Receipts                       | The Receipts page and nav entry, `POST /receipts`, the `receipt` CLI command.                                                                                                                                                                                                                                                                                                                                          |
 | Approvals for other actions    | `POST /approvals` requires a `release_id` and the `release` action; any other action is refused with 400. The Approvals page describes release approvals only.                                                                                                                                                                                                                                                         |
 | Trace monitoring and incidents | The Monitors and Incidents pages and nav entries; `/monitors`, `/traces/{id}/assess`, `/evaluation-jobs/{id}`, and the incident create, resolve and reopen routes; the assessment worker (`npm run worker`) and the alert worker (`npm run worker:alerts`); `LOTUSPOND_ALERT_*` settings; the evaluation and alert queues and worker roles on the operator Operations page; their Compose services and bundle entries. |
+| Trace ingestion                | The Traces page and nav entry; `POST /traces`, `POST /telemetry/otlp` and the OTLP protobuf decoder (`otlp_protobuf.py`); the `ingest` key scope for new keys; the OTLP interoperability check and the drills' OTLP steps.                                                                                                                                                                                             |
 | License page                   | The License page and nav entry. The page comes back when E08 issues a real license. Proposed editions and services stay in the master plan and on the public page.                                                                                                                                                                                                                                                     |
+
+Public and planned copy follows the register. The public page's Available now row stops naming production traces and incidents. The Planned pages' "Use today" links stop pointing to Integrations, Traces and Incidents.
 
 Make executable-v2 the only package format, in this order:
 
 1. No new v1 features. v1 validation, the v1 registry, the Studio and their tests keep working unchanged.
 2. The next Studio increment authors executable-v2 and publishes through `/executable-packages`. The five Studio patterns get v2 equivalents in `contracts/examples/`, pinned by the same digest tests.
-3. Once that ships, retire the Studio's v1 publishing, `POST /projects/{id}/packages`, the backend v1 compatibility modules (`package_contract.py`, `package_input.py`, `package_cli.py`) and `npm run package:validate`. That retirement gets its own record and plan.
+3. Once that ships, retire the Studio's v1 publishing, `POST /projects/{id}/packages`, the backend v1 compatibility modules (`package_contract.py`, `package_input.py`, `package_cli.py`) and `npm run package:validate`. This record is the decision for that step. It needs an implementation plan, not another ADR.
 
 Keep the stored data and the schema, as ADR-0012 does:
 
-- The `integrations`, `receipts`, `monitors`, `evaluation_jobs`, `assessments`, `incidents`, `incident_events` and `alert_deliveries` tables keep their rows, columns and constraints. The ORM models stay, `backend/schema.sql` stays byte-identical and no migration runs. Dropping them needs its own reviewed, data-preserving plan.
-- `GET /incidents` and `GET /incidents/{id}` keep returning existing incidents with their evidence links, so history stays readable through the API.
+- The `integrations`, `receipts`, `traces`, `monitors`, `evaluation_jobs`, `assessments`, `incidents`, `incident_events` and `alert_deliveries` tables keep their rows, columns and constraints. The ORM models stay, `backend/schema.sql` stays byte-identical and no migration runs. Dropping them needs its own reviewed, data-preserving plan.
+- History stays readable through the API only: `GET /traces`, `GET /traces/{id}`, `GET /traces/export`, `GET /incidents` and `GET /incidents/{id}` keep returning stored records with their evidence links. The console keeps no history view for them.
 - The release evidence export keeps its `receipts` array, filled from stored rows, so its schema version 2 shape does not change.
 - Existing approvals for other actions stay readable. They still authorize nothing.
+- Existing API keys that carry the `ingest` scope keep it; it grants nothing.
 - Queued evaluation jobs and alert deliveries are left as they are. Nothing claims them.
 - v1 packages already published stay retrievable byte for byte through `GET /packages/{id}/content`.
 
@@ -58,20 +63,22 @@ Keep, and stop expanding without a qualified customer:
 Unchanged:
 
 - Scenarios, Environments, Runners, Evaluation runs, Releases, Policies and release Approvals, because deployment admission depends on them. The Environments page copy should say that its records also scope deployments.
-- Traces and OTLP ingestion. See the first open question.
 - The three Planned pages, which describe the core.
 - The changelog. Its wording is a content fix, not a scope decision.
 
 ## Consequences
 
-- The sidebar drops from 25 entries (24 after ADR-0012) to 19: Home; Projects, Studio and Connections under Build; seven Assure entries; Control Room, Human tasks and Traces under Operate; and Members, Invitations, API keys, Audit log and Settings under Administer.
+- The sidebar drops from 25 entries (24 after ADR-0012) to 18: Home; Projects, Studio and Connections under Build; seven Assure entries; Control Room and Human tasks under Operate; and Members, Invitations, API keys, Audit log and Settings under Administer. Operate holds only Planned pages until E04's runtime gets its console.
+- Lotuspond collects no production evidence until E05/E06 record evidence and incidents from its own executions. A producer still sending OTLP or `POST /traces` receives 404.
 - No background worker is needed for assurance. The mail and execution workers remain, and the operator Operations page keeps only its mail queue and worker role.
-- A workspace that relied on monitor incidents or alert webhooks loses them without a replacement until E05/E06 add incidents for Lotuspond's own executions. The capability register records no customer use, so no known installation loses behavior it depends on, and no stored data is removed.
+- A workspace that relied on monitor incidents or alert webhooks loses them without a replacement. The capability register records no customer use, so no known installation loses behavior it depends on, and no stored data is removed.
 - Until the Studio authors v2, the console has no way to build a deployable package. Executable packages are authored with the SDK's `lotuspond-package v2` commands. That gap exists today; this record names it rather than creating it.
 - History in `docs/VALIDATION.md`, the plans and earlier records keeps describing these features as they were tested; it is not current scope.
 
-## Open questions for the owner
+## Resolved questions
 
-1. **Traces.** Once monitors go, the only consumers of stored traces are the trace views, the trace export and the workspace `GET /overview` cost summary, which the console does not display. Should they stay as evidence for agents Lotuspond does not run, or retire too, with production evidence rebuilt from execution events under E06? This record keeps them, because it is the smaller and reversible step.
-2. **Incident history in the console.** Is read-only API access to existing incidents enough, or should the console keep a read-only incident history view until E05/E06?
-3. **One record or two.** Should the v1 retirement in step 3 stay in this record as a commitment, or move entirely to the record that accompanies the v2 Studio?
+The proposal left three questions open. On 2026-11-11 the owner delegated them to Claude, which decided them as follows.
+
+1. **Traces: retire ingestion, keep stored traces readable.** Keeping ingestion was the smaller step, but it would leave a store of customer telemetry that grows without limit, since no retention job remains after ADR-0012, and that nothing in the product reads. The automation core neither sends nor needs these traces. Evidence for Lotuspond's own work belongs with its executions and E06's verified outcomes, not with spans from agents it does not run. The code stays in history if a customer later needs that intake, and the tables are unchanged.
+2. **Incident and trace history: API only.** The capability register records no customer use, so existing incidents and traces exist only in local development and test databases. A read-only console view would keep the incident inspector, its evidence views and the trace inspector maintained for records nobody holds. Incidents return under E05/E06, designed around executions.
+3. **One record.** The direction (executable-v2 only) and its trigger (a Studio that authors v2) do not change when that Studio ships; only the work does. The v1 retirement therefore needs an implementation plan under `docs/superpowers/plans/`, not a second ADR.
