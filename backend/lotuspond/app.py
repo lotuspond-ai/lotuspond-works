@@ -23,13 +23,13 @@ from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
 from .mfa import router as mfa_router
 from .models import SchemaVersion
-from .monitoring import router as monitoring_router
 from .offline_identity import router as offline_identity_router
 from .operations import router as operations_router
 from .package_contract import MAX_PACKAGE_BYTES
 from .packages import router as packages_router
 from .schema_version import SCHEMA_VERSION
 from .security import RateLimiter
+from .traces import router as traces_router
 from .workflows import router as workflow_router
 
 logger = logging.getLogger("lotuspond")
@@ -86,18 +86,7 @@ class RequestBoundary:
                 await error(403, "invalid_origin", "The request origin is not permitted.")
                 return
             content_type = headers.get("content-type", "").lower()
-            # OTLP exporters send binary protobuf by default. Like JSON it is not a
-            # CORS-safelisted type, so a cross-site form still cannot submit it, and it is
-            # accepted only where trace exports arrive.
-            otlp_protobuf = (
-                scope["path"] == "/api/v1/telemetry/otlp"
-                and content_type.split(";")[0].strip() == "application/x-protobuf"
-            )
-            if (
-                scope["path"].startswith("/api/")
-                and "application/json" not in content_type
-                and not otlp_protobuf
-            ):
+            if scope["path"].startswith("/api/") and "application/json" not in content_type:
                 await error(415, "unsupported_media_type", "Use an application/json request body.")
                 return
         try:
@@ -304,6 +293,13 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.3.0",
+                    "id": "automation-core-trim",
+                    "date": "2026-11-11",
+                    "title": "Console trimmed to the automation core",
+                    "description": "Lotuspond no longer accepts production traces over OTLP or the JSON API, and no longer runs trace monitors, trace assessments, incidents or signed incident alerts. The Integrations, Receipts, Monitors, Incidents, Traces and License pages are gone, approval requests apply to releases only, and new API keys cannot take the ingest scope. Stored traces and incidents stay readable through the API, the release evidence export still includes its stored receipts, and deployment admission keeps using scenarios, runs, policies, releases and release approvals.",
+                },
                 {
                     "version": "0.3.0",
                     "id": "retired-assurance-extras",
@@ -563,7 +559,7 @@ def create_app(
     app.include_router(execution_router)
     app.include_router(execution_runtime_router)
     app.include_router(workflow_router)
-    app.include_router(monitoring_router)
+    app.include_router(traces_router)
 
     @app.get("/{path:path}", include_in_schema=False)
     def frontend(path: str, request: Request):

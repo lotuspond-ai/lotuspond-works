@@ -8,32 +8,16 @@ import {
   type WorkerRole,
 } from '../lib/operations.js';
 
-const roles: WorkerRole[] = ['evaluation', 'mail', 'alert'];
+const roles: WorkerRole[] = ['mail'];
 const titles: Record<WorkerRole, string> = {
-  evaluation: 'Evaluations',
   mail: 'Identity mail',
-  alert: 'Incident alerts',
 };
 const statuses: Record<WorkerRole, [string, string][]> = {
-  evaluation: [
-    ['queued', 'Queued'],
-    ['running', 'Running'],
-    ['completed', 'Completed'],
-    ['failed', 'Failed jobs'],
-    ['cancelled', 'Cancelled'],
-  ],
   mail: [
     ['queued', 'Queued'],
     ['sending', 'Sending'],
     ['sent', 'SMTP accepted'],
     ['failed', 'Failed messages'],
-    ['cancelled', 'Cancelled'],
-  ],
-  alert: [
-    ['queued', 'Queued'],
-    ['sending', 'Sending'],
-    ['delivered', 'Webhook accepted'],
-    ['failed', 'Failed deliveries'],
     ['cancelled', 'Cancelled'],
   ],
 };
@@ -185,32 +169,7 @@ export function OperationsSnapshotView({ snapshot }: { snapshot: OperationsSnaps
         totals. Expired leases can overlap eligible or suspended work. These values should not be
         added together. A disabled queue does not process eligible work.
       </p>
-      <section className="operations-outcomes" aria-labelledby="operations-outcomes-heading">
-        <h3 id="operations-outcomes-heading">Assessment outcomes</h3>
-        <p>
-          From <ObservedTime value={snapshot.window.start_at} /> up to (excluding){' '}
-          <ObservedTime value={snapshot.window.end_at} /> — a{' '}
-          {elapsedSeconds(snapshot.window.duration_seconds)} window.
-        </p>
-        <dl className="record-facts">
-          <div>
-            <dt>Failed assessments</dt>
-            <dd>{snapshot.assessments_last_24h.failed.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Unknown assessments</dt>
-            <dd>{snapshot.assessments_last_24h.unknown.toLocaleString()}</dd>
-          </div>
-        </dl>
-        <p className="hint">
-          Failed is an assessment verdict; unknown means no conclusive verdict is available. These
-          outcomes are separate from queue job failures.
-        </p>
-      </section>
-      <p className="hint">
-        SMTP acceptance does not confirm inbox delivery. Webhook acceptance does not confirm that a
-        downstream notification reached a person.
-      </p>
+      <p className="hint">SMTP acceptance does not confirm inbox delivery.</p>
     </>
   );
 }

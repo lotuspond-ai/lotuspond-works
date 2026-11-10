@@ -20,8 +20,6 @@
     "check:executable-contracts": "uv run --frozen --project sdk/python python -m lotuspond_sdk.executable.schema --check",
     "schema:contracts": "node scripts/python.mjs package-schema",
     "check:contracts": "node scripts/python.mjs package-schema --check",
-    "worker": "node --env-file-if-exists=.env scripts/python.mjs worker",
-    "worker:alerts": "node --env-file-if-exists=.env scripts/python.mjs alert-worker",
     "worker:mail": "node --env-file-if-exists=.env scripts/python.mjs mail-worker",
     "worker:execution": "node --env-file-if-exists=.env scripts/python.mjs execution-worker",
     "test:database": "node scripts/python.mjs test-database",

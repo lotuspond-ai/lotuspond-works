@@ -21,8 +21,6 @@ nav:
   - Evaluations: evaluations.md
   - Runtime identity foundation: runtime-foundation.md
   - Evaluation runners: runners.md
-  - Production monitoring: monitoring.md
-  - Incidents and alerts: incidents.md
   - Administration: administration.md
   - Operations: operations.md
   - Deployment: deployment.md

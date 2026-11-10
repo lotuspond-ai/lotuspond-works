@@ -1,13 +1,12 @@
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import schemas as s
 from .deps import DB, audit, record, require
-from .incident_service import destination_names, record_incident_event
 from .models import (
     AlertDelivery,
     Approval,
@@ -16,7 +15,6 @@ from .models import (
     Environment,
     Incident,
     IncidentEvent,
-    Integration,
     Monitor,
     Policy,
     Project,
@@ -29,7 +27,6 @@ from .models import (
     Scenario,
     Trace,
     VoiceSession,
-    new_id,
     now,
     serialize,
 )
@@ -97,7 +94,6 @@ for _path, _model in {
     "policies": Policy,
     "releases": Release,
     "approvals": Approval,
-    "integrations": Integration,
     "audit-events": AuditEvent,
     "receipts": Receipt,
 }.items():
@@ -110,8 +106,6 @@ def insert(db, p, model, body, *, administrator=False):
     data = body.model_dump()
     if data.get("project_id"):
         record(db, Project, p.workspace_id, data["project_id"])
-    if data.get("trace_id"):
-        record(db, Trace, p.workspace_id, data["trace_id"])
     row = model(workspace_id=p.workspace_id, **redact(data))
     db.add(row)
     db.flush()
@@ -148,7 +142,6 @@ def overview(p: Principal = Depends(require()), db: Session = DB):
         "scenarios": count(Scenario),
         "active_runs": count(Run, Run.status.in_(["queued", "running"])),
         "pending_approvals": count(Approval, Approval.status == "pending"),
-        "open_incidents": count(Incident, Incident.status == "open"),
         "monthly_cost_usd": float(reported_cost) if reported_cost is not None else None,
         "monthly_cost_counts": cost_counts,
     }
@@ -179,13 +172,6 @@ def runner(body: s.RunnerInput, p: Principal = Depends(require("write")), db: Se
 @router.post("/policies", status_code=201)
 def policy(body: s.PolicyInput, p: Principal = Depends(require("write")), db: Session = DB):
     return insert(db, p, Policy, body, administrator=True)
-
-
-@router.post("/integrations", status_code=201)
-def integration(
-    body: s.IntegrationInput, p: Principal = Depends(require("write")), db: Session = DB
-):
-    return insert(db, p, Integration, body, administrator=True)
 
 
 @router.get("/incidents")
@@ -230,39 +216,6 @@ def incidents(
     }
 
 
-@router.post("/incidents", status_code=201)
-def incident(
-    body: s.IncidentInput,
-    request: Request,
-    p: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    trace = record(db, Trace, p.workspace_id, body.trace_id) if body.trace_id else None
-    row = Incident(
-        id=new_id(),
-        workspace_id=p.workspace_id,
-        project_id=trace.project_id if trace else None,
-        trace_id=trace.id if trace else None,
-        title=body.title,
-        severity=body.severity,
-        category="manual",
-        source="manual",
-        status="open",
-    )
-    db.add(row)
-    db.flush()
-    record_incident_event(
-        db,
-        row,
-        action="created",
-        actor_id=p.actor_id,
-        reason=None,
-        destinations=destination_names(request.app.state.settings),
-    )
-    audit(db, p, "incidents.created", row.id)
-    return serialize(row)
-
-
 def _linked(db: Session, model, workspace_id: str, identifier: str | None):
     if not identifier:
         return None
@@ -305,67 +258,6 @@ def incident_detail(
             serialize(item, exclude={"payload", "lease_token_hash", "lease_expires_at"})
             for item in alerts
         ],
-    }
-
-
-@router.post("/incidents/{identifier}/resolve")
-def resolve_incident(
-    identifier: s.Identifier,
-    request: Request,
-    body: s.IncidentResolve | None = Body(default=None),
-    p: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    row = record(db, Incident, p.workspace_id, identifier, lock=True)
-    if row.status != "resolved":
-        row.status = "resolved"
-        row.resolved_at = now()
-        row.resolution_reason = body.reason if body and body.reason else "Resolved by operator."
-        record_incident_event(
-            db,
-            row,
-            action="resolved",
-            actor_id=p.actor_id,
-            reason=row.resolution_reason,
-            destinations=destination_names(request.app.state.settings),
-        )
-        audit(db, p, "incidents.resolved", identifier, {"reason": row.resolution_reason})
-    return {
-        "ok": True,
-        "status": row.status,
-        "resolved_at": row.resolved_at,
-        "reopened_at": row.reopened_at,
-    }
-
-
-@router.post("/incidents/{identifier}/reopen")
-def reopen_incident(
-    identifier: s.Identifier,
-    body: s.IncidentReopen,
-    request: Request,
-    p: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    row = record(db, Incident, p.workspace_id, identifier, lock=True)
-    if row.status == "resolved":
-        row.status = "open"
-        row.resolved_at = None
-        row.resolution_reason = None
-        row.reopened_at = now()
-        record_incident_event(
-            db,
-            row,
-            action="reopened",
-            actor_id=p.actor_id,
-            reason=body.reason,
-            destinations=destination_names(request.app.state.settings),
-        )
-        audit(db, p, "incidents.reopened", identifier, {"reason": body.reason})
-    return {
-        "ok": True,
-        "status": row.status,
-        "resolved_at": row.resolved_at,
-        "reopened_at": row.reopened_at,
     }
 
 
@@ -653,33 +545,19 @@ def evidence(
     }
 
 
-@router.post("/receipts", status_code=201)
-def receipt(body: s.ReceiptInput, p: Principal = Depends(require("ingest")), db: Session = DB):
-    record(db, Release, p.workspace_id, body.release_id)
-    existing = db.scalar(
-        select(Receipt).where(
-            Receipt.workspace_id == p.workspace_id, Receipt.external_id == body.external_id
-        )
-    )
-    if existing:
-        if all(
-            serialize(existing)[key] == value for key, value in redact(body.model_dump()).items()
-        ):
-            return serialize(existing)
-        fail(409, "receipt_conflict", "This receipt identifier already records different evidence.")
-    return insert(db, p, Receipt, body)
-
-
 @router.post("/approvals", status_code=201)
 def request_approval(
     body: s.ApprovalInput, p: Principal = Depends(require("write")), db: Session = DB
 ):
     if not p.user_id:
         fail(403, "human_required", "A signed-in person must request approval.")
-    if body.release_id:
-        record(db, Release, p.workspace_id, body.release_id)
-        if body.action != "release":
-            fail(400, "invalid_action", "Release approvals must use the release action.")
+    # Approvals apply to releases only (ADR-0013). Approving other exact actions is
+    # planned for human tasks; until then nothing here could authorize them.
+    if not body.release_id:
+        fail(400, "release_required", "An approval request must name a release.")
+    if body.action != "release":
+        fail(400, "invalid_action", "Approvals apply to the release action only.")
+    record(db, Release, p.workspace_id, body.release_id)
     row = Approval(workspace_id=p.workspace_id, requested_by=p.user_id, **body.model_dump())
     db.add(row)
     db.flush()

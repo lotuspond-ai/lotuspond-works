@@ -3,7 +3,7 @@ import { useArrival } from '../../lib/useArrival.js';
 import { Icon } from '../console/icons.js';
 import { NavList } from '../console/navigation.js';
 import { ReleaseView } from './ReleaseView.js';
-import { EvidenceView, GateView, RunView } from './StreamViews.js';
+import { GateView, RunView } from './StreamViews.js';
 
 const views = [
   {
@@ -19,13 +19,6 @@ const views = [
     summary: 'Results arrive from a runner on your side, one scenario at a time.',
     path: 'runs',
     nav: 'runs',
-  },
-  {
-    id: 'evidence',
-    title: 'Production evidence',
-    summary: 'Traces arrive; an assessment that cannot run opens an incident.',
-    path: 'traces',
-    nav: 'traces',
   },
   {
     id: 'gate',
@@ -146,9 +139,7 @@ export function ConsolePreview() {
                   'members',
                   'invitations',
                   'api-keys',
-                  'integrations',
                   'audit-events',
-                  'license',
                   'settings',
                 ]}
               />
@@ -165,7 +156,6 @@ export function ConsolePreview() {
             <div className="console-main" key={current.id}>
               {current.id === 'release' && <ReleaseView onInteract={() => setTouring(false)} />}
               {current.id === 'run' && <RunView running={arrived} />}
-              {current.id === 'evidence' && <EvidenceView running={arrived} />}
               {current.id === 'gate' && <GateView running={arrived} />}
             </div>
           </div>

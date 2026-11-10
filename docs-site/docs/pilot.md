@@ -14,11 +14,11 @@ Run a four-week, bounded pilot around one release decision and one production si
 
 1. **Scope and connect:** inventory the workflow, define metrics, and test only synthetic data.
 2. **Evaluate:** freeze scenarios, run candidate and baseline, and review every critical failure.
-3. **Shadow production:** ingest minimized traces without controlling releases; measure coverage and operator workload.
+3. **Shadow production:** evaluate the candidate against minimized production-like cases without controlling releases; measure coverage and operator workload.
 4. **Decision:** compare against the baseline, exercise evidence export and recovery, and document proceed, revise, or stop.
 
 ## Exit measures
 
-Report scenario coverage, critical failures, false-allow and false-block review, evaluator disagreement, evidence completeness, telemetry loss, decision time, and operator hours. Commercial continuation should require a named production use case, acceptable risk findings, evidence completeness at the agreed threshold, and a buyer willing to fund the next bounded phase.
+Report scenario coverage, critical failures, false-allow and false-block review, evaluator disagreement, evidence completeness, decision time, and operator hours. Commercial continuation should require a named production use case, acceptable risk findings, evidence completeness at the agreed threshold, and a buyer willing to fund the next bounded phase.
 
 Do not promise universal agent compatibility, autonomous governance, compliance certification, or production savings from a pilot. Convert discovered integration gaps into explicit backlog items with owners and evidence needed for closure.

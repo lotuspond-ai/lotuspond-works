@@ -1,7 +1,5 @@
-from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -178,66 +176,6 @@ class ApprovalDecision(Input):
     status: Literal["approved", "rejected"]
 
 
-class TraceInput(Input):
-    project_id: Identifier | None = None
-    external_id: Name
-    name: Name
-    status: Literal["ok", "error"]
-    latency_ms: int = Field(ge=0, le=86400000)
-    cost_usd: Decimal | None = Field(
-        default=None,
-        ge=0,
-        le=1_000_000,
-        max_digits=14,
-        decimal_places=6,
-    )
-    attributes: Json = Field(default_factory=dict)
-    occurred_at: datetime | None = None
-
-
-class IncidentInput(Input):
-    title: Name
-    trace_id: Identifier | None = None
-    severity: Literal["low", "medium", "high", "critical"]
-
-
-class IncidentResolve(Input):
-    reason: str | None = Field(default=None, min_length=3, max_length=2000)
-
-
-class IncidentReopen(Input):
-    reason: str = Field(min_length=3, max_length=2000)
-
-
-class IntegrationInput(Input):
-    name: Name
-    kind: Literal["mcp", "a2a", "telemetry", "webhook", "ci"]
-    endpoint: str = Field(max_length=2000)
-
-    @model_validator(mode="after")
-    def safe_endpoint(self):
-        url = urlsplit(self.endpoint)
-        if (
-            url.scheme != "https"
-            or not url.hostname
-            or url.username
-            or url.password
-            or url.query
-            or url.fragment
-        ):
-            raise ValueError(
-                "Use an HTTPS endpoint without embedded credentials, query, or fragment"
-            )
-        return self
-
-
-class ReceiptInput(Input):
-    release_id: Identifier
-    external_id: Name
-    outcome: Literal["success", "failure", "unknown"]
-    evidence: Json
-
-
 class MemberInput(Input):
     email: EmailStr
     role: Literal["admin", "editor", "viewer"]
@@ -246,8 +184,8 @@ class MemberInput(Input):
 class KeyInput(Input):
     name: Name
     scopes: list[
-        Literal["read", "write", "run", "ingest", "execute", "execution_signal"]
-    ] = Field(min_length=1, max_length=6)
+        Literal["read", "write", "run", "execute", "execution_signal"]
+    ] = Field(min_length=1, max_length=5)
     days: int = Field(default=90, ge=1, le=365)
 
 
@@ -272,15 +210,3 @@ class WorkspaceStatus(Input):
 class AuthorizationInput(Input):
     policy_id: Identifier
     tool: Name
-
-
-class AssessmentInput(Input):
-    criteria: str = Field(min_length=1, max_length=16000)
-
-
-class MonitorInput(Input):
-    project_id: Identifier
-    name: Name
-    criteria: str = Field(min_length=1, max_length=16000)
-    enabled: bool = True
-    sample_basis_points: int = Field(default=10000, ge=0, le=10000)

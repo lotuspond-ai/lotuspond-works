@@ -8,7 +8,6 @@ type Overview = {
   workspaces: number;
   projects: number;
   runs: number;
-  incidents: number;
   pending_approvals: number;
 };
 export function Admin() {

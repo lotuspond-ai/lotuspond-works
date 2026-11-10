@@ -148,7 +148,7 @@ const register = [
       [
         'Assurance',
         'available',
-        'Frozen scenarios, immutable release policies, independent approval, production traces and incidents, for HTTP, MCP and A2A agents.',
+        'Frozen scenarios, evaluation runs for HTTP, MCP and A2A agents, immutable release policies and independent approval. A deployment needs a current release decision.',
       ],
     ],
   ],
@@ -409,10 +409,7 @@ export function Landing({
             <dl className="pond-status">
               <div data-state="available">
                 <dt>Available now</dt>
-                <dd>
-                  Agent testing, release decisions, production evidence and a Studio for workflow
-                  packages
-                </dd>
+                <dd>Agent testing, release decisions and a Studio for workflow packages</dd>
               </div>
               <div data-state="planned">
                 <dt>Planned</dt>

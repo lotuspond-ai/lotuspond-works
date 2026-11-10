@@ -1,7 +1,7 @@
 [project]
 name = "lotuspond-api"
 version = "0.3.0"
-description = "Lotuspond agent assurance and production monitoring"
+description = "Lotuspond agent automation platform API"
 requires-python = ">=3.13"
 dependencies = [
   "lotuspond-sdk==0.3.0",

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { request } from './client.mjs';
 
 const [command, target, file] = process.argv.slice(2);
@@ -22,9 +22,6 @@ try {
     const evidence = await request(`/releases/${target}/evidence`);
     await writeFile(file, JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' });
     console.log('Evidence exported.');
-  } else if (command === 'receipt' && target) {
-    const receipt = JSON.parse(await readFile(target, 'utf8'));
-    console.log(JSON.stringify(await request('/receipts', receipt), null, 2));
   } else if (
     command === 'list' &&
     ['projects', 'runs', 'releases', 'scenarios', 'traces', 'incidents', 'policies'].includes(
@@ -34,7 +31,7 @@ try {
     console.log(JSON.stringify(await request(`/${target}`), null, 2));
   } else
     throw new Error(
-      'Usage: npm run cli -- gate RELEASE_ID | export RELEASE_ID FILE | receipt FILE | list RESOURCE',
+      'Usage: npm run cli -- gate RELEASE_ID | export RELEASE_ID FILE | list RESOURCE',
     );
 } catch (error) {
   console.error(error.message);
