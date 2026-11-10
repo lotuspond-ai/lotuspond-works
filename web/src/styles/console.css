@@ -1887,16 +1887,6 @@ label:has(textarea:not(.code-input)) textarea {
   font-size: 13px;
   margin: 3px 0 0;
 }
-.evidence-section {
-  padding-top: 22px;
-  margin-top: 22px;
-  border-top: 1px solid var(--line);
-}
-.evidence-section h3 {
-  font-size: 13px;
-  font-weight: 650;
-  margin: 0 0 16px;
-}
 .assessment {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1964,96 +1954,6 @@ label:has(textarea:not(.code-input)) textarea {
   font-size: 12px;
   font-weight: 400;
 }
-.incident-filters {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(190px, 1fr) minmax(220px, 2fr);
-  gap: 18px;
-  padding: 20px 0;
-  border-top: 1px solid var(--line);
-}
-.incident-source-label {
-  display: block;
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
-}
-.incident-selected {
-  background: var(--accent-soft);
-}
-.incident-detail {
-  border-top: 1px solid var(--line);
-  margin-top: 36px;
-  padding-top: 28px;
-}
-.incident-detail > .section-row {
-  align-items: flex-start;
-  gap: 24px;
-}
-.incident-detail > .section-row h2 {
-  scroll-margin-top: 24px;
-  overflow-wrap: anywhere;
-}
-.incident-summary {
-  padding: 24px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.incident-summary > p:first-of-type {
-  margin-top: 16px;
-  max-width: 82ch;
-}
-.incident-resolution {
-  border-top: 1px solid var(--line);
-  padding-top: 18px;
-  margin-top: 18px;
-}
-.incident-resolution p,
-.incident-history p {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.incident-links code {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.incident-history {
-  list-style: none;
-  padding: 0;
-}
-.incident-history li {
-  border-left: 2px solid var(--line);
-  padding: 4px 0 14px 18px;
-  margin: 0 0 18px;
-}
-.incident-history .section-row time,
-.incident-history code {
-  font-size: 12px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.incident-alert {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 20px;
-  margin-bottom: 16px;
-  overflow-wrap: anywhere;
-}
-@media (max-width: 720px) {
-  .incident-filters {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
-  .incident-summary {
-    padding: 18px;
-  }
-  .incident-history .section-row {
-    display: block;
-  }
-}
 .evidence-disclosure {
   border-top: 1px solid var(--line);
   padding-top: 16px;
@@ -2074,20 +1974,6 @@ label:has(textarea:not(.code-input)) textarea {
 }
 .assessment .section-row {
   margin-bottom: 12px;
-}
-.assessment-reason {
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
-.job-status {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 12px 0;
-  font-size: 12px;
 }
 /* Authenticator secrets stay readable without forcing narrow layouts to overflow. */
 .authenticator-panel {
@@ -2147,8 +2033,7 @@ label:has(textarea:not(.code-input)) textarea {
   color: var(--muted);
   font-size: 12px;
 }
-.operations-dependencies,
-.operations-outcomes {
+.operations-dependencies {
   padding: 20px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -2286,77 +2171,9 @@ label:has(textarea:not(.code-input)) textarea {
 }
 
 /* License -------------------------------------------------------------------------- */
-.license > section {
-  margin-bottom: 24px;
-}
-.license-heading {
-  margin: 8px 0 10px;
-  font-size: 16px;
-}
-.license-section-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-.license-section-head h2 {
-  margin-bottom: 8px;
-}
-.license-lede {
-  max-width: 82ch;
-  margin-bottom: 14px;
-}
-.license-editions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.license-editions .panel {
-  margin: 0;
-  border-style: dashed;
-  border-color: var(--line-strong);
-}
-.license-editions h3 {
-  margin: 0 0 2px;
-  font-size: 15px;
-}
-.license-use {
-  margin-bottom: 8px;
-  color: var(--ink);
-  font-size: 13.5px;
-  font-weight: 500;
-}
-.license-editions p:last-child,
-.license-services dd {
-  font-size: 13.5px;
-}
-.license-services {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 24px;
-  margin: 0 0 16px;
-}
-.license-services dt {
-  margin-bottom: 2px;
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.license-services dd {
-  margin: 0;
-  color: var(--muted);
-}
 
-@media (max-width: 1080px) {
-  .license-editions {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 @media (max-width: 860px) {
-  .planned-grid,
-  .license-services {
+  .planned-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .planned-today li {

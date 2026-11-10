@@ -6,51 +6,41 @@ import { Operations, OperationsSnapshotView } from '../pages/Operations.js';
 import { elapsedSeconds, pollLabel, type OperationsSnapshot } from './operations.js';
 
 function snapshot(): OperationsSnapshot {
-  const observation = {
-    state: 'missing' as const,
-    last_poll_at: null,
-    age_seconds: null,
-    fresh_for_seconds: 150,
-    error_code: null,
-  };
-  const queue = {
-    enabled: true,
-    eligible_now: 0,
-    delayed: 0,
-    suspended: 0,
-    expired_leases: 0,
-    oldest_eligible_age_seconds: null,
-  };
   return {
     observed_at: '2026-09-21T12:00:00Z',
-    window: {
-      start_at: '2026-09-20T12:00:00Z',
-      end_at: '2026-09-21T12:00:00Z',
-      duration_seconds: 86400,
-    },
     dependencies: { database: { state: 'ok' }, redis: { state: 'ok' } },
     workers: {
-      evaluation: { role: 'evaluation', enabled: true, observation: { ...observation } },
-      mail: { role: 'mail', enabled: false, observation: { ...observation, state: 'disabled' } },
-      alert: { role: 'alert', enabled: true, observation: { ...observation } },
+      mail: {
+        role: 'mail',
+        enabled: false,
+        observation: {
+          state: 'disabled',
+          last_poll_at: null,
+          age_seconds: null,
+          fresh_for_seconds: 150,
+          error_code: null,
+        },
+      },
     },
     queues: {
-      evaluation: {
-        ...queue,
-        status_counts: { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 },
-      },
       mail: {
-        ...queue,
         enabled: false,
+        eligible_now: 0,
+        delayed: 0,
+        suspended: 0,
+        expired_leases: 0,
+        oldest_eligible_age_seconds: null,
         status_counts: { queued: 0, sending: 0, sent: 3, failed: 0, cancelled: 0 },
       },
-      alert: {
-        ...queue,
-        status_counts: { queued: 0, sending: 0, delivered: 2, failed: 0, cancelled: 0 },
-      },
     },
-    assessments_last_24h: { failed: 7, unknown: 4 },
   };
+}
+
+function enabled(data: OperationsSnapshot): OperationsSnapshot {
+  data.workers.mail.enabled = true;
+  data.queues.mail.enabled = true;
+  data.workers.mail.observation.state = 'missing';
+  return data;
 }
 
 test('unknown observation ages never become measured zero', () => {
@@ -63,8 +53,12 @@ test('unknown observation ages never become measured zero', () => {
 });
 
 test('missing and stale polls retain uncertainty and explicit snapshot freshness', () => {
-  const data = snapshot();
-  data.workers.evaluation.observation = {
+  const missing = renderToStaticMarkup(
+    createElement(OperationsSnapshotView, { snapshot: enabled(snapshot()) }),
+  );
+  assert.match(missing, /No poll recorded/);
+  const data = enabled(snapshot());
+  data.workers.mail.observation = {
     state: 'stale',
     last_poll_at: '2026-09-21T11:50:00Z',
     age_seconds: 600,
@@ -73,7 +67,6 @@ test('missing and stale polls retain uncertainty and explicit snapshot freshness
   };
   const html = renderToStaticMarkup(createElement(OperationsSnapshotView, { snapshot: data }));
   assert.match(html, /Poll observation is stale/);
-  assert.match(html, /No poll recorded/);
   assert.match(html, /does not establish that the worker has stopped/);
   assert.match(html, /Poll age at snapshot<\/dt><dd>10m 0s/);
   assert.match(html, /Freshness threshold<\/dt><dd>2m 30s/);
@@ -88,36 +81,37 @@ test('disabled queues retain records and delivery acknowledgements stay qualifie
   assert.match(html, /Queue disabled/);
   assert.match(html, /Existing records remain visible/);
   assert.match(html, /SMTP accepted<\/dt><dd>3/);
-  assert.match(html, /Webhook accepted<\/dt><dd>2/);
   assert.match(html, /SMTP acceptance does not confirm inbox delivery/);
-  assert.match(
-    html,
-    /Webhook acceptance does not confirm that a downstream notification reached a person/,
-  );
   assert.match(html, /No eligible work/);
 });
 
-test('queue failures, inconclusive assessments, and failed assessments remain distinct', () => {
-  const data = snapshot();
-  data.queues.evaluation.status_counts.failed = 5;
-  data.queues.evaluation.eligible_now = 9;
-  data.queues.evaluation.expired_leases = 2;
-  data.queues.evaluation.oldest_eligible_age_seconds = 5400;
+test('only the identity-mail queue is shown after the assurance workers were retired', () => {
+  const html = renderToStaticMarkup(
+    createElement(OperationsSnapshotView, { snapshot: snapshot() }),
+  );
+  assert.match(html, /Identity mail/);
+  assert.doesNotMatch(html, /Evaluations|Incident alerts|Webhook accepted|assessments/i);
+});
+
+test('queue failures, leases and eligibility remain distinct', () => {
+  const data = enabled(snapshot());
+  data.queues.mail.status_counts.failed = 5;
+  data.queues.mail.eligible_now = 9;
+  data.queues.mail.expired_leases = 2;
+  data.queues.mail.oldest_eligible_age_seconds = 5400;
   const html = renderToStaticMarkup(createElement(OperationsSnapshotView, { snapshot: data }));
-  assert.match(html, /Failed jobs<\/dt><dd>5/);
-  assert.match(html, /Failed assessments<\/dt><dd>7/);
-  assert.match(html, /Unknown assessments<\/dt><dd>4/);
+  assert.match(html, /Failed messages<\/dt><dd>5/);
+  assert.match(html, /Eligible now<\/dt><dd>9/);
   assert.match(html, /Oldest eligible age<\/dt><dd>1h 30m/);
   assert.match(html, /Expired leases<\/dt><dd>2/);
   assert.match(html, /These values should not be added together/);
-  assert.match(html, /up to \(excluding\)/);
 });
 
 test('observation dependency outage does not suppress database queue measurements', () => {
-  const data = snapshot();
+  const data = enabled(snapshot());
   data.dependencies.redis.state = 'unavailable';
-  data.workers.evaluation.observation.state = 'unavailable';
-  data.workers.evaluation.observation.error_code = 'observation_store_unavailable';
+  data.workers.mail.observation.state = 'unavailable';
+  data.workers.mail.observation.error_code = 'observation_store_unavailable';
   const html = renderToStaticMarkup(createElement(OperationsSnapshotView, { snapshot: data }));
   assert.match(html, /Query succeeded/);
   assert.match(html, /Check Redis connectivity and refresh/);
@@ -127,9 +121,9 @@ test('observation dependency outage does not suppress database queue measurement
   assert.match(html, /SMTP accepted<\/dt><dd>3/);
 });
 
-test('loading operations renders no fabricated queue or assessment totals', () => {
+test('loading operations renders no fabricated queue totals', () => {
   const html = renderToStaticMarkup(createElement(Operations));
   assert.match(html, /Loading operations snapshot/);
   assert.match(html, /disabled="">Refreshing/);
-  assert.doesNotMatch(html, /Failed assessments|No eligible work|Query succeeded/);
+  assert.doesNotMatch(html, /No eligible work|Query succeeded/);
 });

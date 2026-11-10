@@ -21,7 +21,7 @@ Mail is disabled by default. Set the following values through the installation's
 
 Use a secret-management system to generate and retain the encryption key. Do not put it in Git, logs, screenshots, or support tickets. Existing encrypted messages require their original key; coordinate key changes with pending-message expiry and reissuance. Losing the key prevents those pending messages from being sent.
 
-Start the optional worker alongside the API and evaluation worker:
+Start the optional worker alongside the API:
 
 ```bash
 docker compose --env-file /secure/path/lotuspond.env -f deploy/compose.yaml --profile mail up -d

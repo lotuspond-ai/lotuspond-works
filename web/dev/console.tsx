@@ -125,24 +125,6 @@ const lists: Record<string, Record<string, unknown>[]> = {
       created_at: ago(2870),
     },
   ],
-  integrations: [
-    { id: 'i1', name: 'Support gateway', kind: 'mcp', status: 'unverified', created_at: ago(4000) },
-  ],
-  traces: [
-    ['refund.create', 'ok', 1180, null],
-    ['order.cancel', 'error', 2840, 0.0019],
-    ['refund.lookup', 'ok', 412, 0.0011],
-  ].map(([name, status, latency, cost], index) => ({
-    id: `t${index}`,
-    project_id: project.id,
-    name,
-    status,
-    latency_ms: latency,
-    cost_usd: cost,
-    cost_measurement: cost === null ? 'unavailable' : 'reported',
-    occurred_at: ago(3 + index * 4),
-  })),
-  receipts: [],
   'audit-events': [
     { id: 'a1', action: 'release.evaluated', actor_id: 'you', created_at: ago(90) },
     { id: 'a2', action: 'policy.created', actor_id: 'you', created_at: ago(9100) },
@@ -159,42 +141,6 @@ const lists: Record<string, Record<string, unknown>[]> = {
       scopes: ['read', 'run'],
       expires_at: ago(-86_400),
       revoked_at: null,
-    },
-  ],
-  monitors: [
-    {
-      id: 'mon1',
-      project_id: project.id,
-      name: 'Refunds cite the policy',
-      enabled: true,
-      sample_basis_points: 1000,
-      criteria: 'Cites the refund policy',
-      created_at: ago(3000),
-    },
-  ],
-  incidents: [
-    {
-      id: 'inc1',
-      title: 'Assessment unavailable for refund.create',
-      severity: 'medium',
-      status: 'open',
-      category: 'assessment_unavailable',
-      source: 'trace_assessment',
-      project_id: project.id,
-      trace_id: 't0',
-      created_at: ago(3),
-    },
-    // Opened by a voice assessment before voice was retired; it keeps its stored session link.
-    {
-      id: 'inc2',
-      title: 'Assessment unavailable for an earlier support call',
-      severity: 'medium',
-      status: 'open',
-      category: 'assessment_unavailable',
-      source: 'voice_assessment',
-      project_id: project.id,
-      voice_session_id: 'v0',
-      created_at: ago(9000),
     },
   ],
   // The registry's reviewed-action example, as the registry would record it. Its digest is the
@@ -389,20 +335,6 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const [resource, id] = path.split('/');
   const record = resource ? lists[resource]?.find((item) => item.id === id) : undefined;
-  // An incident detail carries its linked records, as backend/lotuspond/workflows.py returns it.
-  if (record && resource === 'incidents')
-    return json({
-      incident: record,
-      project,
-      trace: lists.traces.find((item) => item.id === record.trace_id) ?? null,
-      voice_session: record.voice_session_id
-        ? { id: record.voice_session_id, name: 'Support call', status: 'closed' }
-        : null,
-      assessment: null,
-      monitor: null,
-      history: [],
-      alerts: [],
-    });
   if (record) return json(record);
   return json({ error: 'not_found', message: 'No fixture for this request.' }, 404);
 };

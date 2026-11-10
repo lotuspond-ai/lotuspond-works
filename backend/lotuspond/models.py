@@ -545,6 +545,8 @@ class ReleaseDecision(Scoped, Base):
     )
 
 
+# Trace ingestion is retired (ADR-0013). Stored traces stay readable and exportable;
+# no route writes them any more.
 class Trace(Scoped, Base):
     __tablename__ = "traces"
     project_id: Mapped[str | None] = mapped_column(String(36))
@@ -595,6 +597,8 @@ class GatewayUsage(Scoped, Base):
     )
 
 
+# Incidents, their events and alert deliveries are retired (ADR-0013). Stored rows stay
+# readable through the incident routes; nothing opens, changes or delivers them.
 class Incident(Scoped, Base):
     __tablename__ = "incidents"
     project_id: Mapped[str | None] = mapped_column(String(36))
@@ -664,6 +668,7 @@ class AlertDelivery(Scoped, Base):
     )
 
 
+# Endpoint registration is retired (ADR-0013); stored rows are kept and no route reads them.
 class Integration(Scoped, Base):
     __tablename__ = "integrations"
     name: Mapped[str] = mapped_column(String(160))
@@ -674,6 +679,7 @@ class Integration(Scoped, Base):
     __table_args__ = scoped()
 
 
+# Receipt submission is retired (ADR-0013). Stored receipts stay in release evidence exports.
 class Receipt(Scoped, Base):
     __tablename__ = "receipts"
     release_id: Mapped[str] = mapped_column(String(36))
@@ -727,6 +733,8 @@ class VoiceSegment(Scoped, Base):
     )
 
 
+# Monitors, trace assessments and evaluation jobs are retired (ADR-0013). Stored rows stay;
+# trace and incident reads still return the assessments linked to them.
 class Assessment(Scoped, Base):
     __tablename__ = "assessments"
     project_id: Mapped[str] = mapped_column(String(36))

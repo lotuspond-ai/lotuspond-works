@@ -4,7 +4,7 @@ Lotuspond is one licensable enterprise agent automation product with separately 
 
 ## Structure
 
-`backend/lotuspond/` owns the Python API, relational models, identity, release workflow, evaluation providers, telemetry ingestion, and durable assessment worker. `web/` owns the React console. `scripts/` contains Node execution and delivery clients and local development commands. `docs-site/` is the Git-backed documentation site, and `deploy/` is delivery packaging, including the separate customer-side execution image.
+`backend/lotuspond/` owns the Python API, relational models, identity, release workflow, read-only stored traces and incidents, and the durable execution engine. `web/` owns the React console. `scripts/` contains Node execution and delivery clients and local development commands. `docs-site/` is the Git-backed documentation site, and `deploy/` is delivery packaging, including the separate customer-side execution image.
 
 The initial TypeScript API and schema were preserved in the separate recovery archive after Python workflow validation. There is one active API and one authoritative relational model. The current product goal permits selective recovery of useful archived functionality with provenance and Lotuspond naming; never restore credentials, unrelated products, or inherited history. `protocol-adapters/` contains the HTTP and A2A agent and explicit MCP tool runners. Voice, Gym sandboxes, Jev, the model gateway, trace-plan billing, the Go collector and the Rust verifier were retired on 2026-11-05 (ADR-0012); their tables stay, unwritten, and the schema is unchanged.
 
@@ -12,7 +12,7 @@ The platform expansion preserves this assurance core. Production business execut
 
 ## Development and validation
 
-Root npm scripts are the entry points. Run `uv sync --frozen --project backend`, `npm run db:start`, and one-time `npm run db:init` for a new empty database. Run `npm run dev` for the Python API, `npm run dev:web` for the console, and `npm run worker` for assessment jobs. Match `LOTUSPOND_ORIGIN` to the browser origin. Never use old environment files or old database names with the Python service.
+Root npm scripts are the entry points. Run `uv sync --frozen --project backend`, `npm run db:start`, and one-time `npm run db:init` for a new empty database. Run `npm run dev` for the Python API and `npm run dev:web` for the console; trace ingestion, monitors, incidents and their workers were retired by ADR-0013. Match `LOTUSPOND_ORIGIN` to the browser origin. Never use old environment files or old database names with the Python service.
 
 Review signed-in console layouts without an account at `/dev/console.html` on the dev server, a fixture harness that is never built. Run `npm run check` and the isolated PostgreSQL tests for authorization, policy, data access, or schema changes. Record local, remote, deployment, and live-provider evidence separately in `docs/VALIDATION.md`. A configured integration is not a verified connection.
 

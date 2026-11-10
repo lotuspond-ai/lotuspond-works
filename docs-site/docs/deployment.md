@@ -15,7 +15,7 @@ The image never initializes the database. Before the first startup, a database a
 
 ## On-premises images
 
-For connected identity verification, recovery, and invitations, configure [identity mail](identity-mail.md) and start Compose with `--profile mail`. Its delivery worker is separate from the evaluation worker. Mail remains disabled by default.
+For connected identity verification, recovery, and invitations, configure [identity mail](identity-mail.md) and start Compose with `--profile mail`. Its delivery worker is the only background worker in the service Compose files. Mail remains disabled by default.
 
 Build and scan versioned application images in a connected environment, publish them to the organization's registry, then set `LOTUSPOND_API_IMAGE`. Use the same Compose configuration without the local build overlay:
 
@@ -43,10 +43,10 @@ Verification requires Python 3 and the matching shell entrypoint/Python helper f
 
 The checksum detects transfer corruption only when the checksum itself arrives through a trusted independent channel. The bundle scripts do not sign artifacts, establish publisher identity, scan images, or mutate cloud resources.
 
-The offline builder records immutable image IDs in `images.json` and the generated environment example. Use `--local-images` to package already reviewed images without building or pulling. The on-prem Compose file requires all three image variables. A separately trusted `deploy/checks/airgap-smoke.py <archive> <trusted-checksum>` installs the bundle into four disposable containers on an internal Docker network, publishes no ports, verifies synthetic API/evaluation/incident/OTLP flows, and checks removal of containers, anonymous volumes, and the network. It requires Python 3.11 or later and Docker. Your HTTPS termination, clean-host transfer, and production organization provisioning still need separate validation.
+The offline builder records immutable image IDs in `images.json` and the generated environment example. Use `--local-images` to package already reviewed images without building or pulling. The on-prem Compose file requires all three image variables. A separately trusted `deploy/checks/airgap-smoke.py <archive> <trusted-checksum>` installs the bundle into three disposable containers on an internal Docker network, publishes no ports, verifies synthetic identity and API flows and that retired trace ingestion is refused, and checks removal of containers, anonymous volumes, and the network. It requires Python 3.11 or later and Docker. Your HTTPS termination, clean-host transfer, and production organization provisioning still need separate validation.
 
-Optional incident webhooks use the `alerts` Compose profile and [operator-owned destinations](incidents.md). Keep mail and alerts disabled in airgap mode.
+Keep mail disabled in airgap mode.
 
-The bundle also carries `OPERATIONS.md`; see the [operations runbook](operations.md). Add `--failure-recovery` to the installation drill to test a stopped evaluation worker, a growing queue, the real stale-observation threshold, worker recovery, and a Redis outage/recovery using only the drill's disposable resources.
+The bundle also carries `OPERATIONS.md`; see the [operations runbook](operations.md). Add `--failure-recovery` to the installation drill to test a Redis outage and its recovery using only the drill's disposable resources.
 
 Customer-side [evaluation runners](runners.md) and protocol adapters have a separate execution image and offline archive. The service image and service bundle do not include them. HTTP, MCP and A2A commands in the execution image need no repository bind, Docker socket or Python runtime. Clean-host transfer, live providers and production operation remain separate delivery work.

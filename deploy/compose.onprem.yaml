@@ -12,10 +12,6 @@ x-mail-environment: &mail-environment
   LOTUSPOND_SMTP_TIMEOUT_SECONDS: ${LOTUSPOND_SMTP_TIMEOUT_SECONDS:-15}
   LOTUSPOND_SMTP_CONVERSATION_SECONDS: ${LOTUSPOND_SMTP_CONVERSATION_SECONDS:-45}
 
-x-alert-environment: &alert-environment
-  LOTUSPOND_ALERT_WEBHOOKS: ${LOTUSPOND_ALERT_WEBHOOKS:-[]}
-  LOTUSPOND_ALERT_TIMEOUT_SECONDS: ${LOTUSPOND_ALERT_TIMEOUT_SECONDS:-10}
-
 services:
   api:
     image: ${LOTUSPOND_API_IMAGE:?Set a versioned or digest-pinned API image}
@@ -24,7 +20,7 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     environment:
-      <<: [*mail-environment, *alert-environment]
+      <<: *mail-environment
       LOTUSPOND_ENV: production
       LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
       LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
@@ -35,30 +31,6 @@ services:
       LOTUSPOND_REQUIRE_MFA: ${LOTUSPOND_REQUIRE_MFA:-false}
     ports:
       - ${LOTUSPOND_BIND_ADDRESS:-127.0.0.1}:${LOTUSPOND_PORT:-8000}:8000
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    security_opt: ['no-new-privileges:true']
-    cap_drop: ['ALL']
-
-  worker:
-    image: ${LOTUSPOND_API_IMAGE:?Set a versioned or digest-pinned API image}
-    restart: unless-stopped
-    command: ['python', '-m', 'lotuspond.worker']
-    healthcheck:
-      disable: true
-    read_only: true
-    tmpfs: ['/tmp:size=64m,mode=1777']
-    environment:
-      <<: *alert-environment
-      LOTUSPOND_ENV: production
-      LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
-      LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
-      LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
-      LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
-      LOTUSPOND_REGISTRATION_ENABLED: ${LOTUSPOND_REGISTRATION_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,30 +56,6 @@ services:
       LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
       LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
       LOTUSPOND_REGISTRATION_ENABLED: ${LOTUSPOND_REGISTRATION_ENABLED:-false}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    security_opt: ['no-new-privileges:true']
-    cap_drop: ['ALL']
-
-  alert-worker:
-    image: ${LOTUSPOND_API_IMAGE:?Set a versioned or digest-pinned API image}
-    profiles: ['alerts']
-    restart: unless-stopped
-    command: ['python', '-m', 'lotuspond.alert_worker']
-    healthcheck:
-      disable: true
-    read_only: true
-    tmpfs: ['/tmp:size=64m,mode=1777']
-    environment:
-      <<: *alert-environment
-      LOTUSPOND_ENV: production
-      LOTUSPOND_DATABASE_URL: ${LOTUSPOND_DATABASE_URL:?Set an authenticated PostgreSQL URL}
-      LOTUSPOND_REDIS_URL: ${LOTUSPOND_REDIS_URL:?Set an authenticated Redis URL}
-      LOTUSPOND_ORIGIN: ${LOTUSPOND_ORIGIN:?Set the public HTTPS origin}
-      LOTUSPOND_NETWORK_MODE: ${LOTUSPOND_NETWORK_MODE:-connected}
     depends_on:
       postgres:
         condition: service_healthy

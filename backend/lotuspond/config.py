@@ -5,8 +5,6 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
-    BaseModel,
-    ConfigDict,
     EmailStr,
     Field,
     SecretStr,
@@ -14,32 +12,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class AlertWebhook(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    name: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-    url: str = Field(min_length=1, max_length=2000)
-    secret: SecretStr = Field(min_length=32, max_length=1024)
-    enabled: bool = False
-
-    @model_validator(mode="after")
-    def safe_url(self):
-        endpoint = urlsplit(self.url)
-        if (
-            endpoint.scheme != "https"
-            or not endpoint.hostname
-            or endpoint.username
-            or endpoint.password
-            or endpoint.query
-            or endpoint.fragment
-        ):
-            raise ValueError(
-                "Alert webhooks require HTTPS without credentials, query, or fragment"
-            )
-        self.url = self.url.rstrip("/")
-        return self
 
 
 class Settings(BaseSettings):
@@ -58,8 +30,6 @@ class Settings(BaseSettings):
     session_hours: int = Field(default=24, ge=1, le=168)
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
     network_mode: Literal["connected", "airgap"] = "connected"
-    alert_webhooks: list[AlertWebhook] = Field(default_factory=list, max_length=20)
-    alert_timeout_seconds: float = Field(default=10, gt=0, le=30)
     mail_enabled: bool = False
     mail_encryption_key: SecretStr | None = None
     mfa_encryption_key: SecretStr | None = None
@@ -108,11 +78,6 @@ class Settings(BaseSettings):
         self.origin = self.origin.rstrip("/")
         if origin.username or origin.password or origin.query or origin.fragment:
             raise ValueError("Origin must not contain credentials, query parameters, or a fragment")
-        alert_names = [webhook.name for webhook in self.alert_webhooks]
-        if len(alert_names) != len(set(alert_names)):
-            raise ValueError("Alert webhook names must be unique")
-        if self.network_mode == "airgap" and any(item.enabled for item in self.alert_webhooks):
-            raise ValueError("Alert webhooks cannot be enabled in airgap mode")
         if self.mail_encryption_key:
             try:
                 key = base64.b64decode(

@@ -8,7 +8,7 @@ import redis
 
 from .config import Settings
 
-WORKER_ROLES = ("evaluation", "mail", "alert")
+WORKER_ROLES = ("mail",)
 MARKER_TTL_SECONDS = 300
 FRESH_FOR_SECONDS = 150
 KEY_PREFIX = "lotuspond:worker-observation:v1"
