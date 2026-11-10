@@ -125,24 +125,6 @@ const lists: Record<string, Record<string, unknown>[]> = {
       created_at: ago(2870),
     },
   ],
-  integrations: [
-    { id: 'i1', name: 'Support gateway', kind: 'mcp', status: 'unverified', created_at: ago(4000) },
-  ],
-  traces: [
-    ['refund.create', 'ok', 1180, null],
-    ['order.cancel', 'error', 2840, 0.0019],
-    ['refund.lookup', 'ok', 412, 0.0011],
-  ].map(([name, status, latency, cost], index) => ({
-    id: `t${index}`,
-    project_id: project.id,
-    name,
-    status,
-    latency_ms: latency,
-    cost_usd: cost,
-    cost_measurement: cost === null ? 'unavailable' : 'reported',
-    occurred_at: ago(3 + index * 4),
-  })),
-  receipts: [],
   'audit-events': [
     { id: 'a1', action: 'release.evaluated', actor_id: 'you', created_at: ago(90) },
     { id: 'a2', action: 'policy.created', actor_id: 'you', created_at: ago(9100) },
@@ -161,31 +143,6 @@ const lists: Record<string, Record<string, unknown>[]> = {
       revoked_at: null,
     },
   ],
-  monitors: [
-    {
-      id: 'mon1',
-      project_id: project.id,
-      name: 'Refunds cite the policy',
-      enabled: true,
-      sample_basis_points: 1000,
-      criteria: 'Cites the refund policy',
-      created_at: ago(3000),
-    },
-  ],
-  incidents: [
-    {
-      id: 'inc1',
-      title: 'Assessment unavailable for refund.create',
-      severity: 'medium',
-      status: 'open',
-      category: 'assessment_unavailable',
-      source: 'trace_assessment',
-      project_id: project.id,
-      trace_id: 't0',
-      created_at: ago(3),
-    },
-  ],
-  'voice/sessions': [],
   // The registry's reviewed-action example, as the registry would record it. Its digest is the
   // one pinned by packageContract.test.ts and the Python contract tests.
   packages: [
@@ -248,18 +205,11 @@ const account = {
 
 const settings = {
   name: 'Example organization',
-  monthly_budget_usd: null,
   authenticator_policy: {
     require_mfa: false,
     available: true,
     manageable: true,
     members_without_authenticator: 1,
-  },
-  billing: {
-    plan: 'team',
-    entitlements: { monthly_trace_quota: 100_000, trace_retention_days: 90 },
-    usage: { traces_this_month: 0, traces_remaining: 100_000 },
-    payment: { status: 'not_collected', message: 'Lotuspond does not collect payment.' },
   },
 };
 

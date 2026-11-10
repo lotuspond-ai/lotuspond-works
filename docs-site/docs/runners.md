@@ -14,7 +14,7 @@ The packaged execution image uses the same variables without a repository path:
 docker run --rm --env-file /protected/execution.env IMAGE_ID runner-http
 ```
 
-The API never accepts an uploaded adapter or scenario-supplied command. Use reviewed adapter files on a POSIX host. A subprocess is a lifecycle boundary, not a security sandbox: run trusted adapters under a restricted operating-system account and the network/filesystem policy appropriate to the workload. Windows process-tree management is not implemented. The HTTP, MCP and voice commands in the execution image do not receive a Docker socket; Gym tasks use the separate host-side kit described in [application sandboxes](sandboxes.md).
+The API never accepts an uploaded adapter or scenario-supplied command. Use reviewed adapter files on a POSIX host. A subprocess is a lifecycle boundary, not a security sandbox: run trusted adapters under a restricted operating-system account and the network/filesystem policy appropriate to the workload. Windows process-tree management is not implemented. The HTTP, MCP and A2A commands in the execution image do not receive a Docker socket.
 
 ## HTTP agent endpoints
 
@@ -38,7 +38,7 @@ Plain mode sends `{"input":"Your test input"}`. Chat mode sends user `messages`,
 
 Redirects, compressed bodies, invalid JSON/UTF-8, truncated responses, missing output, excessive evidence and expired deadlines produce unknown results. Ambient proxies are ignored; HTTPS certificate verification remains enabled. A completed response that fails its supported assertion produces `passed:false`. A successful HTTP status alone never passes an evaluation. No retries or unmeasured zero-cost claims are added. In airgap mode only explicitly configured, verified loopback endpoints are permitted; the surrounding network still must enforce isolation. This text adapter does not transcribe audio.
 
-Use the separate [voice workflow](voice.md) for live transcript evidence, or the MCP adapter described in the repository's `protocol-adapters/README.md` for an explicitly configured tool. See [application sandboxes](sandboxes.md) for the reviewed Gym task.
+Use the MCP adapter described in the repository's `protocol-adapters/README.md` for an explicitly configured tool.
 
 ## Deadlines, credentials and leases
 
@@ -49,7 +49,7 @@ Use the separate [voice workflow](voice.md) for live transcript evidence, or the
 | `LOTUSPOND_RUNNER_ONCE`                | `true` performs one claim cycle and exits; an empty queue is permitted                 |
 | `LOTUSPOND_RUNNER_ADAPTER_ENV`         | Comma-separated additional environment names explicitly permitted for a custom adapter |
 
-The child receives a small system environment and the reviewed HTTP/MCP/Gym settings. Other credentials are absent unless explicitly selected as custom adapter configuration. Reserved Lotuspond control-plane and loader variables cannot be opted in. This filters environment inheritance; it does not prevent trusted code from reading files accessible to its operating-system account.
+The child receives a small system environment and the reviewed HTTP/MCP settings. Other credentials are absent unless explicitly selected as custom adapter configuration. Reserved Lotuspond control-plane and loader variables cannot be opted in. This filters environment inheritance; it does not prevent trusted code from reading files accessible to its operating-system account.
 
 The API grants a 15-minute lease. The runner renews while a scenario executes. If renewal fails, authorization is revoked or the lease is cancelled, it stops active work and discards the unfinished batch. Cancellation is detected at the next renewal request; it is not an immediate remote signal. SIGTERM/SIGINT also abort active work. Cooperative cleanup receives up to five seconds before forced process-group termination; external resources need adapter-specific cleanup. An uncertain teardown stops the runner rather than starting more work.
 

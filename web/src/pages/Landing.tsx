@@ -148,7 +148,7 @@ const register = [
       [
         'Assurance',
         'available',
-        'Frozen scenarios, immutable release policies, independent approval, production traces and incidents, for HTTP, MCP, A2A, voice and software-task agents.',
+        'Frozen scenarios, evaluation runs for HTTP, MCP and A2A agents, immutable release policies and independent approval. A deployment needs a current release decision.',
       ],
     ],
   ],
@@ -235,17 +235,14 @@ const families = [
 ] as const;
 
 const deployments = [
-  [
-    'Connected',
-    'Container images for the API, console, background workers, and the OTLP collector.',
-  ],
+  ['Connected', 'Container images for the API, console and background workers.'],
   [
     'On-premises',
     'An offline bundle of pinned images with checksums and a verifier, for networks you control.',
   ],
   [
     'Air-gapped',
-    'Cloud model calls, mail, and external alerts switch off. Authenticators and operator-attested enrollment work without egress; assessments that need a cloud model report unknown.',
+    'Mail and external alerts switch off. Authenticators and operator-attested enrollment work without egress.',
   ],
 ] as const;
 
@@ -412,10 +409,7 @@ export function Landing({
             <dl className="pond-status">
               <div data-state="available">
                 <dt>Available now</dt>
-                <dd>
-                  Agent testing, release decisions, production evidence and a Studio for workflow
-                  packages
-                </dd>
+                <dd>Agent testing, release decisions and a Studio for workflow packages</dd>
               </div>
               <div data-state="planned">
                 <dt>Planned</dt>
@@ -735,7 +729,7 @@ export function Landing({
                 ))}
               </ul>
               <p className="landing-aside">
-                Execution ships separately: a nonroot image with HTTP, MCP, voice, and release-gate
+                Execution ships separately: a nonroot image with HTTP, MCP, A2A and release-gate
                 commands and no built-in credentials, so evaluations run beside your agents.
               </p>
             </div>

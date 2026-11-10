@@ -19,8 +19,6 @@ def settings():
         env="test",
         database_url="sqlite://",
         origin="http://testserver",
-        typesafe_base_url=None,
-        typesafe_api_key=None,
         redis_url=None,
         registration_enabled=True,
     )

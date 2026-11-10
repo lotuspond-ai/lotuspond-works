@@ -1,8 +1,7 @@
 """Exercise a verified customer-side execution archive.
 
-This uses synthetic loopback endpoints and the reviewed xterm task only. It never
-connects to a customer agent, speech provider, or existing database, and it does
-not publish a port. It is a local packaging drill, not a clean-machine or
+This uses synthetic loopback endpoints only. It never connects to a customer
+agent or an existing database, and it does not publish a port. It is a local packaging drill, not a clean-machine or
 production acceptance test.
 """
 
@@ -23,10 +22,8 @@ from pathlib import Path
 
 from verify_airgap_bundle import MAX_BUNDLE_BYTES, verify_bundle
 
-IMAGE_KEYS = {"LOTUSPOND_EXECUTION_IMAGE", "LOTUSPOND_GYM_REAL_APP_IMAGE"}
+IMAGE_KEYS = {"LOTUSPOND_EXECUTION_IMAGE"}
 LABEL = "com.lotuspond.execution-drill"
-SESSION = "12345678-1234-4234-8234-123456789abc"
-MAX_GYM_KIT_BYTES = 20 * 1024 * 1024
 HTTP_PROBE = r"""
 import { createServer } from 'node:http';
 import { evaluate } from '/app/protocol-adapters/src/http-runner.mjs';
@@ -156,7 +153,7 @@ def image_inventory(path: Path) -> dict[str, str]:
             for image in images.values()
         )
     ):
-        raise ValueError("image inventory requires exactly two immutable image IDs")
+        raise ValueError("image inventory requires exactly one immutable image ID")
     return images
 
 
@@ -170,7 +167,6 @@ def verified_inputs(archive: Path, checksum: Path, private: Path):
                 raise ValueError("bundle exceeds the compressed-size limit")
             target.write(chunk)
     proof = verify_bundle(copied, checksum, kind="execution")
-    gym_bytes = 0
     with tarfile.open(copied, "r:gz") as bundle:
         for member in bundle.getmembers():
             if not member.isfile():
@@ -180,11 +176,6 @@ def verified_inputs(archive: Path, checksum: Path, private: Path):
                 limit = 4096 if relative == "images.json" else MAX_BUNDLE_BYTES
                 if member.size > limit:
                     raise ValueError("required bundle input is missing or oversized")
-                destination = private / relative
-            elif relative.startswith("gym-kit/"):
-                gym_bytes += member.size
-                if gym_bytes > MAX_GYM_KIT_BYTES:
-                    raise ValueError("gym kit exceeds its payload bound")
                 destination = private / relative
             else:
                 continue
@@ -293,79 +284,6 @@ def protocol_probe(image: str, run: str, source: str, protocol: str) -> dict[str
     return payload
 
 
-def voice_probe(image: str, run: str) -> dict[str, object]:
-    result = docker_run(
-        image,
-        run,
-        ["voice", "--session", SESSION, "--channel-map", "0:user"],
-        environment={"LOTUSPOND_NETWORK_MODE": "airgap"},
-        timeout=20,
-        check=False,
-    )
-    stderr = result.stderr.decode()
-    if result.returncode == 0 or "code=network_disabled" not in stderr:
-        raise RuntimeError("voice command did not refuse airgap operation")
-    if "DEEPGRAM" in stderr or "LOTUSPOND_API_KEY" in stderr:
-        raise RuntimeError("voice refusal leaked credential names")
-    return {"airgap_refused": True, "credentials_required": False}
-
-
-def gym_probe(private: Path, gym_image: str) -> dict[str, object]:
-    output = private / "gym-runs"
-    output.mkdir(mode=0o700)
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(private / "gym-kit" / "src")
-    environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "lotuspond_sandbox.real_app",
-            "--bundle",
-            str(private / "gym-kit" / "real-app"),
-            "--output-dir",
-            str(output),
-        ],
-        capture_output=True,
-        timeout=120,
-        check=False,
-        env=environment,
-        cwd=private / "gym-kit",
-    )
-    if result.returncode:
-        detail = (result.stderr or result.stdout).decode("utf-8", "replace")[:400]
-        raise RuntimeError(
-            "extracted gym kit did not complete the reviewed xterm task"
-            + (f": {detail}" if detail else "")
-        )
-    receipt = json.loads(result.stdout.decode())
-    if (
-        receipt.get("status") != "passed"
-        or receipt.get("cleanup_confirmed") is not True
-        or receipt.get("runtime_image") != gym_image
-    ):
-        raise RuntimeError("gym receipt did not confirm a cleaned reviewed pass")
-    listing = command(
-        "docker",
-        "container",
-        "ls",
-        "--all",
-        "--filter",
-        f"label=com.lotuspond.sandbox.run={receipt['run_id']}",
-        "--format",
-        "{{.ID}}",
-        check=False,
-    )
-    if listing.stdout.strip():
-        raise RuntimeError("gym application container remained after the extracted kit finished")
-    return {
-        "status": "passed",
-        "cleanup_confirmed": True,
-        "task_id": receipt.get("task_id"),
-        "run_id": receipt.get("run_id"),
-    }
-
-
 def remaining_owned(run: str) -> str:
     containers = command(
         "docker",
@@ -409,7 +327,6 @@ def image_drill(image: str) -> dict[str, object]:
         report["http"] = protocol_probe(inspected["Id"], run, HTTP_PROBE, "http")
         report["mcp"] = protocol_probe(inspected["Id"], run, MCP_PROBE, "mcp")
         report["a2a"] = protocol_probe(inspected["Id"], run, A2A_PROBE, "a2a")
-        report["voice"] = voice_probe(inspected["Id"], run)
     finally:
         confirm_cleanup(run)
     report["cleanup_confirmed"] = True
@@ -425,8 +342,6 @@ def drill(archive: Path, checksum: Path) -> dict[str, object]:
         "run": run,
         "http": None,
         "mcp": None,
-        "voice": None,
-        "gym": None,
         "cleanup_confirmed": False,
     }
     with tempfile.TemporaryDirectory(prefix="lotuspond-execution-drill-") as temporary:
@@ -436,16 +351,12 @@ def drill(archive: Path, checksum: Path) -> dict[str, object]:
             images = image_inventory(private / "images.json")
             command("docker", "image", "load", "-i", str(private / "images.tar"), timeout=180)
             execution = images["LOTUSPOND_EXECUTION_IMAGE"]
-            gym = images["LOTUSPOND_GYM_REAL_APP_IMAGE"]
             report["archive_root"] = proof.root
             report["execution_image"] = execution
-            report["gym_image"] = gym
             report["image"] = inspect_execution_image(execution, run)
             report["http"] = protocol_probe(execution, run, HTTP_PROBE, "http")
             report["mcp"] = protocol_probe(execution, run, MCP_PROBE, "mcp")
             report["a2a"] = protocol_probe(execution, run, A2A_PROBE, "a2a")
-            report["voice"] = voice_probe(execution, run)
-            report["gym"] = gym_probe(private, gym)
         finally:
             confirm_cleanup(run)
     report["cleanup_confirmed"] = True
@@ -464,7 +375,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--image",
-        help="run HTTP, MCP, and voice probes against an already loaded execution image",
+        help="run HTTP, MCP, and A2A probes against an already loaded execution image",
     )
     args = parser.parse_args()
     os.umask(0o077)

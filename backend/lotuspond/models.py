@@ -121,6 +121,8 @@ class Workspace(Row, Base):
     kind: Mapped[str] = mapped_column(String(20), default="personal")
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(20), default="active")
+    # Retired with the trace-plan ladder and the model gateway (ADR-0012). The columns
+    # keep existing values; nothing reads them and no response reports them.
     plan: Mapped[str] = mapped_column(String(20), default="developer")
     monthly_budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
     require_mfa: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -132,8 +134,7 @@ class Workspace(Row, Base):
             "kind = 'organization' OR require_mfa = false",
             name="workspaces_require_mfa_scope_check",
         ),
-        # The subscription ladder is a static product definition; a stored plan can
-        # never be a tier the server does not know how to enforce.
+        # Kept from the retired subscription ladder so the schema stays unchanged.
         CheckConstraint(
             "plan IN ('developer','team','enterprise')",
             name="workspaces_plan_check",
@@ -544,6 +545,8 @@ class ReleaseDecision(Scoped, Base):
     )
 
 
+# Trace ingestion is retired (ADR-0013). Stored traces stay readable and exportable;
+# no route writes them any more.
 class Trace(Scoped, Base):
     __tablename__ = "traces"
     project_id: Mapped[str | None] = mapped_column(String(36))
@@ -569,7 +572,7 @@ class Trace(Scoped, Base):
 
 
 class GatewayUsage(Scoped, Base):
-    """Authoritative gateway spend ledger, separate from client-submitted trace costs."""
+    """Spend ledger of the retired model gateway (ADR-0012), kept so its rows survive."""
 
     __tablename__ = "gateway_usage"
     model: Mapped[str] = mapped_column(String(160))
@@ -594,6 +597,8 @@ class GatewayUsage(Scoped, Base):
     )
 
 
+# Incidents, their events and alert deliveries are retired (ADR-0013). Stored rows stay
+# readable through the incident routes; nothing opens, changes or delivers them.
 class Incident(Scoped, Base):
     __tablename__ = "incidents"
     project_id: Mapped[str | None] = mapped_column(String(36))
@@ -663,6 +668,7 @@ class AlertDelivery(Scoped, Base):
     )
 
 
+# Endpoint registration is retired (ADR-0013); stored rows are kept and no route reads them.
 class Integration(Scoped, Base):
     __tablename__ = "integrations"
     name: Mapped[str] = mapped_column(String(160))
@@ -673,6 +679,7 @@ class Integration(Scoped, Base):
     __table_args__ = scoped()
 
 
+# Receipt submission is retired (ADR-0013). Stored receipts stay in release evidence exports.
 class Receipt(Scoped, Base):
     __tablename__ = "receipts"
     release_id: Mapped[str] = mapped_column(String(36))
@@ -695,6 +702,8 @@ class AuditEvent(Row, Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+# Voice ingestion is retired (ADR-0012). These tables keep stored sessions and the
+# assessments and incidents that link to them; no route writes them any more.
 class VoiceSession(Scoped, Base):
     __tablename__ = "voice_sessions"
     project_id: Mapped[str] = mapped_column(String(36))
@@ -724,6 +733,8 @@ class VoiceSegment(Scoped, Base):
     )
 
 
+# Monitors, trace assessments and evaluation jobs are retired (ADR-0013). Stored rows stay;
+# trace and incident reads still return the assessments linked to them.
 class Assessment(Scoped, Base):
     __tablename__ = "assessments"
     project_id: Mapped[str] = mapped_column(String(36))

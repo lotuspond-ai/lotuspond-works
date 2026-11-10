@@ -27,7 +27,6 @@ export const navigation: readonly NavSection[] = [
       { id: 'releases', label: 'Releases', icon: 'releases' },
       { id: 'policies', label: 'Policies', icon: 'policies' },
       { id: 'approvals', label: 'Approvals', icon: 'approvals' },
-      { id: 'receipts', label: 'Receipts', icon: 'receipts' },
     ],
   },
   {
@@ -35,10 +34,6 @@ export const navigation: readonly NavSection[] = [
     items: [
       { id: 'control-room', label: 'Control Room', icon: 'control', planned: true },
       { id: 'human-tasks', label: 'Human tasks', icon: 'tasks', planned: true },
-      { id: 'traces', label: 'Traces', icon: 'traces' },
-      { id: 'monitors', label: 'Monitors', icon: 'monitors' },
-      { id: 'incidents', label: 'Incidents', icon: 'incidents' },
-      { id: 'voice-sessions', label: 'Voice sessions', icon: 'voice' },
     ],
   },
   {
@@ -47,9 +42,7 @@ export const navigation: readonly NavSection[] = [
       { id: 'members', label: 'Members', icon: 'members' },
       { id: 'invitations', label: 'Invitations', icon: 'invitations' },
       { id: 'api-keys', label: 'API keys', icon: 'keys' },
-      { id: 'integrations', label: 'Integrations', icon: 'integrations' },
       { id: 'audit-events', label: 'Audit log', icon: 'audit' },
-      { id: 'license', label: 'License', icon: 'license' },
       { id: 'settings', label: 'Settings', icon: 'settings' },
     ],
   },

@@ -18,7 +18,7 @@
 ## Implementation and validation
 
 - TypeScript uses strict checking. Keep imports first and use async/await.
-- UI: `web/`. Primary API and relational model: `backend/`. Go telemetry collector: `collector/`. Rust artifact verification: `evidence-core/`. Node execution clients: `scripts/`. Live transcription: `voice-bridge/`. Isolated software tasks: `sandbox/`.
+- UI: `web/`. Primary API and relational model: `backend/`. Node execution clients: `scripts/`. Protocol adapters: `protocol-adapters/`.
 - Read `SECURITY.md` before authentication, authorization, data access, or outbound HTTP changes.
 - Before shipping, run `npm run check`. Run the isolated database integration test for API, policy, authorization, or schema changes.
 - Update the API changelog for user-visible changes. The client reads it from `/api/v1/changelog`.

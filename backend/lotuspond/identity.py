@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from . import schemas as s
 from .deps import DB, audit, require
-from .entitlements import month_start, plan_for
 from .identity_lifecycle import validate_registration_invitation
 from .identity_status import enrollment_pending, identity_verification_source, identity_verified
 from .mail import enqueue_security_notice
@@ -17,7 +16,6 @@ from .models import (
     Approval,
     AuditEvent,
     IdentityChallenge,
-    Incident,
     LoginSession,
     Membership,
     MfaEnrollment,
@@ -25,7 +23,6 @@ from .models import (
     MfaLoginChallenge,
     Project,
     Run,
-    Trace,
     User,
     Workspace,
     new_id,
@@ -48,6 +45,14 @@ from .security import (
 )
 
 router = APIRouter(prefix="/api/v1")
+
+# The retired subscription plan and gateway budget keep their columns so stored
+# data survives, but no response reports them as if they still applied.
+RETIRED_WORKSPACE_FIELDS = {"plan", "monthly_budget_usd"}
+
+
+def _workspace(workspace: Workspace) -> dict:
+    return serialize(workspace, exclude=RETIRED_WORKSPACE_FIELDS)
 
 
 def create_workspace(db: Session, user: User, name: str, kind: str) -> Workspace:
@@ -253,7 +258,7 @@ def me(request: Request, db: Session = DB):
             "identity_verified": verified_source is not None,
             "identity_verification_source": verified_source,
         },
-        "workspaces": [{**serialize(workspace), "role": role} for workspace, role in rows],
+        "workspaces": [{**_workspace(workspace), "role": role} for workspace, role in rows],
         "capabilities": {
             "mail_enabled": request.app.state.settings.mail_enabled,
             "registration_enabled": request.app.state.settings.registration_enabled,
@@ -274,7 +279,7 @@ def create_organization(body: s.Organization, request: Request, db: Session = DB
         db, Principal(user.id, workspace.id, "owner", user.id), "organization.created", workspace.id
     )
     db.flush()
-    return serialize(workspace)
+    return _workspace(workspace)
 
 
 @router.get("/members")
@@ -384,39 +389,6 @@ def revoke_key(
     return {"ok": True}
 
 
-def _billing(db: Session, workspace: Workspace) -> dict:
-    """What this subscription level entitles the workspace to, and what it has used.
-
-    Lotuspond charges nothing and stores no payment instrument. A plan is provisioned
-    by an operator, so this reports entitlement and usage rather than an invoice.
-    """
-    plan = plan_for(workspace.plan)
-    used = db.scalar(
-        select(func.count())
-        .select_from(Trace)
-        .where(Trace.workspace_id == workspace.id, Trace.created_at >= month_start())
-    )
-    used = int(used or 0)
-    return {
-        "plan": plan.name,
-        "entitlements": {
-            "monthly_trace_quota": plan.monthly_trace_quota,
-            "trace_retention_days": plan.trace_retention_days,
-        },
-        "usage": {
-            "traces_this_month": used,
-            "traces_remaining": max(0, plan.monthly_trace_quota - used),
-        },
-        "payment": {
-            "status": "not_collected",
-            "message": (
-                "Lotuspond stores no payment instrument and charges nothing. "
-                "An operator provisions the plan for this workspace."
-            ),
-        },
-    }
-
-
 def _members_without_authenticator(db: Session, workspace_id: str) -> int:
     return db.scalar(
         select(func.count())
@@ -440,9 +412,8 @@ def settings(request: Request, p: Principal = Depends(require()), db: Session = 
             db, workspace.id
         )
     return {
-        **serialize(workspace),
+        **_workspace(workspace),
         "authenticator_policy": policy,
-        "billing": _billing(db, workspace),
     }
 
 
@@ -500,7 +471,6 @@ def update_settings(
     require_admin(p)
     workspace = db.get(Workspace, p.workspace_id)
     workspace.name = body.name
-    workspace.monthly_budget_usd = body.monthly_budget_usd
     audit(db, p, "settings.updated", workspace.id)
     return {"ok": True}
 
@@ -513,9 +483,6 @@ def admin_overview(request: Request, db: Session = DB):
         "workspaces": db.scalar(select(func.count()).select_from(Workspace)),
         "projects": db.scalar(select(func.count()).select_from(Project)),
         "runs": db.scalar(select(func.count()).select_from(Run)),
-        "incidents": db.scalar(
-            select(func.count()).select_from(Incident).where(Incident.status == "open")
-        ),
         "pending_approvals": db.scalar(
             select(func.count()).select_from(Approval).where(Approval.status == "pending")
         ),
@@ -527,7 +494,7 @@ def admin_workspaces(request: Request, db: Session = DB, limit: int = 100):
     platform_admin(db, request)
     return {
         "items": [
-            serialize(row)
+            _workspace(row)
             for row in db.scalars(
                 select(Workspace)
                 .order_by(Workspace.created_at.desc())
@@ -570,27 +537,3 @@ def admin_workspace_status(
         )
     )
     return {"ok": True, "status": workspace.status}
-
-
-@router.patch("/admin/workspaces/{identifier}/plan")
-def admin_workspace_plan(
-    identifier: s.Identifier, body: s.WorkspacePlan, request: Request, db: Session = DB
-):
-    """Provision a subscription level. Only an operator may widen an entitlement."""
-    user = platform_admin(db, request)
-    workspace = db.scalar(select(Workspace).where(Workspace.id == identifier).with_for_update())
-    if not workspace:
-        fail(404, "not_found", "Workspace not found.")
-    previous = workspace.plan
-    workspace.plan = body.plan
-    db.add(
-        AuditEvent(
-            workspace_id=workspace.id,
-            actor_id=user.id,
-            action="admin.workspace_plan",
-            resource_id=workspace.id,
-            details={"from": previous, "to": body.plan, "reason": body.reason},
-        )
-    )
-    db.flush()
-    return {"ok": True, **_billing(db, workspace)}

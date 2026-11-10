@@ -68,7 +68,6 @@ jobs:
           PYCI
           npm run check
       - run: backend/.venv/bin/python backend/export_schema.py --check
-      - run: PYTHONPATH=sandbox/src backend/.venv/bin/python -m pytest sandbox/tests -q
       - run: backend/.venv/bin/python -m pytest deploy/checks -q
       - name: Required PostgreSQL suite, installed fleet acceptance and supervised runner
         # A hang bound, not a speed target: with tests/execution the 998-test suite took
@@ -378,53 +377,6 @@ jobs:
             ${{ runner.temp }}/runtime-artifacts/**/direct/*.tar.gz
             ${{ runner.temp }}/runtime-artifacts/**/sdk/*.whl
             ${{ runner.temp }}/runtime-artifacts/**/rebuilt/*.whl
-  collector:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: collector/go.mod
-          cache: false
-      - run: go test -race ./...
-        working-directory: collector
-  monitoring-rules:
-    runs-on: ubuntu-latest
-    env:
-      PROMETHEUS_IMAGE: prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - name: Validate scrape configuration and alert timing
-        run: |
-          docker pull "$PROMETHEUS_IMAGE"
-          docker run --rm --network none --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/work:ro" -w /work "$PROMETHEUS_IMAGE" check config --syntax-only prometheus.example.yml
-          docker run --rm --network none --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/work:ro" -w /work "$PROMETHEUS_IMAGE" check rules lotuspond-alerts.yml
-          docker run --rm --network none --entrypoint /bin/promtool -v "$PWD/deploy/monitoring:/work:ro" -w /work "$PROMETHEUS_IMAGE" test rules alerts.test.yml
-  voice:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: '.node-version'
-      - run: npm ci --ignore-scripts
-        working-directory: voice-bridge
-      - run: npm run check
-        working-directory: voice-bridge
-  evidence:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - run: cargo test --locked
-        working-directory: evidence-core
   protocols:
     runs-on: ubuntu-latest
     steps:

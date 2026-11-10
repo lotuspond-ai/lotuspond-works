@@ -10,9 +10,13 @@ The authoritative model is `backend/lotuspond/models.py`, using SQLAlchemy 2 wit
 | Releases    | policies, releases, release_decisions, receipts                                              | Immutable policy versions, comparison, independent decisions, recorded outcomes                                                                               |
 | Governance  | approvals, integrations, audit_events                                                        | Different-person review, unverified endpoints, action history                                                                                                 |
 | Monitoring  | traces, incidents, incident_events, alert_deliveries, monitors, evaluation_jobs, assessments | Project traces, deterministic sampling, durable job and alert leases, incident lifecycle, model/input provenance                                              |
-| Voice       | voice_sessions, voice_segments                                                               | Session state, sequence/revision, immutable finalized transcripts                                                                                             |
-| Model usage | gateway_usage                                                                                | Additive budget reservation and provider settlement ledger                                                                                                    |
+| Voice       | voice_sessions, voice_segments                                                               | Retired 2026-11-05; stored sessions and transcripts are kept, nothing writes them                                                                               |
+| Model usage | gateway_usage                                                                                | Retired 2026-11-05 with the model gateway; existing rows are kept                                                                                                    |
 | Schema      | schema_version                                                                               | Explicit application schema version                                                                                                                           |
+
+The retired trace-plan ladder and gateway budget leave `workspaces.plan` and `workspaces.monthly_budget_usd` in place with their constraints, so the schema and `backend/schema.sql` are unchanged ([ADR-0012](architecture/0012-retire-assurance-extras.md)). Dropping these tables or columns needs its own reviewed, data-preserving plan.
+
+ADR-0013 retired trace ingestion, monitors, assessments, incidents and their alerts, receipt submission and endpoint registration on 2026-11-11 the same way ([ADR-0013](architecture/0013-trim-to-the-automation-core.md)). `traces`, `monitors`, `evaluation_jobs`, `assessments`, `incidents`, `incident_events`, `alert_deliveries`, `receipts` and `integrations` keep their rows, columns and constraints, and the schema is unchanged. No code writes them any more; traces, assessments, incidents and receipts stay readable through the API. Dropping them needs its own reviewed, data-preserving plan.
 
 ## Safe local initialization
 
@@ -44,13 +48,13 @@ Evidence exports identify `sorted-json-utf8-v1`: Python `lotuspond.security.cano
 
 ## Incident delivery data
 
-An assessment creates at most one incident through a workspace-scoped unique constraint. Each state change retains an incident event; enabled operator destinations receive one outbox row per event and name. The payload is immutable metadata and excludes user text. Delivery uses expiring hash-only claims, five attempts, and guarded terminal updates. Repeated lifecycle actions and stale evaluation/alert leases do not duplicate events or overwrite current claims. See the [incident runbook](../docs-site/docs/incidents.md) for signing and receiver deduplication.
+Retired on 2026-11-11 (ADR-0013); this describes the rows already stored. An assessment created at most one incident through a workspace-scoped unique constraint. Each state change retained an incident event; enabled operator destinations received one outbox row per event and name. The payload is immutable metadata and excludes user text. Delivery used expiring hash-only claims, five attempts, and guarded terminal updates.
 
 ## Identity and cost provenance
 
 An offline enrollment belongs to one user and that same user's attestation through a composite foreign key. Token digests are unique; consumed and revoked states are mutually exclusive. Provisioning creates new accounts only, and enrollment is required before authentication. Mailbox state is unchanged. See the [design decision](architecture/0003-offline-identity-and-cost-provenance.md) and [operator guide](../docs-site/docs/offline-identity.md).
 
-Trace costs store a nullable amount and a required `reported`, `unavailable`, or `unknown` marker. Reported cost requires an amount, unavailable cost requires null, and legacy unknown retains its original value. The API derives the marker. Monthly totals include reported amounts only and expose counts of incomplete measurements. A historical zero is never assumed to be measured zero.
+Stored trace costs keep a nullable amount and a required `reported`, `unavailable`, or `unknown` marker. Reported cost requires an amount, unavailable cost requires null, and legacy unknown retains its original value. The API derived the marker while it accepted traces. Monthly totals include reported amounts only and expose counts of incomplete measurements. A historical zero is never assumed to be measured zero.
 
 ## Authenticator persistence
 

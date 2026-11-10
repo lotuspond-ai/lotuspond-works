@@ -90,7 +90,7 @@ class OfflineInstallationInputsTests(unittest.TestCase):
 
     def test_owned_container_actions_verify_exact_name_and_label(self):
         inspected = {
-            "Name": "/lotuspond-offline-run-worker",
+            "Name": "/lotuspond-offline-run-redis",
             "Config": {"Labels": {smoke.LABEL: "run"}},
         }
         with patch.object(
@@ -98,7 +98,7 @@ class OfflineInstallationInputsTests(unittest.TestCase):
             "command",
             side_effect=[SimpleNamespace(stdout=json.dumps([inspected]).encode()), SimpleNamespace()],
         ) as called:
-            smoke.owned_container_action("lotuspond-offline-run-worker", "run", "stop")
+            smoke.owned_container_action("lotuspond-offline-run-redis", "run", "stop")
         self.assertEqual(
             called.call_args_list[1].args,
             (
@@ -107,7 +107,7 @@ class OfflineInstallationInputsTests(unittest.TestCase):
                 "stop",
                 "--time",
                 "10",
-                "lotuspond-offline-run-worker",
+                "lotuspond-offline-run-redis",
             ),
         )
 
@@ -118,22 +118,25 @@ class OfflineInstallationInputsTests(unittest.TestCase):
             return_value=SimpleNamespace(stdout=json.dumps([inspected]).encode()),
         ) as called, self.assertRaisesRegex(RuntimeError, "ownership"):
             smoke.owned_container_action(
-                "lotuspond-offline-run-worker", "run", "start"
+                "lotuspond-offline-run-redis", "run", "start"
             )
         called.assert_called_once()
 
-    def test_failure_recovery_is_optional_and_metrics_use_distinct_token(self):
+    def test_failure_recovery_is_optional_and_trace_ingestion_is_refused(self):
         parameter = inspect.signature(smoke.drill).parameters["failure_recovery"]
         self.assertFalse(parameter.default)
-        self.assertIn("COLLECTOR_METRICS_TOKEN", Path(smoke.__file__).read_text())
-        self.assertIn('data["metrics_token"]', smoke.VERIFY)
-        self.assertIn('data["ingest_token"]', smoke.VERIFY)
-        self.assertIn('"collector_metrics_text": metrics', smoke.VERIFY)
-        self.assertIn('observation["state"] == "stale"', smoke.FAILURE_OBSERVE)
+        source = Path(smoke.__file__).read_text()
+        self.assertNotIn("collector", source.lower())
+        self.assertNotIn("lotuspond.worker", source)
+        self.assertNotIn("/monitors", source)
+        self.assertIn('"/telemetry/otlp?project_id="', smoke.VERIFY)
+        self.assertIn("assert error.code == 405", smoke.VERIFY)
+        self.assertIn('"Bearer " + data["api_key"]', smoke.VERIFY)
+        self.assertIn('"redis_unavailable"', smoke.FAILURE_OBSERVE)
+        self.assertNotIn('"evaluation"', smoke.FAILURE_OBSERVE)
         for program in (
             smoke.SETUP,
             smoke.VERIFY,
-            smoke.FAILURE_ENQUEUE,
             smoke.FAILURE_OBSERVE,
             smoke.REVOKE,
         ):

@@ -1341,13 +1341,6 @@
 .console-main .decision-reasons li {
   font-size: 12.5px;
 }
-.preview-card .eyebrow {
-  margin-bottom: 6px;
-}
-.preview-card p.eyebrow,
-.preview-card p.hint {
-  color: var(--muted);
-}
 
 .preview-critical {
   display: inline-block;
@@ -1458,28 +1451,6 @@
   background: #fbf5e6;
   color: var(--ink);
   font-size: 12.5px;
-}
-.preview-monitor {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  min-height: 108px;
-  margin-top: 14px;
-}
-.preview-card {
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
-}
-.preview-card p {
-  margin: 0 0 4px;
-  color: var(--ink);
-  font-size: 12.5px;
-}
-.preview-card-incident {
-  border-color: #e7d3a6;
-  background: #fdf9ee;
 }
 .preview-gate {
   display: grid;
@@ -1869,8 +1840,7 @@
     box-shadow: none;
   }
   .preview-release-grid,
-  .preview-gate,
-  .preview-monitor {
+  .preview-gate {
     grid-template-columns: 1fr;
   }
   .shipped {

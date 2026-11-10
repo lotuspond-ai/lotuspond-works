@@ -1341,3 +1341,24 @@ Test-only, on branch `claude/hosted-conformance-budgets` from `main` at `533b3d6
 - **A runtime can exit on one refused lookup.** The API refuses a second, concurrent recovery-authority lookup with 503 (`_LookupSlot`), and the runtime supervisor treats that answer to its own calls as fatal. A starting runtime on a busy API can then exit. Polls already retry it. Making the slot wait, or the supervisor retry, would be a product change for E03's runtime.
 
 **Not done:** hosted `conformance` at the second fixes.
+
+## Retired assurance-era components — 2026-11-05
+
+[ADR-0012](architecture/0012-retire-assurance-extras.md) removes voice, the Gym-Anything sandbox, TypeSafe Jev, the model gateway, trace-plan billing, the Go collector and Rust evidence-core. Local evidence only, at `f0df9af`; no hosted run yet.
+
+- `validate`, run in the local Linux runner (`lotuspond-ci-runner:local`, PostgreSQL 18.6 service) from a clean clone: passed. `npm run check` covered the backend SQLite run (1,049 passed, 194 PostgreSQL-only skips), the SDK (1,514), the runtime (733) and 135 unit tests; `export_schema.py --check` passed, so `schema.sql` is unchanged; `deploy/checks` passed 42; the required PostgreSQL suite passed 1,189 in 30 min 5 s; the image, packaging and strict docs steps passed. The Mac was on battery.
+- `scripts/checks/otlp-interop.py`, which no longer uses the collector, with the official OpenTelemetry Python SDK 1.45.2: protobuf exports straight to the API, with and without gzip, both accepted; 4 of 4 spans stored, no mismatches.
+- Browser, Vite fixture harness and signed-out page at 1440, 768 and 375 px: no voice navigation, no budget field or plan card, a trace-only incident inspector, an older voice-linked incident still showing its session, no horizontal overflow, keyboard focus visible on Settings.
+- **Not run:** the `execution` and `offline-install` jobs (both rebuilt here without the voice bridge, Gym kit and collector), `conformance`, `disruptive`, `load`, `restore` and `protocols`.
+
+## Automation-core trim (ADR-0013) — 2026-11-11
+
+[ADR-0013](architecture/0013-trim-to-the-automation-core.md) retires trace ingestion, monitors and trace assessments with their worker, incident writes and signed alerts with their worker, receipt submission, endpoint registration, approvals for anything but a release, the `ingest` scope for new keys and the License page. Local evidence only, on this Mac (PostgreSQL 14, Node 22), at `904a5db`; no hosted run, because GitHub Actions still refuses jobs over billing.
+
+- Backend lint (`npm run lint:python`), `export_schema.py --check` (so `schema.sql` is unchanged) and `npm run check:contracts` passed.
+- Backend SQLite run: 526 passed, 193 skipped. The 5 `tests/fleet/test_acceptance.py` failures are this Mac's known baseline; the 490 errors are execution tests that require PostgreSQL.
+- Backend PostgreSQL run (`PGTZ=UTC`, conformance excluded): 1,151 passed, 1 skipped, 9 failed in 22 min. Eight are the known macOS `tests/fleet/test_acceptance.py` baseline. `test_sweeper.py::test_no_wake_up_outlasts_the_deadline` passed when rerun alone; this change does not touch `execution/`.
+- New `tests/test_automation_core_trim.py`: 17 passed (retired routes answer 405/404, no new `ingest` keys, release-only approvals, stored traces and incidents readable within their workspace only, no incident counts in summaries, stored receipts in the release export).
+- Web: `tsc --noEmit`, 130 unit tests, `npm run build` and Prettier on every changed file passed. `deploy/checks`: 44 passed, with a local shim exposing Docker's Compose plugin to the test's empty `DOCKER_CONFIG`. Strict MkDocs build passed.
+- Browser, Vite dev server against a disposable schema: the personal workspace sidebar has 17 entries; retired routes return 405/404 on the live API; old bookmarks show "Page not found"; the approval form shows a fixed `release` action; Operations shows only identity mail; the public page has three preview tabs and the new changelog entry; no horizontal overflow at 375 px; no script errors.
+- **Not run:** `execution`, `offline-install`, `conformance`, `disruptive`, `load`, `restore`, `protocols` and `scripts/checks` against a built image.

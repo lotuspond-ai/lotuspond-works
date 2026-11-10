@@ -1,13 +1,10 @@
 import base64
 import binascii
-from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
-    BaseModel,
-    ConfigDict,
     EmailStr,
     Field,
     SecretStr,
@@ -15,47 +12,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class ProviderModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, populate_by_name=True)
-
-    id: str = Field(min_length=1, max_length=160)
-    input_usd_per_million: Decimal = Field(ge=0, le=1_000_000_000, alias="inputUsdPerMillion")
-    output_usd_per_million: Decimal = Field(ge=0, le=1_000_000_000, alias="outputUsdPerMillion")
-
-    @field_validator("input_usd_per_million", "output_usd_per_million")
-    @classmethod
-    def finite_rate(cls, value: Decimal) -> Decimal:
-        if not value.is_finite():
-            raise ValueError("Provider prices must be finite")
-        return value
-
-
-class AlertWebhook(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-
-    name: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-    url: str = Field(min_length=1, max_length=2000)
-    secret: SecretStr = Field(min_length=32, max_length=1024)
-    enabled: bool = False
-
-    @model_validator(mode="after")
-    def safe_url(self):
-        endpoint = urlsplit(self.url)
-        if (
-            endpoint.scheme != "https"
-            or not endpoint.hostname
-            or endpoint.username
-            or endpoint.password
-            or endpoint.query
-            or endpoint.fragment
-        ):
-            raise ValueError(
-                "Alert webhooks require HTTPS without credentials, query, or fragment"
-            )
-        self.url = self.url.rstrip("/")
-        return self
 
 
 class Settings(BaseSettings):
@@ -74,17 +30,6 @@ class Settings(BaseSettings):
     session_hours: int = Field(default=24, ge=1, le=168)
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
     network_mode: Literal["connected", "airgap"] = "connected"
-    typesafe_base_url: str | None = None
-    typesafe_api_key: SecretStr | None = None
-    typesafe_model: str = "jev-latest"
-    typesafe_timeout_seconds: float = Field(default=20, gt=0, le=60)
-    provider_url: str | None = None
-    provider_key: SecretStr | None = None
-    provider_models: list[ProviderModel] = Field(default_factory=list)
-    provider_timeout_seconds: float = Field(default=20, gt=0, le=60)
-    provider_response_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
-    alert_webhooks: list[AlertWebhook] = Field(default_factory=list, max_length=20)
-    alert_timeout_seconds: float = Field(default=10, gt=0, le=30)
     mail_enabled: bool = False
     mail_encryption_key: SecretStr | None = None
     mfa_encryption_key: SecretStr | None = None
@@ -100,10 +45,6 @@ class Settings(BaseSettings):
     web_dist: Path = Path(__file__).resolve().parents[2] / "dist"
 
     @field_validator(
-        "typesafe_base_url",
-        "typesafe_api_key",
-        "provider_url",
-        "provider_key",
         "redis_url",
         "mail_encryption_key",
         "mfa_encryption_key",
@@ -137,28 +78,6 @@ class Settings(BaseSettings):
         self.origin = self.origin.rstrip("/")
         if origin.username or origin.password or origin.query or origin.fragment:
             raise ValueError("Origin must not contain credentials, query parameters, or a fragment")
-        if self.provider_url:
-            provider = urlsplit(self.provider_url)
-            if (
-                provider.scheme != "https"
-                or not provider.hostname
-                or provider.username
-                or provider.password
-                or provider.query
-                or provider.fragment
-            ):
-                raise ValueError(
-                    "The model provider must be an HTTPS URL without credentials, query, or fragment"
-                )
-            self.provider_url = self.provider_url.rstrip("/")
-        identifiers = [model.id for model in self.provider_models]
-        if len(identifiers) != len(set(identifiers)):
-            raise ValueError("Provider model identifiers must be unique")
-        alert_names = [webhook.name for webhook in self.alert_webhooks]
-        if len(alert_names) != len(set(alert_names)):
-            raise ValueError("Alert webhook names must be unique")
-        if self.network_mode == "airgap" and any(item.enabled for item in self.alert_webhooks):
-            raise ValueError("Alert webhooks cannot be enabled in airgap mode")
         if self.mail_encryption_key:
             try:
                 key = base64.b64decode(

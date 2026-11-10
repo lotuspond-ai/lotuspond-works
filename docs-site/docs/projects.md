@@ -13,4 +13,4 @@ A useful scenario records:
 
 Freeze the scenario definition with each run. Editing a scenario should create a new test definition for future runs rather than reinterpret retained evidence. Keep confidential prompts and personal data out of free-text descriptions; use controlled artifact references where the backend supports them.
 
-External execution contracts, including Gym integrations, are versioned separately. Registration of an endpoint records configuration only and is not compatibility evidence.
+External execution contracts are versioned separately. Registration of an endpoint records configuration only and is not compatibility evidence.
