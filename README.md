@@ -2,7 +2,7 @@
 
 Lotuspond is being developed as a licensable enterprise agent automation platform, with transformation, implementation, training, and managed services across industries. Customers will be able to build, deploy, operate, and govern workflows combining agents, deterministic actions, and human tasks, using their own team, Lotuspond, or an implementation partner.
 
-The implemented core tests AI agents, records production evidence, and governs releases through Scenarios, Releases, Production Evidence, and Governance. The primary API is Python/FastAPI with a fresh PostgreSQL model and accepts OTLP/HTTP traces in protobuf and JSON; the console is React. Node tooling runs customer-controlled evaluation adapters and release gates.
+The implemented core tests AI agents and governs releases through Scenarios, Releases and Governance, and deployment admission requires a current release decision. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. Node tooling runs customer-controlled evaluation adapters and release gates.
 
 The first expansion slice is a strict workflow-package v1 JSON contract with local validation, canonical content digests, schema export, and tests. The registry adds immutable, tenant-scoped package storage with admission-validator metadata. A standalone Python SDK shares the v1 validator and canonical content behavior, with local differences, detached signatures against independent trust, and exact synthetic capability checks. The console Studio composes a v1 package as a graph, checks it against the same contract in the browser and publishes it to that registry. Production runtime, executable-v2 authoring in the Studio, hosted publisher trust, commercial licensing, and qualified industry packs remain planned. See the [platform decision](docs/architecture/0009-agent-automation-platform.md), [product and services plan](docs/plans/2026-10-13-platform-master-plan.md), and [capability register](docs/CAPABILITIES.md) for the boundary between current code and the target product.
 
@@ -25,7 +25,7 @@ Open http://127.0.0.1:8000. Choose an individual account or deliberately create 
 
 For development, run `LOTUSPOND_REGISTRATION_ENABLED=true LOTUSPOND_ORIGIN=http://127.0.0.1:3001 npm run dev` and `npm run dev:web` in separate terminals. The UI runs on port 3001 and proxies the API on port 8000. Optional settings belong in the untracked project `.env`; use `.env.example` as the template.
 
-Start `npm run worker` separately for background assessments. Criteria the deterministic assertions cannot decide produce **unknown**, never a passing assessment. Configure [identity mail](docs-site/docs/identity-mail.md) and run `npm run worker:mail` separately for verification, recovery, and invitations; mail is disabled by default.
+Configure [identity mail](docs-site/docs/identity-mail.md) and run `npm run worker:mail` separately for verification, recovery, and invitations; mail is disabled by default.
 
 Air-gapped installations use [offline identity enrollment](docs-site/docs/offline-identity.md) to provision new individuals, deliberate organizations and explicit operators. A one-use link lets each person set their own password. Operator attestation stays separate from mailbox verification; pending-link reissue and account revocation are audited CLI operations.
 
@@ -41,7 +41,7 @@ Air-gapped installations use [offline identity enrollment](docs-site/docs/offlin
 
 The [protocol adapters](protocol-adapters/README.md) evaluate an operator-selected HTTP or A2A agent or execute an explicit MCP tool, with read-only tool discovery kept separate. The package has its own lockfile; run `npm ci --ignore-scripts` in it before using it. Its local tests use synthetic endpoints.
 
-Voice sessions, Gym-Anything sandboxes, the TypeSafe Jev evaluator, the model gateway, trace-plan billing, the Go collector and the Rust verifier were retired on 2026-11-05; see [ADR-0012](docs/architecture/0012-retire-assurance-extras.md).
+Voice sessions, Gym-Anything sandboxes, the TypeSafe Jev evaluator, the model gateway, trace-plan billing, the Go collector and the Rust verifier were retired on 2026-11-05; see [ADR-0012](docs/architecture/0012-retire-assurance-extras.md). Trace ingestion, monitors and assessments, incidents and their alerts, receipt submission, endpoint registration and the License page followed on 2026-11-11; stored traces, incidents and receipts stay readable through the API. See [ADR-0013](docs/architecture/0013-trim-to-the-automation-core.md).
 
 ## Validate
 

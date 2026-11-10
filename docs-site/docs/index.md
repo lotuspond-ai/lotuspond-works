@@ -1,13 +1,12 @@
 # Operate agents with evidence
 
-Lotuspond connects four workflows: define agent scenarios, run evaluations, retain production evidence, and make governed release decisions. This documentation describes the current source tree and its portable deployment artifacts. It does not imply a hosted service or a production validation.
+Lotuspond connects three workflows: define agent scenarios, run evaluations, and make governed release decisions that deployment admission requires. This documentation describes the current source tree and its portable deployment artifacts. It does not imply a hosted service or a production validation.
 
 ## Choose a path
 
 - [Install](install.md) for a local source checkout.
 - [Projects and scenarios](projects.md) to define what should be tested.
 - [Evaluations](evaluations.md) to understand evidence and release gates.
-- [Production monitoring](monitoring.md) for bounded OTLP trace ingestion.
 - [Deployment](deployment.md) for connected Docker, on-premises, and air-gapped operation.
 - [Pilot program](pilot.md) for a measured first engagement.
 

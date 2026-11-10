@@ -24,7 +24,7 @@ LOTUSPOND_REGISTRATION_ENABLED=true npm start
 
 Open http://127.0.0.1:8000. The database starts empty and public signup creates no platform administrator. `db:init` refuses nonempty schemas. It never imports data or resets another project. The exact development database is `lotuspond_platform_dev` on loopback port 55439.
 
-Start `npm run worker` in another terminal for queued assessments. Criteria the deterministic assertions cannot decide produce unknown outcomes. Environment examples are in `.env.example`; keep real environment files out of Git.
+Environment examples are in `.env.example`; keep real environment files out of Git.
 
 For separate development servers, use `LOTUSPOND_REGISTRATION_ENABLED=true LOTUSPOND_ORIGIN=http://127.0.0.1:3001 npm run dev` and `npm run dev:web`. The browser origin and configured origin must match.
 

@@ -353,17 +353,11 @@ def test_trace_cost_and_offline_identity_v7_migration_preserves_legacy_amount(
         assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
         assert migration.inspect(connection).has_table("offline_identity_attestations")
         assert migration.inspect(connection).has_table("offline_enrollments")
-    replay = client.post(
-        "/api/v1/traces",
-        json={
-            "external_id": "legacy-precise-cost",
-            "name": "Legacy cost",
-            "status": "ok",
-            "latency_ms": 1,
-            "cost_usd": 0.123456,
-        },
-    )
-    assert replay.status_code == 409
+    # Trace ingestion is retired (ADR-0013); the migrated record stays readable as stored.
+    stored = client.get(f"/api/v1/traces/{trace_id}")
+    assert stored.status_code == 200
+    assert stored.json()["trace"]["cost_usd"] == 0.123456
+    assert stored.json()["trace"]["cost_measurement"] == "unknown"
 
 
 def test_v7_migration_refuses_partial_schema(engine, client, account, monkeypatch):

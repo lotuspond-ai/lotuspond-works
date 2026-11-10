@@ -9,12 +9,9 @@ from pydantic import SecretStr
 from sqlalchemy import event, func, select
 
 from lotuspond import identity
-from lotuspond.evaluation.models import EvaluationProvenance, EvaluationResult
 from lotuspond.mail import decrypt_payload
 from lotuspond.models import (
-    Assessment,
     IdentityChallenge,
-    Incident,
     Invitation,
     LoginSession,
     MailOutbox,
@@ -22,7 +19,6 @@ from lotuspond.models import (
     User,
 )
 from lotuspond.security import verify_password
-from lotuspond.worker import claim_next_job, complete_job
 
 
 def enable_test_mail(settings):
@@ -229,53 +225,3 @@ def test_postgres_password_reset_is_single_consumer(app, engine, client, account
             select(IdentityChallenge).where(IdentityChallenge.kind == "password_reset")
         )
         assert challenge.consumed_at is not None
-
-
-def test_postgres_evaluation_completion_creates_one_incident(
-    app, engine, client, account, db_factory
-):
-    if engine.dialect.name != "postgresql":
-        pytest.skip("Assessment completion contention requires isolated PostgreSQL")
-    project = client.post("/api/v1/projects", json={"name": "Incident contention"}).json()
-    trace = client.post(
-        "/api/v1/traces",
-        json={
-            "project_id": project["id"],
-            "external_id": "incident-contention",
-            "name": "Agent answer",
-            "status": "ok",
-            "latency_ms": 1,
-        },
-    ).json()
-    queued = client.post(
-        f"/api/v1/traces/{trace['id']}/assess",
-        json={"criteria": "The answer must be accurate."},
-    )
-    assert queued.status_code == 202
-    with db_factory.begin() as db:
-        claim = claim_next_job(db)
-    result = EvaluationResult(
-        status="failed",
-        score=0,
-        reasons=("The answer did not satisfy the criterion.",),
-        provider="test",
-        provenance=EvaluationProvenance(source="test"),
-    )
-    barrier = Barrier(2)
-
-    def complete():
-        barrier.wait(timeout=5)
-        with db_factory.begin() as db:
-            assessment = complete_job(db, claim, result)
-            return assessment.id if assessment else None
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        completed = [future.result(timeout=10) for future in [pool.submit(complete), pool.submit(complete)]]
-    assert sum(item is not None for item in completed) == 1
-    with db_factory() as db:
-        assert db.scalar(
-            select(func.count()).select_from(Assessment).where(Assessment.trace_id == trace["id"])
-        ) == 1
-        assert db.scalar(
-            select(func.count()).select_from(Incident).where(Incident.trace_id == trace["id"])
-        ) == 1

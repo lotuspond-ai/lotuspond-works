@@ -71,10 +71,15 @@ def test_compose_applies_installation_mfa_and_fails_closed_without_key(
     api["environment"]["LOTUSPOND_MFA_ENCRYPTION_KEY"] = ""
     with pytest.raises(ValidationError, match="authenticator requirement needs"):
         service_settings(api)
-    for name in ("worker", "mail-worker"):
-        assert not rendered_services[name]["environment"].get(
-            "LOTUSPOND_MFA_ENCRYPTION_KEY"
-        )
+    assert not rendered_services["mail-worker"]["environment"].get(
+        "LOTUSPOND_MFA_ENCRYPTION_KEY"
+    )
+
+
+def test_compose_runs_no_retired_assurance_worker(rendered_services):
+    assert set(rendered_services) == {"api", "mail-worker", "postgres", "redis"}
+    for service in rendered_services.values():
+        assert not any(key.startswith("LOTUSPOND_ALERT_") for key in service.get("environment", {}))
 
 
 def test_compose_applies_whole_smtp_bound_to_api_and_mail_worker(rendered_services):

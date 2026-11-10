@@ -51,9 +51,9 @@ export const plannedAreas: readonly PlannedArea[] = [
         note: 'Evaluate an agent against frozen scenarios. An evaluation run is not a production execution.',
       },
       {
-        href: '#traces',
-        label: 'Traces',
-        note: 'Receive production evidence from an agent you already run yourself.',
+        href: '#releases',
+        label: 'Releases',
+        note: 'Record the release decision a deployment must have before its version is admitted.',
       },
     ],
   },
@@ -81,11 +81,6 @@ export const plannedAreas: readonly PlannedArea[] = [
         label: 'Studio',
         note: 'Declare connector references, versions, operations and secret reference names in a package.',
       },
-      {
-        href: '#integrations',
-        label: 'Integrations',
-        note: 'Register agent, telemetry and delivery endpoints for evaluation. Registration is not a verified connection.',
-      },
     ],
   },
   {
@@ -111,12 +106,7 @@ export const plannedAreas: readonly PlannedArea[] = [
       {
         href: '#approvals',
         label: 'Approvals',
-        note: 'Independent approval of release decisions and high-risk actions by a different administrator.',
-      },
-      {
-        href: '#incidents',
-        label: 'Incidents',
-        note: 'Follow failures and unavailable assessments raised from production evidence.',
+        note: 'Independent approval of a release decision by a different administrator.',
       },
     ],
   },

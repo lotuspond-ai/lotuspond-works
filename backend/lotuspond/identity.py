@@ -16,7 +16,6 @@ from .models import (
     Approval,
     AuditEvent,
     IdentityChallenge,
-    Incident,
     LoginSession,
     Membership,
     MfaEnrollment,
@@ -484,9 +483,6 @@ def admin_overview(request: Request, db: Session = DB):
         "workspaces": db.scalar(select(func.count()).select_from(Workspace)),
         "projects": db.scalar(select(func.count()).select_from(Project)),
         "runs": db.scalar(select(func.count()).select_from(Run)),
-        "incidents": db.scalar(
-            select(func.count()).select_from(Incident).where(Incident.status == "open")
-        ),
         "pending_approvals": db.scalar(
             select(func.count()).select_from(Approval).where(Approval.status == "pending")
         ),

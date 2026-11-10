@@ -3,8 +3,6 @@ import { api, ApiError, type Account, type Row } from './api.js';
 import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
 import { Workspaces } from './pages/Workspaces.js';
-import { Monitors } from './pages/Monitors.js';
-import { Incidents } from './pages/Incidents.js';
 import { AccountSecurity } from './pages/AccountSecurity.js';
 import { IdentityFlow, IdentityFrame, VerificationCard } from './pages/IdentityFlow.js';
 import { Invitations } from './pages/Invitations.js';
@@ -24,8 +22,6 @@ import {
 } from './lib/authenticatorPolicy.js';
 import { ScenarioForm } from './components/ScenarioForm.js';
 import { RecordDetails } from './components/RecordDetails.js';
-import { TraceDetails, type TraceDetail } from './components/TraceDetails.js';
-import { traceCost } from './lib/traceCost.js';
 import {
   loginChallenge,
   privilegedMfaNeeded,
@@ -39,7 +35,6 @@ import { Icon } from './components/console/icons.js';
 import { allPages, navigation, pageLabel } from './components/console/navigation.js';
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
-import { License } from './pages/License.js';
 import { Planned } from './pages/Planned.js';
 import { plannedArea } from './lib/roadmap.js';
 
@@ -72,7 +67,8 @@ const definitions: Record<string, Definition> = {
   },
   environments: {
     title: 'Environments',
-    description: 'Record where a scenario is evaluated and the conditions it requires.',
+    description:
+      'Record where a scenario is evaluated or a deployment runs, and the conditions it requires.',
     fields: [
       { key: 'project_id', label: 'Project', resource: 'projects' },
       { key: 'name', label: 'Environment name' },
@@ -168,37 +164,12 @@ const definitions: Record<string, Definition> = {
   approvals: {
     title: 'Approvals',
     description:
-      'Review high-risk actions and release requests. A different administrator must make the decision.',
+      'Request independent approval of a release. A different administrator must make the decision.',
     fields: [
-      { key: 'release_id', label: 'Release', resource: 'releases', optional: true },
-      { key: 'action', label: 'Action requiring approval' },
+      { key: 'release_id', label: 'Release', resource: 'releases' },
+      { key: 'action', label: 'Action' },
       { key: 'reason', label: 'Why is approval needed?' },
     ],
-  },
-  integrations: {
-    title: 'Integrations',
-    description:
-      'Register your tool, telemetry, and delivery endpoints. A registered endpoint remains unverified until its connection is independently proven.',
-    fields: [
-      { key: 'name', label: 'Integration name' },
-      {
-        key: 'kind',
-        label: 'Integration type',
-        options: ['mcp', 'a2a', 'telemetry', 'webhook', 'ci'],
-      },
-      { key: 'endpoint', label: 'HTTPS endpoint' },
-    ],
-  },
-  traces: {
-    title: 'Production evidence',
-    description:
-      'Inspect trace evidence, cost provenance, and outcomes received from your application. Send records to POST /api/v1/traces.',
-    fields: [],
-  },
-  receipts: {
-    title: 'Outcome receipts',
-    description: 'Retain real release outcomes submitted by your application or delivery pipeline.',
-    fields: [],
   },
   'audit-events': {
     title: 'Audit log',
@@ -220,7 +191,7 @@ const definitions: Record<string, Definition> = {
       { key: 'name', label: 'Key name' },
       {
         key: 'scopes',
-        label: 'Scopes: read, write, run, ingest',
+        label: 'Scopes: read, write, run, execute, execution_signal',
         type: 'list',
         value: 'read',
       },
@@ -234,17 +205,7 @@ const label = (key: string) =>
   ({ admin: 'Administration' } as Record<string, string>)[key] ||
   'Page not found';
 // Pages whose records belong to a project, so the project filter applies to them.
-const projectScoped = [
-  'projects',
-  'studio',
-  'scenarios',
-  'environments',
-  'runs',
-  'releases',
-  'traces',
-  'monitors',
-  'incidents',
-];
+const projectScoped = ['projects', 'studio', 'scenarios', 'environments', 'runs', 'releases'];
 // Records a reader can create from the command palette, with the verb the page uses.
 const creatable: Record<string, string> = {
   projects: 'Create project',
@@ -259,15 +220,12 @@ const creatable: Record<string, string> = {
 // Each record type's empty state carries the field-record glyph for what it will hold.
 const emptyGlyph: Record<string, GlyphName> = {
   releases: 'seal',
-  receipts: 'seal',
   policies: 'seal',
   approvals: 'seal',
   scenarios: 'snapshot',
   runs: 'trace',
   'audit-events': 'trace',
-  traces: 'pulse',
   runners: 'network',
-  integrations: 'network',
   members: 'network',
   'api-keys': 'sealed',
 };
@@ -653,24 +611,6 @@ export function App({
             ) : (
               <Alert>Platform administrator access is required.</Alert>
             )
-          ) : page === 'incidents' ? (
-            <Incidents
-              key={`${workspace}-${projectId}`}
-              workspace={workspace}
-              projectId={projectId}
-              role={currentWorkspace?.role || 'viewer'}
-              onOpenProject={(id) => {
-                setProjectId(id);
-                location.hash = 'projects';
-              }}
-            />
-          ) : page === 'monitors' ? (
-            <Monitors
-              key={`${workspace}-${projectId}`}
-              workspace={workspace}
-              projectId={projectId}
-              role={currentWorkspace?.role || 'viewer'}
-            />
           ) : page === 'studio' ? (
             <Suspense
               fallback={
@@ -696,8 +636,6 @@ export function App({
             />
           ) : page === 'changelog' ? (
             <Changelog />
-          ) : page === 'license' ? (
-            <License />
           ) : plannedArea(page) ? (
             <Planned area={plannedArea(page)!} />
           ) : definitions[page] ? (
@@ -859,8 +797,8 @@ function Welcome({
           </p>
           <p className="lede">
             Put AI agents to work in real business processes, with rules where rules suffice and
-            people where accountability belongs. Agent testing, release decisions, production
-            evidence and a Studio for workflow packages are available today.
+            people where accountability belongs. Agent testing, release decisions and a Studio for
+            workflow packages are available today.
           </p>
           <button
             className="text-button"
@@ -1073,7 +1011,7 @@ function Resource({
           items: Row[];
           next?: { before: string; before_id: string } | null;
         }>(
-          `/${page}?${new URLSearchParams({ ...(cursor || {}), ...(projectId && ['scenarios', 'environments', 'runs', 'releases', 'traces'].includes(page) ? { project_id: projectId } : {}) })}`,
+          `/${page}?${new URLSearchParams({ ...(cursor || {}), ...(projectId && ['scenarios', 'environments', 'runs', 'releases'].includes(page) ? { project_id: projectId } : {}) })}`,
           workspace,
         );
         setRows((current) => (append ? [...current, ...data.items] : data.items));
@@ -1126,8 +1064,7 @@ function Resource({
   const canCreate =
     def.fields.length > 0 &&
     role !== 'viewer' &&
-    (!['policies', 'integrations', 'members', 'api-keys'].includes(page) ||
-      ['owner', 'admin'].includes(role));
+    (!['policies', 'members', 'api-keys'].includes(page) || ['owner', 'admin'].includes(role));
   const noun =
     (
       {
@@ -1139,7 +1076,6 @@ function Resource({
         policies: 'policy',
         releases: 'release',
         approvals: 'approval request',
-        integrations: 'integration',
         members: 'member',
         'api-keys': 'API key',
       } as Record<string, string>
@@ -1149,36 +1085,30 @@ function Resource({
       (!projectId ||
         (page === 'projects'
           ? row.id === projectId
-          : !['scenarios', 'environments', 'runs', 'releases', 'traces'].includes(page) ||
+          : !['scenarios', 'environments', 'runs', 'releases'].includes(page) ||
             row.project_id === projectId)) &&
       JSON.stringify(row).toLowerCase().includes(filter.toLowerCase()),
   );
   const fields =
-    page === 'traces'
-      ? ['name', 'status', 'latency_ms', 'cost_usd', 'occurred_at']
-      : page === 'audit-events'
-        ? ['action', 'actor_id', 'created_at']
-        : page === 'approvals'
-          ? ['action', 'status', 'reason', 'created_at']
-          : page === 'members'
-            ? ['name', 'email', 'role']
-            : page === 'api-keys'
-              ? ['name', 'prefix', 'scopes', 'expires_at', 'revoked_at']
-              : page === 'receipts'
-                ? ['external_id', 'outcome', 'created_at']
-                : [
-                    'name',
-                    ...(page === 'runs'
-                      ? ['revision', 'status']
-                      : page === 'releases'
-                        ? ['revision']
-                        : page === 'runners'
-                          ? ['capabilities', 'last_seen_at']
-                          : page === 'integrations'
-                            ? ['kind', 'status']
-                            : []),
-                    'created_at',
-                  ];
+    page === 'audit-events'
+      ? ['action', 'actor_id', 'created_at']
+      : page === 'approvals'
+        ? ['action', 'status', 'reason', 'created_at']
+        : page === 'members'
+          ? ['name', 'email', 'role']
+          : page === 'api-keys'
+            ? ['name', 'prefix', 'scopes', 'expires_at', 'revoked_at']
+            : [
+                'name',
+                ...(page === 'runs'
+                  ? ['revision', 'status']
+                  : page === 'releases'
+                    ? ['revision']
+                    : page === 'runners'
+                      ? ['capabilities', 'last_seen_at']
+                      : []),
+                'created_at',
+              ];
   return (
     <>
       <div className="page-heading">
@@ -1309,7 +1239,7 @@ function Resource({
               <tr>
                 {fields.map((field) => (
                   <th key={field} scope="col">
-                    {page === 'traces' && field === 'cost_usd' ? 'Cost (USD)' : fieldLabel(field)}
+                    {fieldLabel(field)}
                   </th>
                 ))}
                 <th className="actions">
@@ -1331,12 +1261,7 @@ function Resource({
                             : undefined
                       }
                     >
-                      {page === 'traces' && field === 'cost_usd' ? (
-                        <>
-                          {traceCost(row).value}
-                          <span className="incident-source-label">{traceCost(row).state}</span>
-                        </>
-                      ) : ['status', 'severity', 'outcome'].includes(field) ? (
+                      {field === 'status' ? (
                         <StatusBadge value={row[field]} />
                       ) : field.endsWith('_at') && row[field] ? (
                         <RelativeTime value={row[field]} />
@@ -1354,7 +1279,7 @@ function Resource({
                       aria-label={`Open ${recordName(row)}`}
                       onClick={(event) => {
                         opener.current = event.currentTarget;
-                        if (['runs', 'traces'].includes(page))
+                        if (page === 'runs')
                           void action(
                             `/${page}/${encodeURIComponent(row.id)}`,
                             undefined,
@@ -1490,19 +1415,7 @@ function Resource({
               Close
             </button>
           </div>
-          {page === 'traces' ? (
-            <TraceDetails
-              value={detail as TraceDetail}
-              workspace={workspace}
-              role={role}
-              onRecorded={async () => {
-                const id = (detail as TraceDetail).trace.id;
-                setDetail(await api<TraceDetail>(`/traces/${encodeURIComponent(id)}`, workspace));
-              }}
-            />
-          ) : (
-            <RecordDetails value={detail} />
-          )}
+          <RecordDetails value={detail} />
         </section>
       )}
     </>
@@ -1522,7 +1435,6 @@ function RecordForm({
 }) {
   const [choices, setChoices] = useState<Record<string, Row[]>>({});
   const [selectedProject, setSelectedProject] = useState(projectId);
-  const [releaseApproval, setReleaseApproval] = useState(false);
   const [choicesLoading, setChoicesLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1627,9 +1539,7 @@ function RecordForm({
                     onChange={
                       field.key === 'project_id'
                         ? (event) => setSelectedProject(event.target.value)
-                        : field.key === 'release_id'
-                          ? (event) => setReleaseApproval(Boolean(event.target.value))
-                          : undefined
+                        : undefined
                     }
                   >
                     <option value="">{field.optional ? 'None' : 'Choose…'}</option>
@@ -1651,7 +1561,7 @@ function RecordForm({
                           </option>
                         ))}
                   </select>
-                ) : field.key === 'action' && releaseApproval ? (
+                ) : field.key === 'action' ? (
                   <>
                     <input name="action" value="release" readOnly />
                     <span className="hint">

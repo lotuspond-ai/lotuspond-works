@@ -43,7 +43,7 @@ The API needs `LOTUSPOND_MFA_ENCRYPTION_KEY`: a distinct, stable URL-safe base64
 
 Back up the encryption key separately from the database and test their recovery together in an isolated installation. Replacing or losing the key makes existing encrypted authenticator secrets unusable. Automated key rotation is not provided. Plan a reviewed re-encryption migration before rotating it. All API instances must use the same key.
 
-Without a configured key, new enrollment is unavailable and production platform-operator access remains blocked. An already enabled account never falls back to password-only sign-in. Background evaluation, mail and alert workers do not need the MFA key.
+Without a configured key, new enrollment is unavailable and production platform-operator access remains blocked. An already enabled account never falls back to password-only sign-in. The background mail worker does not need the MFA key.
 
 Authenticator codes work without outbound network access. Air-gapped installations still require internal HTTPS, trusted key delivery, accurate clocks, protected backups and a way for users to retain recovery codes. See [offline identity](offline-identity.md) for the separate initial enrollment process.
 

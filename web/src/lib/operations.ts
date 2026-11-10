@@ -10,7 +10,7 @@ export function elapsedSeconds(value: number | null | undefined): string {
   if (hours < 24) return `${hours}h ${minutes % 60}m`;
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
-export type WorkerRole = 'evaluation' | 'mail' | 'alert';
+export type WorkerRole = 'mail';
 export type WorkerObservation = {
   state: 'fresh' | 'stale' | 'missing' | 'not_configured' | 'unavailable' | 'disabled';
   last_poll_at: string | null;
@@ -29,7 +29,6 @@ export type QueueState = {
 };
 export type OperationsSnapshot = {
   observed_at: string;
-  window: { start_at: string; end_at: string; duration_seconds: number };
   dependencies: {
     database: { state: 'ok' };
     redis: { state: 'ok' | 'not_configured' | 'unavailable' };
@@ -39,7 +38,6 @@ export type OperationsSnapshot = {
     { role: WorkerRole; enabled: boolean; observation: WorkerObservation }
   >;
   queues: Record<WorkerRole, QueueState>;
-  assessments_last_24h: { failed: number; unknown: number };
 };
 
 export function pollLabel(state: WorkerObservation['state']): string {
