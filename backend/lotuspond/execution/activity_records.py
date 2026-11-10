@@ -4,10 +4,11 @@ Everything here is reconstructed from persisted rows: the verified program closu
 the deployment revision's canonical configuration and the exact connection version.
 Nothing comes from a request body. Callers hold the locks; these helpers only read.
 
-Lock order for every activity service (a subsequence of Task 5's order): installation
-cursor (only when capacity counters change), workspace and E03 fleet rows (pool,
-connections, instance, sessions, credential), environment capacity, deployment and
-revision, execution, step, attempts, reservations, delivery, lease.
+Lock order for every activity service (a subsequence of Task 5's order): workspace
+and E03 fleet rows (pool, connections, instance, sessions, credential), environment
+capacity (only when capacity counters change), deployment and revision, execution,
+step, attempts, reservations, delivery, lease. No activity service takes the
+installation cursor: only a slot-taking reservation does, last (`budgets`).
 """
 
 import json
@@ -106,10 +107,6 @@ def scope_of(row) -> Scope:
     return Scope(
         workspace_id=row.workspace_id, project_id=row.project_id, environment_id=row.environment_id
     )
-
-
-def canonical_text(value) -> str:
-    return canonical_value(value).decode("utf-8")
 
 
 def _schema(schema, definitions):
@@ -488,13 +485,4 @@ def signature_text(signature) -> str:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
-    )
-
-
-def delivery_for(db, scope, attempt_id):
-    return db.scalar(
-        scoped(ExecutionActivityDelivery, scope)
-        .where(ExecutionActivityDelivery.attempt_id == attempt_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
     )

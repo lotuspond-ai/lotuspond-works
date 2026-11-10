@@ -56,8 +56,15 @@ def test_duplicate_conflicting_out_of_order_and_late_signals(system):
     execution_id = operator.start(customer, revision)["id"]
     first = operator.open_wait(customer, execution_id, "signal0")
     receipt = operator.signal(customer, execution_id, first["id"], "a", 7)
-    # Duplicate: an equal retry returns the same receipt, and nothing changes.
-    assert operator.signal(customer, execution_id, first["id"], "a", 7) == receipt
+    # Duplicate: an equal retry returns the same receipt, and nothing changes. Its
+    # status is the signal's current one (`accept_signal` replays a receipt whatever
+    # the wait's state now, Task 13), so an orchestrator that consumed the first in
+    # between makes it later, never earlier: pending, leased, delivered. The single
+    # inbox row is counted at the end.
+    again = operator.signal(customer, execution_id, first["id"], "a", 7)
+    order = ["pending", "leased", "delivered"]
+    assert again["id"] == receipt["id"], (receipt, again)
+    assert order.index(again["status"]) >= order.index(receipt["status"]), (receipt, again)
     # Conflicting: the same signal ID with another payload.
     with pytest.raises(Refused) as conflict:
         operator.signal(customer, execution_id, first["id"], "a", 8)

@@ -3,7 +3,7 @@
 import time
 
 import pytest
-from driver import Refused, form_package, serving, two_reads
+from driver import Refused, form_package, patient_read, serving, two_reads
 from processes import Processes
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -121,7 +121,10 @@ def test_cancelling_before_dispatch_signs_nothing_and_calls_nothing(system, linu
     """Spike 26 (cancel before dispatch) and 27 (a cancelled execution never succeeds)."""
     w = system
     operator, customer = w.operator, w.customer
-    revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # the control read's lease may run to its 30 s deadline
+    revision = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     execution_id = operator.start(customer, revision)["id"]
     operator.control(customer, execution_id, "cancel")
     view = operator.settled(customer, execution_id, {"cancelled", "succeeded", "failed"})

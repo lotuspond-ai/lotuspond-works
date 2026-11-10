@@ -93,7 +93,7 @@ const glyphs: Record<GlyphName, ReactNode> = {
     node(32, 22, 4.6, 2, 'node node-warm'),
     node(42, 40, 4, 2),
   ],
-  // Air-gapped: a sealed dial; nothing inside reaches the rim.
+  // Sealed: a closed dial; nothing inside reaches the rim.
   sealed: [
     stroke('M32 6 A26 26 0 1 1 31.99 6', 0),
     stroke('M32 13 V19', 1, 'ink ink-fine'),

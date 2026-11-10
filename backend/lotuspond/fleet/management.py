@@ -29,6 +29,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .. import authority_gate
 from ..models import (
     Connection,
     ConnectionVersion,
@@ -73,14 +74,17 @@ def checked_scope(db: Session, principal: Principal, project_id: str, environmen
     return scope
 
 
-def record(db: Session, model, scope: Scope, identifier: str, *, lock=False):
+def record(db: Session, model, scope: Scope, identifier: str, *, lock=False, share=False):
     from lotuspond_runtime.protocol import CanonicalUUID
 
     identifier = TypeAdapter(CanonicalUUID).validate_python(identifier, strict=True)
     query = scoped(model, scope).where(model.id == identifier)
     # Lock the current database row and replace any earlier identity-map state.
-    # Caller-owned sessions may already retain a pre-revocation object.
-    if lock:
+    # Caller-owned sessions may already retain a pre-revocation object. `share` takes
+    # it FOR SHARE, which still fences its revocation (`lock_pool`).
+    if share:
+        query = query.with_for_update(read=True).execution_options(populate_existing=True)
+    elif lock:
         query = query.with_for_update().execution_options(populate_existing=True)
     row = db.scalar(query)
     if row is None:
@@ -221,6 +225,8 @@ class ManagementService:
 
     def lock_scope(self, scope):
         scope = Scope.model_validate(scope)
+        # The fair gate first, exclusive (`authority_gate`); held already by a route.
+        authority_gate.workspace(self.db, scope.workspace_id, exclusive=True)
         workspace = self.db.scalar(
             select(Workspace)
             .where(Workspace.id == scope.workspace_id)

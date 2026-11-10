@@ -355,3 +355,24 @@ def test_only_a_stopped_never_claimed_attempt_is_released(activity):
             )
         )
         assert reservation.state == "released" and charged(db, reservation) == {0}
+
+
+def test_an_expiry_takes_no_installation_cursor(activity):
+    """Finding 11: the sweeper's expiry returns its slot without the cursor."""
+    from lotuspond.execution.budgets import installation_active
+
+    from .cursor_checks import without_cursor
+
+    h = activity
+    _, attempt_id = h.ready("activity_read")
+    envelope = json.loads(h.dispatch(attempt_id).envelope)
+    until(h, envelope["expires_at_ms"])
+
+    def expire():
+        with Session(h.engine) as db, db.begin():
+            return h.leases.expire_delivery(db, envelope["delivery_id"])
+
+    assert without_cursor(h.engine, expire) is True
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, attempt_id).state == "failed"
+        assert installation_active(db) == 0

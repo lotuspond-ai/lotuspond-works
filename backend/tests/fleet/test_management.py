@@ -129,16 +129,11 @@ def test_api_key_and_platform_operator_no_bypass(client, fleet, account, app, db
     assert post(client, f"{fleet}/connections", {"name": "A"}).status_code == 403
 
 
-@pytest.mark.parametrize("failure", ["suspended", "mfa", "verification"])
+@pytest.mark.parametrize("failure", ["suspended", "verification"])
 def test_current_session_eligibility(client, fleet, account, app, db_factory, failure):
     with db_factory.begin() as db:
         if failure == "suspended":
             db.get(models.Workspace, account).status = "suspended"
-        elif failure == "mfa":
-            object.__setattr__(app.state.settings, "require_mfa", True)
-            from pydantic import SecretStr
-
-            object.__setattr__(app.state.settings, "mfa_encryption_key", SecretStr("synthetic"))
         else:
             object.__setattr__(app.state.settings, "env", "production")
     assert client.get(f"{fleet}/connections").status_code == 403

@@ -136,7 +136,6 @@ def test_result_racing_lease_lapse_ends_in_exactly_one_outcome(activity, release
 
     def report():
         with Session(h.engine) as db, db.begin():
-            h.activities.lock_cursor(db)
             h.activities.record_activity_result(
                 db,
                 h.principal_runtime,

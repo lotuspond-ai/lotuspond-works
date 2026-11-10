@@ -1,7 +1,11 @@
 """Atomic execution admission. All writes belong to the caller's transaction.
 
-Acquire the configured installation cursor before authenticating a transport actor
-in the same transaction. Actor objects convey identity, never reusable authority.
+Authority is current in the same transaction: the workspace and account rows are
+locked first, then Task 5's parents. The provider lookups precede the first lock
+(`AdmissionService._lookups`), and the final guard (`_final`) repeats and compares
+them, so a tenant's workspace row is not held while they wait. Admission changes
+only its environment's counters, so it never takes the installation cursor. Actor
+objects convey identity, never reusable authority.
 Service instances/providers are long-lived, explicitly provisioned dependencies.
 """
 
@@ -12,7 +16,6 @@ from lotuspond_runtime.protocol import OpaqueId
 from lotuspond_sdk.activity import ArtifactHandle
 from lotuspond_sdk.executable.input import project_json
 from lotuspond_sdk.executable.types import validate_value
-from lotuspond_sdk.executable.validation import validate_executable_package
 from pydantic import TypeAdapter
 
 from ..fleet.authority import database_now_ms
@@ -24,11 +27,12 @@ from ..models import (
     ExecutionRequest,
     new_id,
 )
+from . import memo
 from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
-from .authorization import lock, mark_replay, reauthorize, record, scoped
+from .authorization import ExecutionActor, lock, mark_replay, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
-from .deployments import _configuration, _pool, _stored_configuration, load_deployment
+from .deployments import _configuration, _pool, _stored_configuration, gates, load_deployment
 from .errors import ExecutionError, execution_service
 from .interpreters import require_interpreter
 from .orchestrator import mark_runnable
@@ -60,6 +64,14 @@ def execution_view(row):
         deadline_ms=row.deadline_ms,
         result=result,
         next_event_sequence=row.next_event_sequence,
+    )
+
+
+def _copy(request):
+    request = AdmissionRequest.model_validate(request)
+    return AdmissionRequest(
+        deployment_revision_id=request.deployment_revision_id,
+        input=project_json(request.input),
     )
 
 
@@ -105,25 +117,58 @@ class AdmissionService:
         except ExecutionError:
             raise ValueError("Unregistered interpreter version") from None
 
+    def _lookups(self, db, actor):
+        """The provider lookups admission needs, made before its first row lock.
+
+        Each result is used only after `reauthorize`, is checked under the locks
+        exactly as one looked up there, and `_final` looks every one up again and
+        compares, so none is authority by itself. Nothing is disclosed before
+        authorization: a lookup that refuses is left out (None) and repeated at its
+        usual place under the locks, which refuses in the usual order.
+        """
+
+        def attempt(lookup, *args):
+            try:
+                return lookup(*args)
+            except ExecutionError:
+                return None
+
+        if type(actor) is not ExecutionActor:
+            return None, None, None  # `reauthorize` refuses it first, as before
+        return (
+            attempt(self.budgets.deployments.current, db, actor.scope),
+            attempt(self.budgets._grants, db, actor.scope),
+            attempt(self.artifacts._key, actor.scope, self.policy.key_id),
+        )
+
     @execution_service
     def admit_execution(
         self, db, actor, request: AdmissionRequest, request_key: str
     ) -> ExecutionView:
-        self.budgets._cursor(db)  # first lock, before current customer authority
-        actor = reauthorize(db, actor, "execute")
-        request = AdmissionRequest.model_validate(request)
         # Frozen DTOs may still contain caller-owned mutable JSON containers.
         # Copy before provider calls without normalizing numbers: only the declared
-        # schema may select a numeric domain. Identity and storage share this copy.
-        request = AdmissionRequest(
-            deployment_revision_id=request.deployment_revision_id,
-            input=project_json(request.input),
+        # schema may select a numeric domain. Identity and storage share this copy. An
+        # invalid request is refused at its usual place, after authorization.
+        try:
+            copied = _copy(request)
+        except Exception:
+            copied = None
+        # Finding 11, part 6: look up first, so the tenant's workspace row is held for
+        # one load of the deployment and the final guard (`_final`), not four of each.
+        snapshot, grants, artifact_key = self._lookups(db, actor)
+        # The fair gates, before the first row lock (`authority_gate`).
+        gates(
+            db, actor.scope, getattr(request, "deployment_revision_id", None), users=[actor.user_id]
         )
+        actor = reauthorize(db, actor, "execute")  # first lock: the workspace row
+        request = copied if copied is not None else _copy(request)
         key = request_identity(request_key)
         digest = sha256(
             canonical_value({"operation": "admission", **request.model_dump(mode="json")})
         ).hexdigest()
-        _, capacity, revision, _ = self.budgets._parents(db, actor, request.deployment_revision_id)
+        _, capacity, revision, _ = self.budgets._parents(
+            db, actor, request.deployment_revision_id, snapshot=snapshot
+        )
         existing = lock(
             db, scoped(ExecutionRequest, actor.scope).where(ExecutionRequest.request_key == key)
         )
@@ -143,19 +188,27 @@ class AdmissionService:
             mark_replay(db)
             return execution_view(row)
         deployment = record(
-            db, ExecutionDeployment, actor.scope, revision.deployment_id, locked=True
+            db, ExecutionDeployment, actor.scope, revision.deployment_id, shared=True
         )
         if deployment.active_revision_id != revision.id:
             raise ExecutionError("deployment_unavailable")
         publication = record(db, ExecutablePublication, actor.scope, revision.publication_id)
-        package = validate_executable_package(json.loads(publication.canonical_package))
+        package = memo.package(json.loads(publication.canonical_package))
         validate_value(request.input, package.input_schema, package.schemas)
         admitted_at = database_now_ms(db)
-        grant, tenant, recovery = self.budgets._grants(db, actor.scope)
+        if grants is None:
+            grant, tenant, recovery = self.budgets._grants(db, actor.scope)
+        else:
+            grant, tenant, recovery = grants
+            self.budgets._expiry(db, grant, tenant)
         limits, _, _ = self.budgets._limits(db, actor.scope, revision, grant, tenant)
         deadline = admitted_at + limits["elapsed_seconds"] * 1000
-        handle = self.artifacts.put(db, actor, canonical_value(request.input), self.policy)
-        self.budgets.reserve_admission(db, actor, revision.id)
+        handle = self.artifacts.put(
+            db, actor, canonical_value(request.input), self.policy, key=artifact_key
+        )
+        # `reserve_admission`'s checks, on the parents and limits already held here;
+        # `_final` below is its final guard too.
+        self.budgets._count_admission(db, capacity, limits)
         # Consume only this transaction's just-reserved value under the same row lock.
         sequence = capacity.next_admission_sequence - 1
         row = Execution(

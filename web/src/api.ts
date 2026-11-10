@@ -4,7 +4,6 @@ export type Workspace = {
   name: string;
   kind: 'personal' | 'organization';
   role: string;
-  require_mfa?: boolean;
 };
 export type Account = {
   user: {
@@ -14,7 +13,7 @@ export type Account = {
     is_platform_admin: boolean;
     email_verified: boolean;
     identity_verified?: boolean;
-    identity_verification_source?: 'mailbox' | 'operator_attested' | null;
+    identity_verification_source?: 'mailbox' | null;
   };
   workspaces: Workspace[];
   mfa?: {
@@ -23,12 +22,10 @@ export type Account = {
     session_verified: boolean;
     recovery_codes_remaining: number;
     required_for_privileged: boolean;
-    required_by_installation?: boolean;
   };
   capabilities?: {
     mail_enabled: boolean;
     registration_enabled: boolean;
-    offline_enrollment_enabled?: boolean;
   };
 };
 // A field-level problem the server reports without echoing the submitted value.

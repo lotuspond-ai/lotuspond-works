@@ -134,9 +134,14 @@ class Proxy:
 class Processes:
     """The API, workers and runtimes of one world, each in its own process group."""
 
-    def __init__(self, world: worlds.World, *, python=None, cwd=None, api_workers=1):
+    def __init__(
+        self, world: worlds.World, *, python=None, cwd=None, api_workers=1, engine_cpus=None
+    ):
         self.world = world
         self.api_workers = api_workers  # API processes on one socket; restarts keep it
+        # Test-only (tier 3): a CPU list such as "0-3" for the API and the workers, set
+        # with taskset. Runtimes keep the starting process's own affinity.
+        self.engine_cpus = engine_cpus
         self.python = python or sys.executable
         self.cwd = cwd or Path(__file__).resolve().parents[3]
         self.children = {}
@@ -144,7 +149,9 @@ class Processes:
         self.api_port = None
         self.ca, _ = None, None
 
-    def _spawn(self, name, args, *, env=None):
+    def _spawn(self, name, args, *, env=None, cpus=None):
+        if cpus is not None:
+            args = ["taskset", "--cpu-list", cpus, *args]  # it execs: the pid is the child's
         previous = self.children.get(name)
         if previous is not None and (previous.poll() is None or not _absent(previous.pid)):
             raise AssertionError(f"{name} is still running")  # never orphan a live group
@@ -183,7 +190,7 @@ class Processes:
             args += ["--port", str(self.api_port)]
         if self.api_workers != 1:
             args += ["--workers", str(self.api_workers)]
-        process = self._spawn("api", args)
+        process = self._spawn("api", args, cpus=self.engine_cpus)
         state = wait_for(
             lambda: process.poll() is None and path.exists() and self.world.state("api"), 60
         )
@@ -213,7 +220,7 @@ class Processes:
         for interpreter in interpreters or ():
             args += ["--interpreter", interpreter]
         (worlds.private_directory(self.world.root / "ready") / name).unlink(missing_ok=True)
-        process = self._spawn(name, args)
+        process = self._spawn(name, args, cpus=self.engine_cpus)
         if wait:
             self.wait_ready(name)
         return process
@@ -407,7 +414,10 @@ def _clean_environment() -> dict:
     keep = {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR"}
     # Test-only measurement files (tier 3), never configuration.
     keep |= {"LOTUSPOND_CONFORMANCE_CURSOR_LOG", "LOTUSPOND_CONFORMANCE_CYCLE_LOG"}
+    keep.add("LOTUSPOND_CONFORMANCE_LOOKUP_LOG")  # provider lookups that waited (tier 3)
+    keep |= {"LOTUSPOND_CONFORMANCE_CALL_LOG", "LOTUSPOND_CONFORMANCE_PROFILE_DIRECTORY"}
     keep.add("LOTUSPOND_CONFORMANCE_PRIVILEGE_LOG")  # the worker grants, measured
+    keep.add("LOTUSPOND_CONFORMANCE_GATE_LOG")  # fair gate requests by caller (tier 3)
     return {key: value for key, value in os.environ.items() if key in keep}
 
 

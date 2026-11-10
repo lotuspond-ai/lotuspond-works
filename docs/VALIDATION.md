@@ -1221,6 +1221,127 @@ Same branch, draft PR #17. This is local Linux evidence only: GitHub Actions sti
 
 **Not done:** hosted CI, and merging into `main` (not requested).
 
+## Conformance budgets for GitHub's hosted runner, 2026-11-03
+
+Test-only, on branch `claude/hosted-conformance-budgets` from `main` at `533b3d6`. No engine, runtime or SDK code changes.
+
+**What failed.** GitHub Actions started this repository's jobs again on 2 November, after the billing block. Its required `conformance` job failed on `main`'s own code, while every other job passed:
+
+- Run 41399789367, `claude/e05-actions-spec` at `6fd0f3a` (documents only): 4 failed, 44 passed, in 87 min.
+- Run 41582129024, PR #18 (`533b3d6` plus unused-code removal): 3 failed, 45 passed, in 73 min.
+- Both runs failed the reference agent (`test_the_reference_agent_calls_its_model_and_tool_as_counted`), TEN-7 (`test_no_record_of_one_tenant_names_another`), and the installed journey's `reference_workflow_result_and_calls`, in both its `runtime` and `rebuilt` variants. The first run also failed REG-2, the 1,000-item iteration.
+- Each failure ended `execution stayed reconciliation_required`, after `POST /api/v1/runtime/activities/renew` (or `results`) answered `409 conflict`. A claimed attempt's lease ended before its outcome arrived, so the attempt was uncertain, as designed.
+- The local runner had passed all 48 cases at `7d2e97c`.
+
+**The hosted runner is slower.** The repository is private, so `ubuntu-latest` is GitHub's standard x86_64 runner, which GitHub documents as 2 vCPUs for private repositories. The job shares them with its PostgreSQL service. The job log prints no core count. The local runner is a 4-vCPU arm64 Docker VM on an M3 Pro. Cases that passed in both places took 1.5–1.9× as long on the hosted runner:
+
+| Case | Local, `7d2e97c` and `34de53a` | Hosted, the two runs |
+| --- | --- | --- |
+| REG-2, the iteration | 1,126 and 1,152 s | 3,053 s (failed) and 2,182 s |
+| The largest expansion | 166 and 191 s | 285 and 287 s |
+| The stalled orchestrator | 176 and 161 s | 288 and 289 s |
+
+**The budgets these cases had.** A lease ends at the earliest of 60 s, the step's deadline, and the attempt's reservation plus its reserved active time, `demand.active_ms` (`dispatch.py`, `leases.py`). Renewal never passes that end.
+
+- **The reference agent.** Its root and its three children (model, read, model) each reserve `demand.active_ms`. Each is charged at least that against the agent's active budget (`budgets.py`). That budget is the smallest `active_seconds` and agent or model `timeout_seconds` among the limits that apply: 30 s here. A stopped attempt keeps the larger of its reservation and its actual time. So the case could reserve at most 7.5 s per attempt, and it used 7 s. The children run inside the root's lease, so the root, its three children and the root's own report had 7 s in all.
+- **TEN-7.** Its reads used the fixture `activity_read`, whose 2 s step deadline is also its lease. This is the class `34de53a` fixed for REV-6 and RESTORE-1, and the "Residual" note of 28 October.
+- **REG-2.** Each of its 1,000 reads reserved 10 s, under a 30 s step deadline, with five in flight.
+
+**How it was measured.** A scratch probe, not committed, ran each workload and read every attempt's reservation and lease rows. It ran in the local runner, one job at a time. To stand in for the hosted runner, the runner container and its PostgreSQL container were pinned to the same 2 CPUs with a quota of 1 CPU each (`--cpuset-cpus 0,1 --cpus 1.0`). At that setting the installed journey took 137 s when it passed. The hosted runs took 373–378 s, which includes two 122 s failures, so about 128 s of passing work. The Mac was on battery, with a load average of 4–7, for every probe run.
+
+**Measured at `533b3d6`.** Times are from the attempt's reservation.
+
+- **The reference agent.** In seven probe runs across four settings, its root was uncertain six times, each time with its lease ending at exactly 7,000 ms.
+  - Unpinned, the second child finished at 6,207 and 6,590 ms, and the third had not started.
+  - At the hosted-like setting, the third child was claimed at 6,627 and 6,808 ms.
+  - The one success, pinned to 2 CPUs without a quota, used 6,499 ms of the 7,000.
+- **TEN-7.** Seven of its eight reads across four settings ended uncertain. They were claimed 1.2–3.4 s after reservation, with 27–1,572 ms of their 2 s deadline left. At 0.5 CPU each, both reads also failed twice before dispatch.
+- **REG-2**, at the hosted-like setting: a read's result answered `409 conflict`, the execution was held, and fewer than 300 of the 1,000 reads had run after 1,200 s, so the case reported "the iteration stalled".
+
+**Measured with the new budgets.**
+
+- **The reference agent.** With the 7 s cap gone, its root needed:
+  - 7,035 ms unpinned;
+  - 7,016–11,907 ms at the hosted-like setting;
+  - 19,238–20,585 ms at 0.5 CPU each, a harsher setting.
+- **TEN-7.** Its 30 s reads completed in 1.3 s, 3.0–3.6 s and 6.8–9.3 s at the same three settings.
+- **REG-2**, at the hosted-like setting with 30 s per read: it succeeded in 1,954 s, with no uncertain attempt.
+  - Reservation to claim: median 1.9 s, 99th percentile 4.5 s, maximum 12.1 s.
+  - Reservation to stop: median 4.7 s, 99th percentile 9.4 s, 99.9th percentile 16.6 s, maximum 17.7 s.
+  - 7 reads took longer than the old 10 s.
+
+**A second mechanism, not changed.** In two of six TEN-7 runs with 30 s reads, both before the wait became 180 s, one tenant's runtime exited at start. Its `GET /api/v1/runtime/self` answered 503 `authority_unavailable`.
+
+- The API runs at most one recovery-authority lookup per process and refuses a concurrent one (`fleet/authority.py`, `_LookupSlot`).
+- The runtime supervisor ends on an error from its own calls (`supervisor.py`, `run`). The activity worker's polls survive the same 503, and the hosted TEN-7 logs show those.
+- TEN-7 accepts `failed` as well as `succeeded`. A 2 s read with no runtime failed within seconds. A 30 s read takes three deadlines: a probe with no runtime for one tenant reached `failed` after 93–97 s, past the case's 90 s wait.
+
+**Fixes, all in tests (`9f4b9e2`).** No check was removed or loosened.
+
+- **`patient_agent()`** (`driver.py`): `agent_tools` with a 240 s agent deadline: the step's limit and retry timeout, the model document's limit and the package's `active_seconds`. The model document is renamed `model-tools-fixture-240`, because publications are unique by name and version.
+- **The reference agent**, the case and the installed scenario: it uses `patient_agent()` with 50 s per attempt (4 × 50 s = 200 s, within 240 s), and its runtimes install that model document. Its checks are unchanged: succeeded, two model calls, one read, four claimed attempts.
+- **TEN-7:** both tenants deploy `patient_read()`, each attempt reserves 30 s, and the case waits 180 s, which covers its accepted `failed` after three 30 s deadlines. The check for foreign IDs is unchanged.
+- **The installed journey's claim, result and transition rollbacks:** they deploy `patient_read()`. At the hosted-like setting, 2 of these 24 reads lapsed at the unchanged code, although they passed 24 of 24 on the hosted runner. Their checks are unchanged: one injected failure, succeeded, one provider call, gap-free events. The projection rollback keeps the 2 s read, because its hand-driven runtime only polls.
+- **REG-2:** each read reserves 30 s, its read's own step deadline. Its checks are unchanged: one call per item, output in input order, never more than five in flight.
+
+**Runs at `9f4b9e2`**, in the local runner, one job at a time, not hosted CI.
+
+- **The whole `conformance` job at the hosted-like setting**, on a clean clone: **47 passed, 1 failed**, in 53 min 44 s.
+  - Every changed case passed: the reference agent, TEN-7, REG-2 (1,765 s) and the installed journey (100 s, all 32 scenarios).
+  - The failure was `test_a_read_runs_once_on_a_real_runtime`, the session's first case: one unchanged 2 s read, uncertain. Alone at the same setting it then passed 5 of 5, in 5–16 s. It passed in both hosted runs.
+- **Earlier runs with the same agent and TEN-7 budgets**, two at the hosted-like setting and one at 0.5 CPU each: the reference agent and TEN-7 passed 3 of 3, and so did the installed reference scenario.
+- The Mac was on battery for most of these runs, and on AC from about 14:45 IST.
+
+**The first hosted run of these fixes**, run 41611114067 on PR #19 at `e05e313`: 3 failed, 45 passed, in 89 min.
+
+- Every case changed in `9f4b9e2` passed: the reference agent (16 s), TEN-7, REG-2 (3,025 s) and the installed journey (198 s, all scenarios).
+- This runner was slower again. The largest expansion took 373 s and the stalled orchestrator 370 s, against 285–289 s in the two earlier hosted runs.
+- **ENG-5** (`test_replaying_events_reproduces_the_projected_state`) and **REV-5** (`test_withdrawn_revisions_get_no_further_activities`) each ended `execution stayed reconciliation_required`, after `renew` answered `409 conflict`. Both read with the 2 s fixture read; REV-5's follows a timer (`timer_then_read`). This is the class the "Not changed" note below had left.
+- **ENG-4** (`test_event_sequences_are_gap_free_under_concurrent_transitions`) failed with `no open wait at callback` after 60 s. It took 21 s in both earlier hosted runs.
+
+**ENG-4's mechanism.** `waits_fast` is a 2 s timer, then `callback`, an external wait that expires after 3 s; with no signal, the execution fails at that expiry. An execution stays `pending` until the capacity step retains one of its waits, and retention refuses a wait past its deadline (`budgets.py`, `retain_wait`), as designed. The case started 12 executions on two orchestrators, then watched each in turn until its callback was open and the execution was out of `pending`.
+
+- A scratch probe, not committed, ran that workload at the unchanged code. Its observer moved on once a callback had closed. Afterwards it read every wait, retention and event. Runner and PostgreSQL containers were pinned to 2 CPUs, at these quotas:
+  - **0.5 CPU each:** timers fired 0.4–8.3 s after their deadlines, and callbacks opened out of admission order. The observer saw 11 of 12; it reached the ninth execution after that callback had expired.
+  - **0.3 CPU (two runs) and 0.2 CPU:** timers fired 15.7–82.3 s late. Every retention came after its wait's deadline, so no execution left `pending`, and the observer saw none.
+- The unchanged case at 0.5 CPU each failed 2 of 3, with the hosted message. At 0.7 CPU each it passed 3 of 3, in 14–16 s.
+
+**Second fixes, all in tests (`517f56f`).**
+
+- **ENG-4** waits up to 180 s for each execution to end, and checks that each reached its callback. Then it checks the same gap-free sequences, now over each execution's whole life: timer, callback and expiry. The fixture is unchanged, and the case no longer has to watch a 3 s window.
+- **Reads that must complete** deploy `patient_read()`, and each attempt reserves 30 s:
+  - ENG-5, and REV-5's continuing revision through `timer_then_read(3, timeout_seconds=30)`;
+  - `test_a_read_runs_once_on_a_real_runtime` and ENG-2's reads;
+  - DISC-3, and DISC-4's read after reconnection;
+  - the cancellation case's control (spike 26–27), spike 5–7's restart, REV-4's reactivated read (also through `timer_then_read`), and spike 33's control.
+  - Their checks are unchanged: retry bounds, call counts, deliveries, states.
+- **ENG-2's non-conforming model output** uses `patient_agent()`, with 50 s per attempt instead of 5 s. In the first run of the changed cases at 0.5 CPU each, its root's lease ended (`409` on `renew`) before the model's output was reported. Its checks are unchanged: failed, no result, one model call.
+
+**Runs of the second fixes**, in the local runner, one job at a time:
+
+- The three hosted failures, at 0.5 CPU each: passed 3 of 3. ENG-4 took 23–26 s, ENG-5 7–8 s and REV-5 35 s.
+- All 11 changed cases at the hosted-like setting: 11 passed, in 5 min 19 s.
+- The same 11 at 0.5 CPU each: 10 passed, and ENG-2's agent part failed as described above, before its fix.
+- ENG-2 with its agent fix: passed 3 of 3 at 0.5 CPU each, in 26 s, and 1 of 1 at the hosted-like setting, in 13 s.
+- The Mac was on AC, with a background media-analysis process using 2–3 cores for part of these runs.
+
+**Not changed.**
+
+- Engine, runtime and SDK code. No check was removed or loosened; ENG-4 now waits for each execution's end instead of for each callback.
+- The 2 s reads whose short deadline is the point, or whose read is not meant to complete:
+  - DISC-1 and REV-2, where the delivery expires (their next ordinal must still complete within 2 s);
+  - the privacy case and the installed privacy scenario, whose provider raises;
+  - the projection rollback, whose hand-driven runtime only polls;
+  - REV-5's revoked and disabled revisions, which are never dispatched.
+- The privacy agent's 14 s per attempt (root and one child in 30 s). It passed on the hosted runner in 13–19 s.
+- Two single-execution cases watch `waits_fast`'s timer and callback with `open_wait`: `test_an_unregistered_interpreter_is_refused_and_never_claimed` and REG-4 (`test_a_timer_fires_once_at_its_deadline_across_kills`). They passed in all three hosted runs.
+
+**For the owner to decide, not changed here.**
+
+- **A runtime can exit on one refused lookup.** The API refuses a second, concurrent recovery-authority lookup with 503 (`_LookupSlot`), and the runtime supervisor treats that answer to its own calls as fatal. A starting runtime on a busy API can then exit. Polls already retry it. Making the slot wait, or the supervisor retry, would be a product change for E03's runtime.
+
+**Not done:** hosted `conformance` at the second fixes.
+
 ## E03 control transport: one kept connection instead of a resolver and handshake per request, 2026-11-04
 
 Branch `claude/control-transport-reuse`. Local Linux evidence only: no hosted CI, nothing pushed or deployed.
@@ -1287,3 +1408,36 @@ At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominat
 - **So no under-load numbers are claimed.** The rerun needs AC power, a host that isn't swapping, and a snapshot taken inside the steady phase.
 
 **Not done:** hosted CI, a valid tier 3 A/B, and the same change for connector egress in `destination.py`, which still resolves and handshakes per request.
+
+## Retired assurance-era components — 2026-11-05
+
+[ADR-0012](architecture/0012-retire-assurance-extras.md) removes voice, the Gym-Anything sandbox, TypeSafe Jev, the model gateway, trace-plan billing, the Go collector and Rust evidence-core. Local evidence only, at `f0df9af`; no hosted run yet.
+
+- `validate`, run in the local Linux runner (`lotuspond-ci-runner:local`, PostgreSQL 18.6 service) from a clean clone: passed. `npm run check` covered the backend SQLite run (1,049 passed, 194 PostgreSQL-only skips), the SDK (1,514), the runtime (733) and 135 unit tests; `export_schema.py --check` passed, so `schema.sql` is unchanged; `deploy/checks` passed 42; the required PostgreSQL suite passed 1,189 in 30 min 5 s; the image, packaging and strict docs steps passed. The Mac was on battery.
+- `scripts/checks/otlp-interop.py`, which no longer uses the collector, with the official OpenTelemetry Python SDK 1.45.2: protobuf exports straight to the API, with and without gzip, both accepted; 4 of 4 spans stored, no mismatches.
+- Browser, Vite fixture harness and signed-out page at 1440, 768 and 375 px: no voice navigation, no budget field or plan card, a trace-only incident inspector, an older voice-linked incident still showing its session, no horizontal overflow, keyboard focus visible on Settings.
+- **Not run:** the `execution` and `offline-install` jobs (both rebuilt here without the voice bridge, Gym kit and collector), `conformance`, `disruptive`, `load`, `restore` and `protocols`.
+
+## Automation-core trim (ADR-0013) — 2026-11-11
+
+[ADR-0013](architecture/0013-trim-to-the-automation-core.md) retires trace ingestion, monitors and trace assessments with their worker, incident writes and signed alerts with their worker, receipt submission, endpoint registration, approvals for anything but a release, the `ingest` scope for new keys and the License page. Local evidence only, on this Mac (PostgreSQL 14, Node 22), at `904a5db`; no hosted run, because GitHub Actions still refuses jobs over billing.
+
+- Backend lint (`npm run lint:python`), `export_schema.py --check` (so `schema.sql` is unchanged) and `npm run check:contracts` passed.
+- Backend SQLite run: 526 passed, 193 skipped. The 5 `tests/fleet/test_acceptance.py` failures are this Mac's known baseline; the 490 errors are execution tests that require PostgreSQL.
+- Backend PostgreSQL run (`PGTZ=UTC`, conformance excluded): 1,151 passed, 1 skipped, 9 failed in 22 min. Eight are the known macOS `tests/fleet/test_acceptance.py` baseline. `test_sweeper.py::test_no_wake_up_outlasts_the_deadline` passed when rerun alone; this change does not touch `execution/`.
+- New `tests/test_automation_core_trim.py`: 17 passed (retired routes answer 405/404, no new `ingest` keys, release-only approvals, stored traces and incidents readable within their workspace only, no incident counts in summaries, stored receipts in the release export).
+- Web: `tsc --noEmit`, 130 unit tests, `npm run build` and Prettier on every changed file passed. `deploy/checks`: 44 passed, with a local shim exposing Docker's Compose plugin to the test's empty `DOCKER_CONFIG`. Strict MkDocs build passed.
+- Browser, Vite dev server against a disposable schema: the personal workspace sidebar has 17 entries; retired routes return 405/404 on the live API; old bookmarks show "Page not found"; the approval form shows a fixed `release` action; Operations shows only identity mail; the public page has three preview tabs and the new changelog entry; no horizontal overflow at 375 px; no script errors.
+- **Not run:** `execution`, `offline-install`, `conformance`, `disruptive`, `load`, `restore`, `protocols` and `scripts/checks` against a built image.
+
+## Core-loop focus (ADR-0014) — 2026-11-11
+
+[ADR-0014](architecture/0014-focus-on-the-core-loop.md) rewrites `GOAL.md` as the product's single direction and retires air-gapped operation, offline identity enrollment, the organization and installation authenticator requirements, tool authorization, the MCP and A2A runners, the Operations page and the on-premises Compose variant. Local evidence only, on this Mac (PostgreSQL 14, Node 22); no hosted run, because GitHub Actions still refuses jobs over billing.
+
+- Backend lint, `export_schema.py --check` (so `schema.sql` is unchanged) and `npm run check:contracts` passed.
+- Backend PostgreSQL run (`PGTZ=UTC`, conformance excluded) at `677473a`: 1,125 passed, 1 skipped, 8 failed in 15 min. All eight are the known macOS `tests/fleet/test_acceptance.py` baseline. Later commits change only web code and docs.
+- Backend SQLite run without the PostgreSQL-only execution tests: 467 passed, with the 5 known macOS fleet failures and one package-authority case for the retired organization requirement, since removed (`test_packages.py`: 50 passed).
+- New `tests/test_core_focus.py` (9 passed) and the rewritten offline-identity case in `test_identity_lifecycle.py`: retired routes answer 405/404, settings and workspaces no longer report an authenticator requirement, a stored organization requirement no longer holds members, the retired settings are ignored, new policies cannot declare tool lists, and a stored unfinished offline enrollment still blocks its account while an attestation no longer verifies it.
+- Web: `tsc --noEmit`, 114 unit tests, `npm run build` and Prettier on every changed file passed. Protocol adapters (HTTP only): 17 passed. `deploy/checks`: 16 passed, with the local shim exposing Docker's Compose plugin. Strict MkDocs build passed.
+- Browser, Vite dev server against the disposable schema: Settings shows only the workspace name and identity card, Administration has Overview, Workspaces and Users, the policy form has no tool lists, retired routes return 405/404 on the live API, `/me` reports only the mail and registration capabilities, and the public deployment section describes the one service install and the execution image. No script errors.
+- **Not run:** `execution` (built image), `conformance`, `disruptive`, `load`, `restore` and `scripts/checks` against a built image.

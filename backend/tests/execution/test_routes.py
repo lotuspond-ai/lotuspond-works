@@ -183,7 +183,8 @@ def test_runtime_credentials_cannot_enter_customer_routes(api):
 
 def test_human_form_rejects_api_key(api):
     h = api
-    execution_id = h.start("waits_fast", None, "waits.policy")
+    # The callback keeps its hour: a 3 s expiry lapsed before the signal on a slow host.
+    execution_id = h.start("waits_fast_timer", None, "waits.policy")
     h.run()
     until(h, wait_of(h, execution_id, "pause").deadline_ms)
     h.sweep()

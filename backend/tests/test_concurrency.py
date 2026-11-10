@@ -8,13 +8,10 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import event, func, select
 
-from lotuspond import identity
-from lotuspond.evaluation.models import EvaluationProvenance, EvaluationResult
+from lotuspond import authority_gate, identity
 from lotuspond.mail import decrypt_payload
 from lotuspond.models import (
-    Assessment,
     IdentityChallenge,
-    Incident,
     Invitation,
     LoginSession,
     MailOutbox,
@@ -22,7 +19,6 @@ from lotuspond.models import (
     User,
 )
 from lotuspond.security import verify_password
-from lotuspond.worker import claim_next_job, complete_job
 
 
 def enable_test_mail(settings):
@@ -92,18 +88,22 @@ def test_old_password_login_waits_for_password_change(app, engine, client, accou
     def verify(password, encoded):
         if getattr(request_thread, "changing", False):
             changing.set()
-            assert login_waiting.wait(5), "The competing login did not reach its user lock"
+            assert login_waiting.wait(5), "The competing login did not reach its user gate"
         return real_verify(password, encoded)
 
     # FastAPI's sync route runs in an AnyIO worker, so label the requests at the
-    # SQL boundary instead of relying on the caller thread's name.
+    # SQL boundary instead of relying on the caller thread's name. The login waits at
+    # the user's fair gate, taken before its row lock (`authority_gate`).
     def observe(connection, cursor, statement, parameters, context, many):
-        if "FROM users" in statement and "FOR UPDATE" in statement:
-            if not changing.is_set():
-                request_thread.changing = True
-            else:
-                request_thread.changing = False
-                login_waiting.set()
+        if "FROM users" in statement and "FOR UPDATE" in statement and not changing.is_set():
+            request_thread.changing = True
+        elif (
+            changing.is_set()
+            and "pg_advisory_xact_lock(" in statement
+            and parameters.get("namespace") == authority_gate.USER
+        ):
+            request_thread.changing = False
+            login_waiting.set()
 
     event.listen(engine, "before_cursor_execute", observe)
     monkeypatch.setattr(identity, "verify_password", verify)
@@ -146,47 +146,61 @@ def test_postgres_invitation_acceptance_is_single_consumer(
         pytest.skip("Invitation contention requires isolated PostgreSQL")
     enable_test_mail(app.state.settings)
     with TestClient(app, headers={"origin": "http://testserver"}) as invitee:
-        assert invitee.post(
-            "/api/v1/auth/register",
-            json={
-                "email": "concurrent-invitee@example.com",
-                "name": "Concurrent Invitee",
-                "password": "a-valid-test-password",
-            },
-        ).status_code == 201
+        assert (
+            invitee.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "concurrent-invitee@example.com",
+                    "name": "Concurrent Invitee",
+                    "password": "a-valid-test-password",
+                },
+            ).status_code
+            == 201
+        )
     with db_factory.begin() as db:
         user = db.scalar(select(User).where(User.email == "concurrent-invitee@example.com"))
         user.email_verified = True
-    assert client.post(
-        "/api/v1/invitations",
-        json={"email": "concurrent-invitee@example.com", "role": "editor"},
-    ).status_code == 201
+    assert (
+        client.post(
+            "/api/v1/invitations",
+            json={"email": "concurrent-invitee@example.com", "role": "editor"},
+        ).status_code
+        == 201
+    )
     token = queued_token(db_factory, app.state.settings, "invitation")
     barrier = Barrier(2)
 
     def accept():
         with TestClient(app, headers={"origin": "http://testserver"}) as caller:
-            assert caller.post(
-                "/api/v1/auth/login",
-                json={
-                    "email": "concurrent-invitee@example.com",
-                    "password": "a-valid-test-password",
-                },
-            ).status_code == 200
+            assert (
+                caller.post(
+                    "/api/v1/auth/login",
+                    json={
+                        "email": "concurrent-invitee@example.com",
+                        "password": "a-valid-test-password",
+                    },
+                ).status_code
+                == 200
+            )
             barrier.wait(timeout=5)
             response = caller.post("/api/v1/invitations/accept", json={"token": token})
             return response.status_code
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        statuses = [future.result(timeout=10) for future in [pool.submit(accept), pool.submit(accept)]]
+        statuses = [
+            future.result(timeout=10) for future in [pool.submit(accept), pool.submit(accept)]
+        ]
     assert sorted(statuses) == [200, 400]
     with db_factory() as db:
         user = db.scalar(select(User).where(User.email == "concurrent-invitee@example.com"))
-        assert db.scalar(
-            select(func.count())
-            .select_from(Membership)
-            .where(Membership.workspace_id == account, Membership.user_id == user.id)
-        ) == 1
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(Membership)
+                .where(Membership.workspace_id == account, Membership.user_id == user.id)
+            )
+            == 1
+        )
         invitation = db.scalar(
             select(Invitation).where(Invitation.email == "concurrent-invitee@example.com")
         )
@@ -197,9 +211,12 @@ def test_postgres_password_reset_is_single_consumer(app, engine, client, account
     if engine.dialect.name != "postgresql":
         pytest.skip("Password-reset contention requires isolated PostgreSQL")
     enable_test_mail(app.state.settings)
-    assert client.post(
-        "/api/v1/auth/password/reset/request", json={"email": "owner@example.com"}
-    ).status_code == 202
+    assert (
+        client.post(
+            "/api/v1/auth/password/reset/request", json={"email": "owner@example.com"}
+        ).status_code
+        == 202
+    )
     token = queued_token(db_factory, app.state.settings, "password_reset")
     passwords = ("first-concurrent-password", "second-concurrent-password")
     barrier = Barrier(2)
@@ -222,60 +239,15 @@ def test_postgres_password_reset_is_single_consumer(app, engine, client, account
     with db_factory() as db:
         user = db.scalar(select(User).where(User.email == "owner@example.com"))
         assert sum(verify_password(password, user.password_hash) for password in passwords) == 1
-        assert db.scalar(
-            select(func.count()).select_from(LoginSession).where(LoginSession.user_id == user.id)
-        ) == 0
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(LoginSession)
+                .where(LoginSession.user_id == user.id)
+            )
+            == 0
+        )
         challenge = db.scalar(
             select(IdentityChallenge).where(IdentityChallenge.kind == "password_reset")
         )
         assert challenge.consumed_at is not None
-
-
-def test_postgres_evaluation_completion_creates_one_incident(
-    app, engine, client, account, db_factory
-):
-    if engine.dialect.name != "postgresql":
-        pytest.skip("Assessment completion contention requires isolated PostgreSQL")
-    project = client.post("/api/v1/projects", json={"name": "Incident contention"}).json()
-    trace = client.post(
-        "/api/v1/traces",
-        json={
-            "project_id": project["id"],
-            "external_id": "incident-contention",
-            "name": "Agent answer",
-            "status": "ok",
-            "latency_ms": 1,
-        },
-    ).json()
-    queued = client.post(
-        f"/api/v1/traces/{trace['id']}/assess",
-        json={"criteria": "The answer must be accurate."},
-    )
-    assert queued.status_code == 202
-    with db_factory.begin() as db:
-        claim = claim_next_job(db)
-    result = EvaluationResult(
-        status="failed",
-        score=0,
-        reasons=("The answer did not satisfy the criterion.",),
-        provider="test",
-        provenance=EvaluationProvenance(source="test"),
-    )
-    barrier = Barrier(2)
-
-    def complete():
-        barrier.wait(timeout=5)
-        with db_factory.begin() as db:
-            assessment = complete_job(db, claim, result)
-            return assessment.id if assessment else None
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        completed = [future.result(timeout=10) for future in [pool.submit(complete), pool.submit(complete)]]
-    assert sum(item is not None for item in completed) == 1
-    with db_factory() as db:
-        assert db.scalar(
-            select(func.count()).select_from(Assessment).where(Assessment.trace_id == trace["id"])
-        ) == 1
-        assert db.scalar(
-            select(func.count()).select_from(Incident).where(Incident.trace_id == trace["id"])
-        ) == 1

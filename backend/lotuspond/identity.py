@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from . import schemas as s
 from .deps import DB, audit, require
-from .entitlements import month_start, plan_for
 from .identity_lifecycle import validate_registration_invitation
 from .identity_status import enrollment_pending, identity_verification_source, identity_verified
 from .mail import enqueue_security_notice
@@ -17,15 +17,12 @@ from .models import (
     Approval,
     AuditEvent,
     IdentityChallenge,
-    Incident,
     LoginSession,
     Membership,
     MfaEnrollment,
-    MfaFactor,
     MfaLoginChallenge,
     Project,
     Run,
-    Trace,
     User,
     Workspace,
     new_id,
@@ -34,7 +31,6 @@ from .models import (
 )
 from .security import (
     Principal,
-    authenticator_enabled,
     current_session,
     digest,
     fail,
@@ -48,6 +44,15 @@ from .security import (
 )
 
 router = APIRouter(prefix="/api/v1")
+
+# The retired subscription plan, gateway budget (ADR-0012) and organization authenticator
+# requirement (ADR-0014) keep their columns so stored data survives, but no response
+# reports them as if they still applied.
+RETIRED_WORKSPACE_FIELDS = {"plan", "monthly_budget_usd", "require_mfa"}
+
+
+def _workspace(workspace: Workspace) -> dict:
+    return serialize(workspace, exclude=RETIRED_WORKSPACE_FIELDS)
 
 
 def create_workspace(db: Session, user: User, name: str, kind: str) -> Workspace:
@@ -99,7 +104,16 @@ def register(body: s.Register, request: Request, response: Response, db: Session
 def login(body: s.Login, request: Request, response: Response, db: Session = DB):
     request.app.state.limiter.check(f"login:{request.client.host}", 30, 900)
     request.app.state.limiter.check(f"login-account:{str(body.email).lower()}", 15, 900)
-    user = db.scalar(select(User).where(User.email == str(body.email).lower()).with_for_update())
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    # Only the user found and gated is locked; an address no one holds locks nothing.
+    email = str(body.email).lower()
+    gated = db.scalar(select(User.id).where(User.email == email))
+    authority_gate.users(db, [gated], exclusive=True)
+    user = None
+    if gated:
+        user = db.scalar(
+            select(User).where(User.id == gated, User.email == email).with_for_update()
+        )
     valid = verify_password(body.password, user.password_hash) if user else False
     if not user:
         password_hasher.hash(body.password)
@@ -184,6 +198,8 @@ def revoke_session(
 def change_password(body: s.PasswordChange, request: Request, response: Response, db: Session = DB):
     user = session_user(db, request)
     request.app.state.limiter.check(f"password-change:{user.id}", 5, 900)
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [user.id], exclusive=True)
     user = db.scalar(
         select(User)
         .where(User.id == user.id)
@@ -253,11 +269,10 @@ def me(request: Request, db: Session = DB):
             "identity_verified": verified_source is not None,
             "identity_verification_source": verified_source,
         },
-        "workspaces": [{**serialize(workspace), "role": role} for workspace, role in rows],
+        "workspaces": [{**_workspace(workspace), "role": role} for workspace, role in rows],
         "capabilities": {
             "mail_enabled": request.app.state.settings.mail_enabled,
             "registration_enabled": request.app.state.settings.registration_enabled,
-            "offline_enrollment_enabled": request.app.state.settings.network_mode == "airgap",
         },
         "mfa": mfa_status(db, request, user),
     }
@@ -274,7 +289,7 @@ def create_organization(body: s.Organization, request: Request, db: Session = DB
         db, Principal(user.id, workspace.id, "owner", user.id), "organization.created", workspace.id
     )
     db.flush()
-    return serialize(workspace)
+    return _workspace(workspace)
 
 
 @router.get("/members")
@@ -368,6 +383,8 @@ def revoke_key(
     identifier: s.Identifier, p: Principal = Depends(require("write")), db: Session = DB
 ):
     require_admin(p)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, p.workspace_id, exclusive=True)
     key = db.scalar(
         select(ApiKey)
         .where(
@@ -384,113 +401,9 @@ def revoke_key(
     return {"ok": True}
 
 
-def _billing(db: Session, workspace: Workspace) -> dict:
-    """What this subscription level entitles the workspace to, and what it has used.
-
-    Lotuspond charges nothing and stores no payment instrument. A plan is provisioned
-    by an operator, so this reports entitlement and usage rather than an invoice.
-    """
-    plan = plan_for(workspace.plan)
-    used = db.scalar(
-        select(func.count())
-        .select_from(Trace)
-        .where(Trace.workspace_id == workspace.id, Trace.created_at >= month_start())
-    )
-    used = int(used or 0)
-    return {
-        "plan": plan.name,
-        "entitlements": {
-            "monthly_trace_quota": plan.monthly_trace_quota,
-            "trace_retention_days": plan.trace_retention_days,
-        },
-        "usage": {
-            "traces_this_month": used,
-            "traces_remaining": max(0, plan.monthly_trace_quota - used),
-        },
-        "payment": {
-            "status": "not_collected",
-            "message": (
-                "Lotuspond stores no payment instrument and charges nothing. "
-                "An operator provisions the plan for this workspace."
-            ),
-        },
-    }
-
-
-def _members_without_authenticator(db: Session, workspace_id: str) -> int:
-    return db.scalar(
-        select(func.count())
-        .select_from(Membership)
-        .outerjoin(MfaFactor, MfaFactor.user_id == Membership.user_id)
-        .where(Membership.workspace_id == workspace_id, MfaFactor.id.is_(None))
-    )
-
-
 @router.get("/settings")
 def settings(request: Request, p: Principal = Depends(require()), db: Session = DB):
-    workspace = db.get(Workspace, p.workspace_id)
-    policy = {
-        "require_mfa": workspace.require_mfa,
-        "available": request.app.state.settings.mfa_encryption_key is not None,
-        "manageable": workspace.kind == "organization",
-        "required_by_installation": request.app.state.settings.require_mfa,
-    }
-    if p.user_id and p.role in {"owner", "admin"}:
-        policy["members_without_authenticator"] = _members_without_authenticator(
-            db, workspace.id
-        )
-    return {
-        **serialize(workspace),
-        "authenticator_policy": policy,
-        "billing": _billing(db, workspace),
-    }
-
-
-@router.post("/settings/authenticator-policy")
-def update_authenticator_policy(
-    body: s.AuthenticatorPolicyInput,
-    request: Request,
-    p: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    require_admin(p)
-    if not request.app.state.settings.mfa_encryption_key:
-        fail(503, "mfa_unavailable", "Multi-factor authentication is unavailable.")
-    # Lock the actor and then the workspace so a concurrent factor removal cannot slip between
-    # the check below and the stored requirement.
-    db.scalar(
-        select(User)
-        .where(User.id == p.user_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    workspace = db.scalar(
-        select(Workspace)
-        .where(Workspace.id == p.workspace_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if workspace.kind != "organization":
-        fail(409, "policy_unavailable", "Only organizations can require an authenticator.")
-    # The acting administrator must already hold a factor, so the policy cannot lock out its author.
-    if not authenticator_enabled(db, p.user_id, lock=True):
-        fail(403, "mfa_required", "Enable your own authenticator before changing this policy.")
-    if workspace.require_mfa == body.require_mfa:
-        return {
-            "ok": True,
-            "require_mfa": workspace.require_mfa,
-            "members_without_authenticator": _members_without_authenticator(db, workspace.id),
-        }
-    workspace.require_mfa = body.require_mfa
-    remaining = _members_without_authenticator(db, workspace.id)
-    audit(
-        db,
-        p,
-        "settings.authenticator_policy_changed",
-        workspace.id,
-        {"require_mfa": body.require_mfa, "members_without_authenticator": remaining},
-    )
-    return {"ok": True, "require_mfa": body.require_mfa, "members_without_authenticator": remaining}
+    return _workspace(db.get(Workspace, p.workspace_id))
 
 
 @router.patch("/settings")
@@ -498,9 +411,10 @@ def update_settings(
     body: s.WorkspaceInput, p: Principal = Depends(require("write")), db: Session = DB
 ):
     require_admin(p)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, p.workspace_id, exclusive=True)
     workspace = db.get(Workspace, p.workspace_id)
     workspace.name = body.name
-    workspace.monthly_budget_usd = body.monthly_budget_usd
     audit(db, p, "settings.updated", workspace.id)
     return {"ok": True}
 
@@ -513,9 +427,6 @@ def admin_overview(request: Request, db: Session = DB):
         "workspaces": db.scalar(select(func.count()).select_from(Workspace)),
         "projects": db.scalar(select(func.count()).select_from(Project)),
         "runs": db.scalar(select(func.count()).select_from(Run)),
-        "incidents": db.scalar(
-            select(func.count()).select_from(Incident).where(Incident.status == "open")
-        ),
         "pending_approvals": db.scalar(
             select(func.count()).select_from(Approval).where(Approval.status == "pending")
         ),
@@ -527,7 +438,7 @@ def admin_workspaces(request: Request, db: Session = DB, limit: int = 100):
     platform_admin(db, request)
     return {
         "items": [
-            serialize(row)
+            _workspace(row)
             for row in db.scalars(
                 select(Workspace)
                 .order_by(Workspace.created_at.desc())
@@ -555,6 +466,8 @@ def admin_workspace_status(
     identifier: s.Identifier, body: s.WorkspaceStatus, request: Request, db: Session = DB
 ):
     user = platform_admin(db, request)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, identifier, exclusive=True)
     workspace = db.scalar(select(Workspace).where(Workspace.id == identifier).with_for_update())
     if not workspace:
         fail(404, "not_found", "Workspace not found.")
@@ -570,27 +483,3 @@ def admin_workspace_status(
         )
     )
     return {"ok": True, "status": workspace.status}
-
-
-@router.patch("/admin/workspaces/{identifier}/plan")
-def admin_workspace_plan(
-    identifier: s.Identifier, body: s.WorkspacePlan, request: Request, db: Session = DB
-):
-    """Provision a subscription level. Only an operator may widen an entitlement."""
-    user = platform_admin(db, request)
-    workspace = db.scalar(select(Workspace).where(Workspace.id == identifier).with_for_update())
-    if not workspace:
-        fail(404, "not_found", "Workspace not found.")
-    previous = workspace.plan
-    workspace.plan = body.plan
-    db.add(
-        AuditEvent(
-            workspace_id=workspace.id,
-            actor_id=user.id,
-            action="admin.workspace_plan",
-            resource_id=workspace.id,
-            details={"from": previous, "to": body.plan, "reason": body.reason},
-        )
-    )
-    db.flush()
-    return {"ok": True, **_billing(db, workspace)}

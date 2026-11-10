@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from lotuspond import models
+from lotuspond import authority_gate, models
 from lotuspond.app import create_app
 from lotuspond.database import sessions_for
 from tests.fleet.test_management import PIN, POLICY, create, post
@@ -148,7 +148,7 @@ def race_runtime(env, path, headers, bodies):
     engine = env.db.kw["bind"]
 
     def before_cursor(connection, cursor, statement, parameters, context, many):
-        if "workspaces" in statement and "FOR UPDATE" in statement:
+        if "pg_advisory_xact_lock" in statement:  # its first lock: the fair gate
             with reached:
                 connections.add(id(connection.connection.driver_connection))
                 reached.notify_all()
@@ -160,6 +160,8 @@ def race_runtime(env, path, headers, bodies):
 
     with ThreadPoolExecutor(max_workers=2) as workers:
         with env.db.begin() as holder:
+            # An authority change holds the parent: its gate first, exclusive.
+            authority_gate.workspace(holder, env.workspace, exclusive=True)
             holder.scalar(
                 select(models.Workspace)
                 .where(models.Workspace.id == env.workspace)

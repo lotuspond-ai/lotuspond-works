@@ -192,8 +192,12 @@ def test_a_suspended_workspace_admits_and_dispatches_nothing(system, linux):
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
     form = operator.deploy(customer, "form", package=form_package(), dependencies=["waits.policy"])
+    operator.demand(30000)  # the reactivated read's lease may run to its 30 s deadline
     held = operator.deploy(
-        customer, "timer-read", package=timer_then_read(6), dependencies=[operator.documents[0]]
+        customer,
+        "timer-read",
+        package=timer_then_read(6, timeout_seconds=30),
+        dependencies=[operator.documents[0]],
     )
     waiting = operator.start(customer, form)["id"]
     wait = operator.open_wait(customer, waiting, "review")

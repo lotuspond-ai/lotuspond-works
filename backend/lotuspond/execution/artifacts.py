@@ -171,9 +171,11 @@ class ArtifactStore:
 
     @execution_service
     def put(
-        self, db, actor: ExecutionActor, content: bytes, policy: ArtifactPolicy
+        self, db, actor: ExecutionActor, content: bytes, policy: ArtifactPolicy, *, key=None
     ) -> ArtifactHandle:
-        return self._put(db, actor, content, policy, operation="execute")
+        """`key`: this store's `_key` for `policy.key_id`, looked up by the caller before
+        its first row lock (admission), so no key lookup waits under the caller's locks."""
+        return self._put(db, actor, content, policy, operation="execute", key=key)
 
     @execution_service
     def _put_signal(self, db, actor, content, policy, *, check_current):
@@ -190,7 +192,7 @@ class ArtifactStore:
             db, actor, content, policy, operation="signal", check_current=check_current
         )
 
-    def _put(self, db, actor, content, policy, *, operation, check_current=None):
+    def _put(self, db, actor, content, policy, *, operation, check_current=None, key=None):
         actor = reauthorize(db, actor, operation)
         if check_current is not None:
             check_current()
@@ -206,7 +208,10 @@ class ArtifactStore:
             content_bytes=len(content),
             nonce=os.urandom(12),
         )
-        key = self._key(actor.scope, policy.key_id)
+        if key is None:
+            key = self._key(actor.scope, policy.key_id)
+        elif type(key) is not bytes or len(key) != 32:
+            raise ExecutionError("key_unavailable")
         self._current(db, actor, policy, source)
         # An external key/source lookup is not authority to outlive current account expiry.
         reauthorize(db, actor, operation)

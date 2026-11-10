@@ -489,3 +489,14 @@ def test_node_resolution_refuses_unresolved_record_and_mismatched_paths(signals)
     ):
         with pytest.raises(ExecutionError, match="dependency_unavailable"):
             h.inbox._node(package, sources, SimpleNamespace(occurrence_path=path, node_id=node_id))
+
+
+def test_a_signal_takes_no_installation_cursor(signals):
+    """Finding 11: signal acceptance changes no installation counter."""
+    from .cursor_checks import without_cursor
+
+    h = signals
+    receipt = without_cursor(h.engine, lambda: accept(h))
+    assert receipt == accept(h)  # durable: an equal replay returns the same receipt
+    with Session(h.engine) as db:
+        assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1

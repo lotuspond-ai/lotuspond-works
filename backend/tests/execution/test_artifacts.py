@@ -9,6 +9,7 @@ import pytest
 from lotuspond_sdk.activity import ArtifactHandle
 from sqlalchemy.orm import Session
 
+from lotuspond import authority_gate
 from lotuspond.execution.artifacts import ArtifactPolicy, ArtifactStore
 from lotuspond.execution.authorization import ExecutionActor, authorize_execution
 from lotuspond.execution.errors import ExecutionError
@@ -198,6 +199,10 @@ def test_no_provider_cached_allow_or_unbounded_timeout(artifacts):
 def test_retention_inventory_is_bounded_dry_run(artifacts):
     h = artifacts
     with Session(h.engine) as db, db.begin():
+        # Values stored, then retention listed (`manage`), in one transaction: the
+        # exclusive gates first, which the shared puts then find held (`authority_gate`).
+        authority_gate.workspace(db, h.scope.workspace_id, exclusive=True)
+        authority_gate.users(db, [h.actor.user_id], exclusive=True)
         cutoff = database_now_ms(db) + 250
         policy = ArtifactPolicy(**{**h.policy.model_dump(), "retain_until_ms": cutoff})
         first = h.store.put(db, h.actor, b"null", policy)

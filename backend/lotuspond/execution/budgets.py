@@ -1,9 +1,17 @@
 """Caller-transaction reservations, conservative liabilities and reconciled capacity.
 
-Lock order: installation cursor, current workspace/account, pool and connection
-parents, environment capacity, deployment/revision, execution, sorted steps,
-sorted attempts, reservations. Never commit here. Composing callers must enter
-at the same parent order, and roll back the entire operation on refusal.
+Lock order: current workspace/account, pool and connection parents, environment
+capacity, deployment/revision, execution, sorted steps, sorted attempts,
+reservations, and the installation cursor last. Never commit here. Composing
+callers must enter at the same parent order, and roll back the entire operation
+on refusal.
+
+The installation's active count is the sum of the environment counts, which
+every slot and stop changes under its environment row. Only a reservation that
+takes a compute slot, or a scheduling transaction, takes the cursor: last, after
+every lookup and lock, for the sum and its record, and then it commits. Its
+holder never waits on another lock, so the cursor closes no deadlock cycle
+(docs/superpowers/plans/2026-10-29-installation-capacity-lock.md).
 """
 
 import json
@@ -19,6 +27,7 @@ from lotuspond_sdk.executable.package import ArtifactRef
 from pydantic import TypeAdapter
 from sqlalchemy import func, literal, select
 
+from .. import authority_gate
 from ..fleet.authority import RecoverySnapshot, database_now_ms
 from ..models import (
     ExecutableDependency,
@@ -36,10 +45,18 @@ from ..models import (
     ExecutionUsageReservation,
     ExecutionWait,
 )
+from . import memo
 from .assurance import check_assurance_current
-from .authorization import lock, reauthorize, record, scoped
+from .authorization import lock, reauthorize, record, scoped, share
 from .contracts import Contract, DeploymentConfig, canonical_value
-from .deployments import _body_steps, _configuration, _pool, _stored_configuration, load_deployment
+from .deployments import (
+    _body_steps,
+    _configuration,
+    _pool,
+    _stored_configuration,
+    gates,
+    load_deployment,
+)
 from .entitlement import EntitlementGrant, PolicyGrant
 from .errors import ExecutionError, execution_service
 from .program import ProgramError, program_from, resolve_occurrence
@@ -47,6 +64,16 @@ from .publication import _Lookup, current_snapshot, load_publication
 
 MAX_SAFE = 9007199254740991
 SHARED = "capacity.shared:"
+
+
+class HeldParents:
+    """Parents one transaction checked and still holds (`BudgetService.held_parents`)."""
+
+    __slots__ = ("transaction", "actor", "revision_id", "values")
+
+    def __init__(self, transaction, actor, revision_id, values):
+        self.transaction, self.actor = transaction, actor
+        self.revision_id, self.values = revision_id, values
 
 
 class BudgetDemand(Contract):
@@ -67,10 +94,14 @@ class ChargeAuthority(Protocol):
 
 
 def steps(source):
-    return [
-        step.model_dump(mode="json")
-        for step in _body_steps(validate_executable_package(source).body)
-    ]
+    return memo.remembered(
+        "budget-steps",
+        (source,),
+        lambda: [
+            step.model_dump(mode="json")
+            for step in _body_steps(validate_executable_package(source).body)
+        ],
+    )
 
 
 def active_liability(row, now_ms):
@@ -98,6 +129,19 @@ def liability(row, field, now_ms):
 
 def view(row):
     return ReservationView(id=row.id, attempt_id=row.attempt_id, state=row.state)
+
+
+def installation_active(db) -> int:
+    """The installation's compute slots in use: the sum of the environment counts."""
+    return int(db.scalar(select(func.coalesce(func.sum(ExecutionCapacity.active), 0))))
+
+
+def _admission_room(capacity, limits) -> None:
+    if (
+        capacity.pending >= min(capacity.pending_limit, limits["pending_capacity"])
+        or capacity.next_admission_sequence >= MAX_SAFE
+    ):
+        raise ExecutionError("capacity_unavailable")
 
 
 class BudgetService:
@@ -142,7 +186,24 @@ class BudgetService:
     def _call(self, name, method, args, code):
         return self._slots[name].call(getattr(self, name), method, args, self.timeout_seconds, code)
 
-    def _cursor(self, db):
+    def _installation(self, db):
+        """The provisioned installation row, read without a lock; missing denies."""
+        row = db.scalar(
+            select(ExecutionSchedulerCursor)
+            .where(ExecutionSchedulerCursor.installation_id == self.installation_id)
+            .execution_options(populate_existing=True)
+        )
+        if row is None:
+            raise ExecutionError("capacity_unavailable")
+        return row
+
+    def _leaf(self, db):
+        """The installation cursor, always the transaction's last lock.
+
+        Every write is flushed first, so after this only the sum, the cursor's own
+        row and the commit remain: the holder never waits on another lock.
+        """
+        db.flush()
         row = lock(
             db,
             select(ExecutionSchedulerCursor).where(
@@ -153,16 +214,39 @@ class BudgetService:
             raise ExecutionError("capacity_unavailable")
         return row
 
-    def _parents(self, db, actor, revision_id):
-        cursor = self._cursor(db)
+    def _record_active(self, db, cursor):
+        """Write the installation count under the cursor; True while within its limit."""
+        total = installation_active(db)
+        if total > cursor.active_limit:
+            return False
+        cursor.active = total  # a record: never below the count, which only slots raise
+        db.flush()
+        return True
+
+    def _parents(self, db, actor, revision_id, *, snapshot=None):
+        installation = self._installation(db)
+        gates(db, actor.scope, revision_id, users=[actor.user_id])  # before any row lock
         actor = reauthorize(db, actor, "execute")
         hint = record(db, ExecutionDeploymentRevision, actor.scope, revision_id)
         policy = _pool(db, actor.scope, hint.pool_id)
         capacity = lock(db, scoped(ExecutionCapacity, actor.scope))
         if capacity is None:
             raise ExecutionError("capacity_unavailable")
-        _, revision = load_deployment(db, actor, revision_id, dependencies=self.deployments)
-        return cursor, capacity, revision, policy
+        _, revision = load_deployment(
+            db, actor, revision_id, dependencies=self.deployments, snapshot=snapshot
+        )
+        return installation, capacity, revision, policy
+
+    def held_parents(self, db, actor, installation, capacity, revision, policy):
+        """`_parents`' work, done by a scheduling transaction at its top level, for
+        `reserve_attempt` in the same transaction (owner decision, 2 November 2026:
+        each lookup and permission check once per item). The rows stay locked to its
+        end; `_final` still checks everything again after the grant lookups."""
+        if db.in_nested_transaction() or db.get_transaction() is None:
+            raise ExecutionError("invalid_request")
+        return HeldParents(
+            db.get_transaction(), actor, revision.id, (installation, capacity, revision, policy)
+        )
 
     def _grants(self, db, scope):
         now = database_now_ms(db)
@@ -296,12 +380,18 @@ class BudgetService:
         _, capacity, revision, _ = self._parents(db, actor, deployment_revision_id)
         grant, tenant, recovery = self._grants(db, actor.scope)
         limits, _, _ = self._limits(db, actor.scope, revision, grant, tenant)
-        if (
-            capacity.pending >= min(capacity.pending_limit, limits["pending_capacity"])
-            or capacity.next_admission_sequence >= MAX_SAFE
-        ):
-            raise ExecutionError("capacity_unavailable")
+        _admission_room(capacity, limits)
         self._final(db, actor, revision, grant, tenant, recovery)
+        self._count_admission(db, capacity, limits)
+
+    def _count_admission(self, db, capacity, limits) -> None:
+        """Take one pending place and the next admission sequence on a locked row.
+
+        The caller holds `capacity` from `_parents`, with the deployment loaded and
+        `limits` from `_limits` under the same locks, and runs `_final` in this
+        transaction (admission runs it after its own writes).
+        """
+        _admission_room(capacity, limits)
         capacity.pending += 1
         capacity.next_admission_sequence += 1
         db.flush()
@@ -311,7 +401,7 @@ class BudgetService:
         # arbitrary caller ID or a same-named node elsewhere cannot select a model.
         try:
             program = program_from(
-                validate_executable_package(packages[0]),
+                memo.package(packages[0]),
                 dict(enumerate([*packages[1:], *catalog.values()])),
             )
             ref = resolve_occurrence(program, step.occurrence_path)
@@ -346,22 +436,40 @@ class BudgetService:
         return [ArtifactRef.model_validate(ref) for ref in references]
 
     @execution_service
-    def reserve_attempt(self, db, actor, attempt_id, demand, *, shared=False):
+    def reserve_attempt(self, db, actor, attempt_id, demand, *, shared=False, parents=None):
         """Reserve one attempt under the root execution budget.
 
         `shared` (Task 9) admits an agent's child attempt into its parent's running
         compute: the shared budget still applies, but no compute slot is taken. A
         `capacity.shared:` request row records this, so stopping that child returns
         no slot. Without it a child takes its own slot like any attempt.
+
+        A slot meets the installation limit last, under the cursor (`_leaf`), after
+        every lookup, lock and write. A visibly full installation refuses before any
+        provider lookup; one that fills meanwhile refuses at the leaf, and the caller
+        rolls the reservation back.
+
+        `parents` (`held_parents`) is the scheduler's: this transaction checked and
+        still holds them for this actor and revision, so they are not checked twice.
         """
         demand = BudgetDemand.model_validate(demand)
         if type(shared) is not bool:
             raise ExecutionError("invalid_request")
         hint = record(db, ExecutionAttempt, actor.scope, attempt_id)
         execution_hint = record(db, Execution, actor.scope, hint.execution_id)
-        cursor, capacity, revision, pool = self._parents(
-            db, actor, execution_hint.deployment_revision_id
-        )
+        if parents is None:
+            installation, capacity, revision, pool = self._parents(
+                db, actor, execution_hint.deployment_revision_id
+            )
+        elif (
+            type(parents) is not HeldParents
+            or parents.transaction is not db.get_transaction()
+            or parents.actor is not actor
+            or parents.revision_id != execution_hint.deployment_revision_id
+        ):
+            raise ExecutionError("invalid_request")
+        else:
+            installation, capacity, revision, pool = parents.values
         execution = record(db, Execution, actor.scope, hint.execution_id, locked=True)
         step = record(db, ExecutionStepInstance, actor.scope, hint.step_instance_id, locked=True)
         attempt = record(db, ExecutionAttempt, actor.scope, attempt_id, locked=True)
@@ -371,6 +479,8 @@ class BudgetService:
                 ExecutionUsageReservation.attempt_id == attempt.id
             ),
         )
+        if not shared and existing is None and installation_active(db) >= installation.active_limit:
+            raise ExecutionError("capacity_unavailable")  # visibly full: no lookups
         grant, tenant, recovery = self._grants(db, actor.scope)
         limits, packages, catalog = self._limits(db, actor.scope, revision, grant, tenant)
         if (
@@ -469,8 +579,7 @@ class BudgetService:
             )
         )
         if not shared and (
-            cursor.active >= cursor.active_limit
-            or capacity.active >= min(capacity.active_limit, limits["active_capacity"])
+            capacity.active >= min(capacity.active_limit, limits["active_capacity"])
             or pool_active >= pool.max_concurrent_invocations
         ):
             raise ExecutionError("capacity_unavailable")
@@ -494,20 +603,22 @@ class BudgetService:
             )
             db.flush()
             return view(row)
-        cursor.active += 1
         capacity.active += 1
         if execution.state == "pending":
             if capacity.pending < 1:
                 raise ExecutionError("conflict")
             capacity.pending -= 1
             execution.state = "running"
-        db.flush()
+        # Last: the installation limit. Only slot-taking reservations raise the sum,
+        # and each holds the cursor from its sum to its commit, so the sum it reads
+        # includes every committed slot and its own. Nothing is locked after this.
+        if not self._record_active(db, self._leaf(db)):
+            raise ExecutionError("capacity_unavailable")
         return view(row)
 
     def _settlement_rows(self, db, attempt_id):
         # Internal observation APIs grant no external caller authority. Task6/10
         # must authenticate evidence before entering this service boundary.
-        self._cursor(db)
         attempt_id = TypeAdapter(CanonicalUUID).validate_python(attempt_id, strict=True)
         hint = db.get(ExecutionAttempt, attempt_id)
         if hint is None:
@@ -519,7 +630,8 @@ class BudgetService:
         )
         from ..models import Workspace
 
-        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        authority_gate.workspace(db, scope.workspace_id)  # before any row lock
+        share(db, select(Workspace).where(Workspace.id == scope.workspace_id))
         capacity = lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, hint.execution_id, locked=True)
         record(db, ExecutionStepInstance, scope, hint.step_instance_id, locked=True)
@@ -604,10 +716,9 @@ class BudgetService:
                 )
             )
             if shared is None:  # a shared child took no compute slot
-                cursor = self._cursor(db)  # already held from _settlement_rows
-                if cursor.active < 1 or capacity is None or capacity.active < 1:
+                # The environment count is the installation's too: no cursor.
+                if capacity is None or capacity.active < 1:
                     raise ExecutionError("conflict")
-                cursor.active -= 1
                 capacity.active -= 1
             row.compute_stopped_at_ms = observation.observed_at_ms
             row.active_ms = active_liability(row, observation.observed_at_ms)
@@ -725,11 +836,10 @@ class BudgetService:
         db.flush()
 
     def _release_rows(self, db, execution_id):
-        """Cursor, workspace, capacity, then the execution: Task 5's order, no actor.
+        """Workspace, capacity, then the execution: Task 5's order, no actor.
 
         Releases only shrink counted liability, so they need no customer authority.
         """
-        self._cursor(db)
         execution_id = TypeAdapter(CanonicalUUID).validate_python(execution_id, strict=True)
         hint = db.get(Execution, execution_id)
         if hint is None:
@@ -741,7 +851,8 @@ class BudgetService:
         )
         from ..models import Workspace
 
-        lock(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        authority_gate.workspace(db, scope.workspace_id)  # before any row lock
+        share(db, select(Workspace).where(Workspace.id == scope.workspace_id))
         capacity = lock(db, scoped(ExecutionCapacity, scope))
         if capacity is None:
             raise ExecutionError("capacity_unavailable")

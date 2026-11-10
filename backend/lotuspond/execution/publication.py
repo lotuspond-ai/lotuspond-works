@@ -4,18 +4,17 @@ import json
 from dataclasses import dataclass, field
 from hashlib import sha256
 from threading import Event, Lock, Thread
+from time import monotonic
 from typing import Annotated
 
 from lotuspond_runtime.protocol import Digest, SafeInt, Scope
-from lotuspond_sdk.executable import canonical_executable_json, compile_package
+from lotuspond_sdk.executable import canonical_executable_json
 from lotuspond_sdk.executable.catalog import canonical_catalog_document, validate_catalog
 from lotuspond_sdk.executable.dependencies import FAMILIES
 from lotuspond_sdk.executable.metadata import COMPILER_REVISION, VALIDATOR_REVISION
 from lotuspond_sdk.executable.package import ArtifactRef
-from lotuspond_sdk.executable.plan import canonical_plan_json
 from lotuspond_sdk.executable.signing import (
     executable_signature_envelope_json,
-    verify_executable_package,
 )
 from lotuspond_sdk.executable.validation import validate_executable_package
 from lotuspond_sdk.trust import TrustSet
@@ -23,6 +22,7 @@ from pydantic import BeforeValidator, Field
 
 from ..fleet.authority import database_now_ms
 from ..models import ExecutableDependency, ExecutablePublication, FleetMutationRequest
+from . import memo
 from .authorization import mark_replay, reauthorize, record, scoped
 from .contracts import Contract, PublicationRequest, PublicationView, array, canonical_value
 from .errors import ExecutionError, execution_service
@@ -44,14 +44,31 @@ class AuthoritySnapshot(Contract):
 
 
 class _Lookup:
-    """One bounded, non-caching lookup slot; late/stuck answers never grant authority."""
+    """One bounded, non-caching lookup slot; late/stuck answers never grant authority.
+
+    A concurrent caller waits for the slot, and its timeout bounds the wait and the
+    call together: the call gets only what the wait left. So at most one call is in
+    flight, a stuck provider holds one thread and its slot, and every caller is
+    refused within its own bound (owner decision, 2026-10-29; finding 3).
+    """
 
     def __init__(self):
         self.lock = Lock()
         self.closed = False
 
+    def _wait(self, timeout):
+        """Wait for a slot another call holds; True once this caller holds it."""
+        return self.lock.acquire(timeout=timeout)
+
     def call(self, provider, method, args, timeout, code):
-        if provider is None or self.closed or not self.lock.acquire(blocking=False):
+        if provider is None or self.closed:
+            raise ExecutionError(code)
+        started = monotonic()
+        if not (self.lock.acquire(blocking=False) or self._wait(timeout)):
+            raise ExecutionError(code)
+        remaining = timeout - (monotonic() - started)
+        if self.closed or remaining <= 0:
+            self.lock.release()
             raise ExecutionError(code)
         done, result = Event(), []
 
@@ -69,7 +86,7 @@ class _Lookup:
         except Exception:
             self.lock.release()
             raise ExecutionError(code) from None
-        if not done.wait(timeout) or self.closed or not result:
+        if not done.wait(remaining) or self.closed or not result:
             raise ExecutionError(code)
         return result[0]
 
@@ -163,7 +180,8 @@ def _catalog_policy(document):
 
 def _trusted_workflow(raw, signature, snapshot):
     try:
-        if not verify_executable_package(raw, signature, snapshot.trust).valid:
+        # The snapshot was fetched for this call; only the pure verdict is memoized.
+        if not memo.workflow_verified(raw, signature, snapshot.trust.model_dump(mode="json")):
             raise ValueError
     except Exception:
         raise ExecutionError("trust_unavailable") from None
@@ -181,15 +199,15 @@ def _read_publication(row, snapshot):
         raw = json.loads(row.canonical_package)
         _unsupported(raw)
         if row.kind == "workflow":
-            content = canonical_executable_json(raw)
+            content = memo.package_bytes(raw)
             signature = json.loads(row.canonical_signature)
             if executable_signature_envelope_json(signature) != row.canonical_signature:
                 raise ValueError
             _trusted_workflow(raw, signature, snapshot)
             name, version = raw["package_id"], raw["version"]
         else:
-            content = canonical_catalog_document(raw)
-            document = validate_catalog({"documents": [raw]}).documents[0]
+            content = memo.catalog_bytes(raw)
+            document = memo.catalog({"documents": [raw]}).documents[0]
             _catalog_policy(document)
             name, version = document.name, document.version
             if row.kind != document.kind or row.package_sha256 not in snapshot.catalog:
@@ -263,18 +281,21 @@ def _check_dependency_links(db, scope, rows, sources):
 
 
 def _resolve(db, scope, root, rows, snapshot):
-    """SDK resolves reachability/digest/cycles; normalized persisted closure must agree."""
+    """SDK resolves reachability/digest/cycles; normalized persisted closure must agree.
+
+    Returns the plan, the sources and the plan's canonical bytes.
+    """
     if len(rows) > 511:
         raise ExecutionError("dependency_unavailable")
     sources = {row.id: _read_publication(row, snapshot) for row in rows}
     try:
-        plan = compile_package(
+        plan, content = memo.plan(
             root,
-            dependencies=[sources[row.id] for row in rows if row.kind == "workflow"],
-            catalog={"documents": [sources[row.id] for row in rows if row.kind != "workflow"]},
+            [sources[row.id] for row in rows if row.kind == "workflow"],
+            [sources[row.id] for row in rows if row.kind != "workflow"],
         )
         _check_dependency_links(db, scope, rows, sources)
-        return plan, sources
+        return plan, sources, content
     except ExecutionError:
         raise
     except Exception:
@@ -296,15 +317,14 @@ def load_publication(db, scope, identifier, snapshot):
             or link.canonical_dependency != canonical_value(publication_ref(child).model_dump())
         ):
             raise ExecutionError("dependency_unavailable")
-    plan, sources = _resolve(db, scope, raw, rows, snapshot)
-    content = canonical_plan_json(plan)
+    _, sources, content = _resolve(db, scope, raw, rows, snapshot)
     if (
         row.compiler_id != COMPILER_REVISION
         or row.canonical_plan != content
         or row.plan_sha256 != sha256(content).hexdigest()
     ):
         raise ExecutionError("dependency_unavailable")
-    return row, validate_executable_package(raw), links, rows, sources
+    return row, memo.package(raw), links, rows, sources
 
 
 def mutation_replay(db, actor, operation, key, content, view):
@@ -387,8 +407,7 @@ def publish_v2(
             content = canonical_executable_json(package)
             signature = executable_signature_envelope_json(request.signature)
             _trusted_workflow(package, request.signature, snapshot)
-            plan, _ = _resolve(db, actor.scope, root, rows, snapshot)
-            plan_content = canonical_plan_json(plan)
+            _, _, plan_content = _resolve(db, actor.scope, root, rows, snapshot)
             name, version, kind = package.package_id, package.version, "workflow"
         else:
             content = canonical_catalog_document(root)

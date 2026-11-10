@@ -183,7 +183,6 @@ def test_reconciling_a_root_closes_its_unstarted_children(activity):
     lease = h.claim(delivery)
     arguments = h.store_value(parent, {"target": None, "input": None})
     with Session(h.engine) as db, db.begin():
-        h.activities.lock_cursor(db)
         child = h.activities.request_child_activity(
             db,
             h.principal_runtime,
@@ -223,3 +222,24 @@ def test_reconciling_a_root_closes_its_unstarted_children(activity):
         assert released(db, child)  # never claimed: nothing of it is charged
         assert db.scalar(select(ExecutionCapacity.active)) == 0
         assert db.get(Execution, execution_id).runnable_at_ms is not None
+
+
+def test_a_reconciliation_takes_no_installation_cursor(activity):
+    """Finding 11: closing an uncertain attempt takes no cursor, and never waits for one."""
+    from .cursor_checks import without_cursor
+
+    h = activity
+    _, attempt_id, digest = lapsed(h)
+    with Session(h.engine) as db:
+        now = database_now_ms(db)
+    observation = HistoricalObservation(
+        observation_id="journal-known",
+        attempt_id=attempt_id,
+        delivery_sha256=digest,
+        result=None,
+        code="provider_failed",
+        usage=dict(input_tokens=1, output_tokens=1, cost_microusd=1, completed_at_ms=now),
+    )
+    without_cursor(h.engine, lambda: reconcile(h, observation))
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, attempt_id).state == "failed"

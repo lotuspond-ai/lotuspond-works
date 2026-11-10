@@ -9,8 +9,9 @@ attempt it holds; never anything else.
 
 E03's `FleetRequestBoundary` already applies to every `/api/v1/runtime/` path: the
 opt-in switch, single authority headers, JSON bodies and the 64 KiB body bound
-(the runtime transport's). Routes that change capacity counters take the
-installation cursor before runtime authentication, in Task 5's order.
+(the runtime transport's). Routes for results, declines and child requests refuse
+an unknown credential or session before any lock; no route takes the installation
+cursor (docs/superpowers/plans/2026-10-29-installation-capacity-lock.md).
 """
 
 import json
@@ -30,7 +31,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy import select
 
 from ..deps import DB
-from ..fleet.authentication import token_digest
+from ..fleet.authentication import runtime_hint, token_digest
+from ..fleet.authority import database_now_ms
 from ..fleet.runtime_routes import bearer, principal
 from ..models import RuntimeCredential, RuntimeSession
 from .activity_reads import ActivityReads
@@ -76,7 +78,7 @@ def _presented(request, db) -> None:
     """Refuse an unknown credential or session before any lock (Task 12 review).
 
     A plain look-up takes no row lock, so unauthenticated traffic never queues on
-    the installation cursor; the locked authentication after it still decides.
+    a tenant's workspace row; the locked authentication after it still decides.
     """
     secret = request.headers.get("x-lotuspond-runtime-session")
     if secret is None:
@@ -97,11 +99,34 @@ def _presented(request, db) -> None:
         raise FleetError("unauthenticated")
 
 
-def _runtime(request, db, *, cursor=False):
+def _named(raw, field):
+    """A body field the call names, read before validation for its gates only."""
+    value = raw.get(field) if isinstance(raw, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def _runtime(request, db, *, presented=False, attempts=(), deliveries=(), poll=False, parent=None):
+    """The configured services and the runtime, authenticated under its locks.
+
+    The fair gates come first (`authority_gate`): the runtime's workspace, the
+    initiating users of the attempts the call names (or a poll's candidates), then its
+    pool. Plain reads find them and grant nothing; a call whose runtime cannot be read
+    takes none, and is refused by the locked authentication."""
     configured = services(request)
-    if cursor:
+    if presented:
         _presented(request, db)
-        configured.activities.lock_cursor(db)
+    try:
+        hint = None
+        if not request.query_params:
+            secret = request.headers.get("x-lotuspond-runtime-session")
+            hint = runtime_hint(db, bearer(request), secret)
+    except FleetError:
+        hint = None
+    if hint is not None and hint.session_id is not None:
+        activities = configured.activities
+        if poll:
+            attempts = activities._poll_candidates(db, hint, parent, database_now_ms(db))
+        activities.runtime_gates(db, hint, attempts=attempts, deliveries=deliveries)
     return configured, principal(request, db, require_session=True)
 
 
@@ -111,7 +136,7 @@ def _reads(configured) -> ActivityReads:
 
 @router.post("/activities/poll")
 def poll(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, poll=True, parent=_named(raw, "parent_attempt_id"))
     body = PollRequest.model_validate(raw)
     delivery = configured.activities.poll_activity(db, current, body.parent_attempt_id)
     if delivery is None:
@@ -124,7 +149,7 @@ def poll(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/claim")
 def claim(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, deliveries=[_named(raw, "delivery_id")])
     body = ActivityClaim.model_validate(raw)
     lease = configured.activities.claim_activity(
         db, current, body.delivery_id, body.delivery_sha256
@@ -134,14 +159,15 @@ def claim(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/renew")
 def renew(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, attempts=[_named(raw, "attempt_id")])
     body = ActivityLease.model_validate(raw)
     return _json(configured.leases.renew_activity(db, current, body).model_dump(mode="json"))
 
 
 @router.post("/activities/children")
 def children(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db, cursor=True)
+    parent = _named(raw, "parent_attempt_id")
+    configured, current = _runtime(request, db, presented=True, attempts=[parent])
     body = ChildActivityRequest.model_validate(raw)
     attempt_id = configured.activities.request_child_activity(db, current, body)
     return _json(ChildActivityView(attempt_id=attempt_id).model_dump(mode="json"))
@@ -149,7 +175,8 @@ def children(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/results")
 def results(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db, cursor=True)
+    attempt = _named(raw, "attempt_id")
+    configured, current = _runtime(request, db, presented=True, attempts=[attempt])
     body = ActivityResult.model_validate(raw)
     configured.activities.record_activity_result(db, current, body)
     return _json({})
@@ -157,7 +184,8 @@ def results(request: Request, raw=BODY, db=DB):
 
 @router.post("/activities/decline")
 def decline(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db, cursor=True)
+    delivery = _named(raw, "delivery_id")
+    configured, current = _runtime(request, db, presented=True, deliveries=[delivery])
     body = ActivityClaim.model_validate(raw)
     configured.leases.decline_activity(db, current, body.delivery_id, body.delivery_sha256)
     return _json({})
@@ -166,14 +194,14 @@ def decline(request: Request, raw=BODY, db=DB):
 @router.post("/activities/{attempt_id}/values")
 def values(attempt_id: str, request: Request, content=RAW, db=DB):
     attempt_id = TypeAdapter(CanonicalUUID).validate_python(attempt_id, strict=True)
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, attempts=[attempt_id])
     handle = configured.activities.store_activity_value(db, current, attempt_id, content)
     return _json(handle.model_dump(mode="json"))
 
 
 @router.post("/activity-artifacts/records")
 def records(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, deliveries=[_named(raw, "delivery_id")])
     body = ActivityClaim.model_validate(raw)
     pinned = _reads(configured).records(db, current, body.delivery_id, body.delivery_sha256)
     return _json(
@@ -193,7 +221,7 @@ def records(request: Request, raw=BODY, db=DB):
 
 @router.post("/activity-artifacts/agent")
 def agent(request: Request, raw=BODY, db=DB):
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, deliveries=[_named(raw, "delivery_id")])
     body = ActivityClaim.model_validate(raw)
     return _json(_reads(configured).agent(db, current, body.delivery_id, body.delivery_sha256))
 
@@ -201,7 +229,7 @@ def agent(request: Request, raw=BODY, db=DB):
 @router.post("/activity-artifacts/{attempt_id}/input")
 def attempt_input(attempt_id: str, request: Request, raw=BODY, db=DB):
     attempt_id = TypeAdapter(CanonicalUUID).validate_python(attempt_id, strict=True)
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, attempts=[attempt_id])
     handle = ArtifactHandle.model_validate(raw)
     return _bytes(_reads(configured).input(db, current, attempt_id, handle))
 
@@ -209,6 +237,6 @@ def attempt_input(attempt_id: str, request: Request, raw=BODY, db=DB):
 @router.post("/activity-artifacts/{attempt_id}/context")
 def attempt_context(attempt_id: str, request: Request, raw=BODY, db=DB):
     attempt_id = TypeAdapter(CanonicalUUID).validate_python(attempt_id, strict=True)
-    configured, current = _runtime(request, db)
+    configured, current = _runtime(request, db, attempts=[attempt_id])
     body = ContextRead.model_validate(raw)
     return _bytes(_reads(configured).context(db, current, attempt_id, body.source_id, body.version))

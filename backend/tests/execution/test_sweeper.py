@@ -480,3 +480,94 @@ def test_a_sweep_item_only_ever_lowers_the_worker_lock_timeout(
     finally:
         worker.dispose()
     assert seen == [effective]
+
+
+def test_scheduling_reserves_one_head_per_transaction_and_skips_a_full_installation(controlled):
+    """Finding 11: each scheduling transaction reserves one head and takes the cursor
+    last; a visibly full installation is skipped by plain reads, without any lock."""
+    from lotuspond.execution.contracts import AdmissionRequest
+    from lotuspond.execution.scheduler import Scheduler
+    from lotuspond.models import ExecutionSchedulerCursor
+
+    from .activity_fixtures import Demand, deploy
+    from .cursor_checks import statements
+
+    h = controlled
+    revision = deploy(h, "activity_read", capacity=3)
+    with Session(h.engine) as db, db.begin():
+        for key in ("one", "two", "three"):
+            h.service.admit_execution(
+                db, h.actor, AdmissionRequest(deployment_revision_id=revision, input=None), key
+            )
+        db.scalar(select(ExecutionSchedulerCursor)).active_limit = 0
+    h.run()
+    scheduler = Scheduler(h.budgets, Demand(), test_mode=True)
+    calls = []
+    original = scheduler.schedule_batch
+
+    def counted(db, installation_id, limit=1, **kwargs):
+        calls.append(limit)
+        return original(db, installation_id, limit, **kwargs)
+
+    scheduler.schedule_batch = counted
+    scheduling = ExecutionSweeper(leases=h.leases, recovery=h.fence, scheduler=scheduler)
+    with statements(h.engine) as seen:
+        assert h.sweep(sweeper=scheduling).scheduled_attempts == 0
+    assert calls == []  # visibly full: no scheduling transaction at all
+    assert not [s for s in seen if "execution_scheduler_cursors" in s and "FOR UPDATE" in s]
+    with Session(h.engine) as db, db.begin():
+        db.scalar(select(ExecutionSchedulerCursor)).active_limit = 25
+    assert h.sweep(sweeper=scheduling).scheduled_attempts == 3
+    # One head per transaction; then a plain read finds nothing left to reserve.
+    assert calls == [1, 1, 1]
+
+
+def test_an_unfittable_head_fails_at_once_and_one_with_time_left_is_reserved(controlled):
+    """diag1: under overload every head's step no longer fitted before its deadline;
+    refused on every turn, each blocked its environment until it expired."""
+    from uuid import uuid4
+
+    from lotuspond.execution.contracts import AdmissionRequest
+    from lotuspond.execution.scheduler import Scheduler
+
+    from .activity_fixtures import Demand, attempt_at, deploy
+
+    h = controlled
+    revision = deploy(h, "activity_read")  # 1,000 s deadline
+    executions = []
+    for name in ("late", "current"):
+        with Session(h.engine) as db, db.begin():
+            request = AdmissionRequest(deployment_revision_id=revision, input=None)
+            admitted = h.service.admit_execution(db, h.actor, request, f"{name}-{uuid4().hex}")
+            executions.append(admitted.id)
+    h.drive()
+    late, current = (attempt_at(h, execution_id, "read") for execution_id in executions)
+
+    class Demands:
+        test_only = True
+
+        def demand(self, attempt_id):
+            # The late step needs more active time than its execution has left.
+            return Demand(2_000_000 if attempt_id == late else 10_000).demand(attempt_id)
+
+    scheduler = Scheduler(h.budgets, Demands(), test_mode=True)
+    try:
+        with Session(h.engine) as db, db.begin():
+            scheduled = scheduler.schedule_batch(db, "test-installation")
+        assert [item.attempt_id for item in scheduled] == [current]
+    finally:
+        scheduler.close()
+    h.run()
+    with Session(h.engine) as db:
+        row = db.get(Execution, executions[0])
+        assert (row.state, row.reason) == ("failed", "deadline_exceeded")
+        assert database_now_ms(db) < row.deadline_ms  # at once, not at its deadline
+        assert db.get(ExecutionAttempt, late).state == "cancelled"
+        row = db.get(Execution, executions[1])
+        assert (row.state, row.reason) == ("running", None)
+        reserved = db.scalar(
+            select(ExecutionUsageReservation.attempt_id).where(
+                ExecutionUsageReservation.attempt_id == current
+            )
+        )
+        assert reserved == current

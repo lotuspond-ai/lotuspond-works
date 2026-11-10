@@ -26,7 +26,6 @@ export function Invitations({ workspace, account }: { workspace: Workspace; acco
   const permitted =
     workspace.kind === 'organization' && ['owner', 'admin'].includes(workspace.role);
   const mailDisabled = account.capabilities?.mail_enabled === false;
-  const offlineInstallation = account.capabilities?.offline_enrollment_enabled === true;
   const load = useCallback(
     async (signal?: AbortSignal) => {
       const data = await api<{ items: Invitation[] }>(
@@ -95,9 +94,8 @@ export function Invitations({ workspace, account }: { workspace: Workspace; acco
           {message && <p role="status">{message}</p>}
           {mailDisabled && (
             <p className="notice" role="status">
-              {offlineInstallation
-                ? 'Email invitations are unavailable in this isolated installation. Ask your operator to enroll the person, then add their account through Members.'
-                : 'Email delivery is disabled on this installation. An operator must configure mail before you can send invitations.'}
+              Email delivery is disabled on this installation. An operator must configure mail
+              before you can send invitations.
             </p>
           )}
           <form

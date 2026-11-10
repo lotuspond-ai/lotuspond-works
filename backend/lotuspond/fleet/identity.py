@@ -211,7 +211,7 @@ def locked_identity(db, principal, dependencies, *, require_session=False):
 
     identity = RuntimeIdentity.model_validate(principal.identity)
     scope = identity.scope
-    _, policy = lock_pool(db, scope, identity.pool_id, dependencies)
+    _, policy = lock_pool(db, scope, identity.pool_id, dependencies, share=True)
     instance = record(db, RuntimeInstance, scope, identity.instance_id, lock=True)
     if (
         instance.pool_id != identity.pool_id

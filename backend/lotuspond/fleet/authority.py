@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
-from time import time_ns
+from time import monotonic, time_ns
 from typing import Protocol
 
 from lotuspond_runtime.errors import FleetError
@@ -53,17 +53,30 @@ def database_now_ms(db: Session) -> int:
 class _LookupSlot:
     """At most one daemon lookup, including after a deadline or application shutdown.
 
-    A stuck provider occupies its slot permanently and subsequent calls deny.
-    Daemon threads are never joined on shutdown. Each result belongs to exactly
-    one call; a late response is discarded, never cached for another request.
+    A concurrent caller waits for the slot, and its timeout bounds the wait and the
+    lookup together. A stuck provider occupies its slot permanently, and every later
+    call denies within its own bound. Daemon threads are never joined on shutdown.
+    Each result belongs to exactly one call; a late response is discarded, never
+    cached for another request.
     """
 
     def __init__(self):
         self.lock = Lock()
         self.closed = False
 
+    def _wait(self, timeout):
+        """Wait for a slot another lookup holds; True once this caller holds it."""
+        return self.lock.acquire(timeout=timeout)
+
     def current(self, recovery, installation_id, timeout):
-        if self.closed or not self.lock.acquire(blocking=False):
+        if self.closed:
+            raise FleetError("authority_unavailable")
+        started = monotonic()
+        if not (self.lock.acquire(blocking=False) or self._wait(timeout)):
+            raise FleetError("authority_unavailable")
+        remaining = timeout - (monotonic() - started)
+        if self.closed or remaining <= 0:
+            self.lock.release()
             raise FleetError("authority_unavailable")
         completed, result = Event(), []
 
@@ -83,7 +96,7 @@ class _LookupSlot:
         except Exception:
             self.lock.release()
             raise FleetError("authority_unavailable") from None
-        if not completed.wait(timeout) or self.closed or not result:
+        if not completed.wait(remaining) or self.closed or not result:
             raise FleetError("authority_unavailable")
         return result[0]
 

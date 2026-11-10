@@ -3,7 +3,7 @@
 Every route is under `/api/v1/projects/{project_id}/environments/{environment_id}`
 in the authenticated workspace. A session or `lp_` key is authenticated first and
 the operation authorized in its own short transaction; each service then
-reauthorizes under its own lock order (cursor and provider lookups first), so a
+reauthorizes under its own lock order (the workspace row first), so a
 route never holds a lock a service must take earlier. Database-only reads need no
 provider and no worker, so an orchestrator outage never blocks evidence.
 

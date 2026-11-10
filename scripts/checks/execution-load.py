@@ -15,10 +15,22 @@ runtimes from the conformance harness, and admits through the public API:
   duration and the worker memory are recorded.
 
 Writes `load-report.json` (hardware, PostgreSQL version and settings, latency
-distributions, queue age, backlog, lock waits on `execution_scheduler_cursors`,
+distributions, queue age, backlog, lock waits and hold times on
+`execution_scheduler_cursors`, lock waiters by relation, provider lookups that
+waited for their slot, reservations, deliveries and claims per phase, deadlocks,
 database CPU, WAL rate, table and index sizes, dead-tuple ratios and the pass
-criteria). A result is evidence about this harness on this hardware, not hosted
+criteria). For option C it also records every fair gate request by caller, gate
+waiters by role, MultiXact growth and its margin, the sweeper's time per
+reservation, and a revocation probe every few seconds: a revocation's locks under
+the load, then a rollback, whose wait p95 and max are a pass criterion. A result is evidence about this harness on this hardware, not hosted
 capacity or a service level. Needs Linux (runtime private state) and a Docker CLI.
+
+`--engine-cpus` and `--client-cpus` (test-only, both or neither) split the host's
+CPUs the way production separates them. The installation gets the first set: the API
+and the workers (through taskset) and PostgreSQL (`--cpuset-cpus`). Its clients get
+the second: this driver, the synthetic runtimes, and the processes they start. Each
+role's CPU includes children that have exited, such as a runtime's per-request
+resolver.
 """
 
 from __future__ import annotations
@@ -44,7 +56,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "backend/tests/execution/conformance"))
 import driver as drivers
 import world as worlds
-from harness import CURSOR_LOG, CYCLE_LOG
+from harness import (
+    CALL_LOG,
+    CURSOR_LOG,
+    CYCLE_LOG,
+    GATE_LOG,
+    LOOKUP_LOG,
+    PROFILE_DIRECTORY,
+)
 from processes import Processes
 
 IMAGE = "postgres:18.6"
@@ -74,8 +93,15 @@ SETTINGS = (
     "autovacuum",
     "deadlock_timeout",
     "log_lock_waits",
+    "autovacuum_multixact_freeze_max_age",
 )
 CURSOR = "execution_scheduler_cursors"
+# The owner's tier 3 bound for a revocation's wait at the planning target (option C).
+REVOCATION_P95_S, REVOCATION_MAX_S = 1.0, 5.0
+PROBE_SECONDS = 5
+PROBE_TIMEOUT = "10s"
+# `authority_gate`'s namespaces, as pg_locks shows them (classid).
+GATE_NAMES = {0x4C505701: "workspace", 0x4C505503: "user", 0x4C505002: "pool"}
 
 
 def percentile(values, p):
@@ -116,8 +142,9 @@ def docker(*args, check=True, timeout=120):
 class Cluster:
     """The run's own PostgreSQL; removed, and the removal confirmed, at the end."""
 
-    def __init__(self):
+    def __init__(self, cpus=None):
         self.name = "lotuspond-load-" + uuid4().hex[:12]
+        self.cpus = cpus  # test-only: the engine's CPU list (`--engine-cpus`)
         for _ in range(100):
             port = random.randint(20000, 60000)
             with socket.socket() as probe:
@@ -135,6 +162,7 @@ class Cluster:
         docker(
             "run", "--detach", "--name", self.name, "--label", LABEL,
             "--publish", f"127.0.0.1:{self.port}:5432",
+            *(["--cpuset-cpus", self.cpus] if self.cpus else []),
             "--env", "POSTGRES_USER=lotuspond", "--env", "POSTGRES_DB=lotuspond_platform_test",
             "--env", "POSTGRES_HOST_AUTH_METHOD=trust", "--env", f"PGDATA={DATA}",
             IMAGE, "-c", "max_connections=300", "-c", "log_lock_waits=on",
@@ -190,6 +218,13 @@ class Cluster:
                     waited.append(entry)
                 entry = None
         return distribution(waited)
+
+    def deadlocks_from_log(self) -> int:
+        """Deadlocks PostgreSQL detected and logged during the run."""
+        log = docker("logs", self.name, check=False, timeout=300).stderr.decode(
+            errors="replace"
+        )
+        return sum(1 for line in log.splitlines() if "deadlock detected" in line)
 
     def remove(self) -> bool:
         """Remove the container and its anonymous volumes; confirm both are gone.
@@ -260,6 +295,34 @@ def sample(world, cluster):
         lock_waits = db.scalar(
             text("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'")
         )
+        # Who blocks the waiters of each relation: role, state and the statement it
+        # runs (SQL text only; bound values are never in pg_stat_activity's query).
+        blocking = db.execute(
+            text(
+                "SELECT coalesce(w.relation, t.relation)::regclass::text, "
+                "CASE WHEN b.application_name LIKE 'lotuspond-%' THEN "
+                "split_part(b.application_name, ':', 1) ELSE 'api' END, b.state, "
+                "left(regexp_replace(b.query, '\\s+', ' ', 'g'), 90), "
+                "count(DISTINCT w.pid) FROM pg_locks w "
+                "LEFT JOIN pg_locks t ON t.pid = w.pid AND t.locktype = 'tuple' "
+                "AND t.granted "
+                "CROSS JOIN LATERAL unnest(pg_blocking_pids(w.pid)) AS blocking(pid) "
+                "JOIN pg_stat_activity b ON b.pid = blocking.pid "
+                "WHERE NOT w.granted GROUP BY 1, 2, 3, 4"
+            )
+        ).all()
+        # Every waiting backend by the relation it waits on: a row lock waits on the
+        # holder's transaction while holding that row's tuple lock, so its relation is
+        # the tuple lock's. A queue that moved off the cursor shows up here.
+        by_relation = db.execute(
+            text(
+                "SELECT coalesce(w.relation, t.relation)::regclass::text, "
+                "count(DISTINCT w.pid), coalesce(max(extract(epoch FROM "
+                "clock_timestamp() - w.waitstart)), 0) FROM pg_locks w "
+                "LEFT JOIN pg_locks t ON t.pid = w.pid AND t.locktype = 'tuple' "
+                "AND t.granted WHERE NOT w.granted GROUP BY 1"
+            )
+        ).all()
         # Who holds what the cursor's waiters wait for: the API (no application
         # name) or a worker, and whether it is running SQL or idle in its transaction.
         holders = db.execute(
@@ -282,6 +345,25 @@ def sample(world, cluster):
             {"now": now},
         ).all()
         wal = db.scalar(text("SELECT pg_current_wal_lsn() - '0/0'::pg_lsn"))
+        # Shared row locks by more than one transaction make MultiXact IDs (option C).
+        # The database's oldest MultiXact is the cluster's first until a vacuum freezes,
+        # so its age is the count made so far; the margin is to forced freezing.
+        multixacts = db.execute(
+            text(
+                "SELECT mxid_age(datminmxid), age(datfrozenxid) FROM pg_database "
+                "WHERE datname = current_database()"
+            )
+        ).one()
+        gate_waiters = db.execute(
+            text(
+                "SELECT l.classid::bigint, l.mode, CASE WHEN a.application_name "
+                "LIKE 'lotuspond-%' THEN split_part(a.application_name, ':', 1) ELSE 'api' "
+                "END, count(*), coalesce(max(extract(epoch FROM clock_timestamp() - "
+                "l.waitstart)), 0) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid "
+                "WHERE l.locktype = 'advisory' AND l.objsubid = 2 AND NOT l.granted "
+                "GROUP BY 1, 2, 3"
+            )
+        ).all()
         states = dict(
             db.execute(text("SELECT state, count(*) FROM executions GROUP BY 1")).all()
         )
@@ -297,7 +379,32 @@ def sample(world, cluster):
         "cursor_lock_waiters": waits[0],
         "cursor_lock_wait_max_s": float(waits[1]),
         "lock_waiters": lock_waits,
+        "lock_waiters_by_relation": {
+            str(relation): {"waiters": n, "max_wait_s": float(longest)}
+            for relation, n, longest in by_relation
+        },
+        "blocking_holders": [
+            {
+                "relation": str(rel),
+                "holder": f"{who}/{state}",
+                "query": query,
+                "waiters": n,
+            }
+            for rel, who, state, query, n in blocking
+        ],
         "cursor_holders": {f"{who}/{state}": n for who, state, n in holders},
+        "multixact_age": int(multixacts[0]),
+        "xid_age": int(multixacts[1]),
+        "gate_waiters": [
+            {
+                "gate": GATE_NAMES.get(namespace, str(namespace)),
+                "mode": mode,
+                "role": who,
+                "waiters": n,
+                "max_wait_s": float(longest),
+            }
+            for namespace, mode, who, n, longest in gate_waiters
+        ],
         "wal_bytes": int(wal),
         "states": states,
         "database": cluster.stats(),
@@ -367,11 +474,23 @@ def latencies(world, since_ms=0):
 
 
 def activity_by_phase(world, timeline):
-    """Deliveries issued and leases claimed inside each load phase, from rows."""
+    """Reservations, deliveries and claims inside each load phase, from rows.
+
+    Reservations count compute slots taken (shared child reservations take none),
+    in database time, with each count's rate per second over its phase.
+    """
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
     with Session(world.engine) as db:
+        reserved = db.scalars(
+            text(
+                "SELECT floor(extract(epoch FROM r.created_at) * 1000)::bigint "
+                "FROM execution_usage_reservations r WHERE NOT EXISTS (SELECT 1 FROM "
+                "execution_requests q WHERE q.workspace_id = r.workspace_id AND "
+                "q.request_key = 'capacity.shared:' || r.attempt_id)"
+            )
+        ).all()
         issued = db.scalars(
             text("SELECT issued_at_ms FROM execution_activity_deliveries")
         ).all()
@@ -380,17 +499,27 @@ def activity_by_phase(world, timeline):
     def within(times, window):
         return sum(1 for t in times if window["start_ms"] <= t < window["end_ms"])
 
-    return {
-        name: {"deliveries": within(issued, window), "claims": within(claimed, window)}
-        for name, window in timeline.items()
-    }
+    phases = {}
+    for name, window in timeline.items():
+        seconds = max((window["end_ms"] - window["start_ms"]) / 1000, 1e-9)
+        counts = {
+            "reservations": within(reserved, window),
+            "deliveries": within(issued, window),
+            "claims": within(claimed, window),
+        }
+        phases[name] = {
+            **counts,
+            "per_second": {key: round(n / seconds, 2) for key, n in counts.items()},
+        }
+    return phases
 
 
 def cpu_seconds(pid):
-    """User plus system CPU of one child, from /proc (Linux)."""
+    """User plus system CPU of one child and of its children that have exited, from
+    /proc (Linux). Live children are counted by `family`."""
     try:
         fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-        return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+        return sum(int(fields[i]) for i in (11, 12, 13, 14)) / os.sysconf("SC_CLK_TCK")
     except (OSError, IndexError, ValueError):
         return None
 
@@ -445,6 +574,15 @@ def api_cpu(processes):
         return {}
     serving = family(api.pid)
     return {str(pid): cpu_seconds(pid) for pid in serving[1:] or serving}
+
+
+def cpu_list(text):
+    """A Linux CPU list ("0-3", "4,6-7") as a set of CPU numbers."""
+    cpus = set()
+    for part in text.split(","):
+        low, _, high = part.partition("-")
+        cpus.update(range(int(low), int(high or low) + 1))
+    return cpus
 
 
 def hardware():
@@ -510,7 +648,7 @@ class Load:
         )
         self.operator = drivers.Operator(world, processes)
         self.tenants, self.runtimes = [], []
-        self.admissions, self.samples = [], []
+        self.admissions, self.samples, self.probes = [], [], []
         self.lock = threading.Lock()
         # The service-manager stand-in: running while `keeping` is set; it holds
         # `keeper_lock` while it restarts, so a planned kill never races it.
@@ -520,6 +658,8 @@ class Load:
         self.phase = "setup"
         self.cursor_log = Path(os.environ[CURSOR_LOG])
         self.cycle_log = Path(os.environ[CYCLE_LOG])
+        self.lookup_log = Path(os.environ[LOOKUP_LOG])
+        self.call_log = Path(os.environ[CALL_LOG])
 
     def setup(self):
         operator = self.operator
@@ -623,6 +763,56 @@ class Load:
             "exit_codes": codes,
             "runtimes_restarted": len({item["name"] for item in restarts}),
         }
+
+    def revocations(self, stop):
+        """Revocation probes (owner condition on option C): every `PROBE_SECONDS`, one
+        tenant's revocation locks under the load, then a rollback. In turn: a workspace
+        change (its gate exclusive, its row), an identity revocation (the workspace
+        gate, the owner's user gate, the user row) and a runtime revocation (the
+        workspace gate, the pool row). `s` runs from the first gate to the last row."""
+        from sqlalchemy import select, text
+        from sqlalchemy.orm import Session
+
+        from lotuspond import authority_gate
+        from lotuspond.models import Membership, RuntimePool, User, Workspace
+
+        kinds, owners, n = ("workspace", "user", "pool"), {}, 0
+        while not stop.wait(PROBE_SECONDS):
+            customer = self.tenants[n % len(self.tenants)][0]
+            entry = {"phase": self.phase, "kind": kinds[n % len(kinds)]}
+            n += 1
+            db = Session(self.world.engine)
+            began = time.monotonic()
+            try:
+                db.begin()
+                db.execute(text(f"SET LOCAL lock_timeout = '{PROBE_TIMEOUT}'"))
+                if entry["kind"] == "user" and customer.workspace not in owners:
+                    owners[customer.workspace] = db.scalar(
+                        select(Membership.user_id).where(
+                            Membership.workspace_id == customer.workspace,
+                            Membership.role == "owner",
+                        )
+                    )
+                began = time.monotonic()
+                authority_gate.workspace(db, customer.workspace, exclusive=True)
+                if entry["kind"] == "workspace":
+                    row = select(Workspace).where(Workspace.id == customer.workspace)
+                elif entry["kind"] == "user":
+                    owner = owners[customer.workspace]
+                    authority_gate.users(db, [owner], exclusive=True)
+                    row = select(User).where(User.id == owner)
+                else:
+                    row = select(RuntimePool).where(RuntimePool.id == customer.pool_id)
+                db.scalar(row.with_for_update())
+                entry["s"] = round(time.monotonic() - began, 4)
+            except Exception as error:  # noqa: BLE001 - a refused probe is recorded
+                entry["s"] = round(time.monotonic() - began, 4)
+                entry["error"] = type(error).__name__
+            finally:
+                db.rollback()
+                db.close()
+            with self.lock:
+                self.probes.append(entry)
 
     def sampler(self, stop):
         while not stop.wait(self.args.sample_seconds):
@@ -759,6 +949,7 @@ class Load:
                 and "unknown" not in per_attempt
                 and claims["max_claims_per_attempt"] <= 1,
             },
+            "revocation_wait_bounded": revocation_bound(self.probes),
         }
 
     def waiting(self):
@@ -900,8 +1091,10 @@ def timing_log(path):
 
 def cursor_waits(path):
     """Every scheduler-cursor acquisition, by process role, as each process timed it."""
-    entries = timing_log(path)
-    roles = sorted({item["role"] for item in entries})
+    logged = timing_log(path)
+    entries = [item for item in logged if "ms" in item]
+    holds = [item for item in logged if "hold_ms" in item]
+    roles = sorted({item["role"] for item in logged})
     return {
         "all_ms": distribution([item["ms"] for item in entries]),
         "over_100ms": sum(1 for item in entries if item["ms"] > 100),
@@ -910,6 +1103,215 @@ def cursor_waits(path):
             role: distribution([item["ms"] for item in entries if item["role"] == role])
             for role in roles
         },
+        # From the acquisition to the end of its transaction's commit or rollback.
+        "hold_ms": distribution([item["hold_ms"] for item in holds]),
+        "hold_by_role_ms": {
+            role: distribution(
+                [item["hold_ms"] for item in holds if item["role"] == role]
+            )
+            for role in roles
+        },
+        "holds_rolled_back": sum(1 for item in holds if item["failed"]),
+    }
+
+
+def lookup_waits(path):
+    """Provider lookups that waited for their slot (finding 3), by slot and role."""
+    entries = timing_log(path)
+    keys = sorted({(item["slot"], item["role"]) for item in entries})
+    return {
+        "waiting_callers": len(entries),
+        "wait_ms": distribution([item["ms"] for item in entries]),
+        "refused_after_the_bound": sum(1 for item in entries if not item["acquired"]),
+        "by_slot_and_role": {
+            f"{slot}/{role}": {
+                "waiting_callers": sum(
+                    1 for i in entries if (i["slot"], i["role"]) == (slot, role)
+                ),
+                "wait_ms": distribution(
+                    [i["ms"] for i in entries if (i["slot"], i["role"]) == (slot, role)]
+                ),
+            }
+            for slot, role in keys
+        },
+    }
+
+
+def service_calls(path, timeline):
+    """Admission and runtime activity calls by phase: count, wall and thread CPU."""
+    entries = timing_log(path)
+    names = sorted({item["call"] for item in entries})
+
+    def summary(items):
+        return {
+            "count": len(items),
+            "failed": sum(1 for item in items if item["failed"]),
+            "wall_ms": distribution([item["wall_ms"] for item in items]),
+            "cpu_ms": distribution([item["cpu_ms"] for item in items]),
+            "cpu_s_total": round(sum(item["cpu_ms"] for item in items) / 1000, 1),
+        }
+
+    return {
+        phase: {
+            name: summary(
+                [
+                    item
+                    for item in entries
+                    if item["call"] == name
+                    and window["start_ms"] <= item["at"] < window["end_ms"]
+                ]
+            )
+            for name in names
+        }
+        for phase, window in timeline.items()
+    }
+
+
+def relation_waits(samples):
+    """Sampled lock waiters by the relation they waited on, across every sample."""
+    relations = sorted(
+        {name for s in samples for name in s.get("lock_waiters_by_relation", {})}
+    )
+    return {
+        name: {
+            "waiters": distribution(
+                [
+                    s.get("lock_waiters_by_relation", {})
+                    .get(name, {})
+                    .get("waiters", 0)
+                    for s in samples
+                ]
+            ),
+            "max_wait_s": distribution(
+                [
+                    s["lock_waiters_by_relation"][name]["max_wait_s"]
+                    for s in samples
+                    if name in s.get("lock_waiters_by_relation", {})
+                ]
+            ),
+        }
+        for name in relations
+    }
+
+
+def revocation_bound(probes):
+    """The owner's bound on a revocation's wait under load: p95 ≤ 1 s and max ≤ 5 s,
+    over every probe while admissions run (a refused probe counts as its timeout)."""
+    loaded = [p for p in probes if p["phase"] in ("steady", "burst", "recovery")]
+    waits = [p["s"] for p in loaded]
+    return {
+        "bound": {"p95_s": REVOCATION_P95_S, "max_s": REVOCATION_MAX_S},
+        "wait_s": distribution(waits),
+        "by_kind": {
+            kind: distribution([p["s"] for p in loaded if p["kind"] == kind])
+            for kind in sorted({p["kind"] for p in loaded})
+        },
+        "refused": sorted({p["error"] for p in loaded if "error" in p}),
+        "passed": bool(waits)
+        and not any("error" in p for p in loaded)
+        and percentile(waits, 95) <= REVOCATION_P95_S
+        and max(waits) <= REVOCATION_MAX_S,
+    }
+
+
+def gate_waits(path, timeline):
+    """Fair gate requests by caller, gate and mode, per phase (`record_gate_waits`).
+
+    `ms` is a request's wait plus one round trip; `waited` counts those over 10 ms.
+    Refused `try_shared` claims are `skipped`."""
+    entries = timing_log(path)
+    result = {}
+    for phase, window in timeline.items():
+        groups = {}
+        for item in entries:
+            if window["start_ms"] <= item["at"] < window["end_ms"]:
+                name = f"{item['gate']}/{item.get('mode', 'shared')} {item['caller']}"
+                groups.setdefault(name, []).append(item)
+        result[phase] = {
+            name: {
+                "requests": len([i for i in items if not i.get("skipped")]),
+                "skipped": len([i for i in items if i.get("skipped")]),
+                "waited_over_10ms": len([i for i in items if i.get("ms", 0) > 10]),
+                "ms": distribution([i["ms"] for i in items if "ms" in i]),
+                "total_s": round(sum(i.get("ms", 0) for i in items) / 1000, 1),
+            }
+            for name, items in sorted(groups.items())
+        }
+    return result
+
+
+def sampled_gate_waiters(samples):
+    """Backends waiting on a gate at each sample, by gate, mode and role."""
+    names = sorted(
+        {
+            f"{w['gate']}/{w['mode']}/{w['role']}"
+            for s in samples
+            for w in s.get("gate_waiters", [])
+        }
+    )
+    result = {}
+    for name in names:
+        rows = [
+            [
+                w
+                for w in s.get("gate_waiters", [])
+                if f"{w['gate']}/{w['mode']}/{w['role']}" == name
+            ]
+            for s in samples
+        ]
+        result[name] = {
+            "waiters": distribution([sum(w["waiters"] for w in r) for r in rows]),
+            "max_wait_s": distribution(
+                [max(w["max_wait_s"] for w in r) for r in rows if r]
+            ),
+        }
+    return result
+
+
+def multixact_growth(samples, settings_rows):
+    """MultiXact IDs made during the run, their rate, and the margin left before
+    PostgreSQL forces a freeze (`autovacuum_multixact_freeze_max_age`) and before
+    wraparound (2^31)."""
+    points = [(s["at_ms"], s["multixact_age"]) for s in samples if "multixact_age" in s]
+    if len(points) < 2:
+        return {"samples": len(points)}
+    (first_at, first), (last_at, last) = points[0], points[-1]
+    freeze = int(
+        settings_rows.get("autovacuum_multixact_freeze_max_age") or 400_000_000
+    )
+    rate = (
+        (last - first) / ((last_at - first_at) / 1000) if last_at > first_at else None
+    )
+    return {
+        "first_age": first,
+        "last_age": last,
+        "made": last - first,
+        "per_second": round(rate, 2) if rate is not None else None,
+        "freeze_max_age": freeze,
+        "margin_to_forced_freeze": freeze - last,
+        "days_to_forced_freeze_at_this_rate": round((freeze - last) / rate / 86400, 1)
+        if rate
+        else None,
+        "margin_to_wraparound": 2**31 - last,
+    }
+
+
+def sweep_per_reservation(path):
+    """The sweeper's time per attempt it reserved: each sweep that reserved any."""
+    sweeps = [
+        item
+        for item in timing_log(path)
+        if item["cycle"] == "sweep" and item.get("report", {}).get("scheduled_attempts")
+    ]
+    return {
+        "sweeps_that_reserved": len(sweeps),
+        "reserved": sum(item["report"]["scheduled_attempts"] for item in sweeps),
+        "ms_per_reservation": distribution(
+            [
+                round(item["s"] * 1000 / item["report"]["scheduled_attempts"], 2)
+                for item in sweeps
+            ]
+        ),
     }
 
 
@@ -960,6 +1362,16 @@ def summarize(report, load, cluster, timeline, world):
         # distribution above holds only waits that were eventually granted).
         "every_acquisition": cursor_waits(load.cursor_log),
     }
+    report["lock_waits_by_relation"] = relation_waits(observed)
+    report["gate_waits"] = {
+        "by_caller": gate_waits(Path(os.environ[GATE_LOG]), timeline),
+        "sampled_waiters": sampled_gate_waiters(observed),
+    }
+    report["revocation_probes"] = report["criteria"]["revocation_wait_bounded"]
+    report["sweep_per_reservation"] = sweep_per_reservation(load.cycle_log)
+    report["lookup_slot_waits"] = lookup_waits(load.lookup_log)
+    report["service_calls"] = service_calls(load.call_log, timeline)
+    report["deadlocks_logged"] = cluster.deadlocks_from_log()
     cycles = timing_log(load.cycle_log)
     report["worker_cycles_s"] = {
         kind: distribution([item["s"] for item in cycles if item["cycle"] == kind])
@@ -1001,7 +1413,30 @@ def main():
     parser.add_argument(
         "--api-workers", type=int, default=1, help="API processes on one socket"
     )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="test-only: write each API process's cProfile into the report directory",
+    )
+    parser.add_argument(
+        "--engine-cpus", help="test-only: CPU list for the API, workers and PostgreSQL"
+    )
+    parser.add_argument(
+        "--client-cpus", help="test-only: CPU list for this driver and the runtimes"
+    )
     args = parser.parse_args()
+    if (args.engine_cpus is None) != (args.client_cpus is None):
+        raise SystemExit("--engine-cpus and --client-cpus go together")
+    if args.engine_cpus is not None:
+        engine, clients = cpu_list(args.engine_cpus), cpu_list(args.client_cpus)
+        if (
+            not engine
+            or not clients
+            or engine & clients
+            or not (engine | clients <= os.sched_getaffinity(0))
+        ):
+            raise SystemExit("the CPU sets must be disjoint, non-empty and available")
+        os.sched_setaffinity(0, clients)  # before any thread: they inherit it
     output = worlds.private_directory(args.output.absolute())
     report_path = output / "load-report.json"
     if report_path.exists():
@@ -1014,10 +1449,20 @@ def main():
         "hardware": hardware(),
         "outcome": "failed",
     }
+    if args.engine_cpus is not None:
+        report["hardware"]["cpu_split"] = {
+            "engine": args.engine_cpus,
+            "clients": args.client_cpus,
+        }
     # Test-only timing logs the harness's API and workers append to.
     work = worlds.private_directory(args.work.absolute())
     os.environ[CURSOR_LOG] = str(work / "cursor-waits.jsonl")
     os.environ[CYCLE_LOG] = str(work / "cycles.jsonl")
+    os.environ[LOOKUP_LOG] = str(work / "lookup-waits.jsonl")
+    os.environ[CALL_LOG] = str(work / "service-calls.jsonl")
+    os.environ[GATE_LOG] = str(work / "gate-waits.jsonl")
+    if args.profile:
+        os.environ[PROFILE_DIRECTORY] = str(output)
 
     def terminate(signum, frame):
         for other in (signal.SIGTERM, signal.SIGINT):  # a second one never cuts cleanup
@@ -1026,13 +1471,15 @@ def main():
 
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, terminate)
-    cluster = Cluster()
+    cluster = Cluster(args.engine_cpus)
     load = None
     try:
         cluster.start()
         report["cluster"] = {"image": IMAGE, "port": cluster.port}
         with worlds.owned(cluster.url, args.work.absolute() / "world") as world:
-            processes = Processes(world, api_workers=args.api_workers)
+            processes = Processes(
+                world, api_workers=args.api_workers, engine_cpus=args.engine_cpus
+            )
             try:
                 processes.start_api()
                 workers = {
@@ -1051,16 +1498,24 @@ def main():
                     target=load.sampler, args=(stop,), daemon=True
                 )
                 sampler.start()
+                prober = threading.Thread(
+                    target=load.revocations, args=(stop,), daemon=True
+                )
+                prober.start()
                 timeline = load.drive()
                 time.sleep(120)  # drain: admitted work finishes or waits
                 stop.set()
                 sampler.join(timeout=60)
+                prober.join(timeout=60)
                 summarize(report, load, cluster, timeline, world)
                 if args.waiting:
                     report["waiting"] = load.waiting()
                 version, settings, tables = table_health(world)
                 report["postgresql"] = {"version": version, "settings": settings}
                 report["tables"] = tables
+                report["multixacts"] = multixact_growth(
+                    [s for s in load.samples if "error" not in s], settings
+                )
             finally:
                 if load is not None:
                     load.stop_keeping()

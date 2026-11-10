@@ -5,15 +5,12 @@ import { PondPlate } from '../components/PondPlate.js';
 import { PondWorkflow } from '../components/PondWorkflow.js';
 import { ConsolePreview } from '../components/platform/ConsolePreview.js';
 import { RecentlyShipped } from '../components/RecentlyShipped.js';
-import { ThreadedSteps } from '../components/ThreadedSteps.js';
 import { Alert, StatusBadge } from '../components/ui.js';
 import { useArrival } from '../lib/useArrival.js';
 
 type AccountChoice = 'individual' | 'organization';
 
-// Set at build time for the hosted introduction; an installation built without it shows no
-// contact action rather than an invented address.
-const contactEmail = String(import.meta.env.VITE_LOTUSPOND_CONTACT_EMAIL ?? '').trim();
+const contactEmail = 'hello@lotuspond.ai';
 
 // The hero keeps the right of the water clear for the drawn workflow.
 const heroPads: PadLayout = [
@@ -40,57 +37,6 @@ const packageRejections = [
   'An agent references an undeclared model.',
   'A node operation is not declared by its connector.',
   'The package graph must be acyclic.',
-] as const;
-
-const engagements = [
-  [
-    'solo',
-    'On your own',
-    'Install Lotuspond on your infrastructure and build with your own engineers. Nothing in the product needs our consultants to operate it.',
-  ],
-  [
-    'together',
-    'With our team',
-    'We assess your processes, implement the first automations alongside your people, and can operate them for you afterward.',
-  ],
-  [
-    'relay',
-    'Through a partner',
-    'We train and equip the implementation partner you choose, so they deliver on the same platform and methods we use.',
-  ],
-] as const;
-
-const services = [
-  [
-    'Readiness assessment',
-    'We inventory your processes, rank them by value and risk, and check data, documents, systems and permissions to decide where rules, an agent, a person or a mix belongs.',
-    'Readiness scorecard, opportunity backlog, process maps and a phased plan',
-  ],
-  [
-    'Implementation',
-    'We design the process, build its connections and workflow package, test it with recorded evidence, deploy it, and hand it over with named owners.',
-    'Process design, connections, package, test evidence and handover',
-  ],
-  [
-    'Managed operations',
-    'We watch automations in production, respond to incidents, manage capacity, and turn exceptions into tested improvements under agreed change control.',
-    'Monitoring, incident response, approved changes and improvement reviews',
-  ],
-  [
-    'Training and enablement',
-    'We train your administrators, developers and reviewers, and give implementation partners the guides and methods we work by.',
-    'Trained teams and a repeatable implementation method',
-  ],
-] as const;
-const serviceGlyphs = ['survey', 'package', 'pulse', 'handover'] as const;
-
-const readiness = [
-  'Choose where rules, an agent, a person, or a combination belongs.',
-  'Name process owners, inputs, decision rules and exception routes.',
-  'Assess data quality, documents, identity, APIs, permissions and auditability.',
-  'Build permitted integrations, typed tool contracts and governed knowledge.',
-  'Introduce human review, incident handling and release practice.',
-  'Train people, then measure adoption, outcomes and running costs.',
 ] as const;
 
 type Readiness = 'available' | 'in-progress' | 'planned';
@@ -148,7 +94,7 @@ const register = [
       [
         'Assurance',
         'available',
-        'Frozen scenarios, immutable release policies, independent approval, production traces and incidents, for HTTP, MCP, A2A, voice and software-task agents.',
+        'Frozen scenarios, evaluation runs for agents behind HTTP, immutable release policies and independent approval. A deployment needs a current release decision.',
       ],
     ],
   ],
@@ -236,16 +182,12 @@ const families = [
 
 const deployments = [
   [
-    'Connected',
-    'Container images for the API, console, background workers, and the OTLP collector.',
+    'The service',
+    'One Compose file runs the API and console, the identity-mail worker, PostgreSQL and Redis, on a host you choose.',
   ],
   [
-    'On-premises',
-    'An offline bundle of pinned images with checksums and a verifier, for networks you control.',
-  ],
-  [
-    'Air-gapped',
-    'Cloud model calls, mail, and external alerts switch off. Authenticators and operator-attested enrollment work without egress; assessments that need a cloud model report unknown.',
+    'Your side',
+    'A separate nonroot image runs the HTTP evaluation runner and the release gate beside your agents, with no built-in credentials.',
   ],
 ] as const;
 
@@ -260,21 +202,19 @@ const gateExample = [
   ['output', '2'],
 ] as const;
 
-const deploymentGlyphs = ['network', 'enclosure', 'sealed'] as const;
+const deploymentGlyphs = ['network', 'enclosure'] as const;
 const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
 // Page order drives the contents list, the section numbers, and the header links.
 const sections = [
-  ['engage', 'Engagement', '3 paths'],
-  ['services', 'Services', '4 services'],
   ['platform', 'Platform', '8 parts'],
   ['control', 'Human control', '6 rules'],
   ['workflows', 'Workflows', '6 families'],
-  ['deployment', 'Deployment', '3 modes'],
+  ['deployment', 'Deployment', '2 parts'],
   ['accounts', 'Accounts', '2 paths'],
 ] as const;
 type SectionId = (typeof sections)[number][0];
-const headerLinks: SectionId[] = ['services', 'platform', 'workflows', 'deployment'];
+const headerLinks: SectionId[] = ['platform', 'control', 'workflows', 'deployment'];
 
 function jumpTo(event: MouseEvent<HTMLAnchorElement>, id: string) {
   const target = document.getElementById(id);
@@ -395,27 +335,20 @@ export function Landing({
             <p className="pond-lede">
               Lotuspond helps companies put AI agents to work in real business processes: rules
               where rules suffice, agents where judgment helps, and people where accountability
-              belongs. Use our platform yourself, work with our team, or bring a partner.
+              belongs.
             </p>
             <div className="landing-actions">
               <button onClick={() => onCreateAccount()}>
                 Create account <span aria-hidden="true">→</span>
               </button>
-              <a
-                className="button-link"
-                href="#services"
-                onClick={(event) => jumpTo(event, 'services')}
-              >
-                Work with our team
+              <a className="button-link" href={`mailto:${contactEmail}`}>
+                Contact us
               </a>
             </div>
             <dl className="pond-status">
               <div data-state="available">
                 <dt>Available now</dt>
-                <dd>
-                  Agent testing, release decisions, production evidence and a Studio for workflow
-                  packages
-                </dd>
+                <dd>Agent testing, release decisions and a Studio for workflow packages</dd>
               </div>
               <div data-state="planned">
                 <dt>Planned</dt>
@@ -526,64 +459,6 @@ export function Landing({
         </section>
 
         <div className="landing-container">
-          <section id="engage" className="landing-section" aria-labelledby="engage-title">
-            <Rail id="engage" />
-            <div>
-              <h2 id="engage-title" className="section-title" tabIndex={-1}>
-                Use it yourself, with our team, or through a partner.
-              </h2>
-              <p className="section-lede">
-                The platform is built to run without our consultants, and each service is scoped to
-                stand on its own. Combine them in whatever way suits how your company builds.
-              </p>
-              <ul className="panel-grid">
-                {engagements.map(([glyph, title, copy]) => (
-                  <li key={title}>
-                    <div className="panel-glyph">
-                      <InkGlyph name={glyph} />
-                    </div>
-                    <h3>{title}</h3>
-                    <p>{copy}</p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
-
-          <section id="services" className="landing-section" aria-labelledby="services-title">
-            <Rail id="services" />
-            <div>
-              <h2 id="services-title" className="section-title" tabIndex={-1}>
-                From first assessment to steady operation.
-              </h2>
-              <p className="section-lede">
-                Start with an assessment and stop there if that is all you need, or carry on into
-                implementation and operations. Each service has its own scope and deliverables.
-              </p>
-              <ThreadedSteps steps={services} glyphs={serviceGlyphs} retainedLabel="You receive" />
-              <div className="gate readiness">
-                <div>
-                  <h3>What we mean by agent-ready.</h3>
-                  <p>
-                    Not a model added to a process. A company is ready when each automated process
-                    has an owner, dependable inputs, permitted integrations, a review path and a way
-                    to recover. A readiness score is a planning aid, not a compliance certification.
-                  </p>
-                  {contactEmail && (
-                    <a className="button-link readiness-contact" href={`mailto:${contactEmail}`}>
-                      Talk to our team <span aria-hidden="true">→</span>
-                    </a>
-                  )}
-                </div>
-                <ol className="readiness-list">
-                  {readiness.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ol>
-              </div>
-            </div>
-          </section>
-
           <section id="platform" className="landing-section" aria-labelledby="platform-title">
             <Rail id="platform" />
             <div>
@@ -719,11 +594,10 @@ export function Landing({
                 Runs on infrastructure you control.
               </h2>
               <p className="section-lede">
-                Install Lotuspond where your systems are, from a connected network to one with no
-                route out. These modes are proven for today’s assurance platform; the production
-                runtime will be qualified for each topology as it ships.
+                Install Lotuspond where your systems are. Evaluation and, later, workflow steps run
+                on workers inside your own boundary.
               </p>
-              <ul className="panel-grid">
+              <ul className="panel-grid panel-grid-two">
                 {deployments.map(([title, copy], index) => (
                   <li key={title}>
                     <div className="panel-glyph">
@@ -734,10 +608,6 @@ export function Landing({
                   </li>
                 ))}
               </ul>
-              <p className="landing-aside">
-                Execution ships separately: a nonroot image with HTTP, MCP, voice, and release-gate
-                commands and no built-in credentials, so evaluations run beside your agents.
-              </p>
             </div>
           </section>
 
@@ -768,10 +638,7 @@ export function Landing({
                   <PondPlate scene="organization" className="plate-wide" />
                   <p className="eyebrow">Organization</p>
                   <h3>A shared workspace</h3>
-                  <p>
-                    Roles, invitations, scoped API keys, and an optional authenticator requirement
-                    for every member.
-                  </p>
+                  <p>Roles, invitations, scoped API keys and an audit log of every change.</p>
                   <button className="text-button" onClick={() => onCreateAccount('organization')}>
                     Create an organization <span aria-hidden="true">→</span>
                   </button>
@@ -802,6 +669,9 @@ export function Landing({
             <span className="wordmark-dot" />
           </span>
           <span>Business automation with people in charge.</span>
+          <a className="landing-footer-contact" href={`mailto:${contactEmail}`}>
+            {contactEmail}
+          </a>
         </div>
       </footer>
     </div>
