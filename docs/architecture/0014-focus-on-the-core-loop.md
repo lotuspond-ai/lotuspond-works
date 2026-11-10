@@ -16,15 +16,15 @@ Over two months the repository accumulated features for an enterprise rollout th
 
 Retire these features:
 
-| Feature | Retired |
-| --- | --- |
-| Air-gapped operation | `LOTUSPOND_NETWORK_MODE`; the offline image bundle and its drill (`deploy/airgap/`, `deploy/checks/airgap-smoke.py`, `verify_airgap_bundle.py`, CI `offline-install`); the customer execution archive (`deploy/execution/build-bundle.sh`, `verify-bundle.sh`). The execution image itself stays. |
-| Offline identity enrollment | `offline_identity.py`, `offline_provision.py`, `npm run offline-identity`, `/auth/offline-enrollment/*`, the Enrollment page; an operator attestation no longer verifies an identity. |
-| Authenticator requirements | The installation-wide `LOTUSPOND_REQUIRE_MFA` and the organization-wide requirement with its Settings card. Personal authenticators, recovery codes, the administrator-authorized reset for a member who lost every factor, and the mandatory authenticator for production platform operators stay. |
-| Tool authorization | `POST /authorize` and a policy's blocked and approval tool lists. Approving exact actions is E05's human tasks. |
-| MCP and A2A runners | `runner-mcp`, `runner-a2a` and their protocol clients. The HTTP runner and the release gate stay. |
-| Operations page | `/admin/operations`, the Operations tab and Redis worker-poll observations. Redis stays for rate limiting. |
-| Deployment variants and pilot docs | `deploy/compose.onprem.yaml`, the pilot programme and offline identity pages of the docs site. |
+| Feature                            | Retired                                                                                                                                                                                                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Air-gapped operation               | `LOTUSPOND_NETWORK_MODE`; the offline image bundle and its drill (`deploy/airgap/`, `deploy/checks/airgap-smoke.py`, `verify_airgap_bundle.py`, CI `offline-install`); the customer execution archive (`deploy/execution/build-bundle.sh`, `verify-bundle.sh`). The execution image itself stays.   |
+| Offline identity enrollment        | `offline_identity.py`, `offline_provision.py`, `npm run offline-identity`, `/auth/offline-enrollment/*`, the Enrollment page; an operator attestation no longer verifies an identity.                                                                                                               |
+| Authenticator requirements         | The installation-wide `LOTUSPOND_REQUIRE_MFA` and the organization-wide requirement with its Settings card. Personal authenticators, recovery codes, the administrator-authorized reset for a member who lost every factor, and the mandatory authenticator for production platform operators stay. |
+| Tool authorization                 | `POST /authorize` and a policy's blocked and approval tool lists. Approving exact actions is E05's human tasks.                                                                                                                                                                                     |
+| MCP and A2A runners                | `runner-mcp`, `runner-a2a` and their protocol clients. The HTTP runner and the release gate stay.                                                                                                                                                                                                   |
+| Operations page                    | `/admin/operations`, the Operations tab and Redis worker-poll observations. Redis stays for rate limiting.                                                                                                                                                                                          |
+| Deployment variants and pilot docs | `deploy/compose.onprem.yaml`, the pilot programme and offline identity pages of the docs site.                                                                                                                                                                                                      |
 
 Keep the stored data and the schema, as ADR-0012 and ADR-0013 do:
 

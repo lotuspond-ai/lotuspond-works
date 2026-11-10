@@ -62,8 +62,7 @@ export function VerificationCard({
           {identityVerified(account.user) ? (
             <p>
               Your identity is verified, but its source was not recorded. Your mailbox has not been
-              verified.{' '}
-              Mailbox verification is a separate ownership check.
+              verified. Mailbox verification is a separate ownership check.
             </p>
           ) : (
             <p>Verify your mailbox before organization access or accepting invitations.</p>
@@ -337,8 +336,9 @@ export function IdentityFlow({
             <>
               <VerificationCard account={account} onRefresh={onRefresh} />
               <p className="hint">
-                Email invitations require mailbox verification. After verifying, return here and refresh your verification status. Your
-                invitation stays in this tab for up to one hour.
+                Email invitations require mailbox verification. After verifying, return here and
+                refresh your verification status. Your invitation stays in this tab for up to one
+                hour.
               </p>
             </>
           ) : (

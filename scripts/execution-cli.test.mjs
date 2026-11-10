@@ -5,8 +5,7 @@ import { COMMANDS, resolveCommand, usage } from './execution-cli.mjs';
 
 test('execution CLI documents the two packaged commands and API URL convention', () => {
   const text = usage();
-  for (const command of ['runner-http', 'gate'])
-    assert.match(text, new RegExp(`\\b${command}\\b`));
+  for (const command of ['runner-http', 'gate']) assert.match(text, new RegExp(`\\b${command}\\b`));
   assert.match(text, /\/api\/v1/);
   assert.match(text, /no Docker socket/);
   assert.doesNotMatch(text, /docker\.sock/);

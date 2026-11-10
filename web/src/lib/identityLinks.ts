@@ -1,9 +1,5 @@
 export type IdentityRoute = 'verify-email' | 'reset-password' | 'accept-invitation';
-const routes = new Set<IdentityRoute>([
-  'verify-email',
-  'reset-password',
-  'accept-invitation',
-]);
+const routes = new Set<IdentityRoute>(['verify-email', 'reset-password', 'accept-invitation']);
 const invitationKey = 'lotuspond.pending-invitation';
 const retentionMs = 60 * 60 * 1000;
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem' | 'removeItem'>;
