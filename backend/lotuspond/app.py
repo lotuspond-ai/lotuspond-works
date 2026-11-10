@@ -307,6 +307,13 @@ def create_app(
                 },
                 {
                     "version": "0.3.0",
+                    "id": "launch-interest-page",
+                    "date": "2026-11-06",
+                    "title": "Join the Lotuspond early access list",
+                    "description": "A separate public teaser page offers an early access list without revealing product details. Its light invitation design pairs typography with an attributed upper-body Vitruvian Man backdrop on desktop and a decorative DNA motif. The illustration is hidden on small or touch-first devices and cropped above the waist wherever displayed, including social previews. Browser titles identify Lotuspond early access, and social metadata provides a dedicated current-design sharing image. The form collects an email address with consent to early access updates, validates and rate-limits submissions, and acknowledges them only after private storage accepts the record. A branded confirmation email is queued with duplicate protection. Successful signup replaces the form with a centered acknowledgement; a six-month browser cookie remembers that view without storing an email address, and visitors can register another email. Joining the list does not create a product account or grant access; mail-provider acceptance does not establish inbox delivery.",
+                },
+                {
+                    "version": "0.3.0",
                     "id": "retired-assurance-extras",
                     "date": "2026-11-05",
                     "title": "Six assurance-era components retired",
