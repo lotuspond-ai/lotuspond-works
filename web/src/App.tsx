@@ -1600,7 +1600,7 @@ function Settings({
         <div>
           <p className="eyebrow">Administer</p>
           <h1>Settings</h1>
-          <p>Manage your workspace name and access policy.</p>
+          <p>Manage your workspace name.</p>
         </div>
       </div>
       <VerificationCard account={account} onRefresh={onRefresh} />
