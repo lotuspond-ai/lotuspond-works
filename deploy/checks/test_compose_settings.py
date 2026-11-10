@@ -19,7 +19,6 @@ def rendered_services(request, tmp_path):
     # All values are synthetic; do not inherit a developer's deployment configuration.
     variables = {
         "LOTUSPOND_API_IMAGE": "lotuspond-api:config-test",
-        "LOTUSPOND_COLLECTOR_IMAGE": "lotuspond-collector:config-test",
         "POSTGRES_IMAGE": "postgres:config-test",
         "REDIS_IMAGE": "redis:config-test",
         "POSTGRES_PASSWORD": "synthetic-database-password",
@@ -27,9 +26,6 @@ def rendered_services(request, tmp_path):
         "LOTUSPOND_DATABASE_URL": "postgresql+psycopg://test:synthetic@postgres/lotuspond",
         "LOTUSPOND_REDIS_URL": "redis://:synthetic@redis:6379/0",
         "LOTUSPOND_ORIGIN": "https://lotuspond.example.com",
-        "COLLECTOR_INGEST_TOKEN": "synthetic-collector-token-for-config-test",
-        "LOTUSPOND_API_KEY": "synthetic-api-key-for-config-test",
-        "LOTUSPOND_PROJECT_ID": "11111111-1111-4111-8111-111111111111",
         "LOTUSPOND_REQUIRE_MFA": "true",
         "LOTUSPOND_MFA_ENCRYPTION_KEY": base64.urlsafe_b64encode(bytes(32)).decode(),
         "LOTUSPOND_SMTP_TIMEOUT_SECONDS": "20",

@@ -148,7 +148,7 @@ const register = [
       [
         'Assurance',
         'available',
-        'Frozen scenarios, immutable release policies, independent approval, production traces and incidents, for HTTP, MCP, A2A, voice and software-task agents.',
+        'Frozen scenarios, immutable release policies, independent approval, production traces and incidents, for HTTP, MCP and A2A agents.',
       ],
     ],
   ],
@@ -235,17 +235,14 @@ const families = [
 ] as const;
 
 const deployments = [
-  [
-    'Connected',
-    'Container images for the API, console, background workers, and the OTLP collector.',
-  ],
+  ['Connected', 'Container images for the API, console and background workers.'],
   [
     'On-premises',
     'An offline bundle of pinned images with checksums and a verifier, for networks you control.',
   ],
   [
     'Air-gapped',
-    'Cloud model calls, mail, and external alerts switch off. Authenticators and operator-attested enrollment work without egress; assessments that need a cloud model report unknown.',
+    'Mail and external alerts switch off. Authenticators and operator-attested enrollment work without egress.',
   ],
 ] as const;
 
@@ -735,7 +732,7 @@ export function Landing({
                 ))}
               </ul>
               <p className="landing-aside">
-                Execution ships separately: a nonroot image with HTTP, MCP, voice, and release-gate
+                Execution ships separately: a nonroot image with HTTP, MCP, A2A and release-gate
                 commands and no built-in credentials, so evaluations run beside your agents.
               </p>
             </div>

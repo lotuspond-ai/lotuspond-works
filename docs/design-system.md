@@ -103,9 +103,9 @@ Individual registration creates a personal workspace. Organization registration 
 
 Create a project, define scenarios, create an evaluation run, connect an execution worker, and record measured results. Create a release with its candidate run, optional baseline, and immutable policy. Evaluate the release, inspect decision reasons and evidence, then handle independent approval if required. Results cannot be fabricated through the browser. A policy pass is a recorded decision, not a claim of general production readiness.
 
-### Production evidence and voice
+### Production evidence
 
-Inspect ingested traces and voice sessions. Trace details show measured latency, cost, retained attributes, and recorded model assessments. The same assessment component serves traces and voice transcripts, with explicit criteria, verdict, reason, model, timestamp, and provenance. Voice sessions show the retained transcript in sequence and display supplied metrics separately. Five-second refresh is labeled as fetching records; it does not imply a connected microphone or verified live transcription. Model assessments require explicit criteria and a configured backend model. Assessment results are advisory evidence and cannot authorize tool execution. Missing audio, timing, interruption, guardrail, or provenance evidence remains unknown.
+Inspect ingested traces. Trace details show measured latency, cost, retained attributes, and recorded assessments, with explicit criteria, verdict, reason, model, timestamp, and provenance. Assessment results are advisory evidence and cannot authorize tool execution. Criteria the deterministic assertions cannot decide, and missing guardrail or provenance evidence, remain unknown.
 
 ### Administration
 
@@ -113,6 +113,6 @@ Platform administration is visible only when `/me` reports `is_platform_admin`. 
 
 ## Recovery and validation boundaries
 
-The voice evidence normalization module was recovered from the separately archived console, then adapted to the Lotuspond schema identifier and current API shape. Its provenance, metric coverage, privacy, timing, and fail-closed gate semantics are retained. The current shell, workspace flow, administration, scenario editor, and voice session page are newly composed for the single-product contracts. This is a focused recovery of useful behavior, not a claim that every archived feature has been restored.
+The voice evidence normalization module was recovered from the separately archived console and later retired with voice on 2026-11-05 ([ADR-0012](architecture/0012-retire-assurance-extras.md)). The current shell, workspace flow, administration and scenario editor are newly composed for the single-product contracts. This is a focused recovery of useful behavior, not a claim that every archived feature has been restored.
 
-Local checks: `npm run lint`, `npm run build`, and `node --import tsx --test web/src/lib/voiceEvidence.test.ts`. The voice tests cover missing coverage, provenance, opaque provider references, metric units, invalid timing, and absent privacy metadata. Browser inspection covers the public introduction and individual/organization account choices at desktop and mobile widths. Authenticated end-to-end validation requires the Python API and isolated test database. Hosted deployment, production traffic, model-provider quality, and voice-provider streaming require separate operational evidence.
+Local checks: `npm run lint`, `npm run build`, and `npm test`. Browser inspection covers the public introduction and individual/organization account choices at desktop and mobile widths. Authenticated end-to-end validation requires the Python API and isolated test database. Hosted deployment and production traffic require separate operational evidence.

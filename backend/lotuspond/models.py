@@ -121,6 +121,8 @@ class Workspace(Row, Base):
     kind: Mapped[str] = mapped_column(String(20), default="personal")
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     status: Mapped[str] = mapped_column(String(20), default="active")
+    # Retired with the trace-plan ladder and the model gateway (ADR-0012). The columns
+    # keep existing values; nothing reads them and no response reports them.
     plan: Mapped[str] = mapped_column(String(20), default="developer")
     monthly_budget_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
     require_mfa: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -132,8 +134,7 @@ class Workspace(Row, Base):
             "kind = 'organization' OR require_mfa = false",
             name="workspaces_require_mfa_scope_check",
         ),
-        # The subscription ladder is a static product definition; a stored plan can
-        # never be a tier the server does not know how to enforce.
+        # Kept from the retired subscription ladder so the schema stays unchanged.
         CheckConstraint(
             "plan IN ('developer','team','enterprise')",
             name="workspaces_plan_check",
@@ -569,7 +570,7 @@ class Trace(Scoped, Base):
 
 
 class GatewayUsage(Scoped, Base):
-    """Authoritative gateway spend ledger, separate from client-submitted trace costs."""
+    """Spend ledger of the retired model gateway (ADR-0012), kept so its rows survive."""
 
     __tablename__ = "gateway_usage"
     model: Mapped[str] = mapped_column(String(160))
@@ -695,6 +696,8 @@ class AuditEvent(Row, Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+# Voice ingestion is retired (ADR-0012). These tables keep stored sessions and the
+# assessments and incidents that link to them; no route writes them any more.
 class VoiceSession(Scoped, Base):
     __tablename__ = "voice_sessions"
     project_id: Mapped[str] = mapped_column(String(36))

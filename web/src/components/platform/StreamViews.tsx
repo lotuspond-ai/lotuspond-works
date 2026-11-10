@@ -85,7 +85,7 @@ const traces = [
   ['refund.create', 'ok', '1.18 s', null, '4 minutes ago'],
   ['order.cancel', 'error', '2.84 s', '$0.0019', '3 minutes ago'],
   ['refund.create', 'ok', '980 ms', '$0.0014', '2 minutes ago'],
-  ['voice.greeting', 'ok', '640 ms', null, '1 minute ago'],
+  ['support.greeting', 'ok', '640 ms', null, '1 minute ago'],
 ] as const;
 
 // Production traces arriving, a monitor that cannot assess one, and the incident it opens.

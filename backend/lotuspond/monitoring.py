@@ -1,4 +1,4 @@
-"""Tenant-scoped production traces, monitors, and voice evidence APIs."""
+"""Tenant-scoped production traces and monitor APIs."""
 
 from __future__ import annotations
 
@@ -15,20 +15,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import schemas as s
 from .deps import DB, audit, record, require
-from .entitlements import month_start, plan_for
 from .models import (
     Assessment,
     EvaluationJob,
     Monitor,
     Project,
     Trace,
-    VoiceSegment,
-    VoiceSession,
-    Workspace,
     new_id,
     now,
     serialize,
@@ -78,78 +75,49 @@ def _enqueue_monitors(db: Session, trace: Trace) -> list[str]:
     return jobs
 
 
-class TraceAdmission:
-    """Serialized monthly trace admission for one request.
-
-    Locking the workspace row first makes concurrent ingestion decide in turn, the same
-    way the gateway serializes spend. Usage counts server receipt time, never the
-    producer-supplied `occurred_at`, so a backdated span cannot be ingested outside the
-    month it actually arrived in.
-    """
-
-    def __init__(self, db: Session, workspace_id: str):
-        workspace = db.scalar(
-            select(Workspace).where(Workspace.id == workspace_id).with_for_update()
+def _existing_trace(db: Session, workspace_id: str, external_id: str) -> Trace | None:
+    return db.scalar(
+        select(Trace).where(
+            Trace.workspace_id == workspace_id,
+            Trace.external_id == external_id,
         )
-        self.plan = plan_for(workspace.plan if workspace else None)
-        used = db.scalar(
-            select(func.count())
-            .select_from(Trace)
-            .where(Trace.workspace_id == workspace_id, Trace.created_at >= month_start())
-        )
-        self.used = int(used or 0)
-        self.remaining = max(0, self.plan.monthly_trace_quota - self.used)
+    )
 
-    def take(self) -> bool:
-        if self.remaining <= 0:
-            return False
-        self.remaining -= 1
-        self.used += 1
-        return True
 
-    def require(self) -> None:
-        if not self.take():
-            fail(
-                402,
-                "trace_quota_exceeded",
-                "This workspace reached its monthly trace allowance for its plan.",
-            )
+def _same_trace(stored: Trace, body: s.TraceInput, cost_measurement: str) -> bool:
+    same = (
+        stored.project_id == body.project_id
+        and stored.name == body.name
+        and stored.status == body.status
+        and stored.latency_ms == body.latency_ms
+        and stored.cost_usd == body.cost_usd
+        and stored.cost_measurement == cost_measurement
+        and stored.attributes == redact(body.attributes)
+    )
+    if body.occurred_at is not None:
+        supplied_time = body.occurred_at.replace(tzinfo=body.occurred_at.tzinfo or UTC)
+        stored_time = stored.occurred_at.replace(tzinfo=stored.occurred_at.tzinfo or UTC)
+        same = same and supplied_time == stored_time
+    return same
+
+
+def _replay_or_conflict(stored: Trace, body: s.TraceInput, cost_measurement: str) -> Trace:
+    if not _same_trace(stored, body, cost_measurement):
+        fail(409, "trace_exists", "A trace with this external id already exists.")
+    return stored
 
 
 def _create_trace(
     db: Session,
     principal: Principal,
     body: s.TraceInput,
-    admission: TraceAdmission | None = None,
 ) -> tuple[Trace, list[str], bool]:
     if body.project_id:
         _project(db, principal, body.project_id)
     cost_measurement = "reported" if body.cost_usd is not None else "unavailable"
-    duplicate = db.scalar(
-        select(Trace).where(
-            Trace.workspace_id == principal.workspace_id,
-            Trace.external_id == body.external_id,
-        )
-    )
+    duplicate = _existing_trace(db, principal.workspace_id, body.external_id)
     if duplicate:
-        same = (
-            duplicate.project_id == body.project_id
-            and duplicate.name == body.name
-            and duplicate.status == body.status
-            and duplicate.latency_ms == body.latency_ms
-            and duplicate.cost_usd == body.cost_usd
-            and duplicate.cost_measurement == cost_measurement
-            and duplicate.attributes == redact(body.attributes)
-        )
-        if body.occurred_at is not None:
-            supplied_time = body.occurred_at.replace(tzinfo=body.occurred_at.tzinfo or UTC)
-            stored_time = duplicate.occurred_at.replace(tzinfo=duplicate.occurred_at.tzinfo or UTC)
-            same = same and supplied_time == stored_time
-        if same:
-            # An idempotent replay stores nothing, so it must not spend the allowance again.
-            return duplicate, [], True
-        fail(409, "trace_exists", "A trace with this external id already exists.")
-    (admission or TraceAdmission(db, principal.workspace_id)).require()
+        return _replay_or_conflict(duplicate, body, cost_measurement), [], True
     trace = Trace(
         id=new_id(),
         workspace_id=principal.workspace_id,
@@ -163,8 +131,17 @@ def _create_trace(
         attributes=redact(body.attributes),
         occurred_at=body.occurred_at or now(),
     )
-    db.add(trace)
-    db.flush()
+    try:
+        # Nested uniqueness recovery keeps the rest of this request. Concurrent
+        # identical inserts can both miss the lookup and lose the unique constraint.
+        with db.begin_nested():
+            db.add(trace)
+            db.flush()
+    except IntegrityError:
+        duplicate = _existing_trace(db, principal.workspace_id, body.external_id)
+        if duplicate is None:
+            raise
+        return _replay_or_conflict(duplicate, body, cost_measurement), [], True
     jobs = _enqueue_monitors(db, trace) if trace.project_id else []
     return trace, jobs, False
 
@@ -209,12 +186,7 @@ def export_traces(
     principal: Principal = Depends(require()),
     db: Session = DB,
 ):
-    """Export retained traces as canonical JSON with its own digest.
-
-    Export is available on every plan. A subscription decides how much evidence
-    Lotuspond accepts and how long it promises to keep it; it never decides whether
-    a customer may take their own evidence with them.
-    """
+    """Export retained traces as canonical JSON with its own digest."""
     query = select(Trace).where(Trace.workspace_id == principal.workspace_id)
     if project_id:
         _project(db, principal, project_id)
@@ -224,14 +196,10 @@ def export_traces(
     )
     truncated = len(rows) > EXPORT_LIMIT
     traces = [serialize(row) for row in rows[:EXPORT_LIMIT]]
-    workspace = db.get(Workspace, principal.workspace_id)
-    plan = plan_for(workspace.plan if workspace else None)
     payload = {
         "product": "Lotuspond",
         "schemaVersion": 1,
         "canonicalization": "sorted-json-utf8-v1",
-        "plan": plan.name,
-        "trace_retention_days": plan.trace_retention_days,
         "project_id": project_id,
         "traces": traces,
         "truncated": truncated,
@@ -433,13 +401,10 @@ async def otlp_payload(request: Request) -> OtlpExport:
     return OtlpExport(value, protobuf=False)
 
 
-def _partial_success(rejected: int, quota_rejected: int) -> str:
-    reasons = []
-    if rejected:
-        reasons.append(f"{rejected} malformed or conflicting with a recorded span")
-    if quota_rejected:
-        reasons.append(f"{quota_rejected} over the workspace's monthly trace allowance")
-    return f"Spans not stored: {'; '.join(reasons)}." if reasons else ""
+def _partial_success(rejected: int) -> str:
+    if not rejected:
+        return ""
+    return f"Spans not stored: {rejected} malformed or conflicting with a recorded span."
 
 
 @router.post("/telemetry/otlp", status_code=202)
@@ -453,9 +418,7 @@ def ingest_otlp(
         _project(db, principal, project_id)
     accepted = 0
     rejected = 0
-    quota_rejected = 0
     job_ids: list[str] = []
-    admission = TraceAdmission(db, principal.workspace_id)
     for span, resource_attributes in _otlp_spans(export.payload):
         trace_id = span.get("traceId")
         span_id = span.get("spanId")
@@ -505,13 +468,8 @@ def ingest_otlp(
         except (ValidationError, ValueError):
             rejected += 1
             continue
-        if admission.remaining <= 0:
-            # Never silently dropped: the response reports this separately from a
-            # malformed span so a producer can tell a quota wall from bad data.
-            quota_rejected += 1
-            continue
         try:
-            trace, jobs, _ = _create_trace(db, principal, body, admission)
+            trace, jobs, _ = _create_trace(db, principal, body)
         except Exception as error:
             # A duplicate span is rejected without exposing database details.
             if getattr(error, "status_code", None) == 409:
@@ -520,16 +478,8 @@ def ingest_otlp(
             raise
         accepted += 1
         job_ids.extend(jobs)
-    if accepted == 0 and rejected == 0 and quota_rejected == 0:
+    if accepted == 0 and rejected == 0:
         fail(422, "invalid_otlp", "The payload did not contain any OTLP spans.")
-    if accepted == 0 and quota_rejected:
-        # Nothing was stored because the allowance is spent. A 202 here would let a
-        # producer's retry logic record success for evidence that was never kept.
-        fail(
-            402,
-            "trace_quota_exceeded",
-            "This workspace reached its monthly trace allowance for its plan.",
-        )
     audit(
         db,
         principal,
@@ -538,7 +488,6 @@ def ingest_otlp(
             "encoding": "protobuf" if export.protobuf else "json",
             "accepted": accepted,
             "rejected": rejected,
-            "quota_rejected": quota_rejected,
             "evaluation_jobs": len(job_ids),
         },
     )
@@ -546,15 +495,12 @@ def ingest_otlp(
         # The standard OTLP answer: 200 with an ExportTraceServiceResponse, whose partial
         # success tells the exporter how many spans were not kept and why.
         return Response(
-            encode_trace_response(
-                rejected + quota_rejected, _partial_success(rejected, quota_rejected)
-            ),
+            encode_trace_response(rejected, _partial_success(rejected)),
             status_code=200,
             media_type=PROTOBUF,
         )
     return {
         "rejected_spans": rejected,
-        "quota_rejected_spans": quota_rejected,
         "accepted_spans": accepted,
         "evaluation_job_ids": job_ids,
     }
@@ -666,186 +612,3 @@ def delete_monitor(
         fail(409, "monitor_has_evidence", "Disable monitors that already have evaluation evidence.")
     audit(db, principal, "monitors.deleted", monitor.id)
     db.delete(monitor)
-
-
-@router.get("/voice/sessions")
-def voice_sessions(
-    project_id: s.Identifier | None = None,
-    principal: Principal = Depends(require()),
-    db: Session = DB,
-):
-    query = select(VoiceSession).where(VoiceSession.workspace_id == principal.workspace_id)
-    if project_id:
-        _project(db, principal, project_id)
-        query = query.where(VoiceSession.project_id == project_id)
-    rows = db.scalars(query.order_by(VoiceSession.created_at.desc()))
-    return {"items": [serialize(row) for row in rows]}
-
-
-@router.post("/voice/sessions", status_code=201)
-def create_voice_session(
-    body: s.VoiceSessionInput,
-    principal: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    _project(db, principal, body.project_id)
-    session = VoiceSession(
-        id=new_id(),
-        workspace_id=principal.workspace_id,
-        **body.model_dump(),
-    )
-    db.add(session)
-    audit(db, principal, "voice_sessions.created", session.id)
-    db.flush()
-    return serialize(session)
-
-
-def _latest_segments(db: Session, workspace_id: str, session_id: str) -> list[VoiceSegment]:
-    rows = db.scalars(
-        select(VoiceSegment)
-        .where(
-            VoiceSegment.workspace_id == workspace_id,
-            VoiceSegment.session_id == session_id,
-        )
-        .order_by(VoiceSegment.sequence, VoiceSegment.revision)
-    )
-    latest: dict[int, VoiceSegment] = {}
-    for row in rows:
-        latest[row.sequence] = row
-    return [latest[key] for key in sorted(latest)]
-
-
-@router.get("/voice/sessions/{identifier}")
-def voice_session_detail(
-    identifier: s.Identifier,
-    principal: Principal = Depends(require()),
-    db: Session = DB,
-):
-    session = record(db, VoiceSession, principal.workspace_id, identifier)
-    segments = _latest_segments(db, principal.workspace_id, session.id)
-    assessments = db.scalars(
-        select(Assessment)
-        .where(
-            Assessment.workspace_id == principal.workspace_id,
-            Assessment.voice_session_id == session.id,
-        )
-        .order_by(Assessment.created_at.desc())
-    )
-    return {
-        "session": serialize(session),
-        "segments": [serialize(row) for row in segments],
-        "assessments": [serialize(row) for row in assessments],
-    }
-
-
-@router.post("/voice/sessions/{identifier}/segments", status_code=202)
-def append_voice_segments(
-    identifier: s.Identifier,
-    body: s.SegmentBatch,
-    principal: Principal = Depends(require("ingest")),
-    db: Session = DB,
-):
-    session = record(db, VoiceSession, principal.workspace_id, identifier, lock=True)
-    if session.status != "open":
-        fail(409, "voice_session_closed", "Closed voice sessions cannot accept transcript updates.")
-    sequences = [item.sequence for item in body.segments]
-    if len(sequences) != len(set(sequences)):
-        fail(422, "duplicate_sequence", "A segment batch may contain one revision per sequence.")
-
-    latest = {row.sequence: row for row in _latest_segments(db, principal.workspace_id, session.id)}
-    stored: list[VoiceSegment] = []
-    speaker_map = {"user": "caller", "agent": "agent", "other": "system"}
-    for item in sorted(body.segments, key=lambda value: value.sequence):
-        if not item.text.strip():
-            fail(422, "empty_segment", "Transcript segment text cannot be empty.")
-        previous = latest.get(item.sequence)
-        normalized_speaker = speaker_map[item.speaker]
-        if previous and previous.is_final:
-            unchanged = (
-                previous.speaker == normalized_speaker
-                and previous.text == item.text
-                and previous.start_ms == item.start_ms
-                and previous.end_ms == item.end_ms
-                and item.is_final
-            )
-            if unchanged:
-                stored.append(previous)
-                continue
-            fail(409, "final_segment_immutable", "A final transcript segment cannot be revised.")
-        if previous and previous.speaker != normalized_speaker:
-            fail(409, "segment_speaker_immutable", "A transcript segment cannot change speaker.")
-        if previous:
-            unchanged = (
-                previous.text == item.text
-                and previous.start_ms == item.start_ms
-                and previous.end_ms == item.end_ms
-                and previous.is_final == item.is_final
-            )
-            if unchanged:
-                stored.append(previous)
-                continue
-        segment = VoiceSegment(
-            id=new_id(),
-            workspace_id=principal.workspace_id,
-            session_id=session.id,
-            sequence=item.sequence,
-            revision=(previous.revision + 1) if previous else 0,
-            speaker=normalized_speaker,
-            text=item.text,
-            start_ms=item.start_ms,
-            end_ms=item.end_ms,
-            is_final=item.is_final,
-        )
-        db.add(segment)
-        stored.append(segment)
-        latest[item.sequence] = segment
-    audit(db, principal, "voice_segments.received", session.id, {"count": len(stored)})
-    db.flush()
-    return {"items": [serialize(row) for row in stored]}
-
-
-@router.post("/voice/sessions/{identifier}/close")
-def close_voice_session(
-    identifier: s.Identifier,
-    principal: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    session = record(db, VoiceSession, principal.workspace_id, identifier, lock=True)
-    if session.status == "closed":
-        return serialize(session)
-    segments = _latest_segments(db, principal.workspace_id, session.id)
-    if not segments:
-        fail(
-            409, "transcript_required", "A voice session needs transcript evidence before closing."
-        )
-    if any(not segment.is_final for segment in segments):
-        fail(409, "partial_transcript", "Finalize every transcript segment before closing.")
-    session.status = "closed"
-    session.closed_at = now()
-    audit(db, principal, "voice_sessions.closed", session.id)
-    return serialize(session)
-
-
-@router.post("/voice/sessions/{identifier}/assess", status_code=202)
-def assess_voice_session(
-    identifier: s.Identifier,
-    body: s.AssessmentInput,
-    principal: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    session = record(db, VoiceSession, principal.workspace_id, identifier)
-    if session.status != "closed":
-        fail(409, "voice_session_open", "Close and finalize the voice session before assessment.")
-    job = EvaluationJob(
-        id=new_id(),
-        workspace_id=principal.workspace_id,
-        project_id=session.project_id,
-        monitor_id=None,
-        trace_id=None,
-        voice_session_id=session.id,
-        criteria=body.criteria,
-    )
-    db.add(job)
-    audit(db, principal, "voice_sessions.assessment_queued", job.id, {"session_id": session.id})
-    db.flush()
-    return serialize(job)

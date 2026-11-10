@@ -12,7 +12,6 @@
 **/.pytest_cache
 **/.ruff_cache
 **/*.egg-info
-**/target
 **/site
 **/*.log
 dist

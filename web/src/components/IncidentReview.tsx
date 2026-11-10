@@ -103,19 +103,16 @@ export function IncidentReview({
               )}
             </dd>
           </div>
-          <div>
-            <dt>Voice session</dt>
-            <dd>
-              {incident.voice_session_id ? (
-                <>
-                  {voice?.name ? <strong>{String(voice.name)}</strong> : null}
-                  <code>{incident.voice_session_id}</code>
-                </>
-              ) : (
-                'No voice session linked'
-              )}
-            </dd>
-          </div>
+          {incident.voice_session_id && (
+            // Voice assessment is retired; an older incident keeps its stored session link.
+            <div>
+              <dt>Voice session</dt>
+              <dd>
+                {voice?.name ? <strong>{String(voice.name)}</strong> : null}
+                <code>{incident.voice_session_id}</code>
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Assessment</dt>
             <dd>
@@ -192,12 +189,7 @@ export function IncidentReview({
           </p>
         )}
       </section>
-      {incident.trace_id && (
-        <IncidentSourceEvidence workspace={workspace} kind="trace" id={incident.trace_id} />
-      )}
-      {incident.voice_session_id && (
-        <IncidentSourceEvidence workspace={workspace} kind="voice" id={incident.voice_session_id} />
-      )}
+      {incident.trace_id && <IncidentSourceEvidence workspace={workspace} id={incident.trace_id} />}
       <section className="evidence-section" aria-labelledby="incident-history-heading">
         <h3 id="incident-history-heading">Review history</h3>
         {history.length ? (

@@ -184,8 +184,19 @@ const lists: Record<string, Record<string, unknown>[]> = {
       trace_id: 't0',
       created_at: ago(3),
     },
+    // Opened by a voice assessment before voice was retired; it keeps its stored session link.
+    {
+      id: 'inc2',
+      title: 'Assessment unavailable for an earlier support call',
+      severity: 'medium',
+      status: 'open',
+      category: 'assessment_unavailable',
+      source: 'voice_assessment',
+      project_id: project.id,
+      voice_session_id: 'v0',
+      created_at: ago(9000),
+    },
   ],
-  'voice/sessions': [],
   // The registry's reviewed-action example, as the registry would record it. Its digest is the
   // one pinned by packageContract.test.ts and the Python contract tests.
   packages: [
@@ -248,18 +259,11 @@ const account = {
 
 const settings = {
   name: 'Example organization',
-  monthly_budget_usd: null,
   authenticator_policy: {
     require_mfa: false,
     available: true,
     manageable: true,
     members_without_authenticator: 1,
-  },
-  billing: {
-    plan: 'team',
-    entitlements: { monthly_trace_quota: 100_000, trace_retention_days: 90 },
-    usage: { traces_this_month: 0, traces_remaining: 100_000 },
-    payment: { status: 'not_collected', message: 'Lotuspond does not collect payment.' },
   },
 };
 
@@ -385,6 +389,20 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   const [resource, id] = path.split('/');
   const record = resource ? lists[resource]?.find((item) => item.id === id) : undefined;
+  // An incident detail carries its linked records, as backend/lotuspond/workflows.py returns it.
+  if (record && resource === 'incidents')
+    return json({
+      incident: record,
+      project,
+      trace: lists.traces.find((item) => item.id === record.trace_id) ?? null,
+      voice_session: record.voice_session_id
+        ? { id: record.voice_session_id, name: 'Support call', status: 'closed' }
+        : null,
+      assessment: null,
+      monitor: null,
+      history: [],
+      alerts: [],
+    });
   if (record) return json(record);
   return json({ error: 'not_found', message: 'No fixture for this request.' }, 404);
 };

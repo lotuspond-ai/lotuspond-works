@@ -26,13 +26,8 @@ Production organization and operator authority require verified mailbox ownershi
 
 ## Create an API key
 
-A workspace owner or administrator creates a key in **API keys**, or sends `POST /api/v1/api-keys` with the workspace header and a body such as `{"name":"Telemetry collector","scopes":["ingest"],"days":30}`. The raw key is returned once. Store it immediately in the producer's secret mechanism. Use `POST /api/v1/api-keys/:id/revoke` with an empty JSON body to revoke it.
+A workspace owner or administrator creates a key in **API keys**, or sends `POST /api/v1/api-keys` with the workspace header and a body such as `{"name":"Telemetry producer","scopes":["ingest"],"days":30}`. The raw key is returned once. Store it immediately in the producer's secret mechanism. Use `POST /api/v1/api-keys/:id/revoke` with an empty JSON body to revoke it.
 
-## Collector authentication
+## Telemetry producer keys
 
-The collector uses two distinct bearer credentials:
-
-1. `COLLECTOR_INGEST_TOKEN` authenticates local telemetry producers to the collector.
-2. `LOTUSPOND_API_KEY` authenticates the collector to Lotuspond and must carry only the `ingest` scope.
-
-They must not have the same value. Configure them through the deployment's secret mechanism and never put them in a committed environment file, command example, URL, or log.
+A producer that sends OTLP/HTTP straight to `/api/v1/telemetry/otlp` uses a key that carries only the `ingest` scope. Configure it through the deployment's secret mechanism and never put it in a committed environment file, command example, URL, or log.

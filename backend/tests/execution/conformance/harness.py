@@ -50,8 +50,6 @@ def settings_for(world):
         env="test",
         database_url=scoped_url(world),
         origin=world.config["origin"],
-        typesafe_base_url=None,
-        typesafe_api_key=None,
         redis_url=None,
         fleet_enabled=True,
         fleet_installation_id=worlds.INSTALLATION,

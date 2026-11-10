@@ -21,7 +21,6 @@ from lotuspond.models import (
     Membership,
     Project,
     User,
-    VoiceSegment,
     Workspace,
     new_id,
     now,
@@ -252,76 +251,6 @@ class MonitoringApiTests(unittest.TestCase):
         self.assertEqual(polled.status_code, 200, polled.text)
         self.assertEqual(polled.json()["job"]["status"], "completed")
         self.assertEqual(polled.json()["assessments"][0]["id"], assessment_id)
-
-    def test_voice_final_segments_are_immutable_and_airgap_assessment_is_unknown(self) -> None:
-        response = self.post(
-            "/api/v1/voice/sessions",
-            {
-                "project_id": self.project_id,
-                "name": "Support call",
-                "provider": "operator-stream",
-            },
-        )
-        self.assertEqual(response.status_code, 201, response.text)
-        session_id = response.json()["id"]
-
-        partial = {
-            "segments": [
-                {
-                    "sequence": 0,
-                    "speaker": "user",
-                    "text": "hel",
-                    "start_ms": 0,
-                    "end_ms": 100,
-                    "is_final": False,
-                }
-            ]
-        }
-        self.assertEqual(
-            self.post(f"/api/v1/voice/sessions/{session_id}/segments", partial).status_code,
-            202,
-        )
-        final = {
-            "segments": [
-                {
-                    "sequence": 0,
-                    "speaker": "user",
-                    "text": "hello",
-                    "start_ms": 0,
-                    "end_ms": 200,
-                    "is_final": True,
-                }
-            ]
-        }
-        self.assertEqual(
-            self.post(f"/api/v1/voice/sessions/{session_id}/segments", final).status_code,
-            202,
-        )
-        changed = {"segments": [{**final["segments"][0], "text": "changed"}]}
-        immutable = self.post(f"/api/v1/voice/sessions/{session_id}/segments", changed)
-        self.assertEqual(immutable.status_code, 409)
-
-        closed = self.post(f"/api/v1/voice/sessions/{session_id}/close", {})
-        self.assertEqual(closed.status_code, 200, closed.text)
-        queued = self.post(
-            f"/api/v1/voice/sessions/{session_id}/assess",
-            {"criteria": "The agent handled the request well."},
-        )
-        self.assertEqual(queued.status_code, 202, queued.text)
-        assessment_id = asyncio.run(run_once(self.sessions, self.settings))
-        with self.sessions() as db:
-            assessment = db.get(Assessment, assessment_id)
-            self.assertEqual(assessment.status, "unknown")
-            self.assertEqual(assessment.provenance["source"], "network-policy")
-            revisions = list(
-                db.scalars(
-                    select(VoiceSegment)
-                    .where(VoiceSegment.session_id == session_id)
-                    .order_by(VoiceSegment.revision)
-                )
-            )
-            self.assertEqual([item.revision for item in revisions], [0, 1])
-            self.assertEqual([item.is_final for item in revisions], [False, True])
 
     def test_otlp_json_is_bounded_and_redacts_sensitive_attributes(self) -> None:
         response = self.post(

@@ -1859,70 +1859,6 @@ label:has(textarea:not(.code-input)) textarea {
   padding: 32px 0;
   font-size: 13px;
 }
-.monitor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 0;
-  margin-bottom: 10px;
-  border-top: 1px solid var(--line);
-}
-.monitor-toolbar .checkbox-label {
-  margin: 0;
-  font-weight: 400;
-}
-.master-detail {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--paper);
-  min-height: 420px;
-  overflow: hidden;
-}
-.session-list {
-  border-right: 1px solid var(--line);
-  max-height: 780px;
-  overflow: auto;
-}
-.session-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-  width: 100%;
-  padding: 18px;
-  text-align: left;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  background: var(--paper);
-  color: var(--ink);
-  font-weight: 400;
-}
-.session-row.selected {
-  background: #eef4eb;
-  box-shadow: inset 3px 0 var(--accent);
-}
-.session-row .hint {
-  width: 100%;
-  font-size: 12px;
-}
-.session-title {
-  font-weight: 550;
-  flex: 1;
-  min-width: 100px;
-  overflow-wrap: anywhere;
-}
-.session-detail {
-  padding: 24px;
-  min-width: 0;
-}
-.session-detail .empty {
-  border: 0;
-  background: none;
-  padding: 76px 10px;
-}
 .section-row {
   display: flex;
   align-items: flex-start;
@@ -1961,31 +1897,6 @@ label:has(textarea:not(.code-input)) textarea {
   font-weight: 650;
   margin: 0 0 16px;
 }
-.transcript {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.transcript li {
-  padding: 0 0 20px;
-}
-.transcript-meta {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 6px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.transcript-meta strong {
-  color: var(--ink);
-}
-.transcript p {
-  margin: 0;
-  font-size: 13px;
-  white-space: pre-wrap;
-  color: var(--ink);
-}
 .assessment {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -2012,14 +1923,6 @@ label:has(textarea:not(.code-input)) textarea {
   border-radius: 8px;
 }
 @media (max-width: 1050px) {
-  .master-detail {
-    grid-template-columns: 1fr;
-  }
-  .session-list {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    max-height: 250px;
-  }
   .workspace-card {
     flex-wrap: wrap;
   }
@@ -2031,16 +1934,9 @@ label:has(textarea:not(.code-input)) textarea {
   .metric-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .monitor-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
   .workspace-card button {
     margin-left: 0;
     width: 100%;
-  }
-  .session-detail {
-    padding: 18px;
   }
   .welcome .hero-title {
     font-size: 54px;
@@ -2114,8 +2010,7 @@ label:has(textarea:not(.code-input)) textarea {
   margin-top: 18px;
 }
 .incident-resolution p,
-.incident-history p,
-.incident-transcript p {
+.incident-history p {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2125,13 +2020,11 @@ label:has(textarea:not(.code-input)) textarea {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.incident-history,
-.incident-transcript {
+.incident-history {
   list-style: none;
   padding: 0;
 }
-.incident-history li,
-.incident-transcript li {
+.incident-history li {
   border-left: 2px solid var(--line);
   padding: 4px 0 14px 18px;
   margin: 0 0 18px;
@@ -2141,12 +2034,6 @@ label:has(textarea:not(.code-input)) textarea {
   font-size: 12px;
   color: var(--muted);
   overflow-wrap: anywhere;
-}
-.incident-transcript li > div {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
 }
 .incident-alert {
   border: 1px solid var(--line);

@@ -1341,3 +1341,12 @@ Test-only, on branch `claude/hosted-conformance-budgets` from `main` at `533b3d6
 - **A runtime can exit on one refused lookup.** The API refuses a second, concurrent recovery-authority lookup with 503 (`_LookupSlot`), and the runtime supervisor treats that answer to its own calls as fatal. A starting runtime on a busy API can then exit. Polls already retry it. Making the slot wait, or the supervisor retry, would be a product change for E03's runtime.
 
 **Not done:** hosted `conformance` at the second fixes.
+
+## Retired assurance-era components — 2026-11-05
+
+[ADR-0012](architecture/0012-retire-assurance-extras.md) removes voice, the Gym-Anything sandbox, TypeSafe Jev, the model gateway, trace-plan billing, the Go collector and Rust evidence-core. Local evidence only, at `f0df9af`; no hosted run yet.
+
+- `validate`, run in the local Linux runner (`lotuspond-ci-runner:local`, PostgreSQL 18.6 service) from a clean clone: passed. `npm run check` covered the backend SQLite run (1,049 passed, 194 PostgreSQL-only skips), the SDK (1,514), the runtime (733) and 135 unit tests; `export_schema.py --check` passed, so `schema.sql` is unchanged; `deploy/checks` passed 42; the required PostgreSQL suite passed 1,189 in 30 min 5 s; the image, packaging and strict docs steps passed. The Mac was on battery.
+- `scripts/checks/otlp-interop.py`, which no longer uses the collector, with the official OpenTelemetry Python SDK 1.45.2: protobuf exports straight to the API, with and without gzip, both accepted; 4 of 4 spans stored, no mismatches.
+- Browser, Vite fixture harness and signed-out page at 1440, 768 and 375 px: no voice navigation, no budget field or plan card, a trace-only incident inspector, an older voice-linked incident still showing its session, no horizontal overflow, keyboard focus visible on Settings.
+- **Not run:** the `execution` and `offline-install` jobs (both rebuilt here without the voice bridge, Gym kit and collector), `conformance`, `disruptive`, `load`, `restore` and `protocols`.

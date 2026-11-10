@@ -122,13 +122,12 @@ class OfflineInstallationInputsTests(unittest.TestCase):
             )
         called.assert_called_once()
 
-    def test_failure_recovery_is_optional_and_metrics_use_distinct_token(self):
+    def test_failure_recovery_is_optional_and_otlp_goes_to_the_api(self):
         parameter = inspect.signature(smoke.drill).parameters["failure_recovery"]
         self.assertFalse(parameter.default)
-        self.assertIn("COLLECTOR_METRICS_TOKEN", Path(smoke.__file__).read_text())
-        self.assertIn('data["metrics_token"]', smoke.VERIFY)
-        self.assertIn('data["ingest_token"]', smoke.VERIFY)
-        self.assertIn('"collector_metrics_text": metrics', smoke.VERIFY)
+        self.assertNotIn("collector", Path(smoke.__file__).read_text().lower())
+        self.assertIn('base + "/telemetry/otlp?project_id="', smoke.VERIFY)
+        self.assertIn('"Bearer " + data["api_key"]', smoke.VERIFY)
         self.assertIn('observation["state"] == "stale"', smoke.FAILURE_OBSERVE)
         for program in (
             smoke.SETUP,

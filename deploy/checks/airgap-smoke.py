@@ -26,7 +26,6 @@ from verify_airgap_bundle import MAX_BUNDLE_BYTES, verify_bundle
 
 IMAGE_KEYS = {
     "LOTUSPOND_API_IMAGE",
-    "LOTUSPOND_COLLECTOR_IMAGE",
     "POSTGRES_IMAGE",
     "REDIS_IMAGE",
 }
@@ -319,7 +318,7 @@ zero, _ = request("/traces", {"project_id": project["id"], "external_id": "offli
     "name": "Explicit zero cost", "status": "ok", "latency_ms": 1, "cost_usd": 0,
     "attributes": {"output": "match", "expected": {"equals": "match"}}}, 201)
 assert float(zero["cost_usd"]) == 0 and zero["cost_measurement"] == "reported"
-key, _ = request("/api-keys", {"name": "Disposable collector", "scopes": ["ingest"], "days": 1}, 201)
+key, _ = request("/api-keys", {"name": "Disposable telemetry", "scopes": ["ingest"], "days": 1}, 201)
 print(json.dumps({"headers": headers, "project_id": project["id"], "api_key": key["key"],
     "failed_trace_id": failed["id"], "unknown_trace_id": unknown["id"],
     "user_id": me["user"]["id"]}))
@@ -333,10 +332,6 @@ def request(url, headers, body=None):
         headers=headers)
     with urllib.request.urlopen(req, timeout=5) as response:
         return response.status, json.load(response)
-def text_request(url, headers):
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=5) as response:
-        return response.status, response.read(262144).decode()
 def binary_request(url, headers, body):
     req = urllib.request.Request(url, data=body, headers=headers)
     with urllib.request.urlopen(req, timeout=5) as response:
@@ -369,54 +364,29 @@ for incident in incidents["items"]:
     _, detail = request(base + "/incidents/" + incident["id"], data["headers"])
     assert detail["alerts"] == []
     assert detail["history"]
-collector = "http://127.0.0.1:4318"
-assert request(collector + "/healthz", {})[0] == 200
+otlp = base + "/telemetry/otlp?project_id=" + data["project_id"]
 try:
-    request(collector + "/v1/traces", {"Content-Type": "application/json"}, {"resourceSpans": []})
-    raise AssertionError("unauthenticated collector accepted telemetry")
+    request(otlp, {"Content-Type": "application/json"}, {"resourceSpans": []})
+    raise AssertionError("unauthenticated OTLP export was accepted")
 except urllib.error.HTTPError as error:
     assert error.code == 401
-status, _ = request(collector + "/v1/traces", {
-    "Content-Type": "application/json", "Authorization": "Bearer " + data["ingest_token"]}, {
+status, answer = request(otlp, {
+    "Content-Type": "application/json", "Authorization": "Bearer " + data["api_key"]}, {
     "resourceSpans": [{"scopeSpans": [{"spans": [{
-        "traceId": "a" * 32, "spanId": "b" * 16, "name": "Offline collector span",
+        "traceId": "a" * 32, "spanId": "b" * 16, "name": "Offline OTLP span",
         "startTimeUnixNano": "1000000000", "endTimeUnixNano": "1001000000",
         "status": {"code": 1}, "attributes": []}]}]}]})
-assert status in (200, 202)
+assert status == 202 and answer["accepted_spans"] == 1 and answer["rejected_spans"] == 0
 # The OpenTelemetry SDK default: a binary ExportTraceServiceRequest, answered in kind.
 span = (field(1, bytes([0xCC]) * 16) + field(2, bytes([0xDD]) * 8) + field(5, b"Offline protobuf span")
     + fixed64(7, 1_000_000_000) + fixed64(8, 1_002_000_000))
-status, content_type, answer = binary_request(collector + "/v1/traces", {
-    "Content-Type": "application/x-protobuf", "Authorization": "Bearer " + data["ingest_token"]},
+status, content_type, answer = binary_request(otlp, {
+    "Content-Type": "application/x-protobuf", "Authorization": "Bearer " + data["api_key"]},
     field(1, field(2, field(2, span))))
 assert status == 200 and content_type == "application/x-protobuf" and answer == b""
-for token in (None, data["ingest_token"]):
-    headers_for_metrics = {} if token is None else {"Authorization": "Bearer " + token}
-    try:
-        text_request(collector + "/metrics", headers_for_metrics)
-        raise AssertionError("collector metrics accepted the wrong credential")
-    except urllib.error.HTTPError as error:
-        assert error.code == 401
-metrics_status, metrics = text_request(collector + "/metrics", {
-    "Authorization": "Bearer " + data["metrics_token"]})
-assert metrics_status == 200
-for series in (
-    'lotuspond_collector_requests_total{result="accepted"}',
-    "lotuspond_collector_request_duration_seconds_count",
-    "lotuspond_collector_forward_duration_seconds_count",
-    "lotuspond_collector_in_flight", "lotuspond_collector_queue_depth",
-    "lotuspond_collector_queue_capacity", "lotuspond_collector_workers",
-    "lotuspond_collector_uptime_seconds",
-    # The spool is enabled on the packaged /spool; delivered batches have left it.
-    "lotuspond_collector_spool_pending_batches 0", "lotuspond_collector_spool_bytes 0",
-    'lotuspond_collector_spool_replays_total{outcome="delivered"}'):
-    assert series in metrics
-for forbidden in (data["metrics_token"], data["ingest_token"], data["api_key"],
-        data["project_id"], "api/v1/telemetry/otlp"):
-    assert forbidden not in metrics
 _, traces = request(base + "/traces?project_id=" + data["project_id"], data["headers"])
 names = {trace["name"] for trace in traces["items"]}
-assert {"Offline collector span", "Offline protobuf span"} <= names
+assert {"Offline OTLP span", "Offline protobuf span"} <= names
 _, ready = request(base + "/ready", {})
 assert ready["schema_version"] == data["schema_version"]
 with urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5) as response:
@@ -424,11 +394,8 @@ with urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5) as response:
 print(json.dumps({"schema_version": ready["schema_version"],
     "deterministic_failure": True, "semantic_unknown": True,
     "incident_categories": sorted(categories), "alerts_disabled": True,
-    "collector_authenticated_ingestion": True, "collector_protobuf_ingestion": True,
-    "collector_spool_enabled": True, "production_identity_gate": True,
-    "collector_metrics_separate_auth": True,
-    "collector_metrics_fixed_nonsecret_series": True,
-    "collector_metrics_text": metrics,
+    "otlp_authenticated_ingestion": True, "otlp_protobuf_ingestion": True,
+    "production_identity_gate": True,
     "offline_operator_enrollment": True, "mailbox_remains_unverified": True,
     "enrollment_replay_rejected": True, "normal_login_required": True,
     "production_operator_requires_mfa": True, "mfa_totp_login_and_replay_denial": True,
@@ -718,28 +685,11 @@ def drill(archive: Path, checksum: Path, *, failure_recovery: bool = False) -> d
             context = json.loads(
                 execute(api, SETUP, {"password": drill_password}).stdout
             )
-            context["ingest_token"] = secrets.token_urlsafe(32)
-            context["metrics_token"] = secrets.token_urlsafe(32)
             context["schema_version"] = packaged_schema_version(private / "schema.sql")
             EPHEMERAL_SECRETS.update(
                 value
                 for key, value in context.items()
                 if isinstance(value, str) and key.endswith(("token", "key", "password"))
-            )
-            collector = launch(
-                "collector",
-                images["LOTUSPOND_COLLECTOR_IMAGE"],
-                {
-                    "COLLECTOR_INGEST_TOKEN": context["ingest_token"],
-                    "COLLECTOR_METRICS_TOKEN": context["metrics_token"],
-                    "LOTUSPOND_API_KEY": context["api_key"],
-                    "LOTUSPOND_PROJECT_ID": context["project_id"],
-                    "LOTUSPOND_API_URL": "http://127.0.0.1:8000",
-                    "COLLECTOR_SPOOL_DIR": "/spool",
-                },
-                app=True,
-                shared_network="container:" + api,
-                mounts=("type=volume,destination=/spool",),
             )
             worker = launch(
                 "worker",
@@ -823,7 +773,7 @@ def drill(archive: Path, checksum: Path, *, failure_recovery: bool = False) -> d
                     }
                 )
             report.update(json.loads(execute(api, REVOKE, context).stdout))
-            for container in (postgres, redis, api, collector, worker):
+            for container in (postgres, redis, api, worker):
                 state = json.loads(command("docker", "inspect", container).stdout)[0]
                 assert (
                     state["State"]["Running"]
@@ -837,7 +787,7 @@ def drill(archive: Path, checksum: Path, *, failure_recovery: bool = False) -> d
                     "internal_network": True,
                     "published_ports": 0,
                     "synthetic_data_only": True,
-                    "containers": 5,
+                    "containers": 4,
                     "schema_sha256": hashlib.sha256(
                         (private / "schema.sql").read_bytes()
                     ).hexdigest(),

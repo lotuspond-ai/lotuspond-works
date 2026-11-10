@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Send spans from the official OpenTelemetry Python SDK, left at its defaults, to Lotuspond.
 
-The exporter speaks OTLP/HTTP with binary protobuf, the SDK default, straight to the API and
-through the Go collector, with and without gzip. The collector runs with its durable spool:
-before the API starts, an export through it is spooled and answered 202, the collector is
-killed with SIGKILL, and a fresh collector over the same spool must deliver the batch once
-the API is up. The API runs on a throwaway SQLite database in a private temporary directory
+The exporter speaks OTLP/HTTP with binary protobuf, the SDK default, straight to the API, with
+and without gzip. The API runs on a throwaway SQLite database in a private temporary directory
 and every port is loopback. The check then reads the stored traces back and compares them
 with the spans the SDK recorded.
 
@@ -14,7 +11,7 @@ It needs the SDK, which is not a Lotuspond dependency, so run it in a throwaway 
     uv run --no-project --with opentelemetry-sdk --with opentelemetry-exporter-otlp-proto-http \\
         scripts/checks/otlp-interop.py --report /private/tmp/otlp-interop.json
 
-The API itself runs under backend/.venv, and `go` must be on PATH to build the collector.
+The API itself runs under backend/.venv.
 """
 
 from __future__ import annotations
@@ -121,7 +118,6 @@ def main() -> None:
 
     project = str(uuid4())
     api_key = "lp_" + secrets.token_hex(20)
-    ingest_token = secrets.token_urlsafe(32)
     report: dict[str, object] = {
         "sdk": {
             "opentelemetry-sdk": version("opentelemetry-sdk"),
@@ -139,9 +135,7 @@ def main() -> None:
         )
         os.chmod(workdir, 0o700)
         database = workdir / "interop.sqlite3"
-        spool = workdir / "spool"
-        api_port, collector_port = free_port(), free_port()
-        collector_route = f"http://127.0.0.1:{collector_port}/v1/traces"
+        api_port = free_port()
         expected = {}
 
         def expect(service: str, spans: list) -> None:
@@ -151,53 +145,6 @@ def main() -> None:
                     service,
                     item,
                 )
-
-        binary = workdir / "lotuspond-collector"
-        subprocess.run(
-            ["go", "build", "-o", str(binary), "./cmd/lotuspond-collector"],
-            cwd=ROOT / "collector",
-            check=True,
-        )
-
-        def start_collector() -> subprocess.Popen:
-            process = subprocess.Popen(
-                [str(binary)],
-                env={
-                    "PATH": os.environ["PATH"],
-                    "LOTUSPOND_PROJECT_ID": project,
-                    "LOTUSPOND_API_URL": f"http://127.0.0.1:{api_port}",
-                    "LOTUSPOND_API_KEY": api_key,
-                    "COLLECTOR_INGEST_TOKEN": ingest_token,
-                    "COLLECTOR_LISTEN_ADDRESS": f"127.0.0.1:{collector_port}",
-                    "COLLECTOR_SPOOL_DIR": str(spool),
-                },
-            )
-            stack.callback(process.wait, 10)
-            stack.callback(process.terminate)
-            wait_for(f"http://127.0.0.1:{collector_port}/healthz", process)
-            return process
-
-        # The API is not running yet: the collector must keep the batch, then lose its process.
-        crashed = start_collector()
-        spans = record_spans("interop-spooled")
-        exporter = OTLPSpanExporter(
-            endpoint=collector_route,
-            headers={"authorization": f"Bearer {ingest_token}"},
-            compression=Compression.Gzip,
-            timeout=10,
-        )
-        spooled_result = exporter.export(spans)
-        exporter.shutdown()
-        if spooled_result is not SpanExportResult.SUCCESS:
-            raise SystemExit(
-                "the collector did not accept a batch while the API was down"
-            )
-        crashed.kill()
-        crashed.wait(10)
-        left = sorted(path.name for path in (spool / "pending").iterdir())
-        if not left:
-            raise SystemExit("nothing survived the collector being killed")
-        expect("interop-spooled", spans)
 
         api = subprocess.Popen(
             [str(PYTHON), "-c", API],
@@ -214,57 +161,29 @@ def main() -> None:
         stack.callback(api.terminate)
         wait_for(f"http://127.0.0.1:{api_port}/api/v1/health", api)
 
-        # A new collector over the same spool delivers what the killed one accepted.
-        restarted = time.monotonic()
-        collector = start_collector()
-        deadline = restarted + 30
-        while any((spool / "pending").iterdir()):
-            if time.monotonic() > deadline:
-                raise SystemExit(
-                    "the restarted collector did not deliver the spooled batch"
-                )
-            time.sleep(0.1)
-        report["spool_drill"] = {
-            "export_result": spooled_result.name,
-            "spans": len(spans),
-            "pending_after_kill": len(left),
-            "crashed_exit": crashed.returncode,
-            "delivered_after_restart_seconds": round(time.monotonic() - restarted, 2),
-            "rejected": len(list((spool / "rejected").iterdir())),
-        }
-
-        routes = {
-            "api": (
-                f"http://127.0.0.1:{api_port}/api/v1/telemetry/otlp?project_id={project}",
-                api_key,
-            ),
-            "collector": (collector_route, ingest_token),
-        }
-        for route, (endpoint, token) in routes.items():
-            for compression in (Compression.NoCompression, Compression.Gzip):
-                service = f"interop-{route}-{compression.value or 'none'}"
-                spans = record_spans(service)
-                exporter = OTLPSpanExporter(
-                    endpoint=endpoint,
-                    headers={"authorization": f"Bearer {token}"},
-                    compression=compression,
-                    timeout=10,
-                )
-                result = exporter.export(spans)
-                exporter.shutdown()
-                report["scenarios"].append(
-                    {
-                        "route": route,
-                        "compression": compression.value or "none",
-                        "spans": len(spans),
-                        "export_result": result.name,
-                    }
-                )
-                if result is not SpanExportResult.SUCCESS:
-                    raise SystemExit(
-                        f"{route} with {compression.value} was not accepted"
-                    )
-                expect(service, spans)
+        endpoint = f"http://127.0.0.1:{api_port}/api/v1/telemetry/otlp?project_id={project}"
+        for compression in (Compression.NoCompression, Compression.Gzip):
+            service = f"interop-api-{compression.value or 'none'}"
+            spans = record_spans(service)
+            exporter = OTLPSpanExporter(
+                endpoint=endpoint,
+                headers={"authorization": f"Bearer {api_key}"},
+                compression=compression,
+                timeout=10,
+            )
+            result = exporter.export(spans)
+            exporter.shutdown()
+            report["scenarios"].append(
+                {
+                    "route": "api",
+                    "compression": compression.value or "none",
+                    "spans": len(spans),
+                    "export_result": result.name,
+                }
+            )
+            if result is not SpanExportResult.SUCCESS:
+                raise SystemExit(f"api with {compression.value} was not accepted")
+            expect(service, spans)
 
         with sqlite3.connect(database) as db:
             rows = db.execute(
@@ -310,7 +229,6 @@ def main() -> None:
             )
     report["cleanup"] = {
         "api_exit": api.returncode,
-        "collector_exit": collector.returncode,
         "workdir_removed": not workdir.exists(),
     }
     with open(arguments.report, "x", encoding="utf-8") as output:
