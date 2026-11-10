@@ -1407,7 +1407,27 @@ At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominat
 - **CPU snapshots:** both were taken 580 s after container start, before steady admissions began.
 - **So no under-load numbers are claimed.** The rerun needs AC power, a host that isn't swapping, and a snapshot taken inside the steady phase.
 
-**Not done:** hosted CI, a valid tier 3 A/B, and the same change for connector egress in `destination.py`, which still resolves and handshakes per request.
+**Retest at `df8d937`, 11 November** (`main` at `a4da66e`, with ADR-0012/0013/0014 and the cursor redesign, merged in). Local Linux evidence; hosted Actions are still billing-blocked.
+- **`runtime`:** 746 passed.
+- **`validate`:** passed. SQLite suite 1,057 passed and 196 skipped (PostgreSQL-only); required PostgreSQL suite 1,199 passed, 93 subtests, 0 skipped, including the kept-connection revocation journey; SDK 1,514; runtime 746.
+- **Per-request cost**, same script against `main`'s transport and this branch: back to back, client CPU 0.95 ms + resolver 12.8 ms against 0.04 ms + 0; p50 latency 13.9 ms against 0.08 ms. At 0.2 s pace, p50 37.4 ms against 1.5 ms.
+- **Tier 3 A/B, valid this time.** Same shape as 4 November (8 environments × 3 runtimes, 3 API processes; 10 min at 5/s, 2 at 10/s, 2 at 5/s; no waiting), `main` then this branch, on AC power. Host check `store_activity_value` ratio 0.92 and 0.86 against cal5, 15 and 24 swap-ins.
+
+| | `main` (`a4da66e`) | this branch |
+| --- | --- | --- |
+| Steady reservations / deliveries per s | 3.27 / 3.26 | 4.74 / 4.74 |
+| Burst reservations per s | 2.88 | 4.17 |
+| Dispatch latency p50 / p95 | 813 / 1,606 ms | 600 / 1,276 ms |
+| Claim latency p50 / p95 | 853 / 1,184 ms | 472 / 832 ms |
+| Sweeper ms per reservation p50 | 292 | 217 |
+| Admission p95, steady | 0.66 s | 0.64 s |
+| Revocation wait p95 / max | 0.48 / 0.74 s | 0.43 / 0.51 s |
+| Runtime CPU per process, ~15 min in | about 4.3 s | about 2.5 s |
+| Runtime restarts | 0 | 0 |
+
+  Both runs fail the same three backlog criteria (queue age, backlog growth, burst recovery): the VM still cannot sustain 5/s. The kept connection lifts throughput by about 45 % and halves runtime CPU; it does not close finding 11's capacity gap on this host. The runtimes' remaining children CPU is connector egress, which still resolves per request.
+
+**Not done:** hosted CI, and the same change for connector egress in `destination.py`.
 
 ## Retired assurance-era components — 2026-11-05
 
