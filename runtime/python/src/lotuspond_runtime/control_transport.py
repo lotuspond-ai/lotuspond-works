@@ -1,4 +1,11 @@
-"""Direct verified control TLS with a single whole-attempt deadline and owned DNS."""
+"""Direct verified control TLS with a single whole-attempt deadline and owned DNS.
+
+One verified connection is kept alive between requests. It is reused only while it is
+young, recently used, silent, its peer certificate is unexpired and the CA file is
+byte-for-byte the one it was verified with; anything else reconnects (owned DNS, a
+fresh handshake against the current CA). Every request still carries its own
+credential and session, which the server authorizes per request.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +13,7 @@ import ipaddress
 import json
 import os
 import re
+import select
 import signal
 import socket
 import ssl
@@ -24,6 +32,11 @@ from .errors import FleetError
 from .protocol import validate_token
 
 ATTEMPT_SECONDS = 10.0
+# Reuse bounds: idle well under common server keep-alive timeouts (uvicorn's is 5 s),
+# so a server never closes a connection the moment it is reused; and an age that
+# re-resolves DNS and re-verifies the server at least once a minute.
+KEEPALIVE_IDLE_SECONDS = 2.0
+CONNECTION_MAX_SECONDS = 60.0
 _ROUTES = {
     "/enroll",
     "/self",
@@ -93,6 +106,8 @@ class ControlTransport:
     ):
         self._helper = None
         self._socket = None
+        self._reusable = None  # (opened, last used, peer expiry, pid) of a kept socket
+        self._trust = None  # (CA bytes, context) the kept socket was verified with
         self._closed = False
         self._serial = threading.Lock()
         try:
@@ -222,12 +237,45 @@ class ControlTransport:
                 content.extend(chunk)
                 if len(content) > 1048576:
                     raise FleetError("transport_failed")
+            if self._trust is not None and self._trust[0] == content:
+                return self._trust[1]
             context = ssl.create_default_context(cadata=content.decode("ascii"))
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             self._remaining(deadline)
+            self._trust = (bytes(content), context)
             return context
         finally:
             os.close(fd)
+
+    def _drop(self):
+        self._reusable = None
+        if self._socket is not None:
+            self._socket.close()
+            self._socket = None
+
+    def _kept(self):
+        """The kept connection's state if it may carry this request, else None (dropped)."""
+        if self._socket is None or self._reusable is None:
+            self._drop()
+            return None
+        opened, used, expires, pid = self._reusable
+        now = time.monotonic()
+        if (
+            pid != os.getpid()
+            or now - opened > CONNECTION_MAX_SECONDS
+            or now - used > KEEPALIVE_IDLE_SECONDS
+            or (expires is not None and time.time() >= expires)
+        ):
+            self._drop()
+            return None
+        # Anything readable between responses (close_notify, EOF, stray bytes) ends it.
+        poller = select.poll()
+        poller.register(self._socket, select.POLLIN | select.POLLPRI)
+        if poller.poll(0) or (self._tls and self._socket.pending()):
+            self._drop()
+            return None
+        self._reusable = None  # in use; kept again only after a complete response
+        return opened, expires
 
     def request(
         self,
@@ -272,23 +320,36 @@ class ControlTransport:
         if self._closed or not self._serial.acquire(blocking=False):
             raise FleetError("transport_failed")
         deadline = time.monotonic() + ATTEMPT_SECONDS
+        keep = False
         try:
-            family, address = self._resolve(deadline)
-            if not self._tls and not ipaddress.ip_address(address[0]).is_loopback:
-                raise FleetError("transport_failed")
-            stream = socket.socket(family, socket.SOCK_STREAM)
-            self._socket = stream
-            stream.settimeout(self._remaining(deadline))
-            stream.connect(address)
-            if self._tls:
-                context = self._context(deadline)
-                stream.settimeout(self._remaining(deadline))
-                stream = context.wrap_socket(stream, server_hostname=self.host)
+            kept = self._kept()
+            if kept is not None and self._tls:
+                # The CA file is read for every request. A socket verified against other
+                # bytes than the file now holds is never reused.
+                verified = self._trust[1]
+                if self._context(deadline) is not verified:
+                    self._drop()
+                    kept = None
+            if kept is not None:
+                stream, (opened, expires) = self._socket, kept
+            else:
+                family, address = self._resolve(deadline)
+                if not self._tls and not ipaddress.ip_address(address[0]).is_loopback:
+                    raise FleetError("transport_failed")
+                stream = socket.socket(family, socket.SOCK_STREAM)
                 self._socket = stream
+                stream.settimeout(self._remaining(deadline))
+                stream.connect(address)
+                opened, expires = time.monotonic(), None
+                if self._tls:
+                    context = self._context(deadline)
+                    stream.settimeout(self._remaining(deadline))
+                    stream = context.wrap_socket(stream, server_hostname=self.host)
+                    self._socket = stream
+                    expires = ssl.cert_time_to_seconds(stream.getpeercert()["notAfter"])
             fields = [
                 f"{method} /api/v1/runtime{route} HTTP/1.1",
                 f"Host: {self._authority}",
-                "Connection: close",
                 "Accept: application/json",
                 "Accept-Encoding: identity",
                 "Authorization: Bearer " + token.get_secret_value(),
@@ -301,18 +362,20 @@ class ControlTransport:
             stream.settimeout(self._remaining(deadline))
             stream.sendall(request)
             data = bytearray()
-            while b"\r\n\r\n" not in data:
+            while (end := data.find(b"\r\n\r\n")) == -1:
                 stream.settimeout(self._remaining(deadline))
-                chunk = stream.recv(1)
+                chunk = stream.recv(8192)
                 if not chunk or len(data) >= 16384:
                     raise FleetError("transport_failed")
                 data.extend(chunk)
-            lines = bytes(data[:-4]).split(b"\r\n")
+            if end + 4 > 16384:
+                raise FleetError("transport_failed")
+            lines = bytes(data[:end]).split(b"\r\n")
             if len(lines) > 65 or not re.fullmatch(
                 rb"HTTP/1\.[01] [0-9]{3} [\x20-\x7e]*", lines[0]
             ):
                 raise FleetError("transport_failed")
-            status = int(lines[0].split(b" ")[1])
+            version, status = lines[0][:8], int(lines[0].split(b" ")[1])
             headers = {}
             for line in lines[1:]:
                 key, separator, value = line.partition(b":")
@@ -336,7 +399,9 @@ class ControlTransport:
             size = headers.get(b"content-length", b"")
             if not re.fullmatch(rb"0|[1-9][0-9]{0,6}", size) or int(size) > response_bound(route):
                 raise FleetError("transport_failed")
-            response = bytearray()
+            response = data[end + 4 :]
+            if len(response) > int(size):  # bytes past the response: never reused or read
+                raise FleetError("transport_failed")
             while len(response) < int(size):
                 stream.settimeout(self._remaining(deadline))
                 chunk = stream.recv(min(8192, int(size) - len(response)))
@@ -344,6 +409,10 @@ class ControlTransport:
                     raise FleetError("transport_failed")
                 response.extend(chunk)
             self._remaining(deadline)
+            tokens = headers.get(b"connection", b"").lower().split(b",")
+            if version == b"HTTP/1.1" and b"close" not in (t.strip() for t in tokens):
+                keep = True
+                self._reusable = (opened, time.monotonic(), expires, os.getpid())
             return bytes(response)
         except FleetError:
             raise
@@ -351,16 +420,13 @@ class ControlTransport:
             raise FleetError("transport_failed") from None
         finally:
             try:
-                if self._socket is not None:
-                    self._socket.close()
-                    self._socket = None
+                if not keep or self._closed:
+                    self._drop()
                 self._reap()
             finally:
                 self._serial.release()
 
     def close(self):
         self._closed = True
-        if self._socket is not None:
-            self._socket.close()
-            self._socket = None
+        self._drop()
         self._reap()

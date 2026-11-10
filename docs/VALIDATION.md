@@ -1342,6 +1342,93 @@ Test-only, on branch `claude/hosted-conformance-budgets` from `main` at `533b3d6
 
 **Not done:** hosted `conformance` at the second fixes.
 
+## E03 control transport: one kept connection instead of a resolver and handshake per request, 2026-11-04
+
+Branch `claude/control-transport-reuse`. Local Linux evidence only: no hosted CI, nothing pushed or deployed.
+
+**The problem.** During E04 tier 3 load runs, the runtimes' `ControlTransport` started an owned DNS interpreter and made a fresh TLS handshake (`Connection: close`) for every request. The resolver children alone used about 1.2–1.7 cores of the 4-vCPU VM.
+
+**The change** (`runtime/python/src/lotuspond_runtime/control_transport.py`). The verified connection is kept for the next request only while all of these hold:
+- it is under 60 s old (`CONNECTION_MAX_SECONDS`), so DNS is re-resolved and the server re-verified at least once a minute;
+- it has been idle under 2 s (`KEEPALIVE_IDLE_SECONDS`), well under uvicorn's 5 s keep-alive;
+- nothing is readable on it between responses (close_notify, EOF or stray bytes);
+- its peer certificate is unexpired;
+- the CA file, still read on every request, holds exactly the bytes the connection was verified with.
+
+Any error status, `Connection: close`, HTTP/1.0, or bytes past a response end the connection. The next request then goes through owned DNS and a fresh handshake against the current CA. A failed request is never resent.
+
+**Security properties, unchanged:**
+- Hostname and CA verification happen at every handshake, and changed trust is never reused.
+- Every request carries its own credential and session. The server authorizes each request: `authenticate_runtime` locks the credential, session and instance, and checks current recovery authority, with no connection-scoped state.
+- Rotation, revocation and reauthentication are therefore per request.
+- The ten-second whole-attempt deadline and the owned, killable DNS helper are unchanged.
+- One exception: a rotated server leaf certificate is picked up at the next reconnect, at most 60 s later, rather than on the next request.
+
+**Per-request cost** (`scripts/checks/control-transport-cost.py`; TLS uvicorn with a P-256 certificate, 300 requests, in the CI runner image with 4 CPUs; two interleaved runs per head; Mac on battery):
+
+| | `main` (`533b3d6`) | this branch |
+| --- | --- | --- |
+| Client CPU, back to back | 1.4–1.8 ms + resolver 18.5–19.5 ms | 0.05 ms + resolver 0 |
+| Client CPU, 0.2 s pace | 2.9 ms + resolver 33.6–34.3 ms | 0.9 ms + resolver 0.13 ms |
+| Server CPU, back to back | 0.65–0.86 ms | 0.05 ms |
+| Latency p50 / p95, back to back | 20–21 / 22–24 ms | 0.10 / 0.11–0.14 ms |
+| Latency p50 / p95, 0.2 s pace | 38–39 / 40–41 ms | 1.5–1.7 / 1.9–2.0 ms |
+
+At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominated by idle event-loop time, not by requests. Tier 3 was not rerun.
+
+**Tests:**
+- `runtime/python/tests/test_control_transport_reuse.py`, with a keep-alive `KeptServer` in `tls_fixtures.py`, covers:
+  - one connection and one resolution for many requests;
+  - revocation refused on the kept connection;
+  - a server restart;
+  - certificate rotation, which needs the rotated CA;
+  - a changed or missing CA file ending a kept connection;
+  - the idle, age and expiry bounds;
+  - responses that end the connection;
+  - unsolicited bytes and bytes past a response;
+  - `close()`.
+- **Real API.** The fleet acceptance journey adds `revocation_applies_on_a_kept_control_connection`: a heartbeat, a revocation, then a heartbeat on the same connection (the same client address at the server) answered 401.
+
+**Runs** (each `ci.yml` job alone, through the local runner, on a clean clone at `73c0b20`):
+- **`runtime`:** 746 passed on Python 3.14, and 746 passed on 3.13.
+- **`validate`:** passed.
+  - SQLite suite: 1,101 passed and 195 skipped (PostgreSQL-only).
+  - Required PostgreSQL suite: 1,242 passed, 102 subtests, 0 skipped, including the acceptance journey.
+- **`disruptive`** (tier 2): 6 passed.
+- **`conformance`** (tier 1): 47 passed, 1 failed. REG-2 (`test_an_iteration_keeps_order...`) ended `execution stayed reconciliation_required` after 2,733 s.
+  - Alone, REG-2 passed on this branch in 1,290 s.
+  - Alone on `main` (`533b3d6`), it failed with the same signature after 2,780 s.
+  - So this failure is pre-existing, consistent with the recorded 2 s fixture-read residual on a loaded host. It is not caused by connection reuse.
+- On macOS, the runtime suite fails exactly the cases `main` fails there (private-state refusals), and no others.
+
+**Tier 3 A/B, attempted on 4 November, inconclusive.** The shape was 8 environments × 3 runtimes and 3 API processes; 10 min at 5/s, 2 at 10/s, 2 at 5/s; no waiting phase. It ran `main` first, then this branch.
+- **`main`:** the host swapped 10,521 pages in 10 minutes. Only 15 provider calls happened in the whole run, and every load criterion failed.
+- **This branch:** stopped after 11 minutes, when the Mac switched to battery.
+- **CPU snapshots:** both were taken 580 s after container start, before steady admissions began.
+- **So no under-load numbers are claimed.** The rerun needs AC power, a host that isn't swapping, and a snapshot taken inside the steady phase.
+
+**Retest at `df8d937`, 11 November** (`main` at `a4da66e`, with ADR-0012/0013/0014 and the cursor redesign, merged in). Local Linux evidence; hosted Actions are still billing-blocked.
+- **`runtime`:** 746 passed.
+- **`validate`:** passed. SQLite suite 1,057 passed and 196 skipped (PostgreSQL-only); required PostgreSQL suite 1,199 passed, 93 subtests, 0 skipped, including the kept-connection revocation journey; SDK 1,514; runtime 746.
+- **Per-request cost**, same script against `main`'s transport and this branch: back to back, client CPU 0.95 ms + resolver 12.8 ms against 0.04 ms + 0; p50 latency 13.9 ms against 0.08 ms. At 0.2 s pace, p50 37.4 ms against 1.5 ms.
+- **Tier 3 A/B, valid this time.** Same shape as 4 November (8 environments × 3 runtimes, 3 API processes; 10 min at 5/s, 2 at 10/s, 2 at 5/s; no waiting), `main` then this branch, on AC power. Host check `store_activity_value` ratio 0.92 and 0.86 against cal5, 15 and 24 swap-ins.
+
+| | `main` (`a4da66e`) | this branch |
+| --- | --- | --- |
+| Steady reservations / deliveries per s | 3.27 / 3.26 | 4.74 / 4.74 |
+| Burst reservations per s | 2.88 | 4.17 |
+| Dispatch latency p50 / p95 | 813 / 1,606 ms | 600 / 1,276 ms |
+| Claim latency p50 / p95 | 853 / 1,184 ms | 472 / 832 ms |
+| Sweeper ms per reservation p50 | 292 | 217 |
+| Admission p95, steady | 0.66 s | 0.64 s |
+| Revocation wait p95 / max | 0.48 / 0.74 s | 0.43 / 0.51 s |
+| Runtime CPU per process, ~15 min in | about 4.3 s | about 2.5 s |
+| Runtime restarts | 0 | 0 |
+
+  Both runs fail the same three backlog criteria (queue age, backlog growth, burst recovery): the VM still cannot sustain 5/s. The kept connection lifts throughput by about 45 % and halves runtime CPU; it does not close finding 11's capacity gap on this host. The runtimes' remaining children CPU is connector egress, which still resolves per request.
+
+**Not done:** hosted CI, and the same change for connector egress in `destination.py`.
+
 ## Retired assurance-era components — 2026-11-05
 
 [ADR-0012](architecture/0012-retire-assurance-extras.md) removes voice, the Gym-Anything sandbox, TypeSafe Jev, the model gateway, trace-plan billing, the Go collector and Rust evidence-core. Local evidence only, at `f0df9af`; no hosted run yet.

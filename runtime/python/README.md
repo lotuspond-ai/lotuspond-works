@@ -113,7 +113,13 @@ headers and compressed/transfer-encoded responses are refused. Each full control
 attempt has a ten-second deadline across owned DNS subprocess resolution,
 connect, TLS, send and reads. One resolved socket is selected and connected once;
 DNS helper environments contain no control secrets, and owned process groups are
-killed/reaped. Unconfirmed cleanup fences subsequent use.
+killed/reaped. Unconfirmed cleanup fences subsequent use. The verified connection
+is kept for the next request only while it is under 60 seconds old, idle under 2
+seconds, silent between responses, its peer certificate is unexpired and the CA
+file still holds exactly the bytes it was verified with. An error status,
+`Connection: close`, HTTP/1.0 or bytes past a response end it; the next request
+then resolves and verifies afresh. Every request carries its own credential and
+session, and the server authorizes each one.
 
 Library callers construct `RuntimeSupervisor(client, store, observation,
 installation_id=...)`; the required keyword is the independently provisioned
