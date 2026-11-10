@@ -6,7 +6,6 @@ import { Workspaces } from './pages/Workspaces.js';
 import { AccountSecurity } from './pages/AccountSecurity.js';
 import { IdentityFlow, IdentityFrame, VerificationCard } from './pages/IdentityFlow.js';
 import { Invitations } from './pages/Invitations.js';
-import { Enrollment } from './pages/Enrollment.js';
 import { Landing } from './pages/Landing.js';
 import { identityVerified } from './lib/identityStatus.js';
 import { isIdentityRoute, type IdentityLinks } from './lib/identityLinks.js';
@@ -15,11 +14,6 @@ import {
   registrationPayload,
   saveOrganizationDraft,
 } from './lib/registration.js';
-import { AuthenticatorPolicy } from './components/AuthenticatorPolicy.js';
-import {
-  authenticatorRequirement,
-  type AuthenticatorPolicy as AuthenticatorPolicyState,
-} from './lib/authenticatorPolicy.js';
 import { ScenarioForm } from './components/ScenarioForm.js';
 import { RecordDetails } from './components/RecordDetails.js';
 import {
@@ -116,7 +110,7 @@ const definitions: Record<string, Definition> = {
   policies: {
     title: 'Policies',
     description:
-      'Set measurable release limits and tool authorization rules. Policies are immutable; create a new version to change a decision rule.',
+      'Set measurable release limits. Policies are immutable; create a new version to change a decision rule.',
     fields: [
       { key: 'name', label: 'Policy name' },
       { key: 'minimum_pass_rate', label: 'Minimum pass rate (0–1)', type: 'number', value: '1' },
@@ -133,18 +127,6 @@ const definitions: Record<string, Definition> = {
         label: 'Require independent human approval',
         type: 'checkbox',
         value: 'true',
-      },
-      {
-        key: 'blocked_tools',
-        label: 'Blocked tools (comma-separated)',
-        type: 'list',
-        optional: true,
-      },
-      {
-        key: 'approval_tools',
-        label: 'Tools requiring approval (comma-separated)',
-        type: 'list',
-        optional: true,
       },
     ],
   },
@@ -264,7 +246,6 @@ export function App({
   const announcedPage = useRef(page);
   const navOpenNow = useRef(navOpen);
   const focusMainAfterNavigation = useRef(false);
-  const enrollmentWorkspace = useRef('');
   const setup = useSetupProgress(workspace);
   const refreshSetup = setup.refresh;
   const signedInView =
@@ -372,24 +353,8 @@ export function App({
       </div>
     );
   const invitationToken = identityLinks.token('accept-invitation');
-  if (page === 'enroll')
-    return (
-      <IdentityFrame signedIn={!!account}>
-        <Enrollment
-          key={`${page}-${linkVersion}`}
-          links={identityLinks}
-          account={account}
-          onRefresh={refreshAccount}
-          onCompleted={async (id) => {
-            enrollmentWorkspace.current = id;
-            await refreshAccount();
-          }}
-        />
-      </IdentityFrame>
-    );
   if (
     (isIdentityRoute(page) || page === 'forgot-password') &&
-    page !== 'enroll' &&
     !(page === 'accept-invitation' && !account && invitationToken)
   ) {
     return (
@@ -413,8 +378,7 @@ export function App({
       <Welcome
         key={page}
         onReady={async () => {
-          await refreshAccount(enrollmentWorkspace.current || undefined);
-          enrollmentWorkspace.current = '';
+          await refreshAccount();
         }}
         initialError={error}
         initialMode={
@@ -534,16 +498,6 @@ export function App({
               {account.mfa?.enabled
                 ? 'Verify this session with your authenticator before platform administration.'
                 : 'Set up an authenticator before using platform administration.'}{' '}
-              <a className="text-button" href="#account-security">
-                Open account security
-              </a>
-            </p>
-          )}
-          {authenticatorRequirement(account, currentWorkspace) && page !== 'account-security' && (
-            <p className="notice">
-              {authenticatorRequirement(account, currentWorkspace) === 'installation'
-                ? 'This installation requires an authenticator. Set one up to reach any workspace.'
-                : 'This organization requires an authenticator. Set one up to reach its projects, releases, and evidence.'}{' '}
               <a className="text-button" href="#account-security">
                 Open account security
               </a>
@@ -1618,7 +1572,6 @@ function Settings({
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const canEdit = ['owner', 'admin'].includes(role);
-  const policy = data?.authenticator_policy as AuthenticatorPolicyState | undefined;
   useEffect(() => {
     setData(null);
     setError('');
@@ -1647,7 +1600,7 @@ function Settings({
         <div>
           <p className="eyebrow">Administer</p>
           <h1>Settings</h1>
-          <p>Manage your workspace name and access policy.</p>
+          <p>Manage your workspace name.</p>
         </div>
       </div>
       <VerificationCard account={account} onRefresh={onRefresh} />
@@ -1675,18 +1628,6 @@ function Settings({
             )}
             {saved && <p role="status">Settings saved.</p>}
           </form>
-          {policy && (
-            <AuthenticatorPolicy
-              workspace={workspace}
-              policy={policy}
-              canEdit={canEdit}
-              enrolled={!!account.mfa?.enabled}
-              onChanged={(next) => {
-                setData({ ...data, authenticator_policy: next, require_mfa: next.require_mfa });
-                void onRefresh();
-              }}
-            />
-          )}
         </>
       ) : !error ? (
         <p role="status">Loading settings…</p>

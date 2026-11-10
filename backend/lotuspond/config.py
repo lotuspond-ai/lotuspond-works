@@ -29,11 +29,9 @@ class Settings(BaseSettings):
     fleet_installation_id: str | None = None
     session_hours: int = Field(default=24, ge=1, le=168)
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
-    network_mode: Literal["connected", "airgap"] = "connected"
     mail_enabled: bool = False
     mail_encryption_key: SecretStr | None = None
     mfa_encryption_key: SecretStr | None = None
-    require_mfa: bool = False
     smtp_host: str | None = Field(default=None, min_length=1, max_length=253)
     smtp_port: int = Field(default=587, ge=1, le=65535)
     smtp_username: str | None = Field(default=None, max_length=320)
@@ -96,10 +94,6 @@ class Settings(BaseSettings):
                 raise ValueError("MFA encryption key must be URL-safe base64") from error
             if len(key) != 32:
                 raise ValueError("MFA encryption key must decode to exactly 32 bytes")
-        if self.require_mfa and not self.mfa_encryption_key:
-            raise ValueError(
-                "An installation-wide authenticator requirement needs the MFA encryption key"
-            )
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ValueError("SMTP username and password must be configured together")
         if self.smtp_conversation_seconds < self.smtp_timeout_seconds:
@@ -113,8 +107,6 @@ class Settings(BaseSettings):
         ):
             raise ValueError("SMTP host must be a hostname or the ::1 loopback address")
         if self.mail_enabled:
-            if self.network_mode == "airgap":
-                raise ValueError("Mail delivery cannot be enabled in airgap mode")
             if not self.mail_encryption_key or not self.smtp_host or not self.smtp_from:
                 raise ValueError("Enabled mail requires encryption key, SMTP host, and from address")
             loopback = self.smtp_host in {"localhost", "127.0.0.1", "::1"}

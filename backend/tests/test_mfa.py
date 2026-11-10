@@ -104,7 +104,6 @@ def test_mfa_enrollment_login_recovery_and_session_binding(
         "session_verified": True,
         "recovery_codes_remaining": 10,
         "required_for_privileged": False,
-        "required_by_installation": False,
     }
 
     with TestClient(app, headers={"origin": "http://testserver"}) as pending_login:

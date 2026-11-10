@@ -2,7 +2,7 @@
 
 An evaluation should produce evidence a reviewer can trace to a scenario, agent revision, environment, evaluator version, and time window. A result without those anchors is incomplete.
 
-Use an [evaluation runner](runners.md) to execute a reviewed custom adapter, an HTTP agent endpoint, or an explicit MCP tool. HTTP completion and adapter process exit are distinct from an independently checked task verdict.
+Use an [evaluation runner](runners.md) to execute a reviewed custom adapter or an HTTP agent endpoint. HTTP completion and adapter process exit are distinct from an independently checked task verdict.
 
 ## Recommended sequence
 

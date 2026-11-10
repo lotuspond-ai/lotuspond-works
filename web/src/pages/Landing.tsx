@@ -148,7 +148,7 @@ const register = [
       [
         'Assurance',
         'available',
-        'Frozen scenarios, evaluation runs for HTTP, MCP and A2A agents, immutable release policies and independent approval. A deployment needs a current release decision.',
+        'Frozen scenarios, evaluation runs for agents behind HTTP, immutable release policies and independent approval. A deployment needs a current release decision.',
       ],
     ],
   ],
@@ -235,14 +235,13 @@ const families = [
 ] as const;
 
 const deployments = [
-  ['Connected', 'Container images for the API, console and background workers.'],
   [
-    'On-premises',
-    'An offline bundle of pinned images with checksums and a verifier, for networks you control.',
+    'The service',
+    'One Compose file runs the API and console, the identity-mail worker, PostgreSQL and Redis, on a host you choose.',
   ],
   [
-    'Air-gapped',
-    'Mail and external alerts switch off. Authenticators and operator-attested enrollment work without egress.',
+    'Your side',
+    'A separate nonroot image runs the HTTP evaluation runner and the release gate beside your agents, with no built-in credentials.',
   ],
 ] as const;
 
@@ -257,7 +256,7 @@ const gateExample = [
   ['output', '2'],
 ] as const;
 
-const deploymentGlyphs = ['network', 'enclosure', 'sealed'] as const;
+const deploymentGlyphs = ['network', 'enclosure'] as const;
 const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
 // Page order drives the contents list, the section numbers, and the header links.
@@ -713,11 +712,10 @@ export function Landing({
                 Runs on infrastructure you control.
               </h2>
               <p className="section-lede">
-                Install Lotuspond where your systems are, from a connected network to one with no
-                route out. These modes are proven for today’s assurance platform; the production
-                runtime will be qualified for each topology as it ships.
+                Install Lotuspond where your systems are. Evaluation and, later, workflow steps run
+                on workers inside your own boundary.
               </p>
-              <ul className="panel-grid">
+              <ul className="panel-grid panel-grid-two">
                 {deployments.map(([title, copy], index) => (
                   <li key={title}>
                     <div className="panel-glyph">
@@ -728,10 +726,6 @@ export function Landing({
                   </li>
                 ))}
               </ul>
-              <p className="landing-aside">
-                Execution ships separately: a nonroot image with HTTP, MCP, A2A and release-gate
-                commands and no built-in credentials, so evaluations run beside your agents.
-              </p>
             </div>
           </section>
 
@@ -762,10 +756,7 @@ export function Landing({
                   <PondPlate scene="organization" className="plate-wide" />
                   <p className="eyebrow">Organization</p>
                   <h3>A shared workspace</h3>
-                  <p>
-                    Roles, invitations, scoped API keys, and an optional authenticator requirement
-                    for every member.
-                  </p>
+                  <p>Roles, invitations, scoped API keys and an audit log of every change.</p>
                   <button className="text-button" onClick={() => onCreateAccount('organization')}>
                     Create an organization <span aria-hidden="true">→</span>
                   </button>

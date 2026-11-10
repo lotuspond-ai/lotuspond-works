@@ -19,7 +19,6 @@ from .models import (
     LoginSession,
     Membership,
     MfaEnrollment,
-    MfaFactor,
     MfaLoginChallenge,
     Project,
     Run,
@@ -31,7 +30,6 @@ from .models import (
 )
 from .security import (
     Principal,
-    authenticator_enabled,
     current_session,
     digest,
     fail,
@@ -46,9 +44,10 @@ from .security import (
 
 router = APIRouter(prefix="/api/v1")
 
-# The retired subscription plan and gateway budget keep their columns so stored
-# data survives, but no response reports them as if they still applied.
-RETIRED_WORKSPACE_FIELDS = {"plan", "monthly_budget_usd"}
+# The retired subscription plan, gateway budget (ADR-0012) and organization authenticator
+# requirement (ADR-0014) keep their columns so stored data survives, but no response
+# reports them as if they still applied.
+RETIRED_WORKSPACE_FIELDS = {"plan", "monthly_budget_usd", "require_mfa"}
 
 
 def _workspace(workspace: Workspace) -> dict:
@@ -262,7 +261,6 @@ def me(request: Request, db: Session = DB):
         "capabilities": {
             "mail_enabled": request.app.state.settings.mail_enabled,
             "registration_enabled": request.app.state.settings.registration_enabled,
-            "offline_enrollment_enabled": request.app.state.settings.network_mode == "airgap",
         },
         "mfa": mfa_status(db, request, user),
     }
@@ -389,79 +387,9 @@ def revoke_key(
     return {"ok": True}
 
 
-def _members_without_authenticator(db: Session, workspace_id: str) -> int:
-    return db.scalar(
-        select(func.count())
-        .select_from(Membership)
-        .outerjoin(MfaFactor, MfaFactor.user_id == Membership.user_id)
-        .where(Membership.workspace_id == workspace_id, MfaFactor.id.is_(None))
-    )
-
-
 @router.get("/settings")
 def settings(request: Request, p: Principal = Depends(require()), db: Session = DB):
-    workspace = db.get(Workspace, p.workspace_id)
-    policy = {
-        "require_mfa": workspace.require_mfa,
-        "available": request.app.state.settings.mfa_encryption_key is not None,
-        "manageable": workspace.kind == "organization",
-        "required_by_installation": request.app.state.settings.require_mfa,
-    }
-    if p.user_id and p.role in {"owner", "admin"}:
-        policy["members_without_authenticator"] = _members_without_authenticator(
-            db, workspace.id
-        )
-    return {
-        **_workspace(workspace),
-        "authenticator_policy": policy,
-    }
-
-
-@router.post("/settings/authenticator-policy")
-def update_authenticator_policy(
-    body: s.AuthenticatorPolicyInput,
-    request: Request,
-    p: Principal = Depends(require("write")),
-    db: Session = DB,
-):
-    require_admin(p)
-    if not request.app.state.settings.mfa_encryption_key:
-        fail(503, "mfa_unavailable", "Multi-factor authentication is unavailable.")
-    # Lock the actor and then the workspace so a concurrent factor removal cannot slip between
-    # the check below and the stored requirement.
-    db.scalar(
-        select(User)
-        .where(User.id == p.user_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    workspace = db.scalar(
-        select(Workspace)
-        .where(Workspace.id == p.workspace_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if workspace.kind != "organization":
-        fail(409, "policy_unavailable", "Only organizations can require an authenticator.")
-    # The acting administrator must already hold a factor, so the policy cannot lock out its author.
-    if not authenticator_enabled(db, p.user_id, lock=True):
-        fail(403, "mfa_required", "Enable your own authenticator before changing this policy.")
-    if workspace.require_mfa == body.require_mfa:
-        return {
-            "ok": True,
-            "require_mfa": workspace.require_mfa,
-            "members_without_authenticator": _members_without_authenticator(db, workspace.id),
-        }
-    workspace.require_mfa = body.require_mfa
-    remaining = _members_without_authenticator(db, workspace.id)
-    audit(
-        db,
-        p,
-        "settings.authenticator_policy_changed",
-        workspace.id,
-        {"require_mfa": body.require_mfa, "members_without_authenticator": remaining},
-    )
-    return {"ok": True, "require_mfa": body.require_mfa, "members_without_authenticator": remaining}
+    return _workspace(db.get(Workspace, p.workspace_id))
 
 
 @router.patch("/settings")

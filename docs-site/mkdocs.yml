@@ -13,7 +13,6 @@ nav:
   - Authentication: authentication.md
   - Authenticator and recovery: mfa.md
   - Identity mail: identity-mail.md
-  - Offline identity: offline-identity.md
   - API contracts: api.md
   - Package SDK and local trust: package-sdk.md
   - Executable definitions and contracts: executable-packages.md
@@ -22,9 +21,7 @@ nav:
   - Runtime identity foundation: runtime-foundation.md
   - Evaluation runners: runners.md
   - Administration: administration.md
-  - Operations: operations.md
   - Deployment: deployment.md
-  - Pilot program: pilot.md
 plugins:
   - search
 markdown_extensions:

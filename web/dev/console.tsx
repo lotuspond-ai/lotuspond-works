@@ -59,7 +59,7 @@ const lists: Record<string, Record<string, unknown>[]> = {
     {
       id: 'r1',
       name: 'runner-1',
-      capabilities: ['http', 'mcp'],
+      capabilities: ['http'],
       last_seen_at: ago(2),
       created_at: ago(5000),
     },
@@ -190,7 +190,6 @@ const account = {
       name: 'Example organization',
       kind: 'organization',
       role,
-      require_mfa: false,
     },
   ],
   mfa: {
@@ -203,15 +202,7 @@ const account = {
   capabilities: { mail_enabled: false, registration_enabled: true },
 };
 
-const settings = {
-  name: 'Example organization',
-  authenticator_policy: {
-    require_mfa: false,
-    available: true,
-    manageable: true,
-    members_without_authenticator: 1,
-  },
-};
+const settings = { name: 'Example organization' };
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

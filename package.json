@@ -29,7 +29,6 @@
     "db:stop": "node scripts/database.mjs stop",
     "db:init": "node --env-file-if-exists=.env scripts/python.mjs init",
     "db:migrate": "node --env-file-if-exists=.env scripts/python.mjs migrate",
-    "offline-identity": "node --env-file-if-exists=.env scripts/python.mjs offline-identity",
     "check": "npm run lint && npm test && npm run lint:python && npm run test:python && npm run check:sdk && npm run check:runtime && npm run check:contracts && npm run check:executable-contracts && npm run build",
     "cli": "node scripts/cli.mjs",
     "runner": "node scripts/runner.mjs",

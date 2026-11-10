@@ -34,7 +34,7 @@ Validation must prove existing account/project IDs, previous incident values, an
 
 Mail bodies are AES-256-GCM ciphertext bound to their outbox identifier. Tokens are stored only as SHA-256 digests outside that ciphertext, and sent, terminally failed, expired, revoked, or consumed work is cleared or cancelled by the worker. SMTP delivery is disabled by default. `LOTUSPOND_SMTP_TIMEOUT_SECONDS` bounds one socket operation and `LOTUSPOND_SMTP_CONVERSATION_SECONDS` bounds the whole SMTP conversation; a conversation that passes its bound is recorded as the retryable `smtp_deadline` error rather than holding the worker. Still supervise and restart the worker, and expect a duplicate submission after an ambiguous SMTP acceptance or an expired worker lease. Challenge and invitation single-use checks make duplicate links harmless. A `security_notice` row carries no challenge or invitation reference and no link, so nothing can make it stale; the worker always attempts it and a duplicate is only a repeated warning.
 
-These commands are intentionally not production database administration tools. Hosted/on-prem bootstrap and upgrades need their own authorized deployment plan and backup/restore evidence.
+These commands are intentionally not production database administration tools. Hosted bootstrap and upgrades need their own authorized deployment plan and backup/restore evidence.
 
 ## Evidence and authorization
 
@@ -52,7 +52,7 @@ Retired on 2026-11-11 (ADR-0013); this describes the rows already stored. An ass
 
 ## Identity and cost provenance
 
-An offline enrollment belongs to one user and that same user's attestation through a composite foreign key. Token digests are unique; consumed and revoked states are mutually exclusive. Provisioning creates new accounts only, and enrollment is required before authentication. Mailbox state is unchanged. See the [design decision](architecture/0003-offline-identity-and-cost-provenance.md) and [operator guide](../docs-site/docs/offline-identity.md).
+Offline enrollment was retired on 2026-11-11 ([ADR-0014](architecture/0014-focus-on-the-core-loop.md)); its rows stay. A stored enrollment belongs to one user and that same user's attestation through a composite foreign key. Token digests are unique; consumed and revoked states are mutually exclusive. A stored, unfinished enrollment still blocks its account, and an attestation no longer verifies an identity. `workspaces.require_mfa` likewise keeps its column and constraint but no longer holds members to an authenticator. See the [original design decision](architecture/0003-offline-identity-and-cost-provenance.md).
 
 Stored trace costs keep a nullable amount and a required `reported`, `unavailable`, or `unknown` marker. Reported cost requires an amount, unavailable cost requires null, and legacy unknown retains its original value. The API derived the marker while it accepted traces. Monthly totals include reported amounts only and expose counts of incomplete measurements. A historical zero is never assumed to be measured zero.
 

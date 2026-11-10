@@ -6,8 +6,7 @@
       "protocols",
       "restore",
       "execution",
-      "docs",
-      "offline-install"
+      "docs"
     ]
   },
   "enforce_admins": true,

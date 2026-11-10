@@ -10,16 +10,6 @@ export const COMMANDS = {
     args: [resolve(root, 'protocol-adapters/src/http-runner.mjs')],
     summary: 'Supervised HTTP agent adapter. Set LOTUSPOND_RUNNER_ID, LOTUSPOND_API_URL, and LOTUSPOND_API_KEY.',
   },
-  'runner-mcp': {
-    script: resolve(root, 'scripts/runner.mjs'),
-    args: [resolve(root, 'protocol-adapters/src/mcp-runner.mjs')],
-    summary: 'Supervised MCP tool adapter. Set LOTUSPOND_RUNNER_ID, LOTUSPOND_API_URL, and LOTUSPOND_API_KEY.',
-  },
-  'runner-a2a': {
-    script: resolve(root, 'scripts/runner.mjs'),
-    args: [resolve(root, 'protocol-adapters/src/a2a-runner.mjs')],
-    summary: 'Supervised A2A agent adapter. Set LOTUSPOND_RUNNER_ID, LOTUSPOND_API_URL, and LOTUSPOND_API_KEY.',
-  },
   gate: {
     script: resolve(root, 'scripts/cli.mjs'),
     prefix: ['gate'],
@@ -36,8 +26,6 @@ export function usage() {
     '',
     'Commands:',
     '  runner-http   ' + COMMANDS['runner-http'].summary,
-    '  runner-mcp    ' + COMMANDS['runner-mcp'].summary,
-    '  runner-a2a    ' + COMMANDS['runner-a2a'].summary,
     '  gate          ' + COMMANDS.gate.summary,
   ].join('\n');
 }

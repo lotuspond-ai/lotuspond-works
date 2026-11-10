@@ -153,8 +153,6 @@ class PolicyInput(Input):
     maximum_p95_ms: int | None = Field(default=None, gt=0)
     maximum_cost_usd: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=6)
     require_approval: bool = True
-    blocked_tools: list[Name] = Field(default_factory=list, max_length=100)
-    approval_tools: list[Name] = Field(default_factory=list, max_length=100)
 
 
 class ReleaseInput(Input):
@@ -193,10 +191,6 @@ class WorkspaceInput(Input):
     name: Name
 
 
-class AuthenticatorPolicyInput(Input):
-    require_mfa: bool
-
-
 class AuthenticatorReset(Input):
     current_password: str = Field(min_length=1, max_length=256)
     reason: str = Field(min_length=10, max_length=2000)
@@ -206,7 +200,3 @@ class WorkspaceStatus(Input):
     status: Literal["active", "suspended"]
     reason: str = Field(min_length=10, max_length=2000)
 
-
-class AuthorizationInput(Input):
-    policy_id: Identifier
-    tool: Name

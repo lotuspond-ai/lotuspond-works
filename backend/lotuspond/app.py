@@ -23,8 +23,6 @@ from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
 from .mfa import router as mfa_router
 from .models import SchemaVersion
-from .offline_identity import router as offline_identity_router
-from .operations import router as operations_router
 from .package_contract import MAX_PACKAGE_BYTES
 from .packages import router as packages_router
 from .schema_version import SCHEMA_VERSION
@@ -295,6 +293,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.3.0",
+                    "id": "core-loop-focus",
+                    "date": "2026-11-11",
+                    "title": "One direction: build, prove, run, control",
+                    "description": "Lotuspond now states one direction: run AI-agent workflows in real processes, with each version proven before release, each consequential action decided by a person, and every outcome recorded. Features outside that loop are gone: air-gapped operation and offline identity enrollment, the organization and installation authenticator requirements, the tool-authorization endpoint, the MCP and A2A evaluation runners, the Operations page and the on-premises Compose variant. Only a verified mailbox verifies an identity. Personal authenticators, recovery codes, the reset for a member who lost every factor, and the production operator requirement stay. Stored data is unchanged.",
+                },
+                {
+                    "version": "0.3.0",
                     "id": "automation-core-trim",
                     "date": "2026-11-11",
                     "title": "Console trimmed to the automation core",
@@ -550,9 +555,7 @@ def create_app(
 
     app.include_router(identity_router)
     app.include_router(identity_lifecycle_router)
-    app.include_router(offline_identity_router)
     app.include_router(mfa_router)
-    app.include_router(operations_router)
     app.include_router(packages_router)
     app.include_router(fleet_management_router)
     app.include_router(fleet_runtime_router)

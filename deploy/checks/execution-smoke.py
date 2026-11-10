@@ -1,4 +1,4 @@
-"""Exercise a verified customer-side execution archive.
+"""Exercise the customer-side execution image.
 
 This uses synthetic loopback endpoints only. It never connects to a customer
 agent or an existing database, and it does not publish a port. It is a local packaging drill, not a clean-machine or
@@ -10,19 +10,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import secrets
-import shutil
 import subprocess
 import sys
-import tarfile
-import tempfile
 import time
-from pathlib import Path
 
-from verify_airgap_bundle import MAX_BUNDLE_BYTES, verify_bundle
-
-IMAGE_KEYS = {"LOTUSPOND_EXECUTION_IMAGE"}
 LABEL = "com.lotuspond.execution-drill"
 HTTP_PROBE = r"""
 import { createServer } from 'node:http';
@@ -48,85 +40,6 @@ server.close();
 if (result.passed !== true || result.evidence.protocol !== 'http') process.exit(1);
 process.stdout.write(JSON.stringify({ passed: true, protocol: 'http' }));
 """
-A2A_PROBE = r"""
-import { createServer } from 'node:http';
-import { evaluate } from '/app/protocol-adapters/src/a2a-runner.mjs';
-const server = createServer((request, response) => {
-  const chunks = [];
-  request.on('data', (chunk) => chunks.push(chunk));
-  request.on('end', () => {
-    const call = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    const text = call.params.message.parts[0].text;
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ jsonrpc: '2.0', id: call.id, result: {
-      kind: 'task', id: 'task-1', contextId: 'context-1', status: { state: 'completed' },
-      artifacts: [{ parts: [{ kind: 'text', text }] }] } }));
-  });
-});
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const port = server.address().port;
-const result = await evaluate(
-  { prompt: 'hello-from-execution-image' },
-  { contains: 'hello-from-execution-image' },
-  {},
-  { env: { LOTUSPOND_A2A_ENDPOINT: `http://127.0.0.1:${port}/a2a` } },
-);
-server.close();
-if (result.passed !== true || result.evidence.protocol !== 'a2a' || result.evidence.task_state !== 'completed')
-  process.exit(1);
-process.stdout.write(JSON.stringify({ passed: true, protocol: 'a2a' }));
-"""
-
-MCP_PROBE = r"""
-import { createServer } from 'node:http';
-import { evaluate } from '/app/protocol-adapters/src/mcp-runner.mjs';
-const server = createServer(async (request, response) => {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
-  if (request.method === 'DELETE' || body?.id === undefined) {
-    response.writeHead(body?.id === undefined ? 202 : 200).end();
-    return;
-  }
-  let result;
-  if (body.method === 'initialize') {
-    result = {
-      protocolVersion: body.params.protocolVersion,
-      capabilities: { tools: {} },
-      serverInfo: { name: 'execution-drill', version: '1.0.0' },
-    };
-  } else if (body.method === 'tools/call') {
-    result = { content: [{ type: 'text', text: 'approved-from-execution-image' }] };
-  } else {
-    response.writeHead(404).end();
-    return;
-  }
-  const encoded = JSON.stringify({ jsonrpc: '2.0', id: body.id, result });
-  response.writeHead(200, {
-    'content-type': 'application/json',
-    'content-length': Buffer.byteLength(encoded),
-  });
-  response.end(encoded);
-});
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const port = server.address().port;
-const result = await evaluate(
-  { arguments: { prompt: 'hello' } },
-  { contains: 'approved-from-execution-image' },
-  {},
-  {
-    env: {
-      LOTUSPOND_MCP_ENDPOINT: `http://127.0.0.1:${port}/mcp`,
-      LOTUSPOND_MCP_TOOL: 'approved.tool',
-      LOTUSPOND_MCP_TIMEOUT_MS: '4000',
-    },
-  },
-);
-server.close();
-if (result.passed !== true || result.evidence.protocol !== 'mcp') process.exit(1);
-process.stdout.write(JSON.stringify({ passed: true, protocol: 'mcp' }));
-"""
-
 
 def command(*args, data=None, timeout=60, check=True):
     result = subprocess.run(
@@ -135,61 +48,6 @@ def command(*args, data=None, timeout=60, check=True):
     if check and result.returncode:
         raise RuntimeError(f"{args[0]} {args[1]} failed (exit {result.returncode})")
     return result
-
-
-def image_inventory(path: Path) -> dict[str, str]:
-    if path.stat().st_size > 4096:
-        raise ValueError("image inventory exceeds its bound")
-    inventory = json.loads(path.read_text())
-    if not isinstance(inventory, dict) or set(inventory) != {"schema", "images"}:
-        raise ValueError("invalid image inventory")
-    images = inventory["images"]
-    if (
-        inventory["schema"] != "lotuspond.offline-execution-images.v1"
-        or not isinstance(images, dict)
-        or set(images) != IMAGE_KEYS
-        or not all(
-            isinstance(image, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", image)
-            for image in images.values()
-        )
-    ):
-        raise ValueError("image inventory requires exactly one immutable image ID")
-    return images
-
-
-def verified_inputs(archive: Path, checksum: Path, private: Path):
-    copied = private / "input.tar.gz"
-    size = 0
-    with archive.open("rb") as source, copied.open("xb") as target:
-        while chunk := source.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_BUNDLE_BYTES:
-                raise ValueError("bundle exceeds the compressed-size limit")
-            target.write(chunk)
-    proof = verify_bundle(copied, checksum, kind="execution")
-    with tarfile.open(copied, "r:gz") as bundle:
-        for member in bundle.getmembers():
-            if not member.isfile():
-                continue
-            relative = member.name[len(proof.root) + 1 :]
-            if relative in {"images.json", "images.tar"}:
-                limit = 4096 if relative == "images.json" else MAX_BUNDLE_BYTES
-                if member.size > limit:
-                    raise ValueError("required bundle input is missing or oversized")
-                destination = private / relative
-            else:
-                continue
-            resolved = destination.resolve()
-            if not resolved.is_relative_to(private.resolve()) or destination.exists():
-                raise ValueError("bundle extraction path is not confined")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            source = bundle.extractfile(member)
-            if source is None:
-                raise ValueError("required bundle input cannot be read")
-            with source, destination.open("xb") as target:
-                shutil.copyfileobj(source, target, length=1024 * 1024)
-    copied.unlink()
-    return proof
 
 
 def docker_run(
@@ -239,7 +97,7 @@ def inspect_execution_image(image: str, run: str) -> dict[str, str]:
         raise RuntimeError("execution image is not the reviewed nonroot user")
     help_result = docker_run(image, run, ["help"], timeout=20)
     usage = help_result.stdout.decode()
-    if any(entry not in usage for entry in ("runner-http", "runner-a2a", "Docker socket")):
+    if any(entry not in usage for entry in ("runner-http", "gate", "Docker socket")):
         raise RuntimeError("execution image help is incomplete")
     missing = docker_run(
         image,
@@ -325,8 +183,6 @@ def image_drill(image: str) -> dict[str, object]:
         report["execution_image"] = inspected["Id"]
         report["image"] = inspect_execution_image(inspected["Id"], run)
         report["http"] = protocol_probe(inspected["Id"], run, HTTP_PROBE, "http")
-        report["mcp"] = protocol_probe(inspected["Id"], run, MCP_PROBE, "mcp")
-        report["a2a"] = protocol_probe(inspected["Id"], run, A2A_PROBE, "a2a")
     finally:
         confirm_cleanup(run)
     report["cleanup_confirmed"] = True
@@ -334,56 +190,13 @@ def image_drill(image: str) -> dict[str, object]:
     return report
 
 
-def drill(archive: Path, checksum: Path) -> dict[str, object]:
-    started = time.monotonic()
-    run = secrets.token_hex(8)
-    report: dict[str, object] = {
-        "schema": "lotuspond.execution-smoke.v1",
-        "run": run,
-        "http": None,
-        "mcp": None,
-        "cleanup_confirmed": False,
-    }
-    with tempfile.TemporaryDirectory(prefix="lotuspond-execution-drill-") as temporary:
-        private = Path(temporary)
-        try:
-            proof = verified_inputs(archive, checksum, private)
-            images = image_inventory(private / "images.json")
-            command("docker", "image", "load", "-i", str(private / "images.tar"), timeout=180)
-            execution = images["LOTUSPOND_EXECUTION_IMAGE"]
-            report["archive_root"] = proof.root
-            report["execution_image"] = execution
-            report["image"] = inspect_execution_image(execution, run)
-            report["http"] = protocol_probe(execution, run, HTTP_PROBE, "http")
-            report["mcp"] = protocol_probe(execution, run, MCP_PROBE, "mcp")
-            report["a2a"] = protocol_probe(execution, run, A2A_PROBE, "a2a")
-        finally:
-            confirm_cleanup(run)
-    report["cleanup_confirmed"] = True
-    report["elapsed_seconds"] = round(time.monotonic() - started, 1)
-    return report
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("archive", nargs="?", type=Path)
-    parser.add_argument(
-        "checksum",
-        nargs="?",
-        type=Path,
-        help="SHA-256 delivered through a trusted channel",
-    )
     parser.add_argument(
         "--image",
-        help="run HTTP, MCP, and A2A probes against an already loaded execution image",
+        required=True,
+        help="run the HTTP probe against an already loaded execution image",
     )
     args = parser.parse_args()
     os.umask(0o077)
-    if args.image:
-        if args.archive or args.checksum:
-            parser.error("image probes do not take an archive")
-        print(json.dumps(image_drill(args.image), indent=2))
-    else:
-        if args.archive is None or args.checksum is None:
-            parser.error("archive and checksum are required unless --image is set")
-        print(json.dumps(drill(args.archive, args.checksum), indent=2))
+    print(json.dumps(image_drill(args.image), indent=2))

@@ -22,7 +22,7 @@ Use **Forgot password** on the sign-in screen to request recovery. The acknowled
 
 An organization owner or administrator invites an email address and selects a role. Invitees sign in or create a personal account, verify the matching email address, and accept the invitation. Invitations expire and can be revoked. Accepting an invitation does not silently replace an existing member's role. Personal workspaces do not support invitations.
 
-Production organization and operator authority require verified mailbox ownership or an active operator attestation from [offline enrollment](offline-identity.md). Email invitations always require ownership of the matching mailbox. Platform operators additionally require a session verified with [MFA](mfa.md). Identity verification and second-factor possession are separate checks. Identity federation remains open.
+Production organization and operator authority require verified mailbox ownership. Email invitations always require ownership of the matching mailbox. Platform operators additionally require a session verified with [MFA](mfa.md). Identity verification and second-factor possession are separate checks. Identity federation remains open.
 
 ## Create an API key
 

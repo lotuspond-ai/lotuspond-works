@@ -581,16 +581,3 @@ def decide(
     row.decided_at = now()
     audit(db, p, f"approvals.{body.status}", row.id)
     return serialize(row)
-
-
-@router.post("/authorize")
-def authorize(body: s.AuthorizationInput, p: Principal = Depends(require()), db: Session = DB):
-    policy = record(db, Policy, p.workspace_id, body.policy_id)
-    decision = (
-        "DENY"
-        if body.tool in policy.blocked_tools
-        else "REQUIRE_APPROVAL"
-        if body.tool in policy.approval_tools
-        else "ALLOW"
-    )
-    return {"decision": decision}

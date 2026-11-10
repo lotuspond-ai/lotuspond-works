@@ -10,6 +10,7 @@ from pydantic import SecretStr, ValidationError
 from sqlalchemy import func, select
 
 from lotuspond.config import Settings
+from lotuspond.identity_status import identity_verification_source
 from lotuspond.mail import (
     MailDeadline,
     MailDeadlineExceeded,
@@ -26,11 +27,12 @@ from lotuspond.models import (
     MailOutbox,
     Membership,
     OfflineEnrollment,
+    OfflineIdentityAttestation,
     User,
+    new_id,
     now,
 )
-from lotuspond.offline_identity import ProvisioningRequest, provision_identity
-from lotuspond.security import digest
+from lotuspond.security import digest, password_hasher
 
 
 def enable_mail(settings):
@@ -152,90 +154,106 @@ def test_password_reset_is_generic_revokes_sessions_and_invalidates_prior_tokens
         ) == 0
 
 
-def test_offline_identity_password_recovery_requires_completed_enrollment_and_mailbox(
+def store_offline_identity(db_factory, email: str, *, completed: bool) -> str:
+    """Store an operator-attested account, as offline enrollment left one before ADR-0014."""
+    stored = now()
+    with db_factory.begin() as db:
+        user = User(
+            id=new_id(),
+            email=email,
+            name="Offline recovery",
+            password_hash=password_hasher.hash("offline-original-password"),
+        )
+        db.add(user)
+        db.flush()
+        attestation = OfflineIdentityAttestation(
+            id=new_id(),
+            user_id=user.id,
+            source="in_person",
+            source_reference="badge-recovery",
+            operator_reference="operator-recovery",
+            attested_at=stored,
+        )
+        db.add(attestation)
+        db.flush()
+        db.add(
+            OfflineEnrollment(
+                id=new_id(),
+                user_id=user.id,
+                attestation_id=attestation.id,
+                token_hash=digest(f"enrollment-{user.id}"),
+                created_at=stored,
+                expires_at=stored + timedelta(days=1),
+                consumed_at=stored if completed else None,
+            )
+        )
+        return user.id
+
+
+def test_stored_offline_identity_fails_closed_after_enrollment_was_retired(
     app, client, db_factory
 ):
-    with db_factory() as db, db.begin():
-        provisioned = provision_identity(
-            db,
-            ProvisioningRequest(
-                email="offline-recovery@example.com",
-                name="Offline recovery",
-                attestation_source="in_person",
-                source_reference="badge-recovery",
-                operator_reference="operator-recovery",
-            ),
-        )
+    """Offline enrollment is retired (ADR-0014); its stored rows still bound each account."""
+    pending = store_offline_identity(db_factory, "offline-pending@example.com", completed=False)
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "offline-pending@example.com", "password": "offline-original-password"},
+    )
+    assert login.status_code == 401
+    assert client.post("/api/v1/auth/offline-enrollment/complete", json={}).status_code == 405
+
+    completed = store_offline_identity(db_factory, "offline-recovery@example.com", completed=True)
+    with db_factory() as db:
+        # An operator attestation alone no longer verifies an identity.
+        assert identity_verification_source(db, db.get(User, completed)) is None
+        assert identity_verification_source(db, db.get(User, pending)) is None
 
     enable_mail(app.state.settings)
     expected = {"status": "accepted"}
 
+    def reset_challenges(user_id):
+        with db_factory() as db:
+            return db.scalar(
+                select(func.count())
+                .select_from(IdentityChallenge)
+                .where(
+                    IdentityChallenge.user_id == user_id,
+                    IdentityChallenge.kind == "password_reset",
+                )
+            )
+
     # A pending offline account cannot recover through its claimed mailbox,
     # even if its mailbox flag is set independently.
-    assert client.post(
-        "/api/v1/auth/password/reset/request",
-        json={"email": "offline-recovery@example.com"},
-    ).json() == expected
     with db_factory.begin() as db:
-        user = db.get(User, provisioned.user_id)
-        user.email_verified = True
+        db.get(User, pending).email_verified = True
     assert client.post(
-        "/api/v1/auth/password/reset/request",
-        json={"email": "offline-recovery@example.com"},
+        "/api/v1/auth/password/reset/request", json={"email": "offline-pending@example.com"}
     ).json() == expected
-    with db_factory() as db:
-        assert db.scalar(
-            select(func.count())
-            .select_from(IdentityChallenge)
-            .where(
-                IdentityChallenge.user_id == provisioned.user_id,
-                IdentityChallenge.kind == "password_reset",
-            )
-        ) == 0
+    assert reset_challenges(pending) == 0
 
-    # Complete enrollment without establishing mailbox ownership.
-    with db_factory.begin() as db:
-        db.get(User, provisioned.user_id).email_verified = False
-    app.state.settings.network_mode = "airgap"
-    app.state.settings.mail_enabled = False
-    completed = client.post(
-        "/api/v1/auth/offline-enrollment/complete",
-        json={"token": provisioned.token, "password": "offline-original-password"},
-    )
-    assert completed.status_code == 200, completed.text
-
-    app.state.settings.network_mode = "connected"
-    enable_mail(app.state.settings)
+    # A completed enrollment without mailbox ownership cannot recover either.
     assert client.post(
-        "/api/v1/auth/password/reset/request",
-        json={"email": "offline-recovery@example.com"},
+        "/api/v1/auth/password/reset/request", json={"email": "offline-recovery@example.com"}
     ).json() == expected
-    with db_factory() as db:
-        assert db.scalar(
-            select(func.count())
-            .select_from(IdentityChallenge)
-            .where(
-                IdentityChallenge.user_id == provisioned.user_id,
-                IdentityChallenge.kind == "password_reset",
-            )
-        ) == 0
+    assert reset_challenges(completed) == 0
 
     # Once both conditions hold, recovery is queued. Confirmation rechecks the
     # same boundary so a challenge cannot outlive mailbox eligibility.
     with db_factory.begin() as db:
-        db.get(User, provisioned.user_id).email_verified = True
+        db.get(User, completed).email_verified = True
+    with db_factory() as db:
+        assert identity_verification_source(db, db.get(User, completed)) == "mailbox"
     assert client.post(
-        "/api/v1/auth/password/reset/request",
-        json={"email": "offline-recovery@example.com"},
+        "/api/v1/auth/password/reset/request", json={"email": "offline-recovery@example.com"}
     ).json() == expected
     reset_token, _ = token_from_latest(
         db_factory,
         app.state.settings,
         kind="password_reset",
-        user_id=provisioned.user_id,
+        user_id=completed,
     )
     with db_factory.begin() as db:
-        user = db.get(User, provisioned.user_id)
+        user = db.get(User, completed)
         original_hash = user.password_hash
         user.email_verified = False
     denied = client.post(
@@ -245,21 +263,7 @@ def test_offline_identity_password_recovery_requires_completed_enrollment_and_ma
     assert denied.status_code == 400
     assert denied.json()["error"] == "invalid_token"
     with db_factory() as db:
-        user = db.get(User, provisioned.user_id)
-        challenge = db.scalar(
-            select(IdentityChallenge).where(
-                IdentityChallenge.user_id == provisioned.user_id,
-                IdentityChallenge.kind == "password_reset",
-            )
-        )
-        enrollment = db.scalar(
-            select(OfflineEnrollment).where(
-                OfflineEnrollment.user_id == provisioned.user_id
-            )
-        )
-        assert user.password_hash == original_hash
-        assert challenge.consumed_at is None
-        assert enrollment.consumed_at is not None
+        assert db.get(User, completed).password_hash == original_hash
 
 
 def test_invitation_allows_registration_then_requires_verified_matching_mailbox(
