@@ -737,49 +737,6 @@
   color: var(--ink);
 }
 
-.workflow-steps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--ink);
-}
-.workflow-steps li {
-  display: flex;
-  flex-direction: column;
-  padding: 24px 28px 8px 0;
-}
-.workflow-steps li + li {
-  padding-left: 28px;
-  border-left: 1px solid var(--line);
-}
-.step-number {
-  margin-bottom: 20px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted);
-}
-.workflow-steps p {
-  font-size: 15px;
-  line-height: 1.6;
-}
-.workflow-steps dl {
-  margin: auto 0 0;
-  padding-top: 16px;
-  border-top: 1px dashed var(--line);
-}
-.workflow-steps dt {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-}
-.workflow-steps dd {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--ink);
-}
-
 .gate {
   display: grid;
   grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
@@ -822,41 +779,6 @@
 }
 .code-output {
   color: #aebbb3;
-}
-
-.readiness {
-  align-items: start;
-}
-.readiness-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--ink);
-  counter-reset: ready;
-}
-.readiness-list li {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 8px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 15px;
-  line-height: 1.55;
-  color: var(--ink);
-  counter-increment: ready;
-}
-.readiness-list li::before {
-  content: counter(ready, decimal-leading-zero);
-  padding-top: 2px;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted);
-}
-.landing .readiness-contact {
-  margin-top: 24px;
-  min-height: 40px;
-  padding: 0 16px;
-  font-size: 14px;
 }
 .register {
   display: grid;
@@ -1089,6 +1011,10 @@
   width: 5px;
   height: 5px;
   margin-top: 8px;
+}
+.landing-footer-contact {
+  color: var(--pond-paper);
+  text-underline-offset: 3px;
 }
 
 /* Platform tour: the console itself, rebuilt with its own tokens, holding a sample workspace. */
@@ -1619,49 +1545,6 @@
   opacity: 1;
 }
 
-.threaded {
-  position: relative;
-}
-.thread {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-.thread-ahead {
-  fill: none;
-  stroke: var(--ink-mark);
-  stroke-width: 1.2;
-  stroke-dasharray: 2 6;
-  opacity: 0.25;
-}
-.thread-ink {
-  fill: none;
-  stroke: var(--ink-mark);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-dasharray: 1 1;
-  stroke-dashoffset: 1;
-}
-.step-glyph {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 108px;
-  height: 108px;
-  margin-bottom: 20px;
-  border: 1px solid var(--line);
-  border-radius: 50%;
-  background: var(--canvas);
-}
-.step-glyph .ink-glyph {
-  width: 64px;
-  height: 64px;
-}
-
 .panel-glyph {
   display: grid;
   place-items: center;
@@ -1797,17 +1680,6 @@
     position: static;
     margin: 0;
   }
-  .workflow-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .workflow-steps li:nth-child(3) {
-    padding-left: 0;
-    border-left: 0;
-  }
-  .workflow-steps li:nth-child(n + 3) {
-    margin-top: 16px;
-    border-top: 1px solid var(--line);
-  }
   .gate {
     grid-template-columns: 1fr;
     gap: 24px;
@@ -1901,13 +1773,6 @@
     width: calc(100% + 48px);
     margin: -24px -24px 20px;
   }
-  .thread {
-    display: none;
-  }
-  .step-glyph {
-    width: 92px;
-    height: 92px;
-  }
   .account-choices li > .pond-plate {
     width: calc(100% + 48px);
     margin: -24px -24px 20px;
@@ -1976,7 +1841,6 @@
     grid-template-columns: 1fr;
     gap: 2px;
   }
-  .workflow-steps,
   .rule-grid-three,
   .panel-grid,
   .panel-grid-two {
@@ -1986,18 +1850,10 @@
     padding: 24px 0;
     border-left: 0;
   }
-  .workflow-steps li,
-  .workflow-steps li + li,
   .rule-grid li {
     margin-top: 0;
     padding: 24px 0;
     border-left: 0;
-  }
-  .workflow-steps li + li {
-    border-top: 1px solid var(--line);
-  }
-  .step-number {
-    margin-bottom: 12px;
   }
   .gate {
     margin-top: 48px;
