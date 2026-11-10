@@ -9,8 +9,9 @@ from lotuspond_sdk.executable.catalog import catalog_document_digest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lotuspond import authority_gate
 from lotuspond.execution.authorization import authorize_execution
-from lotuspond.execution.budgets import BudgetDemand, BudgetService
+from lotuspond.execution.budgets import BudgetDemand, BudgetService, installation_active
 from lotuspond.execution.contracts import ExecutionLimits
 from lotuspond.execution.deployments import create_deployment, set_deployment_status
 from lotuspond.execution.entitlement import EntitlementGrant, PolicyGrant
@@ -418,7 +419,7 @@ def test_settlement_conflicts_and_unknown_observation_identity(budget_harness):
         with pytest.raises(ExecutionError):
             h.budgets.confirm_stopped(db, attempt, new_id())
         h.stop(db, attempt, "confirmed")
-        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+        assert installation_active(db) == 0  # the live count; the cursor keeps a record
 
 
 @pytest.mark.parametrize("scope", ["tenant", "entitlement", "deployment", "agent", "pool"])
@@ -585,11 +586,13 @@ def test_reservation_serializes_real_e03_renewal_revocation_and_control(budget_h
                 else:
                     # Task6 handler is not implemented; this is its canonical
                     # PostgreSQL parent/control-write contract, not handler qualification.
-                    blocker.scalar(select(ExecutionSchedulerCursor).with_for_update())
+                    # Under option C a control shares the workspace (its gate, then the
+                    # row) and locks the execution row: the reservation waits on that.
+                    authority_gate.workspace(blocker, h.scope.workspace_id)
                     blocker.scalar(
                         select(Workspace)
                         .where(Workspace.id == h.scope.workspace_id)
-                        .with_for_update()
+                        .with_for_update(read=True)
                     )
                     row = blocker.scalar(
                         select(Execution).where(Execution.id == execution).with_for_update()
@@ -599,16 +602,21 @@ def test_reservation_serializes_real_e03_renewal_revocation_and_control(budget_h
                 blocker_pid = blocker.scalar(text("SELECT pg_backend_pid()"))
                 future = pool.submit(reserve)
                 assert started.wait(5)
-                deadline = monotonic() + 5
-                with h.engine.connect() as observer:
-                    while monotonic() < deadline:
-                        if observer.scalar(
-                            text("SELECT :blocker = ANY(pg_blocking_pids(:pid))"),
-                            {"blocker": blocker_pid, "pid": pid[0]},
-                        ):
-                            break
-                    else:
-                        pytest.fail("Reservation did not wait on real producer transaction")
+                if operation == "heartbeat":
+                    # Throughput option C: a heartbeat and a reservation share their
+                    # authority rows, so the reservation completes while it is open.
+                    assert future.result(timeout=5) == "reserved"
+                else:
+                    deadline = monotonic() + 5
+                    with h.engine.connect() as observer:
+                        while monotonic() < deadline:
+                            if observer.scalar(
+                                text("SELECT :blocker = ANY(pg_blocking_pids(:pid))"),
+                                {"blocker": blocker_pid, "pid": pid[0]},
+                            ):
+                                break
+                        else:
+                            pytest.fail("Reservation did not wait on real producer transaction")
             expected = {
                 "heartbeat": "reserved",
                 "instance_revoke": "reserved",
@@ -664,8 +672,12 @@ def test_concurrent_duplicate_settlement_and_nested_retry_costs(budget_harness):
         results = list(pool.map(settle, range(2)))
         assert results[0] == results[1]
     with Session(h.engine) as db, db.begin():
+        from lotuspond.execution.deployments import gates
         from lotuspond.models import ExecutionReconciliationObservation
 
+        # A stop then reservations in one transaction: its gates come first, before
+        # any row lock, as a product transaction takes them (`authority_gate`).
+        gates(db, h.scope, h.revision_id, users=[h.actor.user_id])
         assert len(list(db.scalars(select(ExecutionReconciliationObservation)))) == 1
         h.stop(db, parent, "stop")
         child, _ = h.add(db, execution, parent, 2)

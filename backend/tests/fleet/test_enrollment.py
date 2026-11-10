@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import select
 
-from lotuspond import models
+from lotuspond import authority_gate, models
 from tests.fleet.identity_fixtures import (
     enrolled,
     enrollment,
@@ -279,7 +279,7 @@ def test_enrollment_expiry_is_rechecked_after_parent_wait(identity_env, engine):
     reached = Event()
 
     def before_cursor(connection, cursor, statement, parameters, context, many):
-        if "workspaces" in statement and "FOR UPDATE" in statement:
+        if "pg_advisory_xact_lock" in statement:  # its first lock: the fair gate
             reached.set()
 
     def request():
@@ -291,6 +291,8 @@ def test_enrollment_expiry_is_rechecked_after_parent_wait(identity_env, engine):
 
     with ThreadPoolExecutor(max_workers=1) as workers:
         with env.db.begin() as holder:
+            # An authority change holds the parent: its gate first, exclusive.
+            authority_gate.workspace(holder, env.workspace, exclusive=True)
             holder.scalar(
                 select(models.Workspace)
                 .where(models.Workspace.id == env.workspace)

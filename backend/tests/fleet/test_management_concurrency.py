@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from lotuspond import models
+from lotuspond import authority_gate, models
 from tests.fleet.test_management import CONFIG, create
 
 
@@ -73,7 +73,7 @@ def test_request_rechecks_membership_after_workspace_lock_wait(
     cookies, headers = dict(client.cookies), dict(client.headers)
 
     def before_cursor(connection, cursor, statement, parameters, context, many):
-        if "workspaces" in statement and "FOR UPDATE" in statement:
+        if "pg_advisory_xact_lock" in statement:  # its first lock: the fair gate
             reached.set()
 
     def replay():
@@ -84,6 +84,8 @@ def test_request_rechecks_membership_after_workspace_lock_wait(
 
     with ThreadPoolExecutor(max_workers=1) as workers:
         with db_factory.begin() as holder:
+            # An authority change holds the parent: its gate first, exclusive.
+            authority_gate.workspace(holder, account, exclusive=True)
             holder.scalar(
                 select(models.Workspace).where(models.Workspace.id == account).with_for_update()
             )

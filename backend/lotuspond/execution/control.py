@@ -64,7 +64,7 @@ from .artifacts import ArtifactPolicy
 from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .budgets import liability
 from .contracts import ControlRequest, ExecutionView, canonical_value
-from .deployments import load_deployment
+from .deployments import execution_gates, load_deployment
 from .dispatch import failure_content, keep_interrupted, mark_pause_stops
 from .errors import ExecutionError, execution_service
 from .orchestrator import TERMINAL, mark_runnable
@@ -182,6 +182,8 @@ class ControlService:
                 grants = self.budgets._grants(db, actor.scope)
             except ExecutionError as error:
                 refused = error
+        # The fair gates first, before any row lock (`authority_gate`).
+        execution_gates(db, actor.scope, execution_id, "control", [actor.user_id])
         actor = reauthorize(db, actor, "control")
         scope = actor.scope
         digest = sha256(canonical_value(request.model_dump(mode="json"))).hexdigest()

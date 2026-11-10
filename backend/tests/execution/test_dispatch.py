@@ -14,6 +14,7 @@ from lotuspond_sdk.activity import canonical_activity_json, sign_activity, valid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lotuspond.execution.budgets import installation_active
 from lotuspond.execution.errors import ExecutionError
 from lotuspond.fleet.authority import database_now_ms
 from lotuspond.models import (
@@ -273,7 +274,6 @@ def test_child_request_requires_declaration_and_actual_arguments(activity):
         )
         fields.update(changes)
         with Session(h.engine) as db, db.begin():
-            h.activities.lock_cursor(db)
             return h.activities.request_child_activity(
                 db, principal or h.principal_runtime, ChildActivityRequest(**fields)
             )
@@ -517,7 +517,6 @@ def test_provider_timeout_policy_change_and_reordered_calls_deny(activity):
 
 def request_child(h, parent, request_id, kind, name, arguments, principal=None):
     with Session(h.engine) as db, db.begin():
-        h.activities.lock_cursor(db)
         return h.activities.request_child_activity(
             db,
             principal or h.principal_runtime,
@@ -576,7 +575,7 @@ def test_root_result_closes_unstarted_children_and_waits_for_running_ones(activi
         assert stopped is not None
         assert released(db, unstarted)
         assert db.scalar(select(ExecutionCapacity.active)) == 0
-        assert db.scalar(select(ExecutionSchedulerCursor.active)) == 0
+        assert installation_active(db) == 0
         assert "cancelled" in set(
             db.scalars(
                 select(ExecutionEvent.code).where(
@@ -744,41 +743,35 @@ def test_child_admission_is_rechecked_after_provider_waits(activity):
         assert children == 0
 
 
-def test_a_late_cursor_is_taken_without_waiting(activity):
-    from time import monotonic
+def test_a_result_takes_no_installation_cursor(activity):
+    """Finding 11: a stop changes only its environment's count; no cursor, no wait."""
+    from .cursor_checks import without_cursor
 
     h = activity
     _, attempt_id = h.ready("activity_read")
     lease = h.claim(h.dispatch(attempt_id))
-    with Session(h.engine) as holder, holder.begin():
-        holder.scalar(select(ExecutionSchedulerCursor).with_for_update())
-        started = monotonic()
-        with (
-            Session(h.engine) as db,
-            db.begin(),
-            pytest.raises(ExecutionError, match="capacity_unavailable"),
-        ):
-            # No `lock_cursor` first: the service's own NOWAIT refuses at once.
-            from lotuspond_runtime.activity_protocol import ActivityResult
+    without_cursor(h.engine, lambda: h.result(attempt_id, lease, code="unavailable"))
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, attempt_id).state == "failed"
+        assert installation_active(db) == 0
 
-            h.activities.record_activity_result(
-                db,
-                h.principal_runtime,
-                ActivityResult(
-                    attempt_id=attempt_id,
-                    lease_revision=lease.lease_revision,
-                    result=None,
-                    code="unavailable",
-                    usage=dict(
-                        input_tokens=0,
-                        output_tokens=0,
-                        cost_microusd=0,
-                        completed_at_ms=database_now_ms(db) - 1,
-                    ),
-                ),
-            )
-        assert monotonic() - started < 1
-    h.result(attempt_id, lease, code="unavailable")  # positive control once released
+
+def test_a_child_request_takes_no_installation_cursor(activity):
+    from lotuspond_runtime.activity_protocol import tool_name
+
+    from .cursor_checks import without_cursor
+
+    h = activity
+    _, parent, _ = tools_ready(h)
+    arguments = h.store_value(parent, {"target": None, "input": None})
+    name = tool_name("connector-fixture", "read")
+    child = without_cursor(
+        h.engine,
+        lambda: request_child(h, parent, "tool-1", "connector_read", name, arguments),
+    )
+    with Session(h.engine) as db:
+        assert db.get(ExecutionAttempt, child).state == "reserved"
+        assert installation_active(db) == 1  # the parent's slot covers its child
 
 
 def race(*calls):

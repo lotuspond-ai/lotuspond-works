@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from lotuspond import authority_gate
 from lotuspond.execution.artifacts import ArtifactPolicy, ArtifactStore
 from lotuspond.execution.authorization import authorize_execution
 from lotuspond.execution.context import ContextRequest, ContextSource
@@ -143,6 +144,9 @@ def test_current_freshness_classification_and_citation(artifacts, change):
         elif change == "citation_source":
             # Authenticate a real source-bound artifact whose citation names a
             # different source; a valid FK/tag must not bypass provenance checks.
+            # A read then a store in one transaction: its gates first (`authority_gate`).
+            authority_gate.workspace(db, h.scope.workspace_id)
+            authority_gate.users(db, [h.actor.user_id])
             document = json.loads(h.store.get(db, h.actor, handles.citation))
             document["source_id"] = new_id()
             policy = ArtifactPolicy(

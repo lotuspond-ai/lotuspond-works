@@ -726,7 +726,6 @@ def reconcile_from_journal(world, customer, runtime, execution_id):
     graph = world.graph()
     actor = owner_actor(world, customer, "reconcile")
     with Session(world.engine) as db, db.begin():
-        graph.activities.lock_cursor(db)
         graph.reconciliation.reconcile_activity(db, actor, observation)
     return entry
 

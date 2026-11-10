@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from . import schemas as s
 from .deps import DB, audit, require
 from .identity_lifecycle import validate_registration_invitation
@@ -103,7 +104,16 @@ def register(body: s.Register, request: Request, response: Response, db: Session
 def login(body: s.Login, request: Request, response: Response, db: Session = DB):
     request.app.state.limiter.check(f"login:{request.client.host}", 30, 900)
     request.app.state.limiter.check(f"login-account:{str(body.email).lower()}", 15, 900)
-    user = db.scalar(select(User).where(User.email == str(body.email).lower()).with_for_update())
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    # Only the user found and gated is locked; an address no one holds locks nothing.
+    email = str(body.email).lower()
+    gated = db.scalar(select(User.id).where(User.email == email))
+    authority_gate.users(db, [gated], exclusive=True)
+    user = None
+    if gated:
+        user = db.scalar(
+            select(User).where(User.id == gated, User.email == email).with_for_update()
+        )
     valid = verify_password(body.password, user.password_hash) if user else False
     if not user:
         password_hasher.hash(body.password)
@@ -188,6 +198,8 @@ def revoke_session(
 def change_password(body: s.PasswordChange, request: Request, response: Response, db: Session = DB):
     user = session_user(db, request)
     request.app.state.limiter.check(f"password-change:{user.id}", 5, 900)
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [user.id], exclusive=True)
     user = db.scalar(
         select(User)
         .where(User.id == user.id)
@@ -371,6 +383,8 @@ def revoke_key(
     identifier: s.Identifier, p: Principal = Depends(require("write")), db: Session = DB
 ):
     require_admin(p)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, p.workspace_id, exclusive=True)
     key = db.scalar(
         select(ApiKey)
         .where(
@@ -397,6 +411,8 @@ def update_settings(
     body: s.WorkspaceInput, p: Principal = Depends(require("write")), db: Session = DB
 ):
     require_admin(p)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, p.workspace_id, exclusive=True)
     workspace = db.get(Workspace, p.workspace_id)
     workspace.name = body.name
     audit(db, p, "settings.updated", workspace.id)
@@ -450,6 +466,8 @@ def admin_workspace_status(
     identifier: s.Identifier, body: s.WorkspaceStatus, request: Request, db: Session = DB
 ):
     user = platform_admin(db, request)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, identifier, exclusive=True)
     workspace = db.scalar(select(Workspace).where(Workspace.id == identifier).with_for_update())
     if not workspace:
         fail(404, "not_found", "Workspace not found.")

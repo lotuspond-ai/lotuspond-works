@@ -1,5 +1,6 @@
 import pytest
 
+from lotuspond import authority_gate
 from tests.fleet.command_fixtures import admit, principal  # noqa: F401
 from tests.fleet.identity_fixtures import auth, race_runtime
 
@@ -35,7 +36,7 @@ def race_admit(c, commands):
     connections = set()
 
     def observed(connection, cursor, statement, parameters, context, many):
-        if "workspaces" in statement and "FOR UPDATE" in statement:
+        if "pg_advisory_xact_lock" in statement:  # its first lock: the fair gate
             with reached:
                 connections.add(id(connection.connection.driver_connection))
                 reached.notify_all()
@@ -50,6 +51,8 @@ def race_admit(c, commands):
 
     with ThreadPoolExecutor(max_workers=2) as workers:
         with c.env.db.begin() as holder:
+            # An authority change holds the parent: its gate first, exclusive.
+            authority_gate.workspace(holder, c.env.workspace, exclusive=True)
             holder.scalar(
                 select(models.Workspace)
                 .where(models.Workspace.id == c.env.workspace)

@@ -39,6 +39,7 @@ from lotuspond_sdk.executable.package import TimerStep
 from pydantic import Field
 from sqlalchemy import func, or_, select, text, union_all
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
@@ -52,11 +53,12 @@ from ..models import (
     Workspace,
 )
 from .authorization import record, scoped
+from .budgets import installation_active
 from .contracts import Contract
 from .engine import MAX_RETRY_MS
 from .engine_contracts import SweepReport, WorkerIdentity
 from .errors import ExecutionError
-from .orchestrator import TERMINAL, clear_runnable, mark_runnable
+from .orchestrator import OUT_OF_TIME, TERMINAL, clear_runnable, mark_runnable
 from .program import ProgramError, load_program, resolve_occurrence
 from .recovery import fence_restored, hold_restored, restored
 
@@ -260,6 +262,7 @@ def queue_depths(db, epoch: int) -> QueueDepths:
 
 def _schedulable(db) -> bool:
     """Whether any attempt waits for a reservation: a plain read, without locks."""
+    now = database_now_ms(db)
     return bool(
         db.scalar(
             select(
@@ -269,6 +272,8 @@ def _schedulable(db) -> bool:
                     ExecutionAttempt.state == "reserved",
                     Execution.requested_state == "running",
                     Execution.state.in_(("pending", "running")),
+                    Execution.deadline_ms > now,  # never a head (`schedule_batch`)
+                    or_(Execution.reason.is_(None), Execution.reason != OUT_OF_TIME),
                     ~select(ExecutionUsageReservation.id)
                     .where(ExecutionUsageReservation.attempt_id == ExecutionAttempt.id)
                     .exists(),
@@ -368,7 +373,13 @@ class ExecutionSweeper:
 
     @staticmethod
     def _claim(db, scope, execution_id):
-        """The execution row as the orchestrator takes it; None while another holds it."""
+        """The execution row as the orchestrator takes it; None while another holds it.
+
+        The fair gate first, shared and tried only: while an authority change holds or
+        awaits it, the item waits for a later pass (`authority_gate`)."""
+        if not authority_gate.try_shared(db, authority_gate.WORKSPACE, scope.workspace_id):
+            return None
+        authority_gate.taken(db, authority_gate.WORKSPACE, scope.workspace_id)
         workspace = db.scalar(
             select(Workspace.id)
             .where(Workspace.id == scope.workspace_id)
@@ -474,33 +485,42 @@ class ExecutionSweeper:
     def _schedule(self, sessions, limit) -> int:
         """Reserve the next eligible attempts, under the fence, up to `limit` per pass.
 
-        Each batch reserves at most one head per environment (Task 5's fairness), so
-        batches repeat, each in its own transaction, while they reserve anything. The
-        scheduler takes the installation cursor first, as admission does, and waits for
-        it under the worker role's own lock timeout, like any other request: a shorter
-        bound would let a stream of admissions starve it. When no attempt waits for a
-        reservation it takes no lock at all. A refusal is retried by a later pass and
-        never stops the sweep.
+        One head per transaction (`Scheduler.schedule_batch`), so a transaction holds
+        one tenant's rows and takes the installation cursor last, for a few
+        statements: it never waits behind another tenant's batch, and nothing waits
+        long behind it. Before each, plain reads without locks check that some
+        attempt waits for a reservation and that the installation is not visibly
+        full, so an idle or saturated installation takes no lock at all.
+        Transactions repeat until `limit` reservations, or until as many in a row as
+        there are environments reserve nothing. Each one that reserves nothing moves
+        the round-robin position past every environment it looked at, so by then
+        every environment's head has had its turn: one environment's refused head
+        never stops the pass for the others. A refusal is retried by a later pass
+        and never stops the sweep.
         """
-        total = 0
+        budgets = self.scheduler.budgets
+        total = misses = 0
         while total < limit:
             try:
                 with sessions() as db:
-                    if not _schedulable(db):
+                    if not _schedulable(db) or installation_active(db) >= (
+                        budgets._installation(db).active_limit
+                    ):
                         break
+                    environments = db.scalar(select(func.count()).select_from(ExecutionCapacity))
                 with sessions() as db, db.begin():
                     scheduled = self.scheduler.schedule_batch(
-                        db,
-                        self.scheduler.budgets.installation_id,
-                        min(limit - total, 25),
-                        epoch=self._fence(db),
+                        db, budgets.installation_id, 1, epoch=self._fence(db)
                     )
             except Exception as error:
                 logger.warning("Execution scheduling deferred: %s", _code(error))
                 break
-            if not scheduled:
+            if scheduled:
+                total, misses = total + len(scheduled), 0
+                continue
+            misses += 1
+            if misses >= min(environments, limit):
                 break
-            total += len(scheduled)
         return total
 
     def sweep(self, sessions, worker, *, limit: int = 100) -> SweepReport:

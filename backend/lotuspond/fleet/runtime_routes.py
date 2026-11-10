@@ -60,7 +60,7 @@ def bearer(request):
     return header[7:]
 
 
-def principal(request, db, *, require_session=False):
+def principal(request, db, *, require_session=False, users=()):
     if request.query_params:
         raise FleetError("invalid_request")
     return authenticate_runtime(
@@ -69,6 +69,7 @@ def principal(request, db, *, require_session=False):
         session_secret=request.headers.get("x-lotuspond-runtime-session"),
         require_session=require_session,
         dependencies=dependencies(request),
+        users=users,
     )
 
 

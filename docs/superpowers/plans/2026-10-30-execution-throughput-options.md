@@ -1,0 +1,279 @@
+# Execution throughput: options for the owner (30 October 2026)
+
+**Status: option C approved (owner decision, 30 October 2026), staged as below, with A as the fallback.** See [Owner decision](#owner-decision-30-october-2026).
+
+Context:
+- The [installation capacity amendment](2026-10-29-installation-capacity-lock.md) removed the installation-wide cursor wait (finding 11).
+- Part 7 stops overload from taking goodput to zero.
+- What is left is a throughput ceiling: the planning target (5 admissions a second, 2 steps each, so about 10 reservations a second) is not met.
+
+## What limits throughput, as measured
+
+| | full1, `9d97c50`, host at 1× | diag1, `8aa0ff9`, host at about 2.1× |
+| --- | --- | --- |
+| Reservations by the single sweeper | about 3 a second, about 330 ms each | about 1.4 a second, about 0.7 s each |
+| Needed | about 10 a second | about 10 a second |
+| Lock waits (sampled every 10 s) | `workspaces` rows only: p95 16 waiters; longest wait per sample p95 0.69 s | `workspaces` rows only: p50 8, p95 26 waiters; longest wait per sample p50 0.47 s, p95 2.0 s |
+| Holders | almost all API admissions, active or idle in transaction | — |
+| VM CPU | not sampled | about 95 % busy, CPU pressure 80–89 % |
+| Admission, CPU / wall (p50) | — | 78 ms / 823 ms |
+| Claim, CPU / wall (p50) | — | 82 ms / 455 ms |
+
+Two readings:
+- **Each reservation spends almost all its time queued on its tenant's `workspaces` row, behind API calls.** In the diagnostic the API used only about 0.1 CPU-seconds per second per workspace. The queues come from how long each holder keeps the row exclusively, not from the work done while holding it.
+- **On the 2× host the VM is CPU-bound,** so every lock holder also waits for CPU while holding its lock. Any option must be judged on a quiet host at 1×, with the speed gate passing.
+
+**Who takes a tenant's `workspaces` row `FOR UPDATE`, and keeps it to the end of the request's transaction:**
+- `authorize_execution` (`execution/authorization.py`), for every execution write. That includes admission, signals and controls, and `reauthorize` inside the scheduler's reservation. It also takes `users`, `api_keys` and `memberships` `FOR UPDATE`.
+- E03's `lock_pool` (`fleet/authentication.py`), through `authenticate_runtime`, for every runtime call. That includes polls, claims, renewals, results and stored values. It also takes the `runtime_pools` and `connections` rows `FOR UPDATE`. A poll that finds nothing still holds the workspace row until it commits.
+- The scheduler's pre-acquire, `BudgetService._settlement_rows`, `LeaseService._rows`, and progression's capacity step (`_apply_capacity`).
+
+The same paths also hold these exclusively:
+- the deployment row (admission's active-revision check);
+- the environment's `execution_capacities` row (admission, from `_parents` to commit; reservation; stop);
+- the runtime instance row (per runtime).
+
+## Option A: one scheduler per group of environments
+
+Environments are split into N groups, for example by a hash of `environment_id`, and each group is scheduled by its own loop. The loops can be N threads in the sweeper or N sweeper processes. Each loop still makes one-head transactions.
+
+- **The cursor leaf holds.** Every slot-taking reservation still takes the installation cursor last, only for its sum and its write (`BudgetService._leaf`). So reservations from all groups still meet the installation limit one at a time.
+  - Holds are short: p95 4–8 ms in every redesign run. At about 10 a second, the cursor would be busy about 5–8 % of the time.
+- **The installation sum is unchanged:** `SUM(execution_capacities.active)`, read under the cursor at the leaf.
+- **Round-robin fairness holds within each group and is independent between groups.** Each group needs its own persisted position, for example a small row per group, written just before the cursor at the leaf.
+  - A quiet group's environments are served sooner than a busy group's. No environment can hold up another group's.
+  - Today's single position over every environment goes away.
+- **The gain is bounded by distinct workspaces, not by N.** Two groups whose environments share a workspace still queue on the same row.
+  - In the load world (8 workspaces), 8 loops could reach about 8 times today's rate, if each workspace's queue lets a scheduler in as often as it does now.
+  - A large tenant with one workspace and many environments gains nothing.
+- **Nothing else changes:**
+  - Admission p95 and the API's own queues stay as they are. The schedulers add about 1.25 transactions a second to each workspace's queue at the target, so admission p95 (0.83 s at 1×, bound 1 s) may get worse.
+  - The lock model is unchanged.
+- **New failure modes:**
+  - a group whose loop has stopped is not scheduled. That needs a fence or failover for N processes, but nothing extra for N threads in one sweeper.
+  - "one sweeper per installation" no longer holds for scheduling, and must be re-recorded.
+
+## Option B: reserve the first attempt during admission
+
+Not recommended. It does not help throughput under overload:
+- **FIFO allows it only when the environment has no older unreserved attempt and a slot is free.** That is exactly when there is no backlog. Under overload it never applies.
+- **The first attempt does not exist at admission.** Progression creates it when it derives the first step, in an orchestrator transaction. Reserving at admission would mean deriving the step inside admission, under the workspace row admission already holds longest. Every admission would then hold that row longer.
+- **Later steps still go through the sweeper,** so in the load world it would remove at most half the reservations, and only at low load.
+- What it would improve is first-step latency at low load.
+
+## Option C: authority rows `FOR SHARE` in execution and runtime paths
+
+Execution writes and runtime calls would lock the authority rows `FOR SHARE` instead of `FOR UPDATE`. Those rows are workspace, user, API key, membership, runtime pool, connection and deployment. The paths are `authorize_execution(locked=True)`, E03's `lock_pool`, `_pool`, admission's deployment check, the scheduler's pre-acquire, settlement and the capacity step.
+
+Changing authority still takes these rows exclusively. That covers workspace status, membership, key revocation, pool policy and connection revocation.
+
+- **The fence still holds.** A revocation's `UPDATE` (or `FOR UPDATE`) conflicts with `FOR SHARE`. So a revocation still cannot commit between an execution write's check and its commit, which is the reason these locks exist ("Writes lock the account rows").
+- **Two execution writes in one workspace no longer queue for each other on these rows.** The orchestrator's `FOR KEY SHARE SKIP LOCKED` claim does not conflict with `FOR SHARE`. So orchestrators would stop skipping busy workspaces.
+- **What stays exclusive:**
+  - the environment's capacity counters;
+  - execution, step, attempt and reservation rows;
+  - the runtime instance;
+  - the cursor, as a leaf.
+
+  Admission holds the capacity row from `_parents` to commit. So within one environment, admissions, reservations and stops would still queue for each other, and the queue may move there. If calibration shows it has, a second step takes admission's capacity row last, for its counter step only, the way the cursor became a leaf. Its pending-room check is repeated there under the lock.
+- **Deadlock review:**
+  1. *Upgrades.* Two transactions that hold the same row `FOR SHARE` and then both ask for `FOR UPDATE` on it deadlock. So every execution and runtime path must switch together, and no path may take one of these rows `FOR UPDATE` or write it after sharing it.
+     - Today several paths take the workspace `FOR UPDATE` more than once in one transaction: the scheduler (its pre-acquire, then `reauthorize` in the reservation), the capacity step (`_parents`, then its own lock), settlement, and runtime calls (`lock_pool`, then the initiator's `authorize_execution`, then `LeaseService._rows`). All of them change.
+     - No execution path is known to write these rows. A lock audit test that fails on any `FOR UPDATE` of them outside authority changes would confirm it.
+  2. *Order.* Shared and exclusive takers keep today's global order: workspace, account rows, pool, connections, deployment, then the environment's rows. A revocation and an execution write cannot wait on each other in a cycle.
+  3. *Mixed transactions.* Authority changes, such as status, membership, keys, policy and connections, stay `FOR UPDATE` from their first lock, and never run inside an execution transaction.
+  4. *Starvation.* While share locks overlap without a gap, a revocation waiting for `FOR UPDATE` may wait a long time. This needs a test that a revocation under sustained execution load completes within a bound, and a tier 3 measurement of its wait.
+  5. *MultiXacts.* Concurrent share lockers on one row create MultiXact IDs. Tier 3 should record MultiXact growth and the wraparound margin.
+- **Scope:** E03's `lock_pool` and runtime authentication change too. That needs E03's own review of its revocation tests.
+
+## Recommendation
+
+**C, staged.** The measurements point at exclusive authority locks held for whole requests as the cause. Evidence:
+- the waits are on `workspaces` only;
+- the holders are API calls;
+- a poll that changes nothing holds the row;
+- calls take 5–10 times their own CPU in wall time.
+
+C is the only option that removes that cause. It helps every path, including admission p95, claims and orchestrator claims, not only the sweeper, and it keeps one sweeper and one head per transaction. A cannot go past what a workspace row can serve, and adds load to the queues it waits on. B does not apply under overload.
+
+**Steps, each measured at 1× on a quiet host on AC before the next:**
+1. **The lock audit test, written first.** It records every `FOR UPDATE` and `FOR SHARE` of the authority rows, by path.
+2. **The authority rows `FOR SHARE`, in every execution and runtime path at once.** Tests:
+   - the deadlock review's upgrade and order cases, with real concurrent connections;
+   - a revocation that still fences an in-flight write, and still completes under load.
+3. **A calibration.** It records lock waits by relation, the sweeper's time per reservation, admission p95 and MultiXact growth. If the queue has moved to `execution_capacities`, admission's capacity step becomes a leaf, measured the same way.
+4. **The planning target,** with the busy apps closed and the Mac on AC.
+
+**Fallback:** A, as threads in the sweeper, if the review in step 2 finds a revocation path that cannot be made to share safely. It is the smaller change, but its ceiling is a workspace row's own capacity.
+
+**For the owner:**
+- C changes E03's runtime authentication. A changes "one sweeper per installation". Approve one, or neither.
+
+## Owner decision (30 October 2026)
+
+**Option C is approved:** authority rows `FOR SHARE` in execution and runtime paths, staged as recommended, with A as the fallback. The four steps run in order, each measured before the next:
+1. the lock audit test;
+2. the switch in every path at once, with the upgrade, order, fence and revocation-under-load tests;
+3. a calibration that records MultiXact growth and lock waits by relation;
+4. the planning target, with the busy apps closed and the Mac on AC.
+
+The owner added four conditions:
+- **The audit counts writes, not only `FOR UPDATE`.** A plain `UPDATE` of a shared row after a `FOR SHARE` of it in the same transaction is the same upgrade deadlock. Candidates are bookkeeping columns written during authentication or a call: last-used or last-seen times on API keys or runtime pools, connection health, and counters on workspace or membership rows. Each write found either moves out of the execution transaction or keeps its row exclusive, and this document records which.
+- **The revocation wait is bounded.**
+  - In the test: under sustained overlapping execution transactions that share the row, a revocation's `FOR UPDATE` is granted within **2 s**.
+  - In tier 3: a revocation probe takes the same locks as a revocation and rolls back. It reports its wait p95 and max, with a pass at **p95 ≤ 1 s and max ≤ 5 s** at the planning target.
+- **E03 is checked before `lock_pool` changes.** E03's revocation and runtime-authentication tests, and its plan's lock section, are read first. If any E03 guarantee relies on the exclusive lock beyond the revocation fence, the work stops and is reported. It is not worked around.
+- **A starts only through the owner.** That happens only if the step 2 review finds a revocation path that cannot share safely, and it is reported before anything is switched.
+
+
+## E03 check before `lock_pool` (30 October 2026): stopped, for the owner
+
+**What E03 promises.** The E03 plan ([connections and fleet](2026-10-14-connections-fleet.md), Task 3's lock section) says:
+- "Lock order is workspace → pool → connection/reference rows sorted by ID; later identity tasks add instance → session → credential."
+- "Limit/idempotency allocation shares the same parent lock."
+
+So in E03 the exclusive workspace and pool locks serialize limit counting as well as fencing revocation.
+
+**What each `lock_pool` caller relies on:**
+
+| Caller | What it does under the lock | Relies on exclusivity beyond the fence |
+| --- | --- | --- |
+| `authenticate_runtime`, on every runtime call: poll, claim, renew, result, stored value, child request | Checks statuses and expiry. Its own writes are on the instance, session and credential rows, which it locks `FOR UPDATE` per instance | No |
+| `locked_identity`, the session and self-state paths | Checks statuses and expiry | No |
+| `activate_rotation` | Checks statuses and expiry; its allocation is per instance, under the instance lock | No |
+| `issue_enrollment` (admin) | Counts outstanding issued enrollments, refuses at 100, then inserts one | **Yes:** under `FOR SHARE`, two concurrent issuances in one pool could both pass the count |
+| `exchange_enrollment` (runtime enrollment) | Counts instances against `policy.max_instances`, then inserts one | **Yes:** two concurrent exchanges could exceed `max_instances` |
+
+**No bookkeeping writes.** None of the shared rows has a bookkeeping column: no last-used or last-seen time, health or counter. The only writes to them are authority changes: workspace status, user disable, key revocation, and pool, connection and deployment status. Those keep `FOR UPDATE`. The lock audit test confirms this by statement, path by path.
+
+**`lock_pool` is unchanged.** Per the owner's condition, nothing has been worked around. For the owner:
+1. `lock_pool` takes its rows `FOR SHARE` only for the callers that rely on nothing but the fence: runtime authentication and identity reads. The two allocators keep `FOR UPDATE`, so their limits still serialize. E03's limit and revocation tests are rerun.
+   - Like revocations, the allocators then wait for share holders. The 2 s bound and the tier 3 probe cover them too.
+2. Or `lock_pool` stays exclusive and only E04's `authorize_execution` rows share. Every runtime call, polls included, then still serializes on the workspace and pool rows, so much of the expected gain is lost.
+3. Or the fallback, A.
+
+Step 1 (the lock audit test) goes ahead, since it changes no locks.
+
+**Owner decision (30 October 2026): "Split by caller"**, option 1 above.
+- **Shared:** `authenticate_runtime`, `locked_identity` and `activate_rotation` take the authority rows `FOR SHARE`.
+- **Exclusive:** `issue_enrollment` and `exchange_enrollment` keep `FOR UPDATE` on the pool row from their first lock of it. Neither may share the row earlier in the same transaction, which would be an upgrade deadlock. The audit checks that neither runs in a transaction that went through a shared path.
+- **Added to step 2:**
+  - a PostgreSQL concurrency test for each allocator: two concurrent calls on one pool, at the limit minus one, never both succeed. Each test is shown to fail against a shared-lock variant.
+  - E03's limit, enrollment and revocation tests, rerun in full.
+  - the 2 s bound for the allocators as for revocations: under sustained runtime polling in one pool, an enrollment completes within it. Tier 3 reports that wait.
+- E03's lock section carries the amendment.
+
+
+## Step 1: the lock audit (30 October 2026)
+
+`backend/tests/execution/test_authority_locks.py` runs 13 paths through the real routes and workers, and records every row each statement locks and every authority row it writes. The paths:
+- admission;
+- orchestrator progression;
+- the sweeper's scheduling and sweep;
+- runtime poll, claim, stored value, renewal and result;
+- signal and control;
+- key revocation, pool disable and workspace suspension.
+
+The authority rows are workspace, user, API key, membership, runtime pool, connection, deployment and deployment revision. Today's table is pinned in the test (`EXPECTED`). Raw output: `cursor-evidence/suites/authority-locks-step1.txt`.
+
+- **Every execution and runtime path takes its authority rows `FOR UPDATE`.**
+  - Admission, scheduling, poll, claim and renewal take all seven: workspace, user, membership, pool, connection, deployment and revision.
+  - A signal with an API key adds the key.
+  - Stored values and results take the workspace, pool and connection. They record an outcome, which grants nothing, so they skip the initiator's reauthorization.
+  - Controls take the account rows.
+- **No execution or runtime path writes an authority row.** Only the three authority changes write one, each after its own `FOR UPDATE`. This confirms the review's finding that the authority tables have no bookkeeping columns.
+- **The deployment revision row is an authority row too.** `load_deployment` locks it `FOR UPDATE` on every execution path. The earlier list missed it; step 2 shares it with the deployment row.
+- **The orchestrator takes the workspace `FOR KEY SHARE` for its claim and `FOR UPDATE` for the capacity step, in separate transactions** (`PostgresExecutionEngine._capacity`). So there is no upgrade today. After step 2 the capacity step shares the row.
+- **The exclusive rows that remain after step 2,** where queues can move:
+  - `execution_capacities` (admission, reservation, result, capacity step);
+  - the execution, attempt, step, lease, delivery and reservation rows;
+  - the runtime instance, session and credential;
+  - the cursor.
+- **Pool concurrency.** It is counted under the pool row today (Task 5's guarantee). After step 2 it is serialized by the environment's capacity row, because every slot-taking reservation locks that row `FOR UPDATE` before counting, and a pool belongs to one environment. Step 2 adds a concurrency test for it at the limit minus one.
+
+## Step 2 review: stopped before switching (30 October 2026)
+
+The switch is written. It is not committed or switched in, per the owner's condition: "A starts only if the step 2 review finds a revocation path that can't share safely, and you report that before switching."
+
+**What passes, with the switch in place:**
+- Only the three authority changes still take authority rows `FOR UPDATE` (`cursor-evidence/suites/authority-locks-step2-switched.txt`).
+- Two execution writes in one workspace hold its rows together.
+- An authority change still fences an in-flight write, and the next write is refused.
+- Authority changes and execution writes never deadlock: 40 changes against three write loops.
+- Pool concurrency holds at its limit minus one, serialized by the capacity row.
+- Enrollment issue and exchange admit one at their limit minus one, and both in the forced-shared variant, which shows the race is real.
+
+**What fails: the owner's 2 s bound.**
+- **Measured.**
+  - Under four overlapping execution writes, a workspace `FOR UPDATE` waited 5.4 s, 0.13 s, 0.14 s, 0.36 s and 0.57 s.
+  - Under four overlapping runtime authentications on one pool, `issue_enrollment`'s exclusive `lock_pool` waited more than 60 s; in the first run, more than 9 minutes.
+- **Cause: PostgreSQL row locks are not fair to a waiting exclusive request.** A new `FOR SHARE` that is compatible with the current holders is granted at once, even while a `FOR UPDATE` waits. So an exclusive request gets in only when the shared holds leave a gap, and under sustained load there may be none.
+- **Shown with plain SQL** (`cursor-evidence` scratch scripts, PostgreSQL 18.6): four persistent sessions loop 200 ms shared holds, staggered 50 ms, and an exclusive request is timed.
+  - Row locks: the first exclusive was still waiting at 12 s and timed out; the next waited 2.4 s.
+  - Advisory locks, which use PostgreSQL's regular lock manager: every exclusive waited 198–205 ms, one hold, because a new shared request that conflicts with a waiting one queues behind it.
+- **Correctness is not affected.** A revocation still fences every write, and nothing deadlocks. What is lost is a bound on how long a revocation or enrollment waits.
+
+**For the owner:**
+1. **C with a fair gate.** Execution and runtime paths also take a shared transaction-level advisory lock, keyed by workspace (and by pool for runtime authentication), before their first authority row. Every authority change and both allocators take it exclusive first.
+   - Authority changes are workspace status, user disable, key revocation, membership change, and pool, connection and deployment status.
+   - A waiting change then blocks new shared requests, so it waits for in-flight writes only. The SQL check shows about one hold.
+   - The row locks stay `FOR SHARE` as a second fence.
+   - Cost: one or two heavyweight locks per execution transaction, and every authority-change path must take the gate. A missed one is still fenced, but its wait is unbounded.
+2. **A, one scheduler per group**, as the fallback.
+3. **Neither:** the locks stay exclusive.
+
+## Option C with the fair gate, as built (approved 30 October 2026)
+
+**The gate** (`backend/lotuspond/authority_gate.py`) is a transaction-level advisory lock.
+- **Keys.** It uses PostgreSQL's two-integer form, `pg_advisory_xact_lock(namespace, key)`, whose key space is separate from the single-bigint keys used elsewhere (736183 and 736184, for initialization and offline provisioning).
+  - The namespace is fixed per kind: `0x4C505701` for workspaces and `0x4C505002` for pools.
+  - The key is the first four bytes of SHA-256 over `lotuspond.authority-gate.<kind>:<id>`, read as a signed big-endian integer.
+  - **A collision costs only extra serialization.** Two identifiers that share a key wait on each other's exclusive gate. The row locks still fence, so nothing is missed.
+- **Order.** Every gate comes before any row lock, and the workspace gate before the pool gate; then today's row order. No transaction takes a gate after a row lock, or a gate exclusive after holding it shared. The gate refuses that and raises.
+  - Entry points find their gates' keys by plain reads and take the gates first: admission, `_parents`, `load_deployment`, the scheduler, signals, controls, the capacity step, settlement, release, leases and runtime authentication.
+  - Calls nested inside find the gates already held. They are remembered per transaction, at the top of the transaction, outside savepoints.
+- **Shared gates:** execution and runtime writes. The orchestrator's and the sweeper's claims try the workspace gate shared and skip the workspace when it is held or awaited exclusive, as they skip a locked row.
+- **Exclusive gates.**
+  - Workspace gate: every authority change, including key revocation, workspace status and plan, settings, the authenticator policy, invitations, fleet management (`require_fleet_admin` and `ManagementService.lock_scope`) and deployment management. Also the workspace's own limit counters: the gateway's budget, monitoring's trace quota and evaluation job completion.
+  - Pool gate, with the workspace gate shared: enrollment issue and exchange.
+- **Locks that never wait** (`SKIP LOCKED`, `NOWAIT`: the alert and evaluation-job claims) take no gate. They skip, as they do today.
+
+**Measured** under the loads that defeated shared row locks alone (`tests/execution/test_authority_sharing.py`, `tests/fleet/test_allocation_locks.py`; bound 2 s):
+
+| Exclusive operation, under sustained overlapping holds | Waits | Shared row locks alone |
+| --- | --- | --- |
+| Workspace revocation, under four execution writes | 0.13–0.22 s | 5.4 s once |
+| `issue_enrollment`, under four runtime authentications on one pool | 0.78–0.81 s | over 60 s |
+| `exchange_enrollment`, likewise | 0.77–0.82 s | — |
+
+**Coverage.** Two tests check it.
+- The lock audit pins, path by path, each path's gates beside its row locks. It asserts that each shared authority lock is under its gate and each exclusive lock or write is under the gate held exclusive.
+- A suite-wide guard (`backend/tests/authority_lock_guard.py`) fails any test whose product code does one of these:
+  - takes a gate after a row lock;
+  - takes a gate exclusive after holding it shared;
+  - shares an authority row without its gate, or locks or writes one exclusively without the gate held exclusive;
+  - shares an authority table and then locks or writes it exclusively.
+
+**User rows: a gate per user (owner decision, 1 November 2026; option 2 of the user-row question).**
+- **Why per user.** Users are not workspace-scoped. A login's exclusive gate, under option 1, would have stalled execution in every one of the user's workspaces. With a gate per user, a login waits only on that user's own requests, as today, within the bound.
+- **Order.** The workspace gate, then user gates in key order, then the pool gate, then today's rows. The user namespace is `0x4C505503`, keyed like the others: `lotuspond.authority-gate.user:<id>`.
+- **Execution and runtime writes take the user gate shared.**
+  - `authorize_execution` finds the acting user by a plain read, an API key's creator included.
+  - `gates` and `execution_gates` take the users each transaction acts for: the actor, and the execution's initiator for signals, controls, the scheduler and the capacity step.
+- **The runtime path.**
+  - The route reads the runtime (`runtime_hint`) and the initiators of the attempts the call names by plain reads. For a poll, those are its candidates' initiators. It takes the gates, then authenticates under its locks.
+  - A service called directly takes the same gates first (`ActivityService.runtime_gates`).
+  - `_locked` re-checks after locking that the execution's initiator is the one it read.
+  - A candidate whose initiator was not gated, because it appeared after the read, is refused with `conflict`: a poll skips it, and the next poll gates it. `initiating_user_id` never changes, so a named attempt never meets this.
+- **User-row lockers take the user gate exclusive first:** login; the multi-factor sign-in challenge; password change; email verification request and confirm; password reset request and confirm; invitation acceptance; authenticator enrollment start and confirm, and factor management; an organization's authenticator reset (both users' gates, in key order); the authenticator policy; offline enrollment, reissue and completion; and `revoke_identity`. The last two also take the exclusive gates of the workspaces of the user's live API keys and personal workspace, before the user's.
+- **The guard** applies the gate rules to user rows (the user gate alone bounds them), and checks the order of gate kinds.
+- **Measured** (1 November 2026, `backend/tests/execution/test_user_gate.py`, in the Linux container on a loaded host). Four runtime calls of the user's own executions ran without a gap, each holding its transaction 0.2 s. Against them:
+  - login: 0.96–1.05 s (0.07–0.10 s uncontended);
+  - password reset request: 0.89–0.98 s (0.015 s uncontended);
+  - identity revocation: 0.80–1.0 s.
+  - A login racing three execution writers for the same user, ten times: no deadlock.
+- **What bounds the wait.** An exclusive gate waits for every transaction that already holds the gate when it arrives, including any queued on a row lock while holding it.
+  - One runtime instance's calls serialize on its instance row (E03's fence, unchanged). Each call holds the user gate shared while it queues, so the login waited for the whole queue, about 4 × 0.2 s.
+  - Calls that arrive later queue behind the login (they waited 0.06–0.94 s on the user gate).
+  - The bound is the calls in flight at arrival times each call's hold. Real calls hold milliseconds; the test's 0.2 s hold is synthetic.
+  - The workspace gate's revocation, against execution writes that share their rows and so don't queue on one another, waited 0.13–0.21 s.

@@ -470,6 +470,14 @@ def _serve_on(world, listener, started) -> None:
     install_faults(world, "api")
     if os.environ.get(CURSOR_LOG):
         record_cursor_waits("api", Path(os.environ[CURSOR_LOG]))
+    if os.environ.get(LOOKUP_LOG):
+        record_lookup_waits("api", Path(os.environ[LOOKUP_LOG]))
+    if os.environ.get(CALL_LOG):
+        record_service_calls("api", Path(os.environ[CALL_LOG]))
+    if os.environ.get(GATE_LOG):
+        record_gate_waits("api", Path(os.environ[GATE_LOG]))
+    if os.environ.get(PROFILE_DIRECTORY):
+        profile_process("api", Path(os.environ[PROFILE_DIRECTORY]))
     graph = build(world)
     app = create_app(
         settings_for(world),
@@ -499,6 +507,10 @@ def _serve_on(world, listener, started) -> None:
 
 CURSOR_LOG = "LOTUSPOND_CONFORMANCE_CURSOR_LOG"
 CYCLE_LOG = "LOTUSPOND_CONFORMANCE_CYCLE_LOG"
+LOOKUP_LOG = "LOTUSPOND_CONFORMANCE_LOOKUP_LOG"
+CALL_LOG = "LOTUSPOND_CONFORMANCE_CALL_LOG"
+GATE_LOG = "LOTUSPOND_CONFORMANCE_GATE_LOG"
+PROFILE_DIRECTORY = "LOTUSPOND_CONFORMANCE_PROFILE_DIRECTORY"
 
 
 def _append(path, value):
@@ -508,13 +520,20 @@ def _append(path, value):
 
 
 def record_cursor_waits(role, path: Path):
-    """Test-only (tier 3): how long each statement locking the scheduler cursor took.
+    """Test-only (tier 3): how long each statement locking the scheduler cursor took,
+    and how long the cursor was then held.
 
     That statement does no other work, so its time is the lock wait. Every
     acquisition is recorded, in every process, including those a lock timeout ends.
+    The hold runs from the acquisition to the end of its transaction's commit or
+    rollback (`hold_ms`); a savepoint rollback that releases it earlier still counts
+    to the end, so holds are never understated.
     """
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
+    from sqlalchemy.orm import Session
+
+    holding = threading.local()  # a session's statements and commit share its thread
 
     @event.listens_for(Engine, "before_cursor_execute")
     def started(connection, cursor, statement, parameters, context, executemany):
@@ -524,8 +543,19 @@ def record_cursor_waits(role, path: Path):
     def finished(connection, failed):
         began = connection.info.pop("cursor_lock_started", None)
         if began is not None:
-            elapsed = round((time.monotonic() - began) * 1000, 2)
-            _append(path, {"role": role, "ms": elapsed, "failed": failed})
+            now = time.monotonic()
+            _append(path, {"role": role, "ms": round((now - began) * 1000, 2), "failed": failed})
+            if not failed and getattr(holding, "since", None) is None:
+                holding.since = now
+
+    def released(session, failed):
+        since, holding.since = getattr(holding, "since", None), None
+        if since is not None:
+            held = round((time.monotonic() - since) * 1000, 2)
+            _append(path, {"role": role, "hold_ms": held, "failed": failed})
+
+    event.listen(Session, "after_commit", lambda session: released(session, False))
+    event.listen(Session, "after_rollback", lambda session: released(session, True))
 
     @event.listens_for(Engine, "after_cursor_execute")
     def done(connection, cursor, statement, parameters, context, executemany):
@@ -535,6 +565,157 @@ def record_cursor_waits(role, path: Path):
     def refused(context):
         if context.connection is not None:
             finished(context.connection, True)
+
+
+def record_gate_waits(role, path: Path):
+    """Test-only (tier 3): every fair gate this process asked PostgreSQL for, timed.
+
+    `ms` runs from the request to the grant: the gate's wait plus one round trip. A
+    gate the transaction already holds asks nothing and records nothing. The caller is
+    the first two frames outside the gate module (`execution.dispatch.runtime_gates <
+    execution.runtime_routes.poll`). A claim's `try_shared` that is refused records
+    `skipped`.
+    """
+    from lotuspond import authority_gate
+
+    names = {
+        authority_gate.WORKSPACE: "workspace",
+        authority_gate.USER: "user",
+        authority_gate.POOL: "pool",
+    }
+
+    def caller():
+        frame, found = sys._getframe(2), []
+        while frame is not None and len(found) < 2:
+            module = frame.f_globals.get("__name__", "")
+            if module.startswith("lotuspond") and module != authority_gate.__name__:
+                found.append(f"{module.removeprefix('lotuspond.')}.{frame.f_code.co_name}")
+            frame = frame.f_back
+        return " < ".join(found) or "unknown"
+
+    gate, try_shared = authority_gate.gate, authority_gate.try_shared
+
+    def timed_gate(db, kind, identifier, *, exclusive=False):
+        asks = authority_gate._postgresql(db) and (
+            (kind, authority_gate.key(kind, identifier)) not in authority_gate._held(db)
+        )
+        began = time.monotonic()
+        gate(db, kind, identifier, exclusive=exclusive)
+        if asks:
+            entry = {"role": role, "gate": names[kind], "caller": caller()}
+            entry |= {"mode": "exclusive" if exclusive else "shared"}
+            entry |= {"ms": round((time.monotonic() - began) * 1000, 2)}
+            _append(path, entry | {"at": int(time.time() * 1000)})
+
+    def timed_try(db, kind, identifier):
+        taken = try_shared(db, kind, identifier)
+        if not taken:
+            entry = {"role": role, "gate": names[kind], "caller": caller()}
+            _append(path, entry | {"skipped": True, "at": int(time.time() * 1000)})
+        return taken
+
+    authority_gate.gate, authority_gate.try_shared = timed_gate, timed_try
+
+
+def record_lookup_waits(role, path: Path):
+    """Test-only (tier 3): every provider lookup that had to wait for its slot.
+
+    A lookup that finds its slot free records nothing. One that waits records how
+    long, and whether it got the slot within its bound (finding 3, owner decision
+    2026-10-29), for the execution services' slots and the fleet recovery slot.
+    """
+    from lotuspond.execution.publication import _Lookup
+    from lotuspond.fleet.authority import _LookupSlot
+
+    def timed(kind, wait):
+        def waiting(self, timeout):
+            began = time.monotonic()
+            acquired = wait(self, timeout)
+            elapsed = round((time.monotonic() - began) * 1000, 2)
+            _append(path, {"role": role, "slot": kind, "ms": elapsed, "acquired": acquired})
+            return acquired
+
+        return waiting
+
+    _Lookup._wait = timed("execution", _Lookup._wait)
+    _LookupSlot._wait = timed("fleet", _LookupSlot._wait)
+
+
+def record_service_calls(role, path: Path):
+    """Test-only (tier 3): each admission and runtime activity call, timed in its process.
+
+    `wall_ms` runs from the service's entry to its return, lock waits included.
+    `cpu_ms` is the calling thread's CPU in that time; provider lookups run in their
+    own threads and are not in it (`PROFILE_DIRECTORY` covers every thread).
+    """
+    from lotuspond.execution.admission import AdmissionService
+    from lotuspond.execution.dispatch import ActivityService
+    from lotuspond.execution.inbox import InboxService
+    from lotuspond.execution.leases import LeaseService
+
+    def timed(name, method):
+        def call(*args, **kwargs):
+            wall, cpu, failed = time.monotonic(), time.thread_time(), True
+            try:
+                result = method(*args, **kwargs)
+                failed = False
+                return result
+            finally:
+                _append(
+                    path,
+                    {
+                        "role": role,
+                        "call": name,
+                        "wall_ms": round((time.monotonic() - wall) * 1000, 2),
+                        "cpu_ms": round((time.thread_time() - cpu) * 1000, 2),
+                        "failed": failed,
+                        "at": int(time.time() * 1000),
+                    },
+                )
+
+        return call
+
+    for owner, names in (
+        (AdmissionService, ("admit_execution",)),
+        (InboxService, ("accept_signal",)),
+        (
+            ActivityService,
+            (
+                "poll_activity",
+                "claim_activity",
+                "record_activity_result",
+                "request_child_activity",
+                "store_activity_value",
+            ),
+        ),
+        (LeaseService, ("renew_activity", "decline_activity")),
+    ):
+        for name in names:
+            setattr(owner, name, timed(name, getattr(owner, name)))
+
+
+def profile_process(role, directory: Path):
+    """Test-only: a whole-process cProfile, written every 15 s and so never lost.
+
+    Python 3.12's cProfile observes every thread through `sys.monitoring`, so
+    provider lookup threads are counted with the requests that started them.
+    """
+    import cProfile
+
+    profiler = cProfile.Profile()
+    target = directory / f"{role}-{os.getpid()}.prof"
+
+    def dump():
+        while True:
+            time.sleep(15)
+            profiler.disable()
+            try:
+                profiler.dump_stats(target)
+            finally:
+                profiler.enable()
+
+    profiler.enable()
+    threading.Thread(target=dump, name="conformance-profile", daemon=True).start()
 
 
 class FirstCycle:
@@ -618,8 +799,14 @@ def serve_worker(world, role, worker_id, interpreters, timeout_ms, user=None) ->
     install_faults(world, role)
     if os.environ.get(CURSOR_LOG):
         record_cursor_waits(role, Path(os.environ[CURSOR_LOG]))
+    if os.environ.get(LOOKUP_LOG):
+        record_lookup_waits(role, Path(os.environ[LOOKUP_LOG]))
+    if os.environ.get(GATE_LOG):
+        record_gate_waits(role, Path(os.environ[GATE_LOG]))
     if os.environ.get(PRIVILEGE_LOG):
         record_privileges(role, Path(os.environ[PRIVILEGE_LOG]))
+    if os.environ.get(PROFILE_DIRECTORY):
+        profile_process(role, Path(os.environ[PROFILE_DIRECTORY]))
     graph = build(world)
     url = scoped_url(world)
     if user is not None:  # ENG-4: a least-privilege worker role on the disposable cluster

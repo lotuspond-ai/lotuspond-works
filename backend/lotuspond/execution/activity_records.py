@@ -4,10 +4,11 @@ Everything here is reconstructed from persisted rows: the verified program closu
 the deployment revision's canonical configuration and the exact connection version.
 Nothing comes from a request body. Callers hold the locks; these helpers only read.
 
-Lock order for every activity service (a subsequence of Task 5's order): installation
-cursor (only when capacity counters change), workspace and E03 fleet rows (pool,
-connections, instance, sessions, credential), environment capacity, deployment and
-revision, execution, step, attempts, reservations, delivery, lease.
+Lock order for every activity service (a subsequence of Task 5's order): workspace
+and E03 fleet rows (pool, connections, instance, sessions, credential), environment
+capacity (only when capacity counters change), deployment and revision, execution,
+step, attempts, reservations, delivery, lease. No activity service takes the
+installation cursor: only a slot-taking reservation does, last (`budgets`).
 """
 
 import json

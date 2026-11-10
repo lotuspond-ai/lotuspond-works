@@ -105,6 +105,7 @@ Each finding was observed in a run; none is inferred.
    - Options: accept signals for a `pending` execution with an open wait, list a wait only once retained, or document a retry.
 3. **One authority lookup at a time per API process (Task 12's recorded limitation, measured).** Concurrent callers get 503 `authority_unavailable`. Customers and runtimes retry. The runtime's one-shot `enroll` command does not, so the harness reruns a refused enrollment as an operator would. Tier 3 measures the effect under load.
     - The API also allows each peer 20 enrollment exchanges a minute, and each token 5. Every tier 3 runtime enrolls from one host, and the harness's reruns count too. The first two planning-target runs failed setup on that 429, which the runtime CLI reports only as `unavailable`. The load runner now paces enrollment at 15 a minute.
+    - **Changed on 29 October 2026 (owner decision, part 4 of the [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md)).** A concurrent caller now waits for the slot, and the call's own timeout (at most 5 s) bounds the wait and the call together; still one call in flight per provider per process. This applies to the execution services' lookups and E03's fleet recovery lookup. The cursor had been serializing admissions, so their lookups rarely collided; without it they would have. Measured in the 29 October calibrations: 275–777 callers waited per run, p95 0.7–1.1 ms, and none was refused after its bound.
 4. **A worker refuses to start if its first cycle meets a database outage.** This is by design: its service manager restarts it. The harness waits for each worker's first completed cycle before disrupting anything.
 5. **Connection call bound.** A connection's `DataHandling.timeout_ms` defaults to 10 s (maximum 30 s), and an agent step's `timeout_seconds` caps the merged active limit. Reads longer than the connection's bound are stopped by the runtime.
 6. **Publish-time compile errors are 503 `dependency_unavailable`** (REG-6, one step past the 10,000-step ceiling), not a 4xx.
@@ -147,6 +148,10 @@ Each finding was observed in a run; none is inferred.
     - Now a delivered signal replays its receipt, under current authorization. An undelivered one is still judged by its wait, so Task 6's late-replay refusal stands.
     - Fixed in this commit, with a unit test in `test_inbox.py`.
 14. **The sweeper may now wait up to the worker's lock timeout for the cursor (a consequence of the scheduling amendment).** It schedules after a pass's items and waits for the cursor as any request does, 15 s by default, because a shorter bound let admissions starve it. Under contention the next pass, and with it due timers, lapsed leases and expiries, can start up to that long late. The second calibration shows sweeper cycles at p95 11 s. REG-4's timers fire once and never early, but not necessarily at their deadline under load. Its lock-free check sees only whether some attempt awaits a reservation, not whether there is capacity for it. So under a saturated backlog the sweeper still takes the cursor on every pass. Bounding scheduling per pass, or running it apart from the item sweep, is for the owner to weigh with finding 11.
+    - **Resolved by finding 11's redesign (29 October 2026).**
+      - Scheduling reserves one head per transaction and takes the cursor last, for a few statements. Nothing else takes it, so the sweeper never waits behind admissions for the cursor.
+      - A plain read skips scheduling while the installation is visibly full, so a saturated installation takes no lock at all.
+      - Measured: sweep cycles p95 0.49 s at `2067363`, against 11 s on 27 October. Cursor acquisitions waited at most 1.64 ms.
 15. **Active time is charged at least its reservation.** A settled attempt keeps its full reserved active time against the root budget, even when the call ended sooner (Task 5's conservative liability). Demand must be sized so that every attempt's reservation fits the root budget (REG-1 needed 30 s, not 60 s, for two reads in a 100 s budget).
 16. **REG-6's bound.** At the 10,000-step ceiling, one more step is refused at publication. The case also asserts a bound on the rows read from `execution_step_instances`, per step instance created, from `pg_stat_user_tables`.
     - **The bound is fewer than 9,001** (changed on 28 October from 9,001 / 3, the case's own margin; the plan's criterion is "within the recorded region bound"). Reading the whole expansion on every transition reads at least 9,001 rows per instance. Region-scoped loads cost about 1,000: the root region's 1,000 pinned items, or one item's eight steps.
@@ -161,6 +166,7 @@ Each finding was observed in a run; none is inferred.
       - The planning-target run: 11,250.
     - The two 27 October calibrations had no restarter, and their runtimes ended with exit 3 as well. So their dispatch counts show what stopped runtimes served, not what the engine could dispatch. Their cursor measurements stand.
     - The operations guide's runbook asks for a restarting service manager.
+    - **29 October 2026:** with the cursor no longer queuing results and declines, and the memo shortening every hold, the calibration at `2067363` saw no restart at all. At `5a38912`, before the memo, there were 125.
     - While a restarted runtime waits out its old lease, deliveries to it expire. A read whose dispatch retries run out in that window fails with `provider_unavailable`, unless another runtime serves the pool. Task 14's final tier 2 run showed this in ENG-4, which now resumes its paused read onto a freshly enrolled runtime.
 
 Found by Task 14's whole-branch review (27 October), after the tiers above had run:
@@ -196,6 +202,37 @@ Found in Task 14's final runs:
     - **No cause from this run.** Its database went with its disposable cluster, so the cause cannot be established from it.
     - **If it stalls again,** the case now records the evidence: the execution's state, marker and epoch; its outbox, inbox and wait rows; and every open transaction, with its locks on `workspaces` and `executions`.
     - **Raw output:** `~/Downloads/LotusPond-worktrees/e04-evidence/final/disruptive-3.14-r1.log`.
+
+Found while qualifying the installation cursor redesign (finding 11, 29 October):
+
+25. **A package's `retained_waits` is applied environment-wide, and the retained-wait quota is not first come, first served (open for the owner; no engine change).** Both facts are on `main` (`533b3d6`). The [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md) leaves them unchanged: `retain_wait` is byte-identical, and the redesign only removed the cursor from the capacity step's lock order.
+    - **Environment-wide.** `BudgetService.retain_wait` (`backend/lotuspond/execution/budgets.py:742`) compares the environment's `capacity.retained_waits` with `min(capacity.wait_limit, limits["retained_waits"])`.
+      - `_limits` folds in the package's own `retained_waits`. The [executable-v2 plan](../superpowers/plans/2026-10-14-executable-package-v2.md) (line 75) declares that limit alongside per-execution limits such as `max_steps`.
+      - There is no per-execution counter. So a package that declares 10 is refused once its environment holds 10 retained waits, from any execution of any deployment.
+    - **Not first come, first served.** A refused retention backs off like any capacity step that changes nothing, up to 60 s, and the execution stays `pending` while its wait is unretained (finding 2). A retained wait keeps its slot until it closes. A capacity step releases a closed wait and retains the same execution's next wait in one transaction, so the slot passes to that execution's next wait.
+    - **Measured in ENG-4** (`test_event_sequences_are_gap_free_under_concurrent_transitions`). The case starts 12 executions of `waits_fast` (`retained_waits: 10`) in one environment, with two orchestrators, and never signals them. It waits for each execution to have an open callback and to have left `pending`.
+      - A failure-state dump from three failures, identical each time: executions 0–9 retained their pause and then their callback, holding all 10 slots. Executions 10–11 never retained a wait, stayed `pending`, and their callbacks expired. The orchestrators logged retention deferred `capacity_unavailable`, plus a few `conflict`: a 2 s pause satisfied or expired before its capacity step ran.
+      - Executions 10–11 can get in only in a short window, when another execution has released its pause in one capacity step and not yet retained its callback in the next. So the case passes or fails on timing:
+        - `main` (`533b3d6`), alone: failed 1 of 3;
+        - the redesigned head (`2067363`), alone: failed 5 of 6, and in the full tier 1 run;
+        - every full E04 tier 1 run before the redesign passed (4 of 4).
+
+        The redesign's capacity steps no longer queue on the cursor and run faster, so those windows are shorter. Raw output: `~/Downloads/LotusPond-worktrees/cursor-evidence/suites/eng4-*.log`.
+      - **Test-only fix (owner decision, 2026-10-29: option A).** ENG-4 keeps 12 executions and two orchestrators, with a copy of `waits_fast` whose `retained_waits` is 24, covering both waits of all 12. The case is about event order, not quota.
+    - **For the owner:** whether a package's `retained_waits` should cap each execution or the whole environment, and whether the retained-wait quota should be granted in admission order.
+
+Found in the overload diagnostic (finding 11, 30 October):
+
+26. **Admission accepts work the queue cannot serve before its deadline (open for the owner; owner decision, 2026-10-30: record it, decide later; admission unchanged).** Admission refuses only when an environment's pending count reaches its limit, 1,000 by default. It does not consider how old the queue already is, or how fast it is being served.
+    - **Measured in the 32-minute diagnostic** (`diag1`, at `8aa0ff9`):
+      - The setup: 8 environments of 3 runtimes, 3 API processes, 5 admissions per second. The machine ran at about 2.1× full1's per-call CPU.
+      - Reservations kept pace with about 0.7 executions a second (two steps each), against 5 arriving.
+      - Admission kept accepting: about 9,600 in 32 minutes, p95 1.9 s, none refused. Meanwhile queue age grew by about 50 s every minute.
+      - From minute 18, nothing admitted could run before its deadline. All 3,532 executions admitted from minute 3 to minute 14 were failed with `deadline_exceeded` without running a single step, after about 16 minutes (1,000 s) in the queue. Another 228 were failed partway through.
+      - Only the 575 admitted in the first 3 minutes succeeded.
+    - **Part 7 of the [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md) does not change this.** It fails an execution as soon as its next step no longer fits before the deadline. So under sustained overload, queue age stays about one step's reserved time short of the deadline (30 s in the load world), and clients still wait about 16 minutes to be failed. What part 7 changes is that work that can still run keeps being served.
+    - **For the owner:** whether admission should refuse, with `capacity_unavailable`, work that an environment's queue cannot serve before its deadline. For example, it could bound pending by the measured service rate times the deadline, or refuse while the oldest runnable execution is older than some share of the deadline.
+    - Evidence: `~/Downloads/LotusPond-worktrees/cursor-evidence/diag1/results.md`, with its snapshots, scheduling probes and table copies.
 
 ## Runs
 
@@ -428,3 +465,143 @@ The owner's diagnosis for finding 11 (decision, 2026-10-28: "Diagnose, then deci
 - **Evidence:** `~/Downloads/LotusPond-worktrees/e04-evidence/task13/load-workers/` (`run/load-report.json` and the console).
 
 **What this shows.** Taking the single API process out of the way changed nothing that matters. The installation-wide cursor is the bound. Every admission takes it first and holds it for its whole transaction, so admissions, scheduling, claims and results go through it one transaction at a time, however many API processes there are. Finding 11 stays open as a follow-up redesign outside E04 (owner decision, 2026-10-28). A multi-process API is not a deployment requirement.
+
+### Installation capacity redesign: calibrations, profiles and suites, 29 October 2026
+
+Finding 11's follow-up, the [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md), was owner-approved on 29 October 2026 (cursor last; lookups wait for their slot; later, the memo of pure validation). Each run below is on local Docker Desktop (arm64, 4 CPUs, 6 GB), run alone, from a clean clone, with synthetic providers.
+
+All calibrations use the 27 October parameters: 2 environments of 2 runtimes; 2 minutes at 5 admissions a second, 1 at 10 and 1 at 5; 20 waiting cases. Tier 3 now also records:
+
+- cursor hold time;
+- lock waiters by relation, with who blocks them;
+- provider lookups that waited for their slot;
+- reservations, deliveries and claims per phase, with their rates;
+- admission and runtime calls timed in their process (wall and request-thread CPU);
+- deadlocks PostgreSQL logged.
+
+| Run (head, API processes) | Cursor wait p95 / max; hold p95 | Workspace-row waiters per sample p50 / p95, longest p95 | Admission p95 from arrival (steady / burst) | Reservations / deliveries / claims during load | API CPU, steady 120 s | Deadlocks |
+| --- | --- | --- | --- | --- | --- | --- |
+| 27 Oct, 1 process (before; second calibration) | 8.0 s / 11.8 s; not measured | not measured | 124 s / 270 s | – / 6 / 2 (whole run) | about 1 core (229 CPU-s in 240 s of load) | – |
+| 27 Oct, 3 processes (before) | 10.3 s / 14.4 s; not measured | not measured | 85 s / 232 s | – / 10 / 6 | 117 CPU-s | – |
+| `5a38912`, 1 process (cursor last) | 0.16 ms / 2.15 ms; 1.5 ms | 19 / 19, 7.9 s | 82 s / 228 s | 5 / 2 / 1 | 122 CPU-s | 0 |
+| `6403930`, 3 processes | 0.22 ms / 1.26 ms; 2.3 ms | 34 / 43, 10.7 s | 29 s / 119 s | 3 / 3 / 3 | 165 CPU-s | 0 |
+| `2067363`, 1 process (memo) | 0.28 ms / 1.64 ms; 1.8 ms | 1 / 15, 0.95 s | **0.63 s** / 1.69 s | **329 / 321 / 320** | 101 CPU-s | 0 |
+
+**The cursor.**
+- From `5a38912` on, only the sweeper's scheduling took it: 348–1,096 acquisitions per run.
+- None of them waited over 100 ms, and none was ended by a lock timeout.
+- No backend waited on it at any sample.
+
+**The queue moved to each tenant's workspace row.** Execution authority and E03 runtime authentication lock it `FOR UPDATE`.
+- The samples show its holder: nearly always an API admission idle in its transaction, its thread busy in Python.
+- Orchestrator claims skip a tenant while its row is held, and scheduling waits behind admissions. So with two tenants, almost no work ran during load.
+
+**Where an admission's CPU went.** Single-threaded profiles (`--profile`, no runtimes, 0.5 admissions a second, whole-process cProfile):
+- At `6403930`, about two thirds of the real work was the SDK re-validating and re-canonicalizing the same stored bytes. That was JSON-domain checks, JCS (`rfc8785`) and pydantic. Per admission there were about:
+  - 6 publication loads;
+  - 6 plan compilations;
+  - 6 signature verifications;
+  - 34 package validations;
+  - 20 catalog validations.
+
+  SQL was about 14 %, and backend code under 1 %.
+- The memo (part 5, `2067363`) cut request-thread CPU per admission from 992 to 141 ms (profiled), and wall time from 2.0 to 0.16 s. Compilations fell from 278 to 6, verifications from 276 to 6, package validations from 1,510 to 32, and catalog validations from 901 to 18.
+- The authority checks ran as often as before: 269 → 266 publication loads, 179 → 172 grant lookups, 503 → 493 reauthorizations.
+- Unprofiled, in the calibration, an admission costs 78 ms of request-thread CPU (p50), against 308 ms before.
+
+**After the memo (`2067363`, one API process).**
+- Admission p95 was 0.63 s from scheduled arrival, which passes the plan's criterion. At most one provider call per attempt passed too: 540 calls for 540 claimed attempts.
+- The engine kept up with what the runtimes could take:
+  - reservations ran at 1.6 a second, and deliveries and claims tracked them;
+  - due executions stayed near zero in the steady phase;
+  - runtimes restarted 0 times, against 125 at `5a38912` and 11,250 in the 27 October planning-target run.
+- The other three throughput criteria failed on this scale's own capacity, not on a lock:
+  - a runtime runs one activity at a time, and this scale has 4;
+  - each read took about 2.5 s from reservation to result (dispatch p50 2.3 s, claim p50 0.35 s), which caps throughput at about 1.6 a second against a demand of 10.
+- Provider lookups that waited for their slot (part 4): 749 waiters, p95 1.07 ms, none refused after the bound.
+- Sweep cycles: p95 0.49 s, against 11 s on 27 October.
+- After the kill and restart, all 20 resumed reads succeeded (p50 55 s), with claims at p95 249 ms.
+
+**Suites, one at a time on Linux** (`ci-local.py` against a clean clone):
+
+| Job | Head | Result |
+| --- | --- | --- |
+| `validate` | `2067363` | Passed. The required PostgreSQL 18.6 suite ran 1,275 passed, 0 failed, 0 skipped |
+| Tier 1 and installed acceptance | `2067363` | 47 passed, 1 failed: ENG-4 (finding 25) |
+| ENG-4 alone, 3 times | `9d97c50` (its quota fix) | 3 passed |
+| Tier 1 and installed acceptance | `9d97c50` | 48 passed, 0 failed, 0 skipped |
+| Tier 2 | `9d97c50` | 6 passed. ENG-4 runs both workers under the guide's grants, so the orchestrator no longer needs `UPDATE` on the cursor |
+
+`9d97c50` changes only that conformance case and documents after `2067363`.
+
+**Evidence:** `~/Downloads/LotusPond-worktrees/cursor-evidence/`:
+- `cal1`, `cal3` and `cal4`;
+- `profile1` to `profile3`;
+- `suites/`.
+
+### Tier 3, planning-target run with the redesign, 29 October 2026
+
+At `9d97c50`, 11:52–13:48 UTC, alone, with 3 API processes. The workload matched 27 October's planning-target run: 8 environments of 3 runtimes, 60 minutes at 5 admissions per second, 5 at 10 and 10 at 5, then 10,000 waiting cases. Outcome: failed.
+
+| | 27 October, `8d12453`, 1 API process | 29 October, `9d97c50`, 3 API processes |
+| --- | --- | --- |
+| Cursor wait | 90,644 acquisitions; p95 5.0 s; 31,402 over 100 ms | 24,473, all by the sweeper; p50 0.11 ms, p95 0.96 ms, max 7.95 ms; none over 100 ms |
+| Cursor hold | not recorded | p95 4.15 ms, max 136 ms |
+| Admission from arrival, steady | p50 290 s, p95 566 s; 8,596 refused | p50 0.33 s, p95 0.83 s; none refused (burst p95 0.54 s, recovery 0.47 s) |
+| Reservations = deliveries = claims | 20 deliveries, 9 claims | steady 4,346 (1.21/s, all in minutes 0–24.5); burst 0; recovery 0 |
+| Queue age p95 | 2,670 s | 937 s |
+| API CPU, steady hour | 3,132 s (1 process) | 3,684 s (1,624 / 971 / 1,090) |
+| Orchestrators / sweeper CPU | 110 s / 251 s | 1,036 s / 1,034 s |
+| PostgreSQL CPU | p50 6.6 % | p50 42 %, p95 88 % |
+| Runtime restarts | 11,250 | 3, all in the waiting phase |
+| Deadlocks | 0 | 0 |
+
+- **Lookup slots.** 25,890 callers waited, all on the API: 8,971 on the execution slot and 16,919 on the fleet slot. Waits were p50 1.43 ms, p95 6.58 ms and max 110.6 ms, and none was refused after the bound.
+- **Lock waits** were on tenant `workspaces` rows only: p95 16 waiters (max 45), each waiting p95 0.69 s (max 4.2 s). The holders were almost all API admissions, active or idle in transaction.
+- **Where the time went** (minutes 0–24.5, from the run's own tables):
+  - A slot was held 3.6 s per attempt (p50; p95 6.2 s), so about 11 of the 25 installation slots were in use.
+  - The single sweeper was busy all of the time at about 3 reservations a second, about 330 ms each, against about 10 needed (5 cases a second, two reads each).
+  - It used little CPU in that window, so it was mostly waiting on those rows.
+- **Then the queue collapsed.** At minute 24.5, queue age reached the 1,000 s deadline.
+  - Every head then arrived expired, and `reserve_attempt` refused it `forbidden`. The scheduler recorded that as `authority_revoked`: 414 executions were labelled that way, though nothing was revoked.
+  - The pass ended at the first refusal, so scheduling stopped for all 8 environments until the run ended.
+  - Expired executions were failed within about a second of their deadline (mean), at the arrival rate.
+- **Criteria.**
+  - Failed: queue age, burst recovery and work in the load phases.
+  - Passed: admission p95, and one provider call per attempt.
+  - Backlog growth passed only because expiries matched arrivals.
+- **Waiting phase.** Not exercised: 2,274 of the 10,000 were admitted (the rest were refused because the pending capacity was full), and none reached its wait in 1,800 s.
+  - Restart: workers were ready in 1.5 s; 20 probe cases resumed and completed (p50 56 s); claims after the restart took p50 655 ms.
+- **Reading.**
+  - The cursor redesign removed the installation-wide wait.
+  - Three API processes kept admission under its bound.
+  - The engine's ceiling moved to the single sweeper waiting on tenant rows that admissions hold.
+  - Overload then took goodput to zero instead of holding it at that ceiling.
+  - The owner approved part 6 of the amendment in response.
+
+**Evidence:** `~/Downloads/LotusPond-worktrees/cursor-evidence/full1/`:
+- `results.md`;
+- `interim-diagnosis.md`;
+- `run/load-report.json`;
+- `live/`: the logs and table copies taken during the run.
+
+### Suites for part 7 of the amendment, 30 October 2026
+
+Part 7 fails at once a head whose step no longer fits before its deadline (`2fd8904`). Each suite ran alone through the local CI runner, on the Mac on battery.
+
+| Suite | Head | Result |
+| --- | --- | --- |
+| validate | `0f04ec2` | 1 failed, 1,142 passed, 195 skipped (the lease cap, below) |
+| validate | `9e7a085`, same engine code | passed |
+| Tier 1 | `9e7a085` | 47 passed, 1 failed (REG-5, below) |
+| Tier 2 | `9e7a085` | 6 passed |
+
+- **The lease cap** (`test_leases.py::test_a_lease_is_at_most_sixty_seconds_even_with_a_longer_deadline`).
+  - The case reads the time, then renews and checks that the lease ends within 61 s. Under the full suite the renewal landed more than a second after the read: 61.25 s.
+  - Alone it passed 6 of 6 on battery, and it passed in the rerun of validate. Part 7 does not touch leases.
+  - It is still to be rerun alone on AC.
+- **REG-5** (`test_waits.py::test_duplicate_conflicting_out_of_order_and_late_signals`).
+  - The case signals, then sends an equal retry, and compared the two receipts whole. A signal's replay is its receipt with the signal's current status: `accept_signal` replays it "whatever the wait's state now" (Task 13). So when an orchestrator consumed the first signal between the two calls, the retry answered `delivered` where the first said `pending`.
+  - The engine behaved as designed: the same receipt ID and one inbox row. It passed in every earlier tier 1 run, and alone 3 of 3.
+  - **Test-only fix (`4d7ba2c`).** The case asserts the same ID, and a status no earlier than the first: pending, leased, delivered. It still counts the single inbox row. The plan's API section now says what a signal's replayed answer is. With the fix it passed alone 3 of 3.
+- Evidence: `~/Downloads/LotusPond-worktrees/cursor-evidence/suites/`, the `*-part7*` logs, `lease-cap-alone-battery.txt`, `reg5-alone-*.log` and `reg5-fixed-*.log`.

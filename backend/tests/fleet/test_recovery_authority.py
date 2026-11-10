@@ -80,14 +80,15 @@ def test_authority_deadline_late_results_and_hang_are_bounded():
     dependencies = FleetDependencies(
         Authority(), InstalledCatalog(), installation_id="test", authority_timeout_seconds=0.02
     )
-    start = time.monotonic()
     with pytest.raises(FleetError, match="authority_unavailable"):
         dependencies.current("test")
     assert entered.is_set()
-    for _ in range(100):
+    for _ in range(20):
+        # A waiting caller is refused within its own bound, the wait included.
+        start = time.monotonic()
         with pytest.raises(FleetError, match="authority_unavailable"):
             dependencies.current("test")
-    assert time.monotonic() - start < 1
+        assert time.monotonic() - start < 0.02 + 0.05
     assert calls == ["test"]
     # The late allow does not become a cached grant. The next call must do
     # another independent lookup and observe that provider's newer snapshot.
@@ -280,3 +281,66 @@ def test_recovery_epoch_has_exact_safe_integer_type(epoch):
 
     with pytest.raises(Exception):
         RecoverySnapshot("test", epoch, True)
+
+
+def test_a_concurrent_lookup_waits_for_the_slot_within_its_bound():
+    """Finding 3 (owner decision, 2026-10-29): a busy slot is waited for, not refused."""
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from lotuspond_runtime.errors import FleetError
+
+    from lotuspond.fleet.authority import FleetDependencies, RecoverySnapshot
+    from lotuspond.fleet.catalog import InstalledCatalog
+
+    entered, release = threading.Event(), threading.Event()
+    calls, active, overlap = [], [0], []
+
+    class Authority:
+        def current(self, installation_id):
+            active[0] += 1
+            overlap.append(active[0])
+            calls.append(installation_id)
+            if len(calls) == 1:
+                entered.set()
+                release.wait(5)
+            active[0] -= 1
+            return RecoverySnapshot(installation_id, len(calls), True)
+
+    served = FleetDependencies(
+        Authority(), InstalledCatalog(), installation_id="test", authority_timeout_seconds=3
+    )
+    bounded = FleetDependencies(
+        Authority(), InstalledCatalog(), installation_id="test", authority_timeout_seconds=1
+    )
+    try:
+        with ThreadPoolExecutor(2) as pool:
+            first = pool.submit(served.current, "test")
+            assert entered.wait(5)
+            second = pool.submit(served.current, "test")
+            time.sleep(0.2)
+            assert not second.done()  # it waits for the slot instead of refusing
+            release.set()
+            assert first.result(timeout=5).epoch == 1
+            assert second.result(timeout=5).epoch == 2
+        assert max(overlap) == 1  # still one lookup in flight at a time
+        # The bound covers the wait: with the slot held past it, a caller is refused
+        # after about one bound, never two.
+        entered.clear()
+        release.clear()
+        calls.clear()
+        with ThreadPoolExecutor(1) as pool:
+            held = pool.submit(bounded.current, "test")
+            assert entered.wait(5)
+            start = time.monotonic()
+            with pytest.raises(FleetError, match="authority_unavailable"):
+                bounded.current("test")
+            assert 0.9 <= time.monotonic() - start < 1.9
+            release.set()
+            # The holder had the same bound; its late answer is dropped either way.
+            held.exception(timeout=5)
+    finally:
+        release.set()
+        served.close()
+        bounded.close()

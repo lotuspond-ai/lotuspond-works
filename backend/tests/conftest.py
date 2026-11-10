@@ -1,6 +1,7 @@
 import os
 from uuid import uuid4
 
+import authority_lock_guard
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -11,6 +12,16 @@ from lotuspond.config import Settings
 from lotuspond.database import engine_for, sessions_for
 from lotuspond.models import Base, SchemaVersion
 from lotuspond.schema_version import SCHEMA_VERSION
+
+authority_lock_guard.install()
+
+
+@pytest.fixture(autouse=True)
+def no_authority_lock_upgrades():
+    """Throughput option C: no transaction locks or writes a row it shared."""
+    authority_lock_guard.upgrades.clear()
+    yield
+    assert not authority_lock_guard.upgrades, authority_lock_guard.summary()
 
 
 @pytest.fixture

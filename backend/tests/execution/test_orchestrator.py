@@ -239,8 +239,8 @@ def test_pure_transition_never_locks_capacity_parents(admission):
     assert locked_parents_during_pure_transition == set()
     # Positive control: the same observation sees Task 5's ordered capacity locks.
     with Session(h.engine) as db, db.begin():
-        h.budgets._cursor(db)
         db.scalar(select(ExecutionCapacity).with_for_update())
+        h.budgets._leaf(db)
         assert relation_locks(db) >= {"execution_scheduler_cursors", "execution_capacities"}
 
 
@@ -490,7 +490,7 @@ def test_orchestrator_races_renewal_revocation_and_control(admission, operation)
     from lotuspond.execution.deployments import set_deployment_status
     from lotuspond.fleet.catalog import InstalledCatalog
     from lotuspond.fleet.identity import IdentityManagement, heartbeat
-    from lotuspond.models import ExecutionDeploymentRevision, ExecutionSchedulerCursor
+    from lotuspond.models import ExecutionDeploymentRevision
 
     from .test_budgets import runtime_fixture
 
@@ -515,7 +515,6 @@ def test_orchestrator_races_renewal_revocation_and_control(admission, operation)
                         blocker, h.actor, revision.deployment_id, None, "revoked", "revoke"
                     )
                 else:
-                    blocker.scalar(select(ExecutionSchedulerCursor).with_for_update())
                     blocker.scalar(
                         select(Workspace)
                         .where(Workspace.id == h.scope.workspace_id)

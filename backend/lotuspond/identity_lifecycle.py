@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
+from . import authority_gate
 from . import schemas as s
 from .deps import DB, audit, require
 from .mail import encrypt_payload, enqueue_mail, enqueue_security_notice
@@ -66,9 +67,7 @@ def _password_recovery_eligible(db: Session, user: User) -> bool:
     offline-origin account recovers only if it finished enrollment and
     independently verified its mailbox, as before.
     """
-    offline_origin = db.scalar(
-        select(exists().where(OfflineEnrollment.user_id == user.id))
-    )
+    offline_origin = db.scalar(select(exists().where(OfflineEnrollment.user_id == user.id)))
     if not offline_origin:
         return True
     if not user.email_verified:
@@ -103,6 +102,8 @@ def validate_registration_invitation(
     hint = db.scalar(select(Invitation).where(Invitation.token_hash == digest(token)))
     if not hint:
         return None
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, hint.workspace_id, exclusive=True)
     workspace = db.scalar(
         select(Workspace).where(Workspace.id == hint.workspace_id).with_for_update()
     )
@@ -140,6 +141,8 @@ def _revoke_challenges(db: Session, user_id: str, kind: str, *, except_id: str |
 def request_verification(request: Request, db: Session = DB):
     user = session_user(db, request)
     request.app.state.limiter.check(f"verification-request:{user.id}", 5, 3600)
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [user.id], exclusive=True)
     user = db.scalar(select(User).where(User.id == user.id).with_for_update())
     session_user(db, request)
     if user.email_verified:
@@ -183,6 +186,8 @@ def confirm_verification(body: s.TokenConfirm, request: Request, db: Session = D
     )
     if not challenge:
         fail(400, "invalid_token", "The verification link is invalid or expired.")
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [challenge.user_id], exclusive=True)
     user = db.scalar(select(User).where(User.id == challenge.user_id).with_for_update())
     challenge = db.scalar(
         select(IdentityChallenge)
@@ -215,9 +220,18 @@ def request_password_reset(body: s.PasswordResetRequest, request: Request, db: S
             new_id(),
             {"to": email, "subject": "Reset your Lotuspond password", "body": f"Reset: {link}"},
         )
-    user = db.scalar(
-        select(User).where(User.email == email, User.disabled_at.is_(None)).with_for_update()
-    )
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`),
+    # found by a plain read. Only that user is locked, and checked again under the lock;
+    # an address no one holds locks nothing.
+    gated = db.scalar(select(User.id).where(User.email == email, User.disabled_at.is_(None)))
+    authority_gate.users(db, [gated], exclusive=True)
+    user = None
+    if gated:
+        user = db.scalar(
+            select(User)
+            .where(User.id == gated, User.email == email, User.disabled_at.is_(None))
+            .with_for_update()
+        )
     if user and settings.mail_enabled and _password_recovery_eligible(db, user):
         _revoke_challenges(db, user.id, "password_reset")
         challenge = IdentityChallenge(
@@ -261,6 +275,8 @@ def confirm_password_reset(body: s.PasswordResetConfirm, request: Request, db: S
     )
     if not challenge:
         fail(400, "invalid_token", "The password reset link is invalid or expired.")
+    # The user's fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.users(db, [challenge.user_id], exclusive=True)
     user = db.scalar(select(User).where(User.id == challenge.user_id).with_for_update())
     challenge = db.scalar(
         select(IdentityChallenge)
@@ -345,9 +361,9 @@ def create_invitation(
     settings = request.app.state.settings
     if not settings.mail_enabled:
         fail(503, "mail_unavailable", "Mailbox delivery is not configured.")
-    workspace = db.scalar(
-        select(Workspace).where(Workspace.id == p.workspace_id).with_for_update()
-    )
+    # The fair gate first, exclusive, before any row lock (`authority_gate`).
+    authority_gate.workspace(db, p.workspace_id, exclusive=True)
+    workspace = db.scalar(select(Workspace).where(Workspace.id == p.workspace_id).with_for_update())
     if workspace.kind != "organization":
         fail(409, "organization_required", "Invitations require an organization workspace.")
     if workspace.status != "active":
@@ -421,6 +437,12 @@ def accept_invitation(body: s.TokenConfirm, request: Request, db: Session = DB):
     request.app.state.limiter.check(f"invitation-accept:{user.id}", 20, 900)
     request.app.state.limiter.check(f"invitation-accept-ip:{request.client.host}", 40, 900)
     token_hash = digest(body.token)
+    # The fair gate first, exclusive, before any row lock (`authority_gate`): the
+    # invitation's workspace, found by a plain read.
+    gated = db.scalar(select(Invitation.workspace_id).where(Invitation.token_hash == token_hash))
+    if gated is not None:
+        authority_gate.workspace(db, gated, exclusive=True)
+    authority_gate.users(db, [user.id], exclusive=True)  # then the user's
     user = db.scalar(
         select(User)
         .where(User.id == user.id)
@@ -432,9 +454,7 @@ def accept_invitation(body: s.TokenConfirm, request: Request, db: Session = DB):
     if not invitation_hint:
         fail(400, "invalid_token", "The invitation is invalid or expired.")
     workspace = db.scalar(
-        select(Workspace)
-        .where(Workspace.id == invitation_hint.workspace_id)
-        .with_for_update()
+        select(Workspace).where(Workspace.id == invitation_hint.workspace_id).with_for_update()
     )
     invitation = db.scalar(
         select(Invitation)

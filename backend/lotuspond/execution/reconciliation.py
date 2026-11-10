@@ -14,8 +14,8 @@ evidence closes it all the same, since closing it can only fail it. The executio
 stays held until its owner releases it (`ControlService.reconcile_execution`).
 
 Lock order: the route has authorized the actor (workspace and account rows held),
-so the installation cursor is taken with NOWAIT (see `dispatch`), then capacity,
-execution, step, attempt, reservation, delivery and lease.
+then capacity, execution, step, attempt, reservation, delivery and lease. A stop
+changes only its environment's count, so no installation cursor is taken.
 """
 
 from hashlib import sha256
@@ -41,7 +41,6 @@ from .contracts import canonical_value
 from .dispatch import (
     activity_service,
     close_children,
-    cursor_nowait,
     failure_content,
     keep_interrupted,
 )
@@ -78,12 +77,11 @@ class ReconciliationService:
     @activity_service
     def reconcile_activity(self, db, actor, observation: HistoricalObservation) -> None:
         observation = HistoricalObservation.model_validate(observation)
-        # Current recovery authority, fenced before the cursor or any execution row:
-        # a restored or fenced installation cannot close historical attempts.
+        # Current recovery authority, fenced before any execution row: a restored
+        # or fenced installation cannot close historical attempts.
         recovery = self._recovery()
         actor = reauthorize(db, actor, "reconcile")
         scope = actor.scope
-        cursor_nowait(db, self.budgets.installation_id)
         hint = record(db, ExecutionAttempt, scope, observation.attempt_id)
         lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, hint.execution_id, locked=True)

@@ -10,7 +10,7 @@ It does not authorize a production rollout. This release ships no qualified prod
 | --- | --- | --- | --- |
 | API | `lotuspond-api` image, `uvicorn` (the default command) | Customer routes, the runtime protocol, provider lookups | Worker loops: importing the API starts nothing |
 | Orchestrator | The same image: `execution-worker --role orchestrator` | Claims due executions; derives each transition in one transaction; applies capacity steps, including wait retention | Customer authority, provider secrets |
-| Sweeper | The same image: `execution-worker --role sweeper` | Lapses leases, expires deliveries and waits, applies restore fences and holds, and schedules reserved attempts | Customer authority, provider secrets |
+| Sweeper | The same image: `execution-worker --role sweeper`, one per installation | Lapses leases, expires deliveries and waits, applies restore fences and holds, and schedules reserved attempts | Customer authority, provider secrets |
 | Runtime | `lotuspond-runtime` on the customer's Linux host | Its E03 credential and session; runs activities it was delivered | Any credential of another pool; any way to choose its work |
 | PostgreSQL | One primary | Every execution and business record, in one schema | The recovery epoch, grants or revocations |
 | Independent authorities | Outside the database | Recovery epoch, entitlement and price, tenant policy, deployment trust, artifact keys and access, activity trust and signing | — |
@@ -33,17 +33,17 @@ Run the orchestrator and the sweeper each under its own least-privilege PostgreS
 
 PostgreSQL also requires `UPDATE` privilege on any table whose rows a statement locks (`SELECT ... FOR UPDATE` or `FOR SHARE`). The engine locks parent rows in its fixed order:
 
-1. installation cursor;
-2. workspace;
-3. fleet rows;
-4. capacity;
-5. deployment;
-6. execution;
-7. step;
-8. attempt;
-9. reservation;
-10. delivery;
-11. lease.
+1. workspace;
+2. fleet rows;
+3. capacity;
+4. deployment;
+5. execution;
+6. step;
+7. attempt;
+8. reservation;
+9. delivery;
+10. lease;
+11. installation cursor, last, and only by a reservation that takes a compute slot or by scheduling (the sweeper). Its holder runs a few statements and commits; it never waits on another lock (29 October 2026, the [installation capacity amendment](../superpowers/plans/2026-10-29-installation-capacity-lock.md)).
 
 So a role needs `UPDATE` on each table it locks, even where it never changes a row. Most of the tables below were measured: a test-only listener recorded every table each worker role read, wrote or locked across the whole tier 1 conformance suite (see [the validation record](../validation/2026-10-15-durable-execution.md)). The rest cover paths tier 1 never ran, found in the code by the whole-branch review. Those are:
 
@@ -88,8 +88,7 @@ GRANT SELECT ON
   TO lotuspond_orchestrator;
 GRANT INSERT ON execution_reconciliation_observations TO lotuspond_orchestrator;
 GRANT UPDATE ON
-  execution_activity_deliveries, execution_scheduler_cursors,
-  execution_usage_reservations
+  execution_activity_deliveries, execution_usage_reservations
   TO lotuspond_orchestrator;
 GRANT UPDATE (id) ON api_keys TO lotuspond_orchestrator;
 ```
@@ -155,6 +154,8 @@ VALUES (gen_random_uuid()::text, now(), :workspace_id, :project_id, :environment
 ```
 
 The limits are safety ceilings, not licensing; the schema refuses larger values. Lower a limit to throttle an environment. Never edit the `active`, `pending` or `retained_waits` counters by hand: the engine keeps them in step with reservations and waits.
+
+The installation's live active count is the sum of the environment counts, `SELECT sum(active) FROM execution_capacities`. The cursor row's `active` is a record of that sum as of the last reservation or scheduling transaction, and never below it. It must not exceed `active_limit`, so to lower the installation limit, set both in one statement: `UPDATE execution_scheduler_cursors SET active_limit = :limit, active = (SELECT coalesce(sum(active), 0) FROM execution_capacities)`. This statement is refused while more than `:limit` attempts are active.
 
 ## Autovacuum
 
@@ -235,8 +236,9 @@ An execution pins its interpreter version at admission.
   - Admissions, signals and reads still answer.
   - Restart the workers; each resumes from rows. Tier 1's spike 1–7 cases kill every process mid-flight and observe one provider call per attempt afterwards.
 - **Backlog.** Watch due executions (`runnable_at_ms` at or before now) and reserved attempts without a usage reservation. If the backlog grows:
-  - check the cursor lock wait (`pg_stat_activity` with `wait_event_type = 'Lock'` on `execution_scheduler_cursors`) and the API process's CPU;
-  - add orchestrators only when they, not the cursor, are the bound;
+  - check lock waiters by relation: `pg_locks` entries not granted, attributed to the relation of their tuple lock, as the sampler in `scripts/checks/execution-load.py` does. Waits on `workspaces` are one tenant's own serialization; waits on `execution_scheduler_cursors` should stay brief, since it is held only at a transaction's end;
+  - check the API and worker processes' CPU;
+  - add orchestrators only when they are the bound; keep one sweeper per installation;
   - lower environment limits to shed load.
 - **Lapsed leases.**
   - A lease lapses when a runtime stops renewing it (lost connection, stopped process). The sweeper marks the attempt uncertain and its execution `reconciliation_required`. The attempt is never re-leased, and a late result is evidence only.
