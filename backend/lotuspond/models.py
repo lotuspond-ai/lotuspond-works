@@ -487,6 +487,7 @@ class Policy(Scoped, Base):
     maximum_p95_ms: Mapped[int | None] = mapped_column(Integer)
     maximum_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
     require_approval: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Tool authorization was retired (ADR-0014); both lists stay stored and new policies keep them empty.
     blocked_tools: Mapped[list[str]] = mapped_column(JSON, default=list)
     approval_tools: Mapped[list[str]] = mapped_column(JSON, default=list)
     __table_args__ = scoped(

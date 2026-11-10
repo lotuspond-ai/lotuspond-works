@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { api, type Row } from '../api.js';
 import { Alert, EmptyState, RelativeTime, SectionHeader, StatusBadge } from '../components/ui.js';
-import { Operations } from './Operations.js';
 
 type Overview = {
   users: number;
@@ -14,7 +13,7 @@ export function Admin() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [workspaces, setWorkspaces] = useState<Row[]>([]);
   const [users, setUsers] = useState<Row[]>([]);
-  const [tab, setTab] = useState<'overview' | 'workspaces' | 'users' | 'operations'>('overview');
+  const [tab, setTab] = useState<'overview' | 'workspaces' | 'users'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -82,21 +81,19 @@ export function Admin() {
         title="Administration"
         description="Manage platform access and review recorded workspace activity. Administrative changes require a reason and are audited."
         actions={
-          tab !== 'operations' && (
-            <button
-              className="secondary"
-              disabled={loading}
-              onClick={() => {
-                void load();
-              }}
-            >
-              Refresh
-            </button>
-          )
+          <button
+            className="secondary"
+            disabled={loading}
+            onClick={() => {
+              void load();
+            }}
+          >
+            Refresh
+          </button>
         }
       />
       <nav className="tab-bar" aria-label="Administration sections">
-        {(['overview', 'workspaces', 'users', 'operations'] as const).map((item) => (
+        {(['overview', 'workspaces', 'users'] as const).map((item) => (
           <button
             key={item}
             aria-current={tab === item ? 'page' : undefined}
@@ -105,17 +102,11 @@ export function Admin() {
               setQuery('');
             }}
           >
-            {item === 'overview'
-              ? 'Overview'
-              : item === 'workspaces'
-                ? 'Workspaces'
-                : item === 'users'
-                  ? 'Users'
-                  : 'Operations'}
+            {item === 'overview' ? 'Overview' : item === 'workspaces' ? 'Workspaces' : 'Users'}
           </button>
         ))}
       </nav>
-      {tab !== 'operations' && error && (
+      {error && (
         <Alert
           onRetry={() => {
             void load();
@@ -124,14 +115,12 @@ export function Admin() {
           {error}
         </Alert>
       )}
-      {tab !== 'operations' && notice && (
+      {notice && (
         <p className="success-notice" role="status">
           {notice}
         </p>
       )}
-      {tab === 'operations' ? (
-        <Operations />
-      ) : loading ? (
+      {loading ? (
         <p className="loading-state" role="status">
           Loading platform records…
         </p>

@@ -110,7 +110,7 @@ const definitions: Record<string, Definition> = {
   policies: {
     title: 'Policies',
     description:
-      'Set measurable release limits and tool authorization rules. Policies are immutable; create a new version to change a decision rule.',
+      'Set measurable release limits. Policies are immutable; create a new version to change a decision rule.',
     fields: [
       { key: 'name', label: 'Policy name' },
       { key: 'minimum_pass_rate', label: 'Minimum pass rate (0–1)', type: 'number', value: '1' },
@@ -127,18 +127,6 @@ const definitions: Record<string, Definition> = {
         label: 'Require independent human approval',
         type: 'checkbox',
         value: 'true',
-      },
-      {
-        key: 'blocked_tools',
-        label: 'Blocked tools (comma-separated)',
-        type: 'list',
-        optional: true,
-      },
-      {
-        key: 'approval_tools',
-        label: 'Tools requiring approval (comma-separated)',
-        type: 'list',
-        optional: true,
       },
     ],
   },

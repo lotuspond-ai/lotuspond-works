@@ -23,7 +23,6 @@ from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
 from .mfa import router as mfa_router
 from .models import SchemaVersion
-from .operations import router as operations_router
 from .package_contract import MAX_PACKAGE_BYTES
 from .packages import router as packages_router
 from .schema_version import SCHEMA_VERSION
@@ -550,7 +549,6 @@ def create_app(
     app.include_router(identity_router)
     app.include_router(identity_lifecycle_router)
     app.include_router(mfa_router)
-    app.include_router(operations_router)
     app.include_router(packages_router)
     app.include_router(fleet_management_router)
     app.include_router(fleet_runtime_router)

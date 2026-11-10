@@ -4,12 +4,10 @@ import time
 from .config import Settings
 from .database import engine_for, sessions_for
 from .mail import run_once
-from .worker_observation import close_observation_client, mark_poll, observation_client
 
 
-def run(settings: Settings, factory, *, once: bool, poll_seconds: float, observation=None):
+def run(settings: Settings, factory, *, once: bool, poll_seconds: float):
     while True:
-        mark_poll(observation, "mail")
         result = run_once(factory, settings)
         if once:
             print("Mail outbox item processed." if result is not None else "No mail was queued.")
@@ -30,17 +28,9 @@ def main():
         raise SystemExit("Mail delivery is disabled; no messages were sent.")
     engine = engine_for(settings)
     factory = sessions_for(engine)
-    observation = observation_client(settings)
     try:
-        run(
-            settings,
-            factory,
-            once=args.once,
-            poll_seconds=args.poll_seconds,
-            observation=observation,
-        )
+        run(settings, factory, once=args.once, poll_seconds=args.poll_seconds)
     finally:
-        close_observation_client(observation)
         engine.dispose()
 
 
