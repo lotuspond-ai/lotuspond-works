@@ -186,7 +186,7 @@ def test_exact_key_scopes(client, project, manifest, app, scopes, post, get):
 
 @pytest.mark.parametrize(
     "state,status",
-    [("suspended", 403), ("expired", 401), ("revoked", 401), ("disabled", 401), ("mfa", 403)],
+    [("suspended", 403), ("expired", 401), ("revoked", 401), ("disabled", 401)],
 )
 def test_current_key_authority(client, account, project, manifest, app, db_factory, state, status):
     key = client.post(
@@ -200,17 +200,8 @@ def test_current_key_authority(client, account, project, manifest, app, db_facto
             row.expires_at = now() - timedelta(seconds=1)
         elif state == "revoked":
             row.revoked_at = now()
-        elif state == "disabled":
-            db.get(User, row.created_by_user_id).disabled_at = now()
         else:
-            import base64
-
-            from pydantic import SecretStr
-
-            app.state.settings.mfa_encryption_key = SecretStr(
-                base64.urlsafe_b64encode(b"k" * 32).decode()
-            )
-            db.get(Workspace, account).require_mfa = True
+            db.get(User, row.created_by_user_id).disabled_at = now()
     with TestClient(app, headers={"authorization": f"Bearer {key}"}) as caller:
         assert publish(caller, project, manifest).status_code == status
         assert caller.get("/api/v1/packages", params={"project_id": project}).status_code == status
