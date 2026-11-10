@@ -714,19 +714,6 @@ def next_actions(plan: Program, state: ProgressionState, now_ms: int) -> tuple:
 
 # ---------------------------------------------------------------- golden records
 
-_ACTIONS = {
-    cls.__name__: cls
-    for cls in (
-        RecordPure,
-        CreateAttempt,
-        OpenWait,
-        ConsumeSignal,
-        CancelUndispatched,
-        Complete,
-        Fail,
-    )
-}
-
 
 def derivation_json(derivation) -> bytes:
     """Canonical bytes of a whole derivation: actions, descended regions and wake-up."""

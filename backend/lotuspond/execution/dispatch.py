@@ -99,7 +99,6 @@ MIN_DELIVERY_MS = 1000
 # Runtime-stored values per execution: results and child arguments, bounded.
 MAX_VALUES = 1024
 logger = logging.getLogger("lotuspond.execution")
-RETRYABLE = frozenset({"unavailable", "rate_limited", "timeout_before_dispatch"})
 
 
 def activity_service(function):

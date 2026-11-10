@@ -263,9 +263,6 @@ export function updatePackage(draft: Draft, patch: Partial<WorkflowPackage>): Dr
 
 // Browser storage holds the draft and layout. A draft in progress rarely satisfies the
 // contract yet, so the shape is read leniently and the admission check reports the rest.
-export function serializeDraft(draft: Draft): string {
-  return JSON.stringify(draft);
-}
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 const integer = (value: unknown) =>
   typeof value === 'number' && Number.isInteger(value) ? value : Number.NaN;

@@ -285,11 +285,6 @@
   line-height: 1.6;
   color: var(--pond-muted);
 }
-.pond-note {
-  margin: 20px 0 0;
-  font-size: 13px;
-  color: rgba(241, 236, 225, 0.6);
-}
 .pond .error {
   color: #f3b7a9;
 }
@@ -724,11 +719,6 @@
   color: var(--ink);
   text-wrap: balance;
 }
-.section-statement {
-  max-width: 13em;
-  font-size: clamp(36px, 4.6vw, 62px);
-  line-height: 1.04;
-}
 .section-lede {
   max-width: 36em;
   margin-bottom: 48px;
@@ -971,16 +961,9 @@
   padding: 0;
   border-top: 1px solid var(--ink);
 }
-.rule-grid-two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 .rule-grid li {
   padding: 28px 32px 32px 0;
   border-bottom: 1px solid var(--line);
-}
-.rule-grid-two li:nth-child(even) {
-  padding-left: 32px;
-  border-left: 1px solid var(--line);
 }
 .rule-grid-three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1994,7 +1977,6 @@
     gap: 2px;
   }
   .workflow-steps,
-  .rule-grid-two,
   .rule-grid-three,
   .panel-grid,
   .panel-grid-two {
@@ -2006,8 +1988,7 @@
   }
   .workflow-steps li,
   .workflow-steps li + li,
-  .rule-grid li,
-  .rule-grid-two li:nth-child(even) {
+  .rule-grid li {
     margin-top: 0;
     padding: 24px 0;
     border-left: 0;
