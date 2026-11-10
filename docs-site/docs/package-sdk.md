@@ -352,7 +352,7 @@ the sdist into fresh environments outside the checkout, assert API dependencies
 are absent, and run complete CLI journeys and refusal cases against both origins. CI configures Python 3.13 and 3.14; hosted results are distinct from
 local verification. The API image installs the SDK noneditably, with no SDK source
 directory in the final image. Deployment content proof includes installed SDK
-source bytes and the airgap smoke checks shared types and the historical digest.
+source bytes, shared types and the historical digest.
 
 
 ## Executable-v2 tooling

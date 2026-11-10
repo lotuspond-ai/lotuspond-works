@@ -7,7 +7,7 @@ and refuses new ones, exactly as a lost network would.
 import time
 
 import pytest
-from driver import form_package, reconcile_from_journal, serving
+from driver import form_package, patient_read, reconcile_from_journal, serving
 from lotuspond_runtime.errors import FleetError
 from processes import Processes, wait_for
 from sqlalchemy import select
@@ -101,7 +101,10 @@ def test_a_runtime_revoked_while_disconnected_cannot_return(system, linux):
     """DISC-3: its session is refused on reconnection; it calls nothing more."""
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
-    revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # each lease may run to its read's 30 s deadline
+    revision = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     runtime = operator.runtime(customer, "runtime-a")
     # Positive control: it serves work before it is cut off.
     first = operator.start(customer, revision)["id"]
@@ -135,7 +138,10 @@ def test_all_runtimes_unreachable_for_several_lease_periods(system, linux):
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
     form = operator.deploy(customer, "form", package=form_package(), dependencies=["waits.policy"])
-    read = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # the recovery read's lease may run to its 30 s deadline
+    read = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     waiting = operator.start(customer, form)["id"]
     wait = operator.open_wait(customer, waiting, "review")
     runtime = operator.runtime(customer, "runtime-a")

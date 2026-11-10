@@ -109,10 +109,6 @@ def scope_of(row) -> Scope:
     )
 
 
-def canonical_text(value) -> str:
-    return canonical_value(value).decode("utf-8")
-
-
 def _schema(schema, definitions):
     return {
         "schema": schema.model_dump(mode="json"),
@@ -489,13 +485,4 @@ def signature_text(signature) -> str:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
-    )
-
-
-def delivery_for(db, scope, attempt_id):
-    return db.scalar(
-        scoped(ExecutionActivityDelivery, scope)
-        .where(ExecutionActivityDelivery.attempt_id == attempt_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
     )

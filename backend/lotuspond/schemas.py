@@ -1,7 +1,5 @@
-from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
@@ -155,8 +153,6 @@ class PolicyInput(Input):
     maximum_p95_ms: int | None = Field(default=None, gt=0)
     maximum_cost_usd: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=6)
     require_approval: bool = True
-    blocked_tools: list[Name] = Field(default_factory=list, max_length=100)
-    approval_tools: list[Name] = Field(default_factory=list, max_length=100)
 
 
 class ReleaseInput(Input):
@@ -178,66 +174,6 @@ class ApprovalDecision(Input):
     status: Literal["approved", "rejected"]
 
 
-class TraceInput(Input):
-    project_id: Identifier | None = None
-    external_id: Name
-    name: Name
-    status: Literal["ok", "error"]
-    latency_ms: int = Field(ge=0, le=86400000)
-    cost_usd: Decimal | None = Field(
-        default=None,
-        ge=0,
-        le=1_000_000,
-        max_digits=14,
-        decimal_places=6,
-    )
-    attributes: Json = Field(default_factory=dict)
-    occurred_at: datetime | None = None
-
-
-class IncidentInput(Input):
-    title: Name
-    trace_id: Identifier | None = None
-    severity: Literal["low", "medium", "high", "critical"]
-
-
-class IncidentResolve(Input):
-    reason: str | None = Field(default=None, min_length=3, max_length=2000)
-
-
-class IncidentReopen(Input):
-    reason: str = Field(min_length=3, max_length=2000)
-
-
-class IntegrationInput(Input):
-    name: Name
-    kind: Literal["mcp", "a2a", "telemetry", "webhook", "ci"]
-    endpoint: str = Field(max_length=2000)
-
-    @model_validator(mode="after")
-    def safe_endpoint(self):
-        url = urlsplit(self.endpoint)
-        if (
-            url.scheme != "https"
-            or not url.hostname
-            or url.username
-            or url.password
-            or url.query
-            or url.fragment
-        ):
-            raise ValueError(
-                "Use an HTTPS endpoint without embedded credentials, query, or fragment"
-            )
-        return self
-
-
-class ReceiptInput(Input):
-    release_id: Identifier
-    external_id: Name
-    outcome: Literal["success", "failure", "unknown"]
-    evidence: Json
-
-
 class MemberInput(Input):
     email: EmailStr
     role: Literal["admin", "editor", "viewer"]
@@ -246,18 +182,13 @@ class MemberInput(Input):
 class KeyInput(Input):
     name: Name
     scopes: list[
-        Literal["read", "write", "run", "ingest", "gateway", "execute", "execution_signal"]
-    ] = Field(min_length=1, max_length=7)
+        Literal["read", "write", "run", "execute", "execution_signal"]
+    ] = Field(min_length=1, max_length=5)
     days: int = Field(default=90, ge=1, le=365)
 
 
 class WorkspaceInput(Input):
     name: Name
-    monthly_budget_usd: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=6)
-
-
-class AuthenticatorPolicyInput(Input):
-    require_mfa: bool
 
 
 class AuthenticatorReset(Input):
@@ -265,53 +196,7 @@ class AuthenticatorReset(Input):
     reason: str = Field(min_length=10, max_length=2000)
 
 
-class WorkspacePlan(Input):
-    plan: Literal["developer", "team", "enterprise"]
-    reason: str = Field(min_length=10, max_length=2000)
-
-
 class WorkspaceStatus(Input):
     status: Literal["active", "suspended"]
     reason: str = Field(min_length=10, max_length=2000)
 
-
-class AuthorizationInput(Input):
-    policy_id: Identifier
-    tool: Name
-
-
-class VoiceSessionInput(Input):
-    project_id: Identifier
-    name: Name
-    provider: str = Field(min_length=1, max_length=80)
-
-
-class SegmentInput(Input):
-    sequence: int = Field(ge=0, le=100000)
-    speaker: Literal["user", "agent", "other"]
-    text: str = Field(max_length=32000)
-    start_ms: int = Field(ge=0, le=86400000)
-    end_ms: int = Field(ge=0, le=86400000)
-    is_final: bool
-
-    @model_validator(mode="after")
-    def time_order(self):
-        if self.end_ms < self.start_ms:
-            raise ValueError("Segment end must follow its start")
-        return self
-
-
-class SegmentBatch(Input):
-    segments: list[SegmentInput] = Field(min_length=1, max_length=100)
-
-
-class AssessmentInput(Input):
-    criteria: str = Field(min_length=1, max_length=16000)
-
-
-class MonitorInput(Input):
-    project_id: Identifier
-    name: Name
-    criteria: str = Field(min_length=1, max_length=16000)
-    enabled: bool = True
-    sample_basis_points: int = Field(default=10000, ge=0, le=10000)

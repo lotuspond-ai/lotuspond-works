@@ -19,18 +19,15 @@ from .fleet.catalog import InstalledCatalog
 from .fleet.management_routes import FleetRequestBoundary
 from .fleet.management_routes import router as fleet_management_router
 from .fleet.runtime_routes import router as fleet_runtime_router
-from .gateway import router as gateway_router
 from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
 from .mfa import router as mfa_router
 from .models import SchemaVersion
-from .monitoring import router as monitoring_router
-from .offline_identity import router as offline_identity_router
-from .operations import router as operations_router
 from .package_contract import MAX_PACKAGE_BYTES
 from .packages import router as packages_router
 from .schema_version import SCHEMA_VERSION
 from .security import RateLimiter
+from .traces import router as traces_router
 from .workflows import router as workflow_router
 
 logger = logging.getLogger("lotuspond")
@@ -87,18 +84,7 @@ class RequestBoundary:
                 await error(403, "invalid_origin", "The request origin is not permitted.")
                 return
             content_type = headers.get("content-type", "").lower()
-            # OTLP exporters send binary protobuf by default. Like JSON it is not a
-            # CORS-safelisted type, so a cross-site form still cannot submit it, and it is
-            # accepted only where trace exports arrive.
-            otlp_protobuf = (
-                scope["path"] == "/api/v1/telemetry/otlp"
-                and content_type.split(";")[0].strip() == "application/x-protobuf"
-            )
-            if (
-                scope["path"].startswith("/api/")
-                and "application/json" not in content_type
-                and not otlp_protobuf
-            ):
+            if scope["path"].startswith("/api/") and "application/json" not in content_type:
                 await error(415, "unsupported_media_type", "Use an application/json request body.")
                 return
         try:
@@ -305,6 +291,34 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.3.0",
+                    "id": "core-loop-focus",
+                    "date": "2026-11-11",
+                    "title": "One direction: build, prove, run, control",
+                    "description": "Lotuspond now states one direction: run AI-agent workflows in real processes, with each version proven before release, each consequential action decided by a person, and every outcome recorded. Features outside that loop are gone: air-gapped operation and offline identity enrollment, the organization and installation authenticator requirements, the tool-authorization endpoint, the MCP and A2A evaluation runners, the Operations page and the on-premises Compose variant. Only a verified mailbox verifies an identity. Personal authenticators, recovery codes, the reset for a member who lost every factor, and the production operator requirement stay. Stored data is unchanged.",
+                },
+                {
+                    "version": "0.3.0",
+                    "id": "automation-core-trim",
+                    "date": "2026-11-11",
+                    "title": "Console trimmed to the automation core",
+                    "description": "Lotuspond no longer accepts production traces over OTLP or the JSON API, and no longer runs trace monitors, trace assessments, incidents or signed incident alerts. The Integrations, Receipts, Monitors, Incidents, Traces and License pages are gone, approval requests apply to releases only, and new API keys cannot take the ingest scope. Stored traces and incidents stay readable through the API, the release evidence export still includes its stored receipts, and deployment admission keeps using scenarios, runs, policies, releases and release approvals.",
+                },
+                {
+                    "version": "0.3.0",
+                    "id": "launch-interest-page",
+                    "date": "2026-11-06",
+                    "title": "Join the Lotuspond early access list",
+                    "description": "A separate public teaser page offers an early access list without revealing product details. Its light invitation design pairs typography with an attributed upper-body Vitruvian Man backdrop on desktop and a decorative DNA motif. The illustration is hidden on small or touch-first devices and cropped above the waist wherever displayed, including social previews. Browser titles identify Lotuspond early access, and social metadata provides a dedicated current-design sharing image. The form collects an email address with consent to early access updates, validates and rate-limits submissions, and acknowledges them only after private storage accepts the record. A branded confirmation email is queued with duplicate protection. Successful signup replaces the form with a centered acknowledgement; a six-month browser cookie remembers that view without storing an email address, and visitors can register another email. Joining the list does not create a product account or grant access; mail-provider acceptance does not establish inbox delivery.",
+                },
+                {
+                    "version": "0.3.0",
+                    "id": "retired-assurance-extras",
+                    "date": "2026-11-05",
+                    "title": "Six assurance-era components retired",
+                    "description": "Lotuspond no longer includes voice sessions and the voice bridge, Gym-Anything software sandboxes, the TypeSafe Jev semantic evaluator, the model gateway and its workspace budget, the trace-plan ladder with its monthly allowance and retention job, the Go telemetry collector, or the Rust artifact verifier. Their API routes, console pages, packages and images are gone. Traces still arrive directly over OTLP/HTTP and the JSON API; criteria the deterministic assertions cannot decide are reported as unknown. Stored voice, gateway and plan records stay in the database untouched.",
+                },
                 {
                     "version": "0.3.0",
                     "id": "durable-execution-api",
@@ -548,17 +562,14 @@ def create_app(
 
     app.include_router(identity_router)
     app.include_router(identity_lifecycle_router)
-    app.include_router(offline_identity_router)
     app.include_router(mfa_router)
-    app.include_router(operations_router)
     app.include_router(packages_router)
     app.include_router(fleet_management_router)
     app.include_router(fleet_runtime_router)
     app.include_router(execution_router)
     app.include_router(execution_runtime_router)
     app.include_router(workflow_router)
-    app.include_router(monitoring_router)
-    app.include_router(gateway_router)
+    app.include_router(traces_router)
 
     @app.get("/{path:path}", include_in_schema=False)
     def frontend(path: str, request: Request):

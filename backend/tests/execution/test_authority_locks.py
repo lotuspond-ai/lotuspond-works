@@ -23,7 +23,6 @@ from sqlalchemy.orm import Session
 from lotuspond import authority_gate
 from lotuspond.execution.scheduler import Scheduler
 from lotuspond.models import ApiKey, User
-from lotuspond.offline_identity import RevocationRequest, revoke_identity
 
 from .activity_fixtures import Demand, attempt_at, deploy
 from .activity_fixtures import activity as activity
@@ -180,9 +179,6 @@ EXPECTED = {
     "login (route)": USER_GATE | {"users": {X}},
     "password reset request (route)": USER_GATE | {"users": {X}},
     "verification request (route)": USER_GATE | {"users": {X}},
-    "revoke identity (service)": EXCLUSIVE_GATE
-    | USER_GATE
-    | {"users": {X, "UPDATE"}, "api_keys": {X, "UPDATE"}},
 }
 
 
@@ -311,8 +307,6 @@ def test_every_authority_lock_and_write_by_path(api):
                 headers=h.owner,
             )
             assert response.status_code == 200, response.text
-        with audit.on("revoke identity (service)"), Session(h.engine) as db, db.begin():
-            revoke_identity(db, RevocationRequest(owner_id, email, "operator-1", "Lock audit"))
     table = audit.table()
     print("\nlocks (authority rows marked *) and authority writes by path:")
     for path, found in table.items():

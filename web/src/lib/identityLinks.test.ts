@@ -17,7 +17,7 @@ function fixture() {
   };
 }
 test('email links retain the action while removing token from browser location', () => {
-  for (const page of ['verify-email', 'reset-password', 'accept-invitation', 'enroll']) {
+  for (const page of ['verify-email', 'reset-password', 'accept-invitation']) {
     const parsed = parseIdentityLink(`https://lotuspond.example/#${page}?token=${token}`);
     assert.equal(parsed.page, page);
     assert.equal(parsed.token, token);
@@ -30,6 +30,8 @@ test('duplicate, malformed, and misplaced tokens are scrubbed and never accepted
     'https://lotuspond.example/#reset-password?token=%3Cscript%3E',
     `https://lotuspond.example/?token=${token}#releases`,
     `https://lotuspond.example/#releases?token=${token}`,
+    // Offline enrollment is retired (ADR-0014); its links are scrubbed like any other.
+    `https://lotuspond.example/#enroll?token=${token}`,
   ]) {
     const parsed = parseIdentityLink(href);
     assert.equal(parsed.token, undefined);
@@ -48,14 +50,11 @@ test('only invitation survives a tab reload; login navigation does not discard i
   };
   links.capture({ href: `https://lotuspond.example/#accept-invitation?token=${token}` }, history);
   links.capture({ href: `https://lotuspond.example/#verify-email?token=${token}` }, history);
-  links.capture({ href: `https://lotuspond.example/#enroll?token=${token}` }, history);
   links.capture({ href: 'https://lotuspond.example/#login' }, history);
   assert.equal(links.token('accept-invitation'), token);
   const reloaded = createIdentityLinks(storage);
   assert.equal(reloaded.token('accept-invitation'), token);
   assert.equal(reloaded.token('verify-email'), undefined);
-  assert.equal(links.token('enroll'), token);
-  assert.equal(reloaded.token('enroll'), undefined);
   reloaded.clear('accept-invitation');
   assert.equal(storage.data.size, 0);
 });
@@ -72,7 +71,7 @@ test('local expiry clears invitation storage and stale tokens cannot be reused',
   assert.equal(storage.data.size, 0);
 });
 
-test('enrollment token is scrubbed before rendering and never retained in storage', () => {
+test('a retired enrollment link loses its token before rendering and keeps nothing', () => {
   const storage = fixture();
   const links = createIdentityLinks(storage);
   let scrubbed = '';
@@ -86,9 +85,6 @@ test('enrollment token is scrubbed before rendering and never retained in storag
     },
   );
   assert.equal(scrubbed, 'https://lotuspond.example/#enroll');
-  assert.equal(links.token('enroll'), token);
+  assert.equal(links.token('accept-invitation'), undefined);
   assert.equal(storage.data.size, 0);
-  assert.equal(createIdentityLinks(storage).token('enroll'), undefined);
-  links.clear('enroll');
-  assert.equal(links.token('enroll'), undefined);
 });

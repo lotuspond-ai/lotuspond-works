@@ -60,11 +60,12 @@ def _active_challenge(challenge: IdentityChallenge | None, kind: str) -> bool:
 
 
 def _password_recovery_eligible(db: Session, user: User) -> bool:
-    """Keep mailbox recovery from upgrading an offline identity claim.
+    """Keep mailbox recovery from upgrading a stored offline identity claim.
 
-    Publicly registered accounts retain the existing recovery behavior. An
-    offline-origin account must first finish its operator-mediated enrollment
-    and then independently verify its mailbox.
+    Offline enrollment was retired (ADR-0014), but its rows stay. Publicly
+    registered accounts retain the existing recovery behavior. A stored
+    offline-origin account recovers only if it finished enrollment and
+    independently verified its mailbox, as before.
     """
     offline_origin = db.scalar(select(exists().where(OfflineEnrollment.user_id == user.id)))
     if not offline_origin:

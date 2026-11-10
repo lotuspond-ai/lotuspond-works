@@ -8,7 +8,7 @@ import signal
 import time
 
 import pytest
-from driver import Refused, decoded_events, flow, form_package, reconcile_from_journal
+from driver import Refused, decoded_events, flow, form_package, patient_read, reconcile_from_journal
 from processes import Processes, wait_for
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
@@ -79,8 +79,13 @@ def test_event_sequences_are_gap_free_under_concurrent_transitions(system):
         dependencies=["waits.policy"],
     )
     executions = [operator.start(customer, revision)["id"] for _ in range(12)]
+    # Each runs its whole life: timer, callback and the callback's expiry. Watching
+    # each 3 s callback in turn can miss one on a slow host, where a wait past its
+    # deadline is never retained and its execution stays `pending`, as designed.
     for execution_id in executions:
-        operator.open_wait(customer, execution_id, "callback", seconds=60)
+        operator.settled(customer, execution_id, TERMINAL, 180)
+        paths = {item["occurrence_path"] for item in operator.waits(customer, execution_id)}
+        assert "callback" in paths, paths
     with Session(w.engine) as db:
         for execution_id in executions:
             sequences = list(
@@ -118,7 +123,10 @@ def test_replaying_events_reproduces_the_projected_state(system, linux):
     w = system
     operator, customer = w.operator, w.customer
     operator.runtime(customer, "runtime-a")
-    read = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # the lease may run to the read's 30 s deadline
+    read = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     form = operator.deploy(customer, "form", package=form_package(), dependencies=["waits.policy"])
     done = operator.start(customer, read)["id"]
     waiting = operator.start(customer, form)["id"]

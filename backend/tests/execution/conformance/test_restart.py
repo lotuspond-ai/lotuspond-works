@@ -6,7 +6,7 @@ nothing in the database or the authorities is edited to simulate it.
 
 import time
 
-from driver import Refused, decoded_events, form_package
+from driver import Refused, decoded_events, form_package, patient_read
 from processes import Processes
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -65,7 +65,10 @@ def test_fresh_processes_finish_an_activity_with_one_provider_call(system, linux
     """Spike 5–7: kill the workers mid-flight; new ones finish; one call; distinct actors."""
     w = system
     operator, customer, processes = w.operator, w.customer, w.processes
-    revision = operator.deploy(customer, "activity_read", dependencies=[operator.documents[0]])
+    operator.demand(30000)  # the lease may run to the read's 30 s deadline
+    revision = operator.deploy(
+        customer, "activity_read_30", package=patient_read(), dependencies=[operator.documents[0]]
+    )
     execution_id = operator.start(customer, revision)["id"]
     restart_workers(processes, "b")  # before any runtime exists: nothing is dispatched
     runtime = operator.runtime(customer, "runtime-a")

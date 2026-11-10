@@ -39,8 +39,6 @@ def api_settings(**changes):
             "env": "test",
             "database_url": "sqlite://",
             "origin": "http://testserver",
-            "typesafe_base_url": None,
-            "typesafe_api_key": None,
             "redis_url": None,
             "fleet_enabled": True,
             "fleet_installation_id": "test-installation",

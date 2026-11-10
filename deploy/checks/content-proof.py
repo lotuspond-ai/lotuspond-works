@@ -26,7 +26,6 @@ EXCLUDED_DIRECTORIES = {
     "node_modules",
     "dist",
     "site",
-    "target",
     ".mypy_cache",
 }
 EXCLUDED_SUFFIXES = (".pyc", ".pyo")
@@ -137,7 +136,6 @@ def build(repo: Path, args) -> dict[str, object]:
         "scripts/runner-execution-child.mjs",
         "scripts/client.mjs",
         "protocol-adapters",
-        "sandbox",
     ]
     proof = {
         "schema": "lotuspond.local-content-proof.v1",
@@ -148,7 +146,7 @@ def build(repo: Path, args) -> dict[str, object]:
         ),
         "bundle": file_record(args.bundle),
         "smoke_report": file_record(args.smoke_report),
-        "delivery_scope": ["api", "static_ui", "collector", "postgres", "redis"],
+        "delivery_scope": ["api", "static_ui", "postgres", "redis"],
         "excluded_runner_delivery": excluded_runner_delivery,
         "source_trees": {
             "backend": tree_hash(backend),
@@ -164,7 +162,6 @@ def build(repo: Path, args) -> dict[str, object]:
         "local_built_dist": tree_hash(repo / "dist"),
         "images": {
             "LOTUSPOND_API_IMAGE": image_id(args.api_image),
-            "LOTUSPOND_COLLECTOR_IMAGE": image_id(args.collector_image),
         },
         "embedded_runtime_trees": {
             "/app/backend/lotuspond": embedded_tree(args.api_image, "/app/backend/lotuspond"),
@@ -197,7 +194,6 @@ if __name__ == "__main__":
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--smoke-report", type=Path, required=True)
     parser.add_argument("--api-image", required=True)
-    parser.add_argument("--collector-image", required=True)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--require-match", action="store_true")
     args = parser.parse_args()

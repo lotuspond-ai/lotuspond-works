@@ -1,7 +1,7 @@
 [project]
 name = "lotuspond-api"
 version = "0.3.0"
-description = "Lotuspond agent assurance and production monitoring"
+description = "Lotuspond agent automation platform API"
 requires-python = ">=3.13"
 dependencies = [
   "lotuspond-sdk==0.3.0",
@@ -17,7 +17,6 @@ dependencies = [
   "httpx2>=2.13,<3",
   "redis>=6,<9",
   "email-validator>=2.3,<3",
-  "typesafe-sdk>=0.7,<0.8",
   "cryptography>=50,<51",
 ]
 

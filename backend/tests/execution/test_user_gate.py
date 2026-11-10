@@ -2,23 +2,20 @@
 
 Execution and runtime writes share their initiating user's row under that user's
 gate, shared; every user-row locker takes the gate exclusive first. While one user's
-executions make constant runtime calls, that user's login, password reset and identity
-revocation each finish within the owner's 2 s bound, and a login racing an execution
+executions make constant runtime calls, that user's login and password reset each finish within the owner's 2 s bound, and a login racing an execution
 write for the same user never deadlocks.
 """
 
-import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 
 import pytest
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from lotuspond.execution.errors import ExecutionError
-from lotuspond.models import OfflineEnrollment, OfflineIdentityAttestation, User, now
+from lotuspond.models import User
 from lotuspond.security import password_hasher
 
 from .activity_fixtures import activity as activity
@@ -33,34 +30,12 @@ PASSWORD = "a-valid-test-password"
 
 
 def account(engine, user_id):
-    """The user as a person who can log in, reset a password and, being provisioned
-    offline and enrolled, have that identity revoked. Returns the email."""
+    """The user as a person who can log in and reset a password. Returns the email."""
     with Session(engine) as db, db.begin():
         user = db.get(User, user_id)
         # The fixtures' `.test` addresses are reserved names, which login refuses.
         user.email = f"{user_id}@example.com"
         user.password_hash = password_hasher.hash(PASSWORD)
-        at = now()
-        attestation = OfflineIdentityAttestation(
-            created_at=at,
-            user_id=user_id,
-            source="in_person",
-            source_reference="user-gate",
-            operator_reference="operator-1",
-            attested_at=at,
-        )
-        db.add(attestation)
-        db.flush()
-        db.add(
-            OfflineEnrollment(
-                user_id=user_id,
-                attestation_id=attestation.id,
-                token_hash=secrets.token_hex(32),
-                created_at=at,
-                expires_at=at + timedelta(hours=1),
-                consumed_at=at,
-            )
-        )
         return user.email
 
 
@@ -141,22 +116,6 @@ def test_a_password_reset_finishes_within_2s_while_the_users_runtime_calls_run(b
     idle = timed(reset)  # the call's own cost, uncontended
     waits = under_load(h, reset)
     print("password reset waits (s):", waits, "idle:", idle)
-    assert max(waits) < 2.0, waits
-
-
-def test_identity_revocation_finishes_within_2s_while_the_users_runtime_calls_run(busy):
-    from lotuspond.offline_identity import RevocationRequest, revoke_identity
-
-    h = busy
-
-    def revoke():
-        with Session(h.engine) as db, db.begin():
-            revoke_identity(
-                db, RevocationRequest(h.actor.user_id, h.email, "operator-1", "user gate test")
-            )
-
-    waits = under_load(h, revoke, times=1)
-    print("identity revocation waits (s):", waits)
     assert max(waits) < 2.0, waits
 
 

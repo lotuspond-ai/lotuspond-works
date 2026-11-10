@@ -622,5 +622,4 @@ def mfa_status(db: Session, request: Request, user: User) -> dict:
         "required_for_privileged": (
             request.app.state.settings.env == "production" and user.is_platform_admin
         ),
-        "required_by_installation": request.app.state.settings.require_mfa,
     }

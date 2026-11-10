@@ -151,29 +151,6 @@ def authenticator_enabled(db: Session, user_id: str, *, lock: bool = False) -> b
     return db.scalar(query) is not None
 
 
-def _require_workspace_authenticator(request: Request, db: Session, workspace: Workspace, user_id):
-    """An installation or organization requirement holds for every human authority it covers.
-
-    Account pages and enrollment never pass through here, so a person kept out by either
-    requirement can always still add the authenticator that lets them back in.
-    """
-    settings = request.app.state.settings
-    installation_wide = settings.require_mfa
-    organization_wide = workspace.kind == "organization" and workspace.require_mfa
-    if not installation_wide and not organization_wide:
-        return
-    if not settings.mfa_encryption_key:
-        fail(503, "mfa_unavailable", "Multi-factor authentication is unavailable.")
-    if not user_id or not authenticator_enabled(db, user_id):
-        fail(
-            403,
-            "mfa_required",
-            "This installation requires an authenticator for workspace access."
-            if installation_wide
-            else "This organization requires an authenticator for access.",
-        )
-
-
 @dataclass(frozen=True)
 class Principal:
     actor_id: str
@@ -232,8 +209,6 @@ def authenticate(db: Session, request: Request, scope: str = "read") -> Principa
         if request.app.state.settings.env == "production" and workspace.kind == "organization":
             if not creator or not identity_verified(db, creator):
                 fail(403, "identity_unverified", "A verified account must authorize this API key.")
-        # A scoped key carries its creator's authority, so the policy follows that person.
-        _require_workspace_authenticator(request, db, workspace, creator.id if creator else None)
         return Principal(key.id, key.workspace_id, "service")
     user = session_user(db, request)
     workspace_id = request.headers.get("x-lotuspond-workspace", "")
@@ -249,7 +224,6 @@ def authenticate(db: Session, request: Request, scope: str = "read") -> Principa
         and not identity_verified(db, user)
     ):
         fail(403, "identity_unverified", "A verified identity is required for organization access.")
-    _require_workspace_authenticator(request, db, workspace, user.id)
     if scope != "read" and member.role == "viewer":
         fail(403, "forbidden", "Your role has read-only access.")
     return Principal(user.id, workspace_id, member.role, user.id)

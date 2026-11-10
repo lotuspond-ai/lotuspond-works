@@ -1,0 +1,19 @@
+{
+  "name": "lotuspond-interest-local",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-06",
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
+  "kv_namespaces": [{ "binding": "INTEREST", "id": "local-interest" }],
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["hello@lotuspond.ai"] }],
+  "durable_objects": {
+    "bindings": [{ "name": "CONFIRMATIONS", "class_name": "ConfirmationEmail" }],
+  },
+  "migrations": [{ "tag": "confirmation-v1", "new_sqlite_classes": ["ConfirmationEmail"] }],
+  "ratelimits": [
+    {
+      "name": "SIGNUP_LIMIT",
+      "namespace_id": "2026110601",
+      "simple": { "limit": 5, "period": 60 },
+    },
+  ],
+}

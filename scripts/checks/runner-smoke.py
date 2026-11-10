@@ -323,7 +323,6 @@ def _start_api(listener: socket.socket, database_url: URL, origin: str, temporar
             "LOTUSPOND_DATABASE_URL": database_url.render_as_string(hide_password=False),
             "LOTUSPOND_ORIGIN": origin,
             "LOTUSPOND_REGISTRATION_ENABLED": "true",
-            "LOTUSPOND_NETWORK_MODE": "connected",
         }
     )
     return subprocess.Popen(
@@ -744,7 +743,6 @@ def _execute(args) -> dict[str, Any]:
                     "LOTUSPOND_HTTP_ENDPOINT": f"http://127.0.0.1:{agent.server_port}/agent",
                     "LOTUSPOND_HTTP_TOKEN": agent_token,
                     "LOTUSPOND_HTTP_TIMEOUT_MS": "1000",
-                    "LOTUSPOND_NETWORK_MODE": "airgap",
                 },
                 forbidden=[agent_token],
             )

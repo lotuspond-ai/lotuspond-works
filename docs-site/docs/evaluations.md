@@ -2,7 +2,7 @@
 
 An evaluation should produce evidence a reviewer can trace to a scenario, agent revision, environment, evaluator version, and time window. A result without those anchors is incomplete.
 
-Use an [evaluation runner](runners.md) to execute a reviewed custom adapter, an HTTP agent endpoint, an explicit MCP tool, or the reviewed application sandbox. HTTP completion and adapter process exit are distinct from an independently checked task verdict.
+Use an [evaluation runner](runners.md) to execute a reviewed custom adapter or an HTTP agent endpoint. HTTP completion and adapter process exit are distinct from an independently checked task verdict.
 
 ## Recommended sequence
 
@@ -15,4 +15,3 @@ Use an [evaluation runner](runners.md) to execute a reviewed custom adapter, an 
 
 Lotuspond must fail closed when required evidence is missing, a critical scenario fails, a comparison is incompatible, or the approver is not independent. A retry is a new attempt with its own identifier and evidence.
 
-The `lotuspond-evidence` Rust CLI can create and verify sorted SHA-256 file manifests, and sign a manifest with an Ed25519 publisher key so `verify-signed` can tell which key published it. A matching hash proves file integrity relative to a trusted manifest, and a valid signature proves that the holder of a trusted key published that manifest; neither proves when an artifact was created or whether its contents are true. Keys are standard PEM, so OpenSSL can check a signature without Lotuspond; see `evidence-core/README.md` for the signed message and the key handling rules.

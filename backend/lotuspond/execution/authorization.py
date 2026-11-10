@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import authority_gate
 from ..fleet.authority import database_now_ms
-from ..models import ApiKey, Environment, Membership, MfaFactor, Project, User, Workspace
+from ..models import ApiKey, Environment, Membership, Project, User, Workspace
 from ..security import Principal, enrollment_pending
 from .errors import ExecutionError, execution_service
 
@@ -221,11 +221,6 @@ def authorize_execution(
         or user.disabled_at is not None
         or member is None
         or enrollment_pending(db, user_id)
-    ):
-        raise ExecutionError("forbidden")
-    if (
-        workspace.require_mfa
-        and db.scalar(select(MfaFactor.id).where(MfaFactor.user_id == user_id)) is None
     ):
         raise ExecutionError("forbidden")
     if key:

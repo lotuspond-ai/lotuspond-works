@@ -865,6 +865,15 @@ waits_fast["body"]["steps"][0]["delay_seconds"] = 2
 waits_fast["body"]["steps"][1]["expiry_seconds"] = 3
 compile_package(waits_fast, dependencies=[], catalog={"documents": [policy]})
 (OUT / "waits_fast.json").write_text(json.dumps(waits_fast, indent=1, sort_keys=True) + "\n")
+# The 2 s timer alone: the external wait keeps its hour, so a case about who may
+# signal it never races a 3 s expiry on a slow host.
+waits_fast_timer = copy.deepcopy(waits)
+waits_fast_timer["package_id"] = "fixture-waits-fast-timer"
+waits_fast_timer["body"]["steps"][0]["delay_seconds"] = 2
+compile_package(waits_fast_timer, dependencies=[], catalog={"documents": [policy]})
+(OUT / "waits_fast_timer.json").write_text(
+    json.dumps(waits_fast_timer, indent=1, sort_keys=True) + "\n"
+)
 waits_deadline = copy.deepcopy(waits)
 waits_deadline["package_id"] = "fixture-waits-deadline"
 waits_deadline["limits"] = {**waits["limits"], "elapsed_seconds": 5}

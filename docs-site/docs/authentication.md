@@ -22,17 +22,8 @@ Use **Forgot password** on the sign-in screen to request recovery. The acknowled
 
 An organization owner or administrator invites an email address and selects a role. Invitees sign in or create a personal account, verify the matching email address, and accept the invitation. Invitations expire and can be revoked. Accepting an invitation does not silently replace an existing member's role. Personal workspaces do not support invitations.
 
-Production organization and operator authority require verified mailbox ownership or an active operator attestation from [offline enrollment](offline-identity.md). Email invitations always require ownership of the matching mailbox. Platform operators additionally require a session verified with [MFA](mfa.md). Identity verification and second-factor possession are separate checks. Identity federation remains open.
+Production organization and operator authority require verified mailbox ownership. Email invitations always require ownership of the matching mailbox. Platform operators additionally require a session verified with [MFA](mfa.md). Identity verification and second-factor possession are separate checks. Identity federation remains open.
 
 ## Create an API key
 
-A workspace owner or administrator creates a key in **API keys**, or sends `POST /api/v1/api-keys` with the workspace header and a body such as `{"name":"Telemetry collector","scopes":["ingest"],"days":30}`. The raw key is returned once. Store it immediately in the producer's secret mechanism. Use `POST /api/v1/api-keys/:id/revoke` with an empty JSON body to revoke it.
-
-## Collector authentication
-
-The collector uses two distinct bearer credentials:
-
-1. `COLLECTOR_INGEST_TOKEN` authenticates local telemetry producers to the collector.
-2. `LOTUSPOND_API_KEY` authenticates the collector to Lotuspond and must carry only the `ingest` scope.
-
-They must not have the same value. Configure them through the deployment's secret mechanism and never put them in a committed environment file, command example, URL, or log.
+A workspace owner or administrator creates a key in **API keys**, or sends `POST /api/v1/api-keys` with the workspace header and a body such as `{"name":"CI release gate","scopes":["read","run"],"days":30}`. The raw key is returned once. Store it immediately in the client's secret mechanism. Use `POST /api/v1/api-keys/:id/revoke` with an empty JSON body to revoke it.

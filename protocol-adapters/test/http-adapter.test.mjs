@@ -330,24 +330,10 @@ test('rejects URL credentials, insecure external URLs, invalid config, and unsaf
   assert.equal(resolutions, 0);
 });
 
-test('airgap denies external hosts before DNS but permits loopback; localhost resolution is verified and pinned', async () => {
+test('localhost resolution is verified and pinned', async () => {
   let resolutions = 0;
-  const external = await evaluate(
-    { prompt: 'hello' },
-    { contains: 'approved' },
-    {},
-    {
-      env: env('https://agent.example.test/agent', { LOTUSPOND_NETWORK_MODE: 'airgap' }),
-      lookup: () => {
-        resolutions += 1;
-        return [];
-      },
-    },
-  );
-  assert.equal(external.output.error, 'airgap');
-  assert.equal(resolutions, 0);
   const server = await endpoint();
-  assert.equal((await run(server.url, { LOTUSPOND_NETWORK_MODE: 'airgap' })).passed, true);
+  assert.equal((await run(server.url)).passed, true);
   const localUrl = server.url.replace('127.0.0.1', 'localhost');
   const blocked = await evaluate(
     { prompt: 'hello' },

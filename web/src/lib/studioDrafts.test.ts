@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { emptyDraft, moveNode, serializeDraft, updatePackage, parseDraft } from './studio.js';
+import { emptyDraft, moveNode, updatePackage, parseDraft } from './studio.js';
 import {
   MAX_DRAFTS,
   addDraft,
@@ -36,7 +36,7 @@ test('an empty or unreadable shelf opens as an empty list', () => {
 });
 
 test('the earlier single draft moves onto the shelf and stays open', () => {
-  const single = parseDraft(serializeDraft(named('Kept from before')));
+  const single = parseDraft(JSON.stringify(named('Kept from before')));
   const shelf = readShelf(null, single, at(5), ids());
   assert.equal(shelf.drafts.length, 1);
   assert.equal(shelf.open, 'd1');

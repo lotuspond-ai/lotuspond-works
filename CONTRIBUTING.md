@@ -8,7 +8,7 @@ Install the locked Node and Python dependencies using the README instructions. B
 
 Run `npm run test:database` against an independently verified, isolated localhost test database for API behavior, authorization, policy, or relational model changes. Read [SECURITY.md](SECURITY.md) before those changes. Do not inspect or operate a production database. Database evolution requires a reviewed, data-preserving plan; the empty-database initializer is not an upgrade tool.
 
-Run component-specific checks for changes to the collector, evidence tools, protocol adapters, voice bridge, deployment artifacts, or documentation. Preserve existing CI checks. Follow [DESIGN.md](DESIGN.md) for interface work and verify desktop, tablet, 375px, and keyboard behavior. Update the API changelog for user-visible changes and keep capability claims tied to evidence.
+Run component-specific checks for changes to the protocol adapters, deployment artifacts, or documentation. Preserve existing CI checks. Follow [DESIGN.md](DESIGN.md) for interface work and verify desktop, tablet, 375px, and keyboard behavior. Update the API changelog for user-visible changes and keep capability claims tied to evidence.
 
 Do not commit actual environment files, credentials, customer data, local database contents, dependencies, build output, or private handoff notes. Preserve third-party notices and recovery provenance. This private repository does not establish a new open-source license: retain existing component notices and resolve distribution terms before distributing product artifacts.
 

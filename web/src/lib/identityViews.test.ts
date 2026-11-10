@@ -83,23 +83,13 @@ test('personal workspace and viewers cannot render invitation administration', (
   }
 });
 
-test('operator attestation permits identity access without claiming mailbox ownership', () => {
-  const attested: Account = {
+test('an unverified mailbox must be verified before an invitation can be accepted', () => {
+  const unverified: Account = {
     ...account,
-    user: {
-      ...account.user,
-      identity_verified: true,
-      identity_verification_source: 'operator_attested',
-    },
+    user: { ...account.user, email_verified: false, identity_verified: false },
   };
-  assert.equal(identityVerified(attested.user), true);
-  assert.equal(identityLabel(attested.user), 'Operator attested');
-  const html = renderToStaticMarkup(
-    createElement(VerificationCard, { account: attested, onRefresh: refresh }),
-  );
-  assert.match(html, /Operator attested/);
-  assert.match(html, /Your mailbox has not been verified/);
-  assert.doesNotMatch(html, /Your mailbox is verified/);
+  assert.equal(identityVerified(unverified.user), false);
+  assert.equal(identityLabel(unverified.user), 'Unverified');
   const links = createIdentityLinks();
   links.capture(
     {
@@ -111,7 +101,7 @@ test('operator attestation permits identity access without claiming mailbox owne
     createElement(IdentityFlow, {
       page: 'accept-invitation',
       links,
-      account: attested,
+      account: unverified,
       onRefresh: refresh,
       onAccepted: refresh,
     }),
@@ -120,32 +110,21 @@ test('operator attestation permits identity access without claiming mailbox owne
   assert.doesNotMatch(invitation, /<button[^>]*>Accept invitation/);
 });
 
-test('isolated installation never suggests enabling prohibited mailbox verification', () => {
-  const isolated: Account = {
+test('disabled mail says so instead of claiming a delivery', () => {
+  const noMail: Account = {
     ...account,
-    user: {
-      ...account.user,
-      identity_verified: true,
-      identity_verification_source: 'operator_attested',
-    },
-    capabilities: {
-      mail_enabled: false,
-      registration_enabled: false,
-      offline_enrollment_enabled: true,
-    },
+    user: { ...account.user, email_verified: false, identity_verified: false },
+    capabilities: { mail_enabled: false, registration_enabled: false },
   };
   const html = renderToStaticMarkup(
-    createElement(VerificationCard, { account: isolated, onRefresh: refresh }),
+    createElement(VerificationCard, { account: noMail, onRefresh: refresh }),
   );
-  assert.match(html, /Mailbox verification is unavailable in this isolated installation/);
-  assert.match(html, /Your operator manages account enrollment/);
-  assert.doesNotMatch(html, /configure mail/);
+  assert.match(html, /Email delivery is disabled on this installation/);
+  assert.doesNotMatch(html, /isolated installation|operator attested/i);
   assert.match(html, /<button disabled="">Request verification email/);
   const invitations = renderToStaticMarkup(
-    createElement(Invitations, { account: isolated, workspace: isolated.workspaces[0] }),
+    createElement(Invitations, { account: noMail, workspace: noMail.workspaces[0] }),
   );
-  assert.match(invitations, /Email invitations are unavailable in this isolated installation/);
-  assert.match(invitations, /add their account through Members/);
-  assert.doesNotMatch(invitations, /configure mail/);
+  assert.match(invitations, /Email delivery is disabled on this installation/);
   assert.match(invitations, /<button disabled="">Send invitation/);
 });
