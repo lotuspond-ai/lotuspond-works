@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import pytest
 from lotuspond.config import Settings
-from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,7 +25,6 @@ def rendered_services(request, tmp_path):
         "LOTUSPOND_DATABASE_URL": "postgresql+psycopg://test:synthetic@postgres/lotuspond",
         "LOTUSPOND_REDIS_URL": "redis://:synthetic@redis:6379/0",
         "LOTUSPOND_ORIGIN": "https://lotuspond.example.com",
-        "LOTUSPOND_REQUIRE_MFA": "true",
         "LOTUSPOND_MFA_ENCRYPTION_KEY": base64.urlsafe_b64encode(bytes(32)).decode(),
         "LOTUSPOND_SMTP_TIMEOUT_SECONDS": "20",
         "LOTUSPOND_SMTP_CONVERSATION_SECONDS": "90",
@@ -63,14 +61,11 @@ def service_settings(service):
         return Settings(_env_file=None)
 
 
-def test_compose_applies_installation_mfa_and_fails_closed_without_key(
-    rendered_services,
-):
+def test_compose_gives_the_mfa_key_to_the_api_only(rendered_services):
     api = rendered_services["api"]
-    assert service_settings(api).require_mfa is True
-    api["environment"]["LOTUSPOND_MFA_ENCRYPTION_KEY"] = ""
-    with pytest.raises(ValidationError, match="authenticator requirement needs"):
-        service_settings(api)
+    assert service_settings(api).mfa_encryption_key is not None
+    # The installation-wide authenticator requirement was retired (ADR-0014).
+    assert "LOTUSPOND_REQUIRE_MFA" not in api["environment"]
     assert not rendered_services["mail-worker"]["environment"].get(
         "LOTUSPOND_MFA_ENCRYPTION_KEY"
     )

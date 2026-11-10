@@ -375,13 +375,13 @@ test('adapter environment excludes control-plane credentials and permits explici
     LOTUSPOND_API_KEY: 'control',
     LOTUSPOND_DATABASE_URL: 'postgres',
     LOTUSPOND_MFA_ENCRYPTION_KEY: 'mfa',
-    LOTUSPOND_MCP_TOKEN: 'adapter-token',
+    LOTUSPOND_HTTP_TOKEN: 'adapter-token',
     LOTUSPOND_RUNNER_ADAPTER_ENV: 'CUSTOM_PROVIDER_TOKEN',
     CUSTOM_PROVIDER_TOKEN: 'custom',
   });
   assert.deepEqual(child, {
     PATH: '/bin',
-    LOTUSPOND_MCP_TOKEN: 'adapter-token',
+    LOTUSPOND_HTTP_TOKEN: 'adapter-token',
     CUSTOM_PROVIDER_TOKEN: 'custom',
   });
   assert.throws(

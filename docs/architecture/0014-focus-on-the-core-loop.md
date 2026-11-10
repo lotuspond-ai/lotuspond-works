@@ -20,7 +20,7 @@ Retire these features:
 | --- | --- |
 | Air-gapped operation | `LOTUSPOND_NETWORK_MODE`; the offline image bundle and its drill (`deploy/airgap/`, `deploy/checks/airgap-smoke.py`, `verify_airgap_bundle.py`, CI `offline-install`); the customer execution archive (`deploy/execution/build-bundle.sh`, `verify-bundle.sh`). The execution image itself stays. |
 | Offline identity enrollment | `offline_identity.py`, `offline_provision.py`, `npm run offline-identity`, `/auth/offline-enrollment/*`, the Enrollment page; an operator attestation no longer verifies an identity. |
-| Authenticator requirements | The installation-wide `LOTUSPOND_REQUIRE_MFA`, the organization-wide requirement and its Settings card, and the administrator-authorized factor reset. Personal authenticators, recovery codes and the mandatory authenticator for production platform operators stay. |
+| Authenticator requirements | The installation-wide `LOTUSPOND_REQUIRE_MFA` and the organization-wide requirement with its Settings card. Personal authenticators, recovery codes, the administrator-authorized reset for a member who lost every factor, and the mandatory authenticator for production platform operators stay. |
 | Tool authorization | `POST /authorize` and a policy's blocked and approval tool lists. Approving exact actions is E05's human tasks. |
 | MCP and A2A runners | `runner-mcp`, `runner-a2a` and their protocol clients. The HTTP runner and the release gate stay. |
 | Operations page | `/admin/operations`, the Operations tab and Redis worker-poll observations. Redis stays for rate limiting. |
@@ -35,7 +35,7 @@ Keep the stored data and the schema, as ADR-0012 and ADR-0013 do:
 ## Consequences
 
 - Identity is verified only by mailbox. An account whose only verification was an operator attestation loses organization and operator authority until it verifies its mailbox. The capability register records no customer use.
-- An organization that turned on the authenticator requirement no longer has its members held to it, and an installation's `LOTUSPOND_REQUIRE_MFA` is ignored. This is a deliberate reduction in scope, not a weakening of any remaining check: personal authenticators and the production-operator requirement work as before.
+- An organization that turned on the authenticator requirement no longer has its members held to it, and an installation's `LOTUSPOND_REQUIRE_MFA` is ignored. This is a deliberate reduction in scope, not a weakening of any remaining check: personal authenticators, the lost-factor reset and the production-operator requirement work as before.
 - Mail is the only way to verify a mailbox, recover a password or accept an invitation, so a hosted installation needs an authorized SMTP service.
 - The service bundle is one Compose file. The execution image runs `runner-http` and `gate`.
 - Unmerged work is handled outside this record. `claude/control-transport-reuse`, whose measurement was inconclusive, is not merged. `claude/e04-cursor-redesign` (finding 11) is held: it raises engine throughput for scale, its own finding is still open, and it needs rebasing onto ADR-0012 and ADR-0013 before it can be validated.

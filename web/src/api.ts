@@ -4,7 +4,6 @@ export type Workspace = {
   name: string;
   kind: 'personal' | 'organization';
   role: string;
-  require_mfa?: boolean;
 };
 export type Account = {
   user: {
@@ -23,7 +22,6 @@ export type Account = {
     session_verified: boolean;
     recovery_codes_remaining: number;
     required_for_privileged: boolean;
-    required_by_installation?: boolean;
   };
   capabilities?: {
     mail_enabled: boolean;

@@ -14,11 +14,6 @@ import {
   registrationPayload,
   saveOrganizationDraft,
 } from './lib/registration.js';
-import { AuthenticatorPolicy } from './components/AuthenticatorPolicy.js';
-import {
-  authenticatorRequirement,
-  type AuthenticatorPolicy as AuthenticatorPolicyState,
-} from './lib/authenticatorPolicy.js';
 import { ScenarioForm } from './components/ScenarioForm.js';
 import { RecordDetails } from './components/RecordDetails.js';
 import {
@@ -515,16 +510,6 @@ export function App({
               {account.mfa?.enabled
                 ? 'Verify this session with your authenticator before platform administration.'
                 : 'Set up an authenticator before using platform administration.'}{' '}
-              <a className="text-button" href="#account-security">
-                Open account security
-              </a>
-            </p>
-          )}
-          {authenticatorRequirement(account, currentWorkspace) && page !== 'account-security' && (
-            <p className="notice">
-              {authenticatorRequirement(account, currentWorkspace) === 'installation'
-                ? 'This installation requires an authenticator. Set one up to reach any workspace.'
-                : 'This organization requires an authenticator. Set one up to reach its projects, releases, and evidence.'}{' '}
               <a className="text-button" href="#account-security">
                 Open account security
               </a>
@@ -1599,7 +1584,6 @@ function Settings({
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const canEdit = ['owner', 'admin'].includes(role);
-  const policy = data?.authenticator_policy as AuthenticatorPolicyState | undefined;
   useEffect(() => {
     setData(null);
     setError('');
@@ -1656,18 +1640,6 @@ function Settings({
             )}
             {saved && <p role="status">Settings saved.</p>}
           </form>
-          {policy && (
-            <AuthenticatorPolicy
-              workspace={workspace}
-              policy={policy}
-              canEdit={canEdit}
-              enrolled={!!account.mfa?.enabled}
-              onChanged={(next) => {
-                setData({ ...data, authenticator_policy: next, require_mfa: next.require_mfa });
-                void onRefresh();
-              }}
-            />
-          )}
         </>
       ) : !error ? (
         <p role="status">Loading settings…</p>

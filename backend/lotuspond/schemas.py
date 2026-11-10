@@ -193,10 +193,6 @@ class WorkspaceInput(Input):
     name: Name
 
 
-class AuthenticatorPolicyInput(Input):
-    require_mfa: bool
-
-
 class AuthenticatorReset(Input):
     current_password: str = Field(min_length=1, max_length=256)
     reason: str = Field(min_length=10, max_length=2000)
