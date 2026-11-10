@@ -454,7 +454,7 @@ def deliver_claim(
 
 
 def run_once(factory, settings: Settings, *, smtp_factory=smtplib.SMTP) -> bool | None:
-    if not settings.mail_enabled or settings.network_mode == "airgap":
+    if not settings.mail_enabled:
         return None
     with factory.begin() as db:
         claim = claim_mail(db)

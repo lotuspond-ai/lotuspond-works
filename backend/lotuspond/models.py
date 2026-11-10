@@ -306,6 +306,9 @@ class MfaRecoveryCode(Row, Base):
     )
 
 
+# Offline identity enrollment is retired (ADR-0014). Stored attestations and enrollments
+# stay; a stored unfinished enrollment still blocks its account, and an attestation no
+# longer verifies an identity.
 class OfflineIdentityAttestation(Row, Base):
     __tablename__ = "offline_identity_attestations"
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)

@@ -34,7 +34,6 @@ export function VerificationCard({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const mailDisabled = account.capabilities?.mail_enabled === false;
-  const offlineInstallation = account.capabilities?.offline_enrollment_enabled === true;
   async function request() {
     setBusy(true);
     setError('');
@@ -62,9 +61,8 @@ export function VerificationCard({
         <>
           {identityVerified(account.user) ? (
             <p>
-              {account.user.identity_verification_source === 'operator_attested'
-                ? 'An operator attested to your identity. Your mailbox has not been verified.'
-                : 'Your identity is verified, but its source was not recorded. Your mailbox has not been verified.'}{' '}
+              Your identity is verified, but its source was not recorded. Your mailbox has not been
+              verified.{' '}
               Mailbox verification is a separate ownership check.
             </p>
           ) : (
@@ -72,9 +70,8 @@ export function VerificationCard({
           )}
           {mailDisabled && (
             <p role="status">
-              {offlineInstallation
-                ? 'Mailbox verification is unavailable in this isolated installation. Your operator manages account enrollment.'
-                : 'Email delivery is disabled on this installation. Ask the operator to configure mail before requesting verification.'}
+              Email delivery is disabled on this installation. Ask the operator to configure mail
+              before requesting verification.
             </p>
           )}
           <div className="inline-actions">
@@ -340,8 +337,7 @@ export function IdentityFlow({
             <>
               <VerificationCard account={account} onRefresh={onRefresh} />
               <p className="hint">
-                Email invitations require mailbox verification, including for operator-attested
-                accounts. After verifying, return here and refresh your verification status. Your
+                Email invitations require mailbox verification. After verifying, return here and refresh your verification status. Your
                 invitation stays in this tab for up to one hour.
               </p>
             </>

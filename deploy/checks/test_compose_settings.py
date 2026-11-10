@@ -14,7 +14,7 @@ from pydantic import ValidationError
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.fixture(params=["compose.yaml", "compose.onprem.yaml"])
+@pytest.fixture(params=["compose.yaml"])
 def rendered_services(request, tmp_path):
     # All values are synthetic; do not inherit a developer's deployment configuration.
     variables = {

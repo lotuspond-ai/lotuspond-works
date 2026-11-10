@@ -1,9 +1,8 @@
-export type IdentityRoute = 'verify-email' | 'reset-password' | 'accept-invitation' | 'enroll';
+export type IdentityRoute = 'verify-email' | 'reset-password' | 'accept-invitation';
 const routes = new Set<IdentityRoute>([
   'verify-email',
   'reset-password',
   'accept-invitation',
-  'enroll',
 ]);
 const invitationKey = 'lotuspond.pending-invitation';
 const retentionMs = 60 * 60 * 1000;

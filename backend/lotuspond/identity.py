@@ -262,7 +262,6 @@ def me(request: Request, db: Session = DB):
         "capabilities": {
             "mail_enabled": request.app.state.settings.mail_enabled,
             "registration_enabled": request.app.state.settings.registration_enabled,
-            "offline_enrollment_enabled": request.app.state.settings.network_mode == "airgap",
         },
         "mfa": mfa_status(db, request, user),
     }

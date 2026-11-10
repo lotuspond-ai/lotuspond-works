@@ -6,7 +6,6 @@ import { Workspaces } from './pages/Workspaces.js';
 import { AccountSecurity } from './pages/AccountSecurity.js';
 import { IdentityFlow, IdentityFrame, VerificationCard } from './pages/IdentityFlow.js';
 import { Invitations } from './pages/Invitations.js';
-import { Enrollment } from './pages/Enrollment.js';
 import { Landing } from './pages/Landing.js';
 import { identityVerified } from './lib/identityStatus.js';
 import { isIdentityRoute, type IdentityLinks } from './lib/identityLinks.js';
@@ -264,7 +263,6 @@ export function App({
   const announcedPage = useRef(page);
   const navOpenNow = useRef(navOpen);
   const focusMainAfterNavigation = useRef(false);
-  const enrollmentWorkspace = useRef('');
   const setup = useSetupProgress(workspace);
   const refreshSetup = setup.refresh;
   const signedInView =
@@ -372,24 +370,8 @@ export function App({
       </div>
     );
   const invitationToken = identityLinks.token('accept-invitation');
-  if (page === 'enroll')
-    return (
-      <IdentityFrame signedIn={!!account}>
-        <Enrollment
-          key={`${page}-${linkVersion}`}
-          links={identityLinks}
-          account={account}
-          onRefresh={refreshAccount}
-          onCompleted={async (id) => {
-            enrollmentWorkspace.current = id;
-            await refreshAccount();
-          }}
-        />
-      </IdentityFrame>
-    );
   if (
     (isIdentityRoute(page) || page === 'forgot-password') &&
-    page !== 'enroll' &&
     !(page === 'accept-invitation' && !account && invitationToken)
   ) {
     return (
@@ -413,8 +395,7 @@ export function App({
       <Welcome
         key={page}
         onReady={async () => {
-          await refreshAccount(enrollmentWorkspace.current || undefined);
-          enrollmentWorkspace.current = '';
+          await refreshAccount();
         }}
         initialError={error}
         initialMode={

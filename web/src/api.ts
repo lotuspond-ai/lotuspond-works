@@ -14,7 +14,7 @@ export type Account = {
     is_platform_admin: boolean;
     email_verified: boolean;
     identity_verified?: boolean;
-    identity_verification_source?: 'mailbox' | 'operator_attested' | null;
+    identity_verification_source?: 'mailbox' | null;
   };
   workspaces: Workspace[];
   mfa?: {
@@ -28,7 +28,6 @@ export type Account = {
   capabilities?: {
     mail_enabled: boolean;
     registration_enabled: boolean;
-    offline_enrollment_enabled?: boolean;
   };
 };
 // A field-level problem the server reports without echoing the submitted value.

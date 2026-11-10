@@ -46,10 +46,6 @@ function configuration(env) {
   )
     throw new AdapterError('endpoint_rejected');
   if (url.protocol === 'http:' && !local) throw new AdapterError('https_required');
-  const networkMode = env.LOTUSPOND_NETWORK_MODE ?? 'connected';
-  if (!['connected', 'airgap'].includes(networkMode))
-    throw new AdapterError('invalid_configuration');
-  if (networkMode === 'airgap' && !local) throw new AdapterError('airgap');
   const mode = env.LOTUSPOND_HTTP_MODE ?? 'plain-input';
   if (!['plain-input', 'openai-chat'].includes(mode))
     throw new AdapterError('invalid_configuration');
