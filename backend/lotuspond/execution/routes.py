@@ -56,7 +56,7 @@ from .contracts import (
     canonical_value,
 )
 from .deployments import _view as deployment_view
-from .deployments import create_deployment, set_deployment_status
+from .deployments import create_deployment, set_deployment_status, stored_unreviewed
 from .errors import ExecutionError
 from .projections import project_execution
 from .publication import mutation_replay, publication_view, publish_v2, remember
@@ -229,9 +229,9 @@ def get_execution_deployment(
 ):
     no_query(request)
     current = actor(db, request, project_id, environment_id, "read")
-    return _json(
-        deployment_view(record(db, ExecutionDeployment, current.scope, _id(deployment_id)), None)
-    )
+    deployment = record(db, ExecutionDeployment, current.scope, _id(deployment_id))
+    unreviewed = stored_unreviewed(db, current.scope, deployment.active_revision_id)
+    return _json(deployment_view(deployment, None, unreviewed))
 
 
 def _status(request, db, project_id, environment_id, deployment_id, revision_id, raw):

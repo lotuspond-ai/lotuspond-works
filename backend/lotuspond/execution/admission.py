@@ -28,14 +28,17 @@ from ..models import (
     new_id,
 )
 from . import memo
+from .action_policies import admit_closure
 from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
 from .authorization import ExecutionActor, lock, mark_replay, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
 from .deployments import _configuration, _pool, _stored_configuration, gates, load_deployment
+from .engine_contracts import INTERPRETER_V1
 from .errors import ExecutionError, execution_service
 from .interpreters import require_interpreter
 from .orchestrator import mark_runnable
+from .program import stored_closure
 from .publication import current_snapshot, load_publication
 
 
@@ -117,6 +120,18 @@ class AdmissionService:
         except ExecutionError:
             raise ValueError("Unregistered interpreter version") from None
 
+    def interpreter_for(self, db, scope, publication_id) -> str:
+        """v1 unless the closure uses an E05 feature; refused unless this build registers it.
+
+        `interpreter_id` (the constructor's) stays the version plans without E05
+        features pin.
+        """
+        selected = admit_closure(stored_closure(db, scope, publication_id))
+        if selected == INTERPRETER_V1 and self.interpreter_id != INTERPRETER_V1:
+            # A plain plan never pins another version (it would fail only at load).
+            raise ExecutionError("unsupported_interpreter")
+        return require_interpreter(selected)
+
     def _lookups(self, db, actor):
         """The provider lookups admission needs, made before its first row lock.
 
@@ -195,6 +210,8 @@ class AdmissionService:
         publication = record(db, ExecutablePublication, actor.scope, revision.publication_id)
         package = memo.package(json.loads(publication.canonical_package))
         validate_value(request.input, package.input_schema, package.schemas)
+        # The pinned closure selects the interpreter (E05, owner decision 15).
+        interpreter_id = self.interpreter_for(db, actor.scope, publication.id)
         admitted_at = database_now_ms(db)
         if grants is None:
             grant, tenant, recovery = self.budgets._grants(db, actor.scope)
@@ -215,7 +232,7 @@ class AdmissionService:
             **actor.scope.model_dump(),
             id=new_id(),
             deployment_revision_id=revision.id,
-            interpreter_id=self.interpreter_id,
+            interpreter_id=interpreter_id,
             engine_identity=new_id(),
             input_artifact_id=handle.id,
             input_artifact_version=handle.version,

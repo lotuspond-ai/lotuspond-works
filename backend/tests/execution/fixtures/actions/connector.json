@@ -1,0 +1,135 @@
+{
+ "definition": {
+  "artifact_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "operations": [
+   {
+    "effect": "read",
+    "id": "lookup",
+    "idempotency": "none",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "amount_minor",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 1000000000000,
+        "min": 0
+       }
+      },
+      {
+       "name": "currency",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 128
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "present",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "record_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 128
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "write",
+    "id": "submit",
+    "idempotency": "target_key",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "amount_minor",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 1000000000000,
+        "min": 0
+       }
+      },
+      {
+       "name": "currency",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 128
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "present",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "absence_rules": [
+      {
+       "op": "present",
+       "readback_pointer": "/present"
+      }
+     ],
+     "effect_rules": [
+      {
+       "op": "present",
+       "readback_pointer": "/present"
+      }
+     ],
+     "mode": "read_back",
+     "read_operation": "lookup"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "record_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 128
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "connector",
+ "name": "synthetic-target",
+ "schemas": [],
+ "version": "1.0.0"
+}

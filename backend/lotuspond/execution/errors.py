@@ -16,6 +16,8 @@ class ExecutionCode(StrEnum):
     CONFLICT = "conflict"
     UNSUPPORTED_STEP = "unsupported_step"
     UNSUPPORTED_POLICY = "unsupported_policy"
+    # E05: a write whose reconciliation read cannot take its exact target and input.
+    UNSUPPORTED_OPERATION = "unsupported_operation"
     DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
     TRUST_UNAVAILABLE = "trust_unavailable"
     AUTHORITY_UNAVAILABLE = "authority_unavailable"

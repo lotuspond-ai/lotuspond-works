@@ -46,6 +46,7 @@ SINGLE_HEADERS = (
 STATUS = {
     "invalid_request": 400,
     "unsupported_step": 400,
+    "unsupported_operation": 400,
     "unsupported_policy": 400,
     "command_rejected": 400,
     "unauthenticated": 401,

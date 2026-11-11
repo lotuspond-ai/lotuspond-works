@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lotuspond.execution import interpreters, program
+from lotuspond.execution.action_contracts import INTERPRETER_V2
 from lotuspond.execution.admission import AdmissionService
 from lotuspond.execution.engine import PostgresExecutionEngine
 from lotuspond.execution.engine_contracts import INTERPRETER_V1
@@ -35,7 +36,7 @@ V9 = "lotuspond.execution-interpreter.v9"
 
 def test_unsupported_interpreter_is_never_admitted_or_claimed(flows):
     h = flows
-    assert REGISTERED == {INTERPRETER_V1}
+    assert REGISTERED == {INTERPRETER_V1, INTERPRETER_V2}  # E05 adds v2 (owner decision 15)
     assert require_interpreter(INTERPRETER_V1) == INTERPRETER_V1
     for other in (V9, None, 1, "bad id"):
         with pytest.raises(ExecutionError, match="unsupported_interpreter"):
