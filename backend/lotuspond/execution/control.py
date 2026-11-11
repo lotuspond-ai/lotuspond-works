@@ -42,7 +42,7 @@ from hashlib import sha256
 
 from lotuspond_runtime.protocol import CanonicalUUID
 from pydantic import TypeAdapter
-from sqlalchemy import literal, select
+from sqlalchemy import literal, or_, select
 
 from ..fleet.authority import database_now_ms
 from ..models import (
@@ -74,17 +74,39 @@ from .recovery import restored
 TARGET = {"pause": "paused", "resume": "running", "cancel": "cancelled"}
 
 
-def _retained_open_wait(db, execution) -> bool:
-    retained = (
+def retained_clause():
+    """The one retention predicate (E04 finding 2): the wait's capacity record exists.
+
+    Releasing a wait adds a separate `capacity.wait-release:` record and keeps this
+    one, so a wait once listed stays listed.
+    """
+    return (
         select(ExecutionRequest.id)
         .where(
-            ExecutionRequest.workspace_id == execution.workspace_id,
-            ExecutionRequest.project_id == execution.project_id,
-            ExecutionRequest.environment_id == execution.environment_id,
+            ExecutionRequest.workspace_id == ExecutionWait.workspace_id,
+            ExecutionRequest.project_id == ExecutionWait.project_id,
+            ExecutionRequest.environment_id == ExecutionWait.environment_id,
             ExecutionRequest.request_key == literal("capacity.wait:") + ExecutionWait.id,
         )
         .exists()
     )
+
+
+def wait_retained(db, wait) -> bool:
+    return bool(
+        db.scalar(
+            select(ExecutionWait.id).where(ExecutionWait.id == wait.id).where(retained_clause())
+        )
+    )
+
+
+def listed_wait_clause():
+    """Waits a listing shows: every non-open wait, and an open one once retained."""
+    return or_(ExecutionWait.state != "open", retained_clause())
+
+
+def _retained_open_wait(db, execution) -> bool:
+    retained = retained_clause()
     return bool(
         db.scalar(
             scoped(ExecutionWait, scope_of(execution))

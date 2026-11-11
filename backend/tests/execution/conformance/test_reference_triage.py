@@ -113,7 +113,7 @@ def open_form(w, operator, customer, execution_id, seconds=120):
         if view["state"] in {"succeeded", "failed", "cancelled"}:
             raise AssertionError(f"settled before the form: {view} {diagnose(w, execution_id)}")
         for item in operator.waits(customer, execution_id):
-            if item["state"] == "open" and view["state"] != "pending":
+            if item["state"] == "open":  # listed open only once retained (E04 finding 2)
                 return item
         time.sleep(0.2)
     raise AssertionError("no open clerk form")

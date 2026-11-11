@@ -529,17 +529,15 @@ class Operator:
     def open_wait(self, customer, execution_id, path, seconds=60):
         """The open wait at this occurrence path, once it can be signalled.
 
-        Progression opens a wait in one commit and the capacity step retains it in
-        the next. In between the wait is listed open, but an execution still
-        `pending` refuses its signal with 403 (a recorded Task 13 finding), so this
-        also waits for the execution to leave `pending`.
+        E04 finding 2 (fixed in E05 Task 5): a wait is listed open only once the
+        capacity step has retained it, and only then can it be signalled; a signal
+        before that is a 409 to retry. So a listed open wait is ready.
         """
         deadline = time.monotonic() + seconds
         while True:
             for item in self.waits(customer, execution_id):
                 if item["occurrence_path"] == path and item["state"] == "open":
-                    if self.execution(customer, execution_id)["state"] != "pending":
-                        return item
+                    return item
             if time.monotonic() > deadline:
                 raise AssertionError(f"no open wait at {path}")
             time.sleep(0.2)

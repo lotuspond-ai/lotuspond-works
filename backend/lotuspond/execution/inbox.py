@@ -23,6 +23,7 @@ from .admission import _current_deployment
 from .artifacts import ArtifactPolicy
 from .authorization import lock, mark_replay, reauthorize, record, scoped
 from .contracts import SignalReceipt, SignalRequest, canonical_value
+from .control import wait_retained
 from .deployments import execution_gates
 from .errors import ExecutionError, execution_service
 from .orchestrator import mark_runnable
@@ -119,6 +120,19 @@ class InboxService:
             if current_actor.role not in {"owner", "admin"}:
                 raise ExecutionError("forbidden")
             now = database_now_ms(db)
+            # E04 finding 2 (owner decision, 2 November 2026): an open, unexpired wait of
+            # a live execution that the capacity step has not yet retained is listed
+            # nowhere, and its signal is a 409 to retry, never a 403. Read under the
+            # execution, step and wait locks that `retain_wait` also takes.
+            if (
+                state
+                and execution.requested_state != "cancelled"
+                and execution.state in {"pending", "running", "waiting", "paused"}
+                and wait.state == "open"
+                and min(wait.deadline_ms, execution.deadline_ms) > now
+                and not wait_retained(db, wait)
+            ):
+                raise ExecutionError("conflict")
             # A paused execution still accepts signals; progression consumes them on
             # resume, judged by their acceptance time (Task 11).
             if state and (

@@ -55,6 +55,7 @@ from .contracts import (
     SignalRequest,
     canonical_value,
 )
+from .control import listed_wait_clause
 from .deployments import _view as deployment_view
 from .deployments import create_deployment, set_deployment_status, stored_unreviewed
 from .errors import ExecutionError
@@ -364,6 +365,7 @@ def list_production_execution_waits(
         request,
         lambda row: row,
         ExecutionWait.execution_id == execution.id,
+        listed_wait_clause(),  # E04 finding 2: an open wait only once retained
     )
     # Only this page's step instances, never every path of a large iteration.
     paths = dict(
