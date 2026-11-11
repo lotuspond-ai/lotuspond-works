@@ -294,15 +294,18 @@ def activity_config(tmp_path, **changes):
 
 
 def test_activity_worker_runs_synthetic_providers_only_in_test_mode(tmp_path, capsys):
-    """Task 13: test mode runs the packaged synthetic providers; nothing else does."""
+    """Task 13: only test mode runs the packaged synthetic providers. Other modes accept
+    only an operator's real-provider configuration (`provider_config`), so a synthetic
+    one is refused there as invalid, and no configuration at all is unavailable."""
     module = cli_module()
     activity = str(activity_config(tmp_path))
-    # Production and development modes install no provider, whatever is configured.
     for mode in ("production", "development"):
         config = str(config_file(tmp_path, mode=mode))
         assert (
-            module.main(["activity-worker", "--config", config, "--activity-config", activity]) == 3
+            module.main(["activity-worker", "--config", config, "--activity-config", activity]) == 2
         )
+        assert capsys.readouterr().err.strip() == "invalid_input"
+        assert module.main(["activity-worker", "--config", config]) == 3
         assert capsys.readouterr().err.strip() == "unavailable"
     # Test mode needs its activity configuration, and it must be exact closed data.
     config = str(config_file(tmp_path, mode="test"))

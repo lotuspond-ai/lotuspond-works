@@ -46,6 +46,7 @@ class Ledger:
         self.keys: dict[str, tuple[str, str, str]] = {}
         self.fail_after_commit = 0
         self.lock = threading.Lock()
+        self.requests: list[tuple[str, str, bool]] = []  # (method, path, authorized)
 
     # ------------------------------------------------------------------ reads
 
@@ -174,7 +175,9 @@ def handler(ledger: Ledger, token: str):
 
         def _handle(self, method):
             supplied = self.headers.get("Authorization", "")
-            if not hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode()):
+            authorized = hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode())
+            ledger.requests.append((method, self.path, authorized))
+            if not authorized:
                 return self._send(401, {"error": "unauthorized"})
             operation, target = route(method, self.path.split("?", 1)[0])
             if operation is None:

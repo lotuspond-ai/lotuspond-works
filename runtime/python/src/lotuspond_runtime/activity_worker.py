@@ -490,6 +490,7 @@ def _descriptor(descriptor, deps) -> dict:
         "operations": sorted(descriptor.operations),
         "test_only": descriptor.test_only,
         "script": descriptor.script_data() if deps.providers.test_mode else None,
+        "settings": descriptor.settings_data(),
         "connector": (
             None if descriptor.connector is None else descriptor.connector.model_dump(mode="json")
         ),

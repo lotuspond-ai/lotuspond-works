@@ -245,6 +245,7 @@ class Processes:
         dependencies,
         start=True,
         operations=("read",),
+        activity=None,
     ):
         """Enroll and start one installed runtime with synthetic providers.
 
@@ -273,9 +274,13 @@ class Processes:
         worlds.write_private(trust, self.world.state("activity-trust"))
         read_script = {**(read or {"read": {"value": None}}), "counter": str(counter)}
         model_script = {**(model or {"rounds": [{"output": None}]}), "counter": str(model_counter)}
+        # `activity(trust, journal)` builds an operator-format configuration with real
+        # providers instead of the synthetic fixture one.
         worlds.write_private(
             home / "activity.json",
-            {
+            activity(trust, journal)
+            if activity is not None
+            else {
                 "trust_file": str(trust),
                 "journal_directory": str(journal),
                 "providers": [

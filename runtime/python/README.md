@@ -266,12 +266,24 @@ private invocation journal records each call before it starts and is the evidenc
 for reconciliation after a lost lease or stop; an uncertain call is never retried
 blindly. A delivery the runtime cannot verify is declined, never run.
 
-This distribution installs no production read or model provider. Outside
-`mode: "test"`, or without `--activity-config`, the command exits 3 (`unavailable`)
-before doing anything. In test mode `--activity-config <private file>` names a
-reread trust file, a journal directory and up to eight synthetic `fixture-read` or
-`fixture-model` descriptors: they exist only to qualify the protocol (Task 13's
-conformance suite and installed acceptance), never to run customer work. While
+Without `--activity-config` the command exits 3 (`unavailable`) before doing
+anything. The configuration is one private file in one of two forms:
+
+- **Operator form (any mode):** a reread activity-trust file, a journal directory,
+  the mounted secret root and mapping with the pinned secret each binding serves, and
+  up to eight real providers (`provider_config.py`). `https-json` is the generic
+  connector's read side: its installed artifact is a routes document whose canonical
+  SHA-256 must equal the connector pin, and each read is one HTTPS GET through
+  `DestinationTransport` with the connection's one secret as a bearer token.
+  `anthropic-messages` is one model round on the Anthropic Messages API (install the
+  `anthropic` extra): its settings carry the pinned model document and configuration
+  (model ID, effort, price table), checked against the pin; the HTTP client takes no
+  proxy from the environment, follows no redirect and never retries. Loopback
+  destinations are allowed only for a test-mode runtime. These providers are tested
+  locally against a stand-in and an API double, not against a live system.
+- **Fixture form (test mode only):** up to eight synthetic `fixture-read` or
+  `fixture-model` descriptors, which exist only to qualify the protocol (Task 13's
+  conformance suite and installed acceptance), never to run customer work. While
 idle the worker polls again after 0.2 s, backing off to 1 s.
 
 Operator bootstrap and qualification are documented in

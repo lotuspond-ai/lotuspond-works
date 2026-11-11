@@ -1474,3 +1474,26 @@ Local evidence only: no push of this code at the time of the runs, no hosted CI 
 - **Finding:** an execution's active-time budget is the smallest declared `timeout_seconds` (the agent's 240 s), and each attempt is charged at least its reservation. 60 s per attempt failed with `budget_exceeded` on the agent's first tool call; 20 s fits. Recorded in the specification for milestone 2.
 - **Revision 3 (same day):** the model pin moved to `claude-haiku-5-5` at `medium` effort, the agent's limits to 600 s, 20 steps and a $0.02 cost cap. The reference case was rerun alone in the Linux container and passed (1 passed, 62 s). No real model was called: the pin is a catalog value, and the synthetic provider answers in test mode.
 - **Not covered:** the clerk's 3-day timeout, the action branches (E05), any real provider, and hosted CI.
+
+## Reference workflow, milestone 2: the runtime's real providers — 2026-11-11
+
+Local evidence only: no hosted CI (GitHub Actions refused every job for billing, 0 steps), no deployment, no live model call and no real AP system. Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6), on battery power; no timing claim is made.
+
+- **What shipped (runtime 0.2.0, unversioned change):**
+  - `https-json`, the generic connector's read side. Its installed artifact is a routes document whose canonical SHA-256 is the connector's pinned `artifact_sha256`. Reads go through `DestinationTransport` with the connection's one secret as a bearer token; `ConnectedDestination` now also accepts `Authorization: Bearer <token>`.
+  - `anthropic-messages`, one model round on the Anthropic Messages API through the official `anthropic` SDK 2.3.0, as an optional `anthropic` extra. It checks the pinned model document and configuration, uses strict tools and structured output, and sets no proxy from the environment, no redirects and no SDK retries.
+  - An opaque per-round `continuation`, so Claude's earlier turns and thinking blocks are replayed unchanged.
+  - An operator-form activity configuration (`provider_config.py`), which a test-mode runtime may also use against loopback stand-ins.
+  - The reference package now declares its `ap_token` secret, and the model configuration pins Anthropic's prices.
+- **Mac:** 22 reference tests passed, now including the pinned routes and the `https-json` connector reading the HTTPS stand-in. The runtime's new connector and model tests (16, against a local HTTPS server and a Messages API double) and the destination tests passed. `lint:python` passed.
+- **Linux, real processes:** `test_reference_triage.py` now runs the prefix on the API, orchestrator, sweeper and one enrolled runtime using the real providers. Reads go to the HTTPS stand-in with a mounted bearer token; model rounds go to a local Messages API double scripted from the scenarios, in the documented response shape. All six scenarios end as specified, with these checks:
+  - every read is an authorized GET;
+  - read and model call counts are exact;
+  - the requests name `claude-haiku-5-5` at `medium` effort with no sampling parameters and strict tools;
+  - the second round replays the model's thinking and tool-use turn unchanged.
+- **Regression:**
+  - Full conformance tier 1 and installed acceptance: 49 passed (33 min 26 s).
+  - Runtime job: 764 passed.
+  - `validate`: the backend check suite 1,079 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed. The required PostgreSQL suite had 1,220 passed and 1 failed. The failure, `test_artifacts.py::test_retention_inventory_is_bounded_dry_run`, has a 250 ms retention cutoff that two writes outlasted on the loaded host; it involves no code this change touched, and alone it passed 5 of 5.
+  - Three runtime expectations were updated for the new behaviour. Installed metadata now lists the optional extra, and a core install must not contain `anthropic` or `httpx2`. A synthetic configuration outside test mode is now refused as `invalid_input` rather than `unavailable`, so synthetic providers still run only in test mode.
+- **Not covered:** a live Anthropic call (no API key on this machine), a real AP system, writes (E05), and hosted CI.

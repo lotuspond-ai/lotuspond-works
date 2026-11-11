@@ -2024,11 +2024,12 @@
  },
  "connectors": [
   {
+   "credential_ref": "ap_token",
    "id": "ap",
    "ref": {
     "kind": "connector",
     "name": "ap-standin",
-    "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+    "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
     "version": "0.1.0"
    }
   }
@@ -2075,7 +2076,7 @@
    "ref": {
     "kind": "model",
     "name": "ap-investigator-model",
-    "sha256": "1244bb4e1edcc728eb1916049148e6ac38c1566f66feed2d2c44483e2c29ab40",
+    "sha256": "83e4f8aebf1ab9da4a6d75c88e7bb972dcc498ebfd71a3cdf2105247f4b4be81",
     "version": "0.1.0"
    }
   }
@@ -2204,7 +2205,9 @@
  ],
  "schema_version": "lotuspond.workflow-package.v2",
  "schemas": [],
- "secret_refs": [],
+ "secret_refs": [
+  "ap_token"
+ ],
  "subworkflows": [],
  "version": "0.1.0"
 }

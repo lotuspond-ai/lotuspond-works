@@ -73,6 +73,9 @@ class ProviderDescriptor:
     operations: frozenset = field(default_factory=frozenset)
     test_only: bool = False
     script: object = field(default=None, compare=False, hash=False)
+    # A real provider's operator data (its installed connector routes, CA file and
+    # egress policy, or its pinned model document), canonical JSON text; never code.
+    settings: object = field(default=None, compare=False, hash=False)
     connector: ConnectorPin | None = None
     credentials: tuple = ()
 
@@ -101,9 +104,16 @@ class ProviderDescriptor:
             if not self.test_only:
                 raise ValueError("Only a synthetic provider carries a script")
             object.__setattr__(self, "script", rfc8785.dumps(self.script).decode("utf-8"))
+        if self.settings is not None:
+            if self.test_only:
+                raise ValueError("A synthetic provider carries a script, not settings")
+            object.__setattr__(self, "settings", rfc8785.dumps(self.settings).decode("utf-8"))
 
     def script_data(self):
         return None if self.script is None else json.loads(self.script)
+
+    def settings_data(self):
+        return None if self.settings is None else json.loads(self.settings)
 
 
 @dataclass(frozen=True)
@@ -195,9 +205,15 @@ class ToolProposal:
 
 @dataclass(frozen=True)
 class ModelReply:
+    """`continuation` is the provider's own record of this round (for example the
+    model's content blocks), opaque to the runtime. It is kept only in worker memory
+    and handed back to the same provider on the next round, so a model that needs
+    its earlier turns can continue; it is never stored or journaled."""
+
     output: object | None
     tool_calls: tuple[ToolProposal, ...]
     usage: UsageObservation
+    continuation: object | None = None
 
 
 @dataclass(frozen=True)

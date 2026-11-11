@@ -1,0 +1,41 @@
+{
+ "connector": {
+  "name": "ap-standin",
+  "version": "0.1.0"
+ },
+ "format": "lotuspond.https-json.routes.v1",
+ "operations": {
+  "get_credit_note_request": {
+   "method": "GET",
+   "path": "/invoices/{invoice_id}/credit-note-request"
+  },
+  "get_goods_receipt": {
+   "method": "GET",
+   "path": "/goods-receipts/{po_number}"
+  },
+  "get_invoice": {
+   "method": "GET",
+   "path": "/invoices/{invoice_id}"
+  },
+  "get_payment_hold": {
+   "method": "GET",
+   "path": "/invoices/{invoice_id}/payment-hold"
+  },
+  "get_purchase_order": {
+   "method": "GET",
+   "path": "/purchase-orders/{po_number}"
+  },
+  "get_supplier_contract": {
+   "method": "GET",
+   "path": "/suppliers/{supplier_id}/contract"
+  },
+  "list_credit_notes": {
+   "method": "GET",
+   "path": "/suppliers/{supplier_id}/credit-notes"
+  },
+  "list_supplier_invoices": {
+   "method": "GET",
+   "path": "/suppliers/{supplier_id}/purchase-orders/{po_number}/invoices"
+  }
+ }
+}

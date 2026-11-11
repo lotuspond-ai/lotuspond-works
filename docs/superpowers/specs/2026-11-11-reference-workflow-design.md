@@ -87,6 +87,17 @@ Proving the package version itself (scenarios that run the workflow, not an agen
 8. **Tolerance:** 0.5 % of the PO total and no quantity beyond what was received, as a constant in the package. A customer's own tolerance is a new package version, which is proven and released like any other change. It is not a deployment setting that could skip the proof.
 9. **The timeout finding:** no engine change. E04's conservative intersection stays, because it is what keeps a reused agent or subworkflow from granting itself a fresh allowance. The package sizes the agent's limits to the execution instead. E04 also counts every reservation against the smallest `max_steps`, so the agent's `max_steps` is 20, covering 3 reads, the agent root and its 6 model rounds and 8 tool calls (18). Its timeout is 600 s, which fits those 18 attempts at 20 s reservations (360 s). Milestone 2 records real reservation sizes. Only if a real workflow cannot fit does a follow-up reopen the rule.
 
+## Milestone 2 as built (11 November)
+
+Decisions taken while building the runtime's real providers:
+
+- **The connector's installed artifact is a routes document.** The catalog's `artifact_sha256` for `ap-standin` is the canonical SHA-256 of `reference/invoice-triage/catalog/ap-standin.routes.json`, which maps each read operation to one GET path. A customer's AP system is another routes document, and so another pinned connector. There is no per-deployment path setting.
+- **The AP token is declared.** The package names `ap_token` in `secret_refs` and as the connector's `credential_ref`. Deployment admission then requires the connection to bind exactly that secret. The runtime resolves it from its mounted secrets just before each read and sends it only as a bearer token.
+- **Model egress uses the official SDK, not the connector transport.** The connector transport exists to police customer-supplied destinations: one DNS resolution, an egress policy on every address, a narrow HTTP grammar. The model destination is the operator's own fixed HTTPS origin. So `anthropic-messages` uses the `anthropic` SDK (pinned `2.3.0`, the newest release older than two weeks, as an optional runtime extra). It sets no proxy from the environment, follows no redirect, makes no SDK retry (the engine owns retries) and bounds each call by time. That meets SECURITY.md's rules for model destinations.
+- **Each model round carries its own continuation.** The runtime's transcript held only tool results. Claude needs its own earlier turns, including thinking blocks unchanged, to continue a tool conversation. A provider may now return an opaque `continuation` with its reply, at most 256 KiB, kept only in worker memory and handed back on the next round. Synthetic providers return none, so their behaviour is unchanged.
+- **Cost comes from the pinned price table.** The model configuration now includes Anthropic's rates (`price_microusd_per_mtok`), so a price change is a new pin. Each round's cost is rounded up from the reported token counts. Unreported or cached tokens make the cost unknown, which ends the agent rather than guessing.
+- **No live call yet.** This machine has no API key. The opt-in live call waits for one. Until then the model provider is tested against a local double that follows the documented response shape.
+
 ## Milestones
 
 Each is its own PR, in this order. The workflow is done after milestone 6.

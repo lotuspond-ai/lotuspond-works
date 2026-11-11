@@ -1,7 +1,7 @@
 {
  "definition": {
   "configuration_revision": "1",
-  "configuration_sha256": "dbacb5731642b59bd33a570349542685ab2d9c44dfd5f63bb8f4ede7667c2ad6",
+  "configuration_sha256": "7f19d5b1706e2e43a3d43b5487333e7fcf9789eb1eef53ef7ab7615066c81326",
   "input_schema": {
    "fields": [
     {
@@ -381,7 +381,7 @@
     "connector_ref": {
      "kind": "connector",
      "name": "ap-standin",
-     "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+     "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
      "version": "0.1.0"
     },
     "operation": "get_supplier_contract",
@@ -398,7 +398,7 @@
     "connector_ref": {
      "kind": "connector",
      "name": "ap-standin",
-     "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+     "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
      "version": "0.1.0"
     },
     "operation": "list_supplier_invoices",
@@ -415,7 +415,7 @@
     "connector_ref": {
      "kind": "connector",
      "name": "ap-standin",
-     "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+     "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
      "version": "0.1.0"
     },
     "operation": "list_credit_notes",

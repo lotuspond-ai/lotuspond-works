@@ -169,9 +169,30 @@ def operation(oid, target, output, *, effect="read", input_schema=NULL, readback
     }
 
 
-def synthetic_digest(label):
-    """A declared, not measured, artifact digest: the connector binary ships in M2."""
-    return sha256(f"lotuspond synthetic placeholder: {label}".encode()).hexdigest()
+# The installed connector artifact: the runtime's generic `https-json` connector reads
+# this routes document, and its canonical SHA-256 is the catalog's `artifact_sha256`.
+# The paths are the stand-in's (`standin/server.py` ROUTES); a customer's AP system
+# would be another routes document and so another pinned connector.
+ROUTES = {
+    "format": "lotuspond.https-json.routes.v1",
+    "connector": {"name": "ap-standin", "version": VERSION},
+    "operations": {
+        "get_invoice": {"method": "GET", "path": "/invoices/{invoice_id}"},
+        "get_purchase_order": {"method": "GET", "path": "/purchase-orders/{po_number}"},
+        "get_goods_receipt": {"method": "GET", "path": "/goods-receipts/{po_number}"},
+        "get_supplier_contract": {"method": "GET", "path": "/suppliers/{supplier_id}/contract"},
+        "list_supplier_invoices": {
+            "method": "GET",
+            "path": "/suppliers/{supplier_id}/purchase-orders/{po_number}/invoices",
+        },
+        "list_credit_notes": {"method": "GET", "path": "/suppliers/{supplier_id}/credit-notes"},
+        "get_payment_hold": {"method": "GET", "path": "/invoices/{invoice_id}/payment-hold"},
+        "get_credit_note_request": {
+            "method": "GET",
+            "path": "/invoices/{invoice_id}/credit-note-request",
+        },
+    },
+}
 
 
 BY_INVOICE = fields(invoice_id=ID)
@@ -184,7 +205,7 @@ connector = {
     "version": VERSION,
     "schemas": [],
     "definition": {
-        "artifact_sha256": synthetic_digest("https-json connector 0.1.0"),
+        "artifact_sha256": sha256(rfc8785.dumps(ROUTES)).hexdigest(),
         "operations": [
             operation("get_invoice", BY_INVOICE, INVOICE),
             operation("get_purchase_order", BY_PO, ORDER),
@@ -234,7 +255,19 @@ AGENT_LIMITS = {
 # Claude Haiku 5.5 at medium effort: the cheapest current model with tool use and
 # structured output (decision 3). No sampling parameters: API version 2026-10-21
 # refuses them. The 600 s timeout also bounds the execution's active time (finding 1).
-MODEL_CONFIGURATION = {"model": "claude-haiku-5-5", "effort": "medium"}
+MODEL_CONFIGURATION = {
+    "model": "claude-haiku-5-5",
+    "effort": "medium",
+    # Anthropic's published rates (3 November 2026), micro-USD per million tokens:
+    # $0.10 / $0.50, or $0.50 / $2.50 for prompts above 100K tokens.
+    "price_microusd_per_mtok": {
+        "input": 100000,
+        "output": 500000,
+        "long_context_above": 100000,
+        "long_input": 500000,
+        "long_output": 2500000,
+    },
+}
 model = {
     "format_version": 1,
     "kind": "model",
@@ -549,7 +582,8 @@ def workflow(package_id, name, exception, policies):
         "output_schema": TRIAGE,
         "schemas": [],
         "body": body([*reads, matched], step("matched"), TRIAGE),
-        "secret_refs": [],
+        # The AP system's bearer token: the connection must bind exactly this secret.
+        "secret_refs": ["ap_token"],
         "environment": {
             "runtime_contract": "lotuspond.runtime-contract.v1",
             "platforms": [{"os": "linux", "architecture": "amd64"}],
@@ -572,7 +606,7 @@ def workflow(package_id, name, exception, policies):
             "required_classification": "synthetic",
         },
         "models": [{"id": "investigator", "ref": ref_of(model)}],
-        "connectors": [{"id": "ap", "ref": ref_of(connector)}],
+        "connectors": [{"id": "ap", "ref": ref_of(connector), "credential_ref": "ap_token"}],
         "agents": [],
         "subworkflows": [],
         "evaluations": [],
@@ -611,5 +645,6 @@ if __name__ == "__main__":
     print("prefix package compiled:", len(plan.steps), "steps")
     for document in catalog:
         write(OUT / "catalog" / f"{document['name']}.json", document)
+    write(OUT / "catalog" / "ap-standin.routes.json", ROUTES)
     write(OUT / "package.json", full)
     write(OUT / "prefix.json", copy.deepcopy(prefix))

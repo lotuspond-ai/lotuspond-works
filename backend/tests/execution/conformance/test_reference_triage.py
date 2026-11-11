@@ -1,26 +1,35 @@
-"""Reference workflow, milestone 1: the invoice-triage prefix package on real processes.
+"""Reference workflow on real processes with the runtime's real providers (milestone 2).
 
-The prefix is the reference workflow before E05: three reads, the decimal tolerance
-decision, the tool-using investigation and the clerk's form, with both action branches
-replaced by the form. Providers are the synthetic test-mode fixtures, scripted from the
-stand-in's own records (`reference/invoice-triage/standin/server.py`), so the reads
-return what the HTTPS stand-in serves. No real model, connector or AP system is used.
+The invoice-triage prefix (the workflow before E05) runs on the API, orchestrator,
+sweeper and one enrolled runtime. The runtime's `https-json` connector reads the HTTPS
+stand-in AP system (`reference/invoice-triage/standin/server.py`) with the connection's
+bearer token from a mounted secret, and its `anthropic-messages` provider calls a local
+Messages API double (`standin/model_double.py`) scripted from each scenario. Nothing
+leaves the machine: no real model, AP system or key is used.
 """
 
+import datetime
 import importlib.util
 import json
+import os
+import threading
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import driver as drivers
 import pytest
-from driver import _scope_of, diagnose
-from processes import Processes
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
+from driver import _scope_of, catalog_ref, diagnose
 from sqlalchemy.orm import Session
 
 from lotuspond.models import Execution
 
 REFERENCE = Path(__file__).resolve().parents[4] / "reference" / "invoice-triage"
+AP_TOKEN, MODEL_KEY = "synthetic-ap-token", "synthetic-model-key"
 
 
 def _load(name, path):
@@ -32,29 +41,50 @@ def _load(name, path):
 
 gen = _load("invoice_triage_generate", REFERENCE / "generate.py")
 standin = _load("invoice_triage_standin", REFERENCE / "standin" / "server.py")
+doubles = _load("invoice_triage_model_double", REFERENCE / "standin" / "model_double.py")
 SCENARIOS = json.loads((REFERENCE / "scenarios.json").read_text())["scenarios"]
 
 
-def reads_for(invoice_id):
-    """Each read operation's answer for this invoice, as the stand-in gives it."""
-    ledger = standin.Ledger()
-    invoice = ledger.answer("get_invoice", {"invoice_id": invoice_id})
-    supplier, po = invoice["supplier_id"], invoice["po_number"]
-    answers = {
-        "get_invoice": ledger.answer("get_invoice", {"invoice_id": invoice_id}),
-        "get_purchase_order": ledger.answer("get_purchase_order", {"po_number": po}),
-        "get_goods_receipt": ledger.answer("get_goods_receipt", {"po_number": po}),
-        "get_supplier_contract": ledger.answer("get_supplier_contract", {"supplier_id": supplier}),
-        "list_supplier_invoices": ledger.answer(
-            "list_supplier_invoices", {"supplier_id": supplier, "po_number": po}
-        ),
-        "list_credit_notes": ledger.answer("list_credit_notes", {"supplier_id": supplier}),
-    }
-    reads = {op: {"value": value} for op, value in answers.items()}
-    reads["get_invoice"]["require_seen"] = invoice_id  # the package input reached the read
-    reads["get_purchase_order"]["require_seen"] = po  # and the invoice's PO the next ones
-    reads["get_goods_receipt"]["require_seen"] = po
-    return {"reads": reads}
+def certificate(directory):
+    """A synthetic localhost certificate, its own CA; never production trust."""
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(hours=6))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+        .sign(key, hashes.SHA256())
+    )
+    cert_path, key_path = directory / "standin-cert.pem", directory / "standin-key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    os.chmod(key_path, 0o600)
+    return cert_path, key_path
+
+
+def mounted_secrets(world_root, pins):
+    """E03's mounted layout: private secret files and a private mapping file."""
+    root = drivers.worlds.private_directory(world_root / "secrets" / "root")
+    mapping_dir = drivers.worlds.private_directory(world_root / "secrets" / "mapping")
+    rows = []
+    for binding, value in pins.items():
+        drivers.worlds.write_private(root / binding, value)
+        rows.append({"binding_id": binding, "version": 1, "filename": binding})
+    drivers.worlds.write_private(mapping_dir / "mapping.json", {"bindings": rows})
+    return root, mapping_dir / "mapping.json"
 
 
 def result_of(world, execution_id):
@@ -99,11 +129,21 @@ def prefix_expectation(scenario):
 @pytest.fixture
 def reference(system, linux):
     w = system
-    operator = drivers.Operator(w, w.processes, connector=gen.connector)
+    cert, key = certificate(drivers.worlds.private_directory(w.root / "tls"))
+    server, ledger = standin.serve(0, cert, key, AP_TOKEN, host="127.0.0.1")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    double = doubles.ModelDouble(cert, key, token=MODEL_KEY).start()
+    destination = {"host": "localhost", "port": server.server_address[1], "path_prefix": "/"}
+    operator = drivers.Operator(
+        w,
+        w.processes,
+        connector=gen.connector,
+        destinations=[destination],
+        secret_binding="ap_token",
+    )
     customer = operator.tenant(w.engine, label="Reference")
     # The execution's active budget is the smallest declared timeout (the agent's 600 s),
-    # and every attempt is charged its reservation: 3 reads, the agent root and up to 4
-    # children at 20 s each use 160 s of it.
+    # and every attempt is charged its reservation: 20 s each leaves ample room.
     operator.demand(20000)
     revision = operator.deploy(
         customer,
@@ -111,49 +151,96 @@ def reference(system, linux):
         package=gen.prefix,
         dependencies=[gen.connector, gen.model, gen.clerks],  # a model's closure is its connector
     )
-    yield w, operator, customer, revision
+    ap_pin = customer.connection["secrets"][0]
+    model_pin = {"reference_id": str(uuid4()), "version": 1}
+    root, mapping = mounted_secrets(w.root, {"ap-token": AP_TOKEN, "model-key": MODEL_KEY})
+
+    def activity(trust, journal):
+        return {
+            "trust_file": str(trust),
+            "journal_directory": str(journal),
+            "secrets": {
+                "root": str(root),
+                "mapping_file": str(mapping),
+                "bindings": [
+                    {**ap_pin, "binding": "ap-token"},
+                    {**model_pin, "binding": "model-key"},
+                ],
+            },
+            "providers": [
+                {
+                    "provider_id": "https-json",
+                    "dependency": catalog_ref(gen.connector),
+                    "operations": list(operator.read_operations),
+                    "connector": {
+                        "name": gen.connector["name"],
+                        "version": gen.connector["version"],
+                        "artifact_sha256": gen.connector["definition"]["artifact_sha256"],
+                    },
+                    "settings": {
+                        "routes": gen.ROUTES,
+                        "ca_file": str(cert),
+                        "egress": {"allowed_private_cidrs": ["127.0.0.0/8", "::1/128"]},
+                        "test_loopback": True,
+                    },
+                },
+                {
+                    "provider_id": "anthropic-messages",
+                    "dependency": catalog_ref(gen.model),
+                    "credentials": [model_pin],
+                    "settings": {
+                        "model_document": gen.model,
+                        "configuration": gen.MODEL_CONFIGURATION,
+                        "base_url": f"https://localhost:{double.port}",
+                        "ca_file": str(cert),
+                    },
+                },
+            ],
+        }
+
+    runtime = operator.runtime(customer, "runtime-reference", activity=activity)
+    yield w, operator, customer, revision, ledger, double, runtime
     customer.close()
+    double.stop()
+    server.shutdown()
+    server.server_close()
 
 
-def test_the_prefix_triages_every_scenario_as_specified(reference):
-    w, operator, customer, revision = reference
+def test_the_prefix_runs_every_scenario_on_the_real_providers(reference):
+    w, operator, customer, revision, ledger, double, runtime = reference
     for scenario in SCENARIOS:
-        name = f"runtime-{scenario['id']}"
         rounds = scenario.get("model_rounds", [{"output": None}])
-        runtime = operator.runtime(
-            customer,
-            name,
-            model_document=gen.model,
-            model={"rounds": rounds},
-            read=reads_for(scenario["input"]["invoice_id"]),
-        )
-        print("scenario", scenario["id"], flush=True)
-        try:
-            execution_id = operator.start(customer, revision, scenario["input"])["id"]
-            if scenario["expected"]["status"] != "matched":
-                form = open_form(w, operator, customer, execution_id)
-                operator.signal(customer, execution_id, form["id"], "clerk", scenario["clerk_form"])
-            view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 180)
-            assert view["state"] == "succeeded", (scenario["id"], diagnose(w, execution_id))
-            result = result_of(w, execution_id)
-            for key, value in prefix_expectation(scenario).items():
-                assert result[key] == value, (scenario["id"], key, result)
-            reads = Processes.calls(runtime["counter"])
-            models = Processes.calls(runtime["model_counter"])
-            tools = sum(
-                len(item.get("tool_calls", [])) for item in scenario.get("model_rounds", [])
-            )
-            if scenario["expected"]["status"] == "matched":
-                assert (reads, models) == (3, 0), scenario["id"]  # no model, no person
-            else:
-                assert (reads, models) == (3 + tools, len(rounds)), scenario["id"]
-                assert result["reasons"] == rounds[-1]["output"]["reasons"]
-        except AssertionError as error:
-            logs = w.root / "logs"
-            tails = {
-                path.name: path.read_text(errors="replace")[-3000:]
-                for path in sorted(logs.glob(f"{name}.*")) + sorted(logs.glob("api*.stderr"))
-            }
-            raise AssertionError(f"{error}\n{json.dumps(tails, indent=1)}") from None
-        finally:
-            w.processes.stop(name)
+        double.rounds = rounds
+        reads_before, models_before = len(ledger.requests), len(double.requests)
+        execution_id = operator.start(customer, revision, scenario["input"])["id"]
+        if scenario["expected"]["status"] != "matched":
+            form = open_form(w, operator, customer, execution_id)
+            operator.signal(customer, execution_id, form["id"], "clerk", scenario["clerk_form"])
+        view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 180)
+        assert view["state"] == "succeeded", (scenario["id"], diagnose(w, execution_id))
+        result = result_of(w, execution_id)
+        for key, value in prefix_expectation(scenario).items():
+            assert result[key] == value, (scenario["id"], key, result)
+
+        reads = ledger.requests[reads_before:]
+        models = double.requests[models_before:]
+        tools = [c for r in scenario.get("model_rounds", []) for c in r.get("tool_calls", [])]
+        assert all(method == "GET" and authorized for method, _, authorized in reads), reads
+        invoice = scenario["input"]["invoice_id"]
+        assert reads[0][1] == f"/invoices/{invoice}", reads
+        if scenario["expected"]["status"] == "matched":
+            assert (len(reads), len(models)) == (3, 0), scenario["id"]  # no model, no person
+            continue
+        assert (len(reads), len(models)) == (3 + len(tools), len(rounds)), scenario["id"]
+        assert result["reasons"] == rounds[-1]["output"]["reasons"]
+        first = models[0]["body"]
+        assert first["model"] == "claude-haiku-5-5"
+        assert first["output_config"]["effort"] == "medium"
+        assert not {"temperature", "top_p", "top_k"} & set(first)
+        assert {t["name"] for t in first["tools"]} == {f"ap-standin-{op}" for op in gen.TOOLS}
+        assert all(t["strict"] for t in first["tools"])
+        if len(models) > 1:
+            replayed = models[1]["body"]["messages"]
+            assert replayed[1]["role"] == "assistant"
+            assert replayed[1]["content"][0]["type"] == "thinking"  # replayed unchanged
+            assert replayed[2]["content"][0]["type"] == "tool_result"

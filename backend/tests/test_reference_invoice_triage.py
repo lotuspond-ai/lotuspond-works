@@ -236,3 +236,93 @@ def test_the_https_service_requires_its_token_and_maps_routes(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+# ------------------------------------------------------------------ milestone 2
+
+
+def test_the_connector_pins_its_routes_and_the_model_pins_its_configuration():
+    from lotuspond_runtime.anthropic_messages import configuration_digest
+    from lotuspond_runtime.https_json import routes_digest
+
+    assert stored("catalog/ap-standin.routes.json") == gen.ROUTES
+    assert gen.connector["definition"]["artifact_sha256"] == routes_digest(gen.ROUTES)
+    declared = {op["id"] for op in gen.connector["definition"]["operations"]}
+    assert set(gen.ROUTES["operations"]) == {
+        o for o in declared if not o.startswith(("set_", "request_"))
+    }
+    assert gen.model["definition"]["configuration_sha256"] == configuration_digest(
+        gen.MODEL_CONFIGURATION
+    )
+    assert gen.MODEL_CONFIGURATION["model"] == "claude-haiku-5-5"
+
+
+def test_each_route_reaches_its_stand_in_operation():
+    for operation, route in gen.ROUTES["operations"].items():
+        path = route["path"].replace("{invoice_id}", "INV-1").replace("{po_number}", "PO-1")
+        path = path.replace("{supplier_id}", "SUP-1")
+        assert standin.route("GET", path) == (operation, standin.route("GET", path)[1])
+
+
+def test_the_https_json_connector_reads_the_stand_in(tmp_path):
+    from types import SimpleNamespace
+
+    from lotuspond_runtime.https_json import HttpsJsonReadProvider, routes_digest
+    from lotuspond_runtime.protocol import (
+        ConnectionConfig,
+        ConnectorPin,
+        DataHandling,
+        DestinationRule,
+        SecretPin,
+    )
+    from lotuspond_runtime.providers import ProviderDescriptor
+    from lotuspond_sdk.executable.package import ArtifactRef
+
+    cert, key = certificate(tmp_path)
+    server, ledger = standin.serve(0, cert, key, "synthetic-token", host="127.0.0.1")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    pin = ConnectorPin(
+        name="ap-standin", version="0.1.0", artifact_sha256=routes_digest(gen.ROUTES)
+    )
+    descriptor = ProviderDescriptor(
+        "https-json",
+        ArtifactRef.model_validate(gen.ref_of(gen.connector)),
+        "read",
+        frozenset(gen.ROUTES["operations"]),
+        connector=pin,
+        settings={
+            "routes": gen.ROUTES,
+            "ca_file": str(cert),
+            "egress": {"allowed_private_cidrs": ["127.0.0.0/8", "::1/128"]},
+            "test_loopback": True,
+        },
+    )
+    provider = HttpsJsonReadProvider(descriptor, (b"synthetic-token",), test_mode=True)
+    connection = ConnectionConfig(
+        connector=pin,
+        operations=tuple(gen.ROUTES["operations"]),
+        destinations=(
+            DestinationRule(host="localhost", port=server.server_address[1], path_prefix="/"),
+        ),
+        secrets=(SecretPin(reference_id="11111111-1111-4111-8111-111111111111", version=1),),
+        data_handling=DataHandling(timeout_ms=5000),
+    )
+
+    def read(operation, target):
+        records = SimpleNamespace(
+            envelope=SimpleNamespace(operation=operation), connection=connection
+        )
+        return provider.invoke(records, {"target": target, "input": None}, 0).value
+
+    try:
+        invoice = read("get_invoice", {"invoice_id": "INV-1006"})
+        assert invoice == standin.Ledger().answer("get_invoice", {"invoice_id": "INV-1006"})
+        listed = read("list_supplier_invoices", {"supplier_id": "SUP-ACME", "po_number": "PO-5006"})
+        assert [item["invoice_id"] for item in listed["invoices"]] == ["INV-0990", "INV-1006"]
+        assert ledger.requests == [
+            ("GET", "/invoices/INV-1006", True),
+            ("GET", "/suppliers/SUP-ACME/purchase-orders/PO-5006/invoices", True),
+        ]
+    finally:
+        server.shutdown()
+        server.server_close()
