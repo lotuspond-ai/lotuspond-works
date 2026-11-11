@@ -1,0 +1,926 @@
+{
+ "definition": {
+  "artifact_sha256": "5ab07720c9aac2a7b2c8bb8714f27771cdff3ef8adfac1ddefd1e07cfcb64d75",
+  "operations": [
+   {
+    "effect": "read",
+    "id": "get_invoice",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "currency",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 3
+       }
+      },
+      {
+       "name": "total",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "total_quantity",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 1000000,
+        "min": 0
+       }
+      },
+      {
+       "name": "status",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 16
+       }
+      },
+      {
+       "name": "lines",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "sku",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "quantity",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0
+           }
+          },
+          {
+           "name": "unit_price",
+           "required": true,
+           "schema": {
+            "kind": "decimal",
+            "precision": 18,
+            "scale": 2
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_purchase_order",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "currency",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 3
+       }
+      },
+      {
+       "name": "total",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "total_quantity",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 1000000,
+        "min": 0
+       }
+      },
+      {
+       "name": "invoiced_quantity",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 1000000,
+        "min": 0
+       }
+      },
+      {
+       "name": "lines",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "sku",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "quantity",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0
+           }
+          },
+          {
+           "name": "unit_price",
+           "required": true,
+           "schema": {
+            "kind": "decimal",
+            "precision": 18,
+            "scale": 2
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_goods_receipt",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "received_quantity",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 1000000,
+        "min": 0
+       }
+      },
+      {
+       "name": "receipts",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "receipt_id",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "sku",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "quantity",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_supplier_contract",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "prices",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "sku",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "unit_price",
+           "required": true,
+           "schema": {
+            "kind": "decimal",
+            "precision": 18,
+            "scale": 2
+           }
+          },
+          {
+           "name": "effective_from",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 10
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      },
+      {
+       "name": "price_change_terms",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 500
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "list_supplier_invoices",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "invoices",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "invoice_id",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "supplier_id",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "po_number",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "currency",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 3
+           }
+          },
+          {
+           "name": "total",
+           "required": true,
+           "schema": {
+            "kind": "decimal",
+            "precision": 18,
+            "scale": 2
+           }
+          },
+          {
+           "name": "total_quantity",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0
+           }
+          },
+          {
+           "name": "status",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 16
+           }
+          },
+          {
+           "name": "lines",
+           "required": true,
+           "schema": {
+            "items": {
+             "fields": [
+              {
+               "name": "sku",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "quantity",
+               "required": true,
+               "schema": {
+                "kind": "integer",
+                "max": 1000000,
+                "min": 0
+               }
+              },
+              {
+               "name": "unit_price",
+               "required": true,
+               "schema": {
+                "kind": "decimal",
+                "precision": 18,
+                "scale": 2
+               }
+              }
+             ],
+             "kind": "object"
+            },
+            "kind": "array",
+            "max_items": 50
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "list_credit_notes",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "credit_notes",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "credit_note_id",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "invoice_id",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "amount",
+           "required": true,
+           "schema": {
+            "kind": "decimal",
+            "precision": 18,
+            "scale": 2
+           }
+          },
+          {
+           "name": "status",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 16
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_payment_hold",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "exists",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      },
+      {
+       "name": "amount",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_credit_note_request",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "exists",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      },
+      {
+       "name": "amount",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "write",
+    "id": "set_payment_hold",
+    "idempotency": "target_key",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "amount",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "reference",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "absence_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": false
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "effect_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": true
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "mode": "read_back",
+     "read_operation": "get_payment_hold"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "write",
+    "id": "request_credit_note",
+    "idempotency": "target_key",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "amount",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "reference",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "absence_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": false
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "effect_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": true
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "mode": "read_back",
+     "read_operation": "get_credit_note_request"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "connector",
+ "name": "ap-standin",
+ "schemas": [],
+ "version": "0.1.0"
+}

@@ -1,0 +1,2210 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "ref",
+   "pointer": "",
+   "source": {
+    "id": "matched",
+    "kind": "step"
+   }
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "fields": [
+     {
+      "name": "status",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 32
+      }
+     },
+     {
+      "name": "exception_class",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 32
+      }
+     },
+     {
+      "name": "resolution",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 32
+      }
+     },
+     {
+      "name": "amount",
+      "required": true,
+      "schema": {
+       "kind": "decimal",
+       "precision": 18,
+       "scale": 2
+      }
+     },
+     {
+      "name": "reasons",
+      "required": true,
+      "schema": {
+       "items": {
+        "fields": [
+         {
+          "name": "text",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 400
+          }
+         },
+         {
+          "name": "tool",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 64
+          }
+         },
+         {
+          "name": "field",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 128
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "kind": "array",
+       "max_items": 5
+      }
+     },
+     {
+      "name": "clerk_decision",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 32
+      }
+     },
+     {
+      "name": "comment",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 1000
+      }
+     }
+    ],
+    "kind": "object"
+   }
+  },
+  "steps": [
+   {
+    "connector_ref": "ap",
+    "id": "invoice",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    },
+    "kind": "connector_read",
+    "operation": "get_invoice",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    },
+    "target": {
+     "fields": [
+      {
+       "name": "invoice_id",
+       "value": {
+        "kind": "ref",
+        "pointer": "/invoice_id",
+        "source": {
+         "kind": "package_input"
+        }
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "connector_ref": "ap",
+    "id": "order",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    },
+    "kind": "connector_read",
+    "operation": "get_purchase_order",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    },
+    "target": {
+     "fields": [
+      {
+       "name": "po_number",
+       "value": {
+        "kind": "ref",
+        "pointer": "/po_number",
+        "source": {
+         "id": "invoice",
+         "kind": "step"
+        }
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "connector_ref": "ap",
+    "id": "receipt",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    },
+    "kind": "connector_read",
+    "operation": "get_goods_receipt",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    },
+    "target": {
+     "fields": [
+      {
+       "name": "po_number",
+       "value": {
+        "kind": "ref",
+        "pointer": "/po_number",
+        "source": {
+         "id": "invoice",
+         "kind": "step"
+        }
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "id": "variance",
+    "kind": "transform",
+    "mapping": {
+     "fields": [
+      {
+       "name": "price_delta",
+       "value": {
+        "args": [
+         {
+          "kind": "ref",
+          "pointer": "/total",
+          "source": {
+           "id": "invoice",
+           "kind": "step"
+          }
+         },
+         {
+          "kind": "ref",
+          "pointer": "/total",
+          "source": {
+           "id": "order",
+           "kind": "step"
+          }
+         }
+        ],
+        "fn": "subtract",
+        "kind": "call",
+        "rounding": "reject",
+        "scale": 2
+       }
+      },
+      {
+       "name": "quantity_needed",
+       "value": {
+        "args": [
+         {
+          "kind": "ref",
+          "pointer": "/total_quantity",
+          "source": {
+           "id": "invoice",
+           "kind": "step"
+          }
+         },
+         {
+          "kind": "ref",
+          "pointer": "/invoiced_quantity",
+          "source": {
+           "id": "order",
+           "kind": "step"
+          }
+         }
+        ],
+        "fn": "add",
+        "kind": "call"
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "price_delta",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 38,
+        "scale": 2
+       }
+      },
+      {
+       "name": "quantity_needed",
+       "required": true,
+       "schema": {
+        "kind": "integer"
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "condition": {
+     "args": [
+      {
+       "args": [
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "decimal",
+              "precision": 8,
+              "scale": 2
+             },
+             "value": "-5.00"
+            },
+            {
+             "kind": "ref",
+             "pointer": "/total",
+             "source": {
+              "id": "order",
+              "kind": "step"
+             }
+            }
+           ],
+           "fn": "multiply",
+           "kind": "call",
+           "rounding": "reject",
+           "scale": 2
+          },
+          {
+           "args": [
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "decimal",
+              "precision": 8,
+              "scale": 2
+             },
+             "value": "1000.00"
+            },
+            {
+             "kind": "ref",
+             "pointer": "/price_delta",
+             "source": {
+              "id": "variance",
+              "kind": "step"
+             }
+            }
+           ],
+           "fn": "multiply",
+           "kind": "call",
+           "rounding": "reject",
+           "scale": 2
+          }
+         ],
+         "fn": "le",
+         "kind": "call"
+        },
+        {
+         "args": [
+          {
+           "args": [
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "decimal",
+              "precision": 8,
+              "scale": 2
+             },
+             "value": "1000.00"
+            },
+            {
+             "kind": "ref",
+             "pointer": "/price_delta",
+             "source": {
+              "id": "variance",
+              "kind": "step"
+             }
+            }
+           ],
+           "fn": "multiply",
+           "kind": "call",
+           "rounding": "reject",
+           "scale": 2
+          },
+          {
+           "args": [
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "decimal",
+              "precision": 8,
+              "scale": 2
+             },
+             "value": "5.00"
+            },
+            {
+             "kind": "ref",
+             "pointer": "/total",
+             "source": {
+              "id": "order",
+              "kind": "step"
+             }
+            }
+           ],
+           "fn": "multiply",
+           "kind": "call",
+           "rounding": "reject",
+           "scale": 2
+          }
+         ],
+         "fn": "le",
+         "kind": "call"
+        }
+       ],
+       "fn": "and",
+       "kind": "call"
+      },
+      {
+       "args": [
+        {
+         "kind": "ref",
+         "pointer": "/quantity_needed",
+         "source": {
+          "id": "variance",
+          "kind": "step"
+         }
+        },
+        {
+         "kind": "ref",
+         "pointer": "/received_quantity",
+         "source": {
+          "id": "receipt",
+          "kind": "step"
+         }
+        }
+       ],
+       "fn": "le",
+       "kind": "call"
+      }
+     ],
+     "fn": "and",
+     "kind": "call"
+    },
+    "else_body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "route",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "fields": [
+        {
+         "name": "status",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "exception_class",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "resolution",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "amount",
+         "required": true,
+         "schema": {
+          "kind": "decimal",
+          "precision": 18,
+          "scale": 2
+         }
+        },
+        {
+         "name": "reasons",
+         "required": true,
+         "schema": {
+          "items": {
+           "fields": [
+            {
+             "name": "text",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             }
+            },
+            {
+             "name": "tool",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 64
+             }
+            },
+            {
+             "name": "field",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 128
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "array",
+          "max_items": 5
+         }
+        },
+        {
+         "name": "clerk_decision",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "comment",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 1000
+         }
+        }
+       ],
+       "kind": "object"
+      }
+     },
+     "steps": [
+      {
+       "id": "investigate",
+       "input": {
+        "fields": [
+         {
+          "name": "invoice",
+          "value": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "invoice",
+            "kind": "step"
+           }
+          }
+         },
+         {
+          "name": "order",
+          "value": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "order",
+            "kind": "step"
+           }
+          }
+         },
+         {
+          "name": "receipt",
+          "value": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "receipt",
+            "kind": "step"
+           }
+          }
+         },
+         {
+          "name": "variance",
+          "value": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "variance",
+            "kind": "step"
+           }
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "instructions": "You investigate one accounts-payable exception: an invoice that does not match its purchase order and goods receipt within tolerance. You are given the invoice, the purchase order (with the quantity already invoiced against it), the goods receipt and the computed variance. You may read the supplier's contract, the other invoices against the purchase order and the supplier's credit notes with the tools provided. You cannot change anything; a person approves any action you propose.\n\nReturn:\n- exception_class: one of price, quantity, missing_receipt, duplicate, other.\n- resolution: hold (place a payment hold on the invoice), request_credit_note (ask the supplier for a credit note) or no_action (the difference is justified; a clerk records it).\n- amount: the amount to hold or to request as credit, in the invoice currency; 0.00 for no_action.\n- reasons: at most five short reasons. Each names the tool (or \"input\") and the field it relies on. Do not state anything a document does not show.",
+       "kind": "agent",
+       "limits": {
+        "max_cost_microusd": 250000,
+        "max_input_tokens": 60000,
+        "max_output_tokens": 4000,
+        "max_steps": 14,
+        "timeout_seconds": 240
+       },
+       "model_ref": "investigator",
+       "output_schema": {
+        "fields": [
+         {
+          "name": "exception_class",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 32
+          }
+         },
+         {
+          "name": "resolution",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 32
+          }
+         },
+         {
+          "name": "amount",
+          "required": true,
+          "schema": {
+           "kind": "decimal",
+           "precision": 18,
+           "scale": 2
+          }
+         },
+         {
+          "name": "reasons",
+          "required": true,
+          "schema": {
+           "items": {
+            "fields": [
+             {
+              "name": "text",
+              "required": true,
+              "schema": {
+               "kind": "string",
+               "max_length": 400
+              }
+             },
+             {
+              "name": "tool",
+              "required": true,
+              "schema": {
+               "kind": "string",
+               "max_length": 64
+              }
+             },
+             {
+              "name": "field",
+              "required": true,
+              "schema": {
+               "kind": "string",
+               "max_length": 128
+              }
+             }
+            ],
+            "kind": "object"
+           },
+           "kind": "array",
+           "max_items": 5
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "read_tools": [
+        {
+         "connector_ref": "ap",
+         "operation": "get_supplier_contract",
+         "retry": {
+          "backoff_seconds": 5,
+          "max_attempts": 3,
+          "retry_codes": [
+           "unavailable"
+          ],
+          "timeout_seconds": 30
+         }
+        },
+        {
+         "connector_ref": "ap",
+         "operation": "list_supplier_invoices",
+         "retry": {
+          "backoff_seconds": 5,
+          "max_attempts": 3,
+          "retry_codes": [
+           "unavailable"
+          ],
+          "timeout_seconds": 30
+         }
+        },
+        {
+         "connector_ref": "ap",
+         "operation": "list_credit_notes",
+         "retry": {
+          "backoff_seconds": 5,
+          "max_attempts": 3,
+          "retry_codes": [
+           "unavailable"
+          ],
+          "timeout_seconds": 30
+         }
+        }
+       ],
+       "retry": {
+        "backoff_seconds": 0,
+        "max_attempts": 1,
+        "retry_codes": [],
+        "timeout_seconds": 30
+       }
+      },
+      {
+       "condition": {
+        "args": [
+         {
+          "kind": "ref",
+          "pointer": "/resolution",
+          "source": {
+           "id": "investigate",
+           "kind": "step"
+          }
+         },
+         {
+          "kind": "literal",
+          "schema": {
+           "kind": "string",
+           "max_length": 32
+          },
+          "value": "hold"
+         }
+        ],
+        "fn": "eq",
+        "kind": "call"
+       },
+       "else_body": {
+        "result": {
+         "kind": "ref",
+         "pointer": "",
+         "source": {
+          "id": "route_credit",
+          "kind": "step"
+         }
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "fields": [
+           {
+            "name": "status",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "exception_class",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "resolution",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "amount",
+            "required": true,
+            "schema": {
+             "kind": "decimal",
+             "precision": 18,
+             "scale": 2
+            }
+           },
+           {
+            "name": "reasons",
+            "required": true,
+            "schema": {
+             "items": {
+              "fields": [
+               {
+                "name": "text",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                }
+               },
+               {
+                "name": "tool",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 64
+                }
+               },
+               {
+                "name": "field",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 128
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "kind": "array",
+             "max_items": 5
+            }
+           },
+           {
+            "name": "clerk_decision",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "comment",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 1000
+            }
+           }
+          ],
+          "kind": "object"
+         }
+        },
+        "steps": [
+         {
+          "condition": {
+           "args": [
+            {
+             "kind": "ref",
+             "pointer": "/resolution",
+             "source": {
+              "id": "investigate",
+              "kind": "step"
+             }
+            },
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "string",
+              "max_length": 32
+             },
+             "value": "request_credit_note"
+            }
+           ],
+           "fn": "eq",
+           "kind": "call"
+          },
+          "else_body": {
+           "result": {
+            "fields": [
+             {
+              "name": "status",
+              "value": {
+               "kind": "literal",
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               },
+               "value": "clerk_decided"
+              }
+             },
+             {
+              "name": "exception_class",
+              "value": {
+               "kind": "ref",
+               "pointer": "/exception_class",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "resolution",
+              "value": {
+               "kind": "ref",
+               "pointer": "/resolution",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "amount",
+              "value": {
+               "kind": "ref",
+               "pointer": "/amount",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "reasons",
+              "value": {
+               "kind": "ref",
+               "pointer": "/reasons",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "clerk_decision",
+              "value": {
+               "kind": "ref",
+               "pointer": "/decision",
+               "source": {
+                "id": "clerk",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "comment",
+              "value": {
+               "kind": "ref",
+               "pointer": "/comment",
+               "source": {
+                "id": "clerk",
+                "kind": "step"
+               }
+              }
+             }
+            ],
+            "kind": "object"
+           },
+           "result_schema": {
+            "kind": "data",
+            "schema": {
+             "fields": [
+              {
+               "name": "status",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "exception_class",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "resolution",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "amount",
+               "required": true,
+               "schema": {
+                "kind": "decimal",
+                "precision": 18,
+                "scale": 2
+               }
+              },
+              {
+               "name": "reasons",
+               "required": true,
+               "schema": {
+                "items": {
+                 "fields": [
+                  {
+                   "name": "text",
+                   "required": true,
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 400
+                   }
+                  },
+                  {
+                   "name": "tool",
+                   "required": true,
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 64
+                   }
+                  },
+                  {
+                   "name": "field",
+                   "required": true,
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 128
+                   }
+                  }
+                 ],
+                 "kind": "object"
+                },
+                "kind": "array",
+                "max_items": 5
+               }
+              },
+              {
+               "name": "clerk_decision",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "comment",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 1000
+               }
+              }
+             ],
+             "kind": "object"
+            }
+           },
+           "steps": [
+            {
+             "assignment_policy_ref": "clerks",
+             "form_schema": {
+              "fields": [
+               {
+                "name": "decision",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 32
+                }
+               },
+               {
+                "name": "comment",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 1000
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "id": "clerk",
+             "kind": "human_task",
+             "mode": "form",
+             "timeout_seconds": 259200
+            }
+           ]
+          },
+          "id": "route_credit",
+          "kind": "decision",
+          "then_body": {
+           "result": {
+            "fields": [
+             {
+              "name": "status",
+              "value": {
+               "kind": "literal",
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               },
+               "value": "credit_requested"
+              }
+             },
+             {
+              "name": "exception_class",
+              "value": {
+               "kind": "ref",
+               "pointer": "/exception_class",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "resolution",
+              "value": {
+               "kind": "ref",
+               "pointer": "/resolution",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "amount",
+              "value": {
+               "kind": "ref",
+               "pointer": "/amount",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "reasons",
+              "value": {
+               "kind": "ref",
+               "pointer": "/reasons",
+               "source": {
+                "id": "investigate",
+                "kind": "step"
+               }
+              }
+             },
+             {
+              "name": "clerk_decision",
+              "value": {
+               "kind": "literal",
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               },
+               "value": ""
+              }
+             },
+             {
+              "name": "comment",
+              "value": {
+               "kind": "literal",
+               "schema": {
+                "kind": "string",
+                "max_length": 1000
+               },
+               "value": ""
+              }
+             }
+            ],
+            "kind": "object"
+           },
+           "result_schema": {
+            "kind": "data",
+            "schema": {
+             "fields": [
+              {
+               "name": "status",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "exception_class",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "resolution",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "amount",
+               "required": true,
+               "schema": {
+                "kind": "decimal",
+                "precision": 18,
+                "scale": 2
+               }
+              },
+              {
+               "name": "reasons",
+               "required": true,
+               "schema": {
+                "items": {
+                 "fields": [
+                  {
+                   "name": "text",
+                   "required": true,
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 400
+                   }
+                  },
+                  {
+                   "name": "tool",
+                   "required": true,
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 64
+                   }
+                  },
+                  {
+                   "name": "field",
+                   "required": true,
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 128
+                   }
+                  }
+                 ],
+                 "kind": "object"
+                },
+                "kind": "array",
+                "max_items": 5
+               }
+              },
+              {
+               "name": "clerk_decision",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 32
+               }
+              },
+              {
+               "name": "comment",
+               "required": true,
+               "schema": {
+                "kind": "string",
+                "max_length": 1000
+               }
+              }
+             ],
+             "kind": "object"
+            }
+           },
+           "steps": [
+            {
+             "approval": "human",
+             "connector_ref": "ap",
+             "expiry_seconds": 86400,
+             "id": "credit_intent",
+             "independent_review": true,
+             "input": {
+              "fields": [
+               {
+                "name": "supplier_id",
+                "value": {
+                 "kind": "ref",
+                 "pointer": "/supplier_id",
+                 "source": {
+                  "id": "invoice",
+                  "kind": "step"
+                 }
+                }
+               },
+               {
+                "name": "amount",
+                "value": {
+                 "kind": "ref",
+                 "pointer": "/amount",
+                 "source": {
+                  "id": "investigate",
+                  "kind": "step"
+                 }
+                }
+               },
+               {
+                "name": "reason",
+                "value": {
+                 "args": [
+                  {
+                   "kind": "ref",
+                   "pointer": "/reasons/0/text",
+                   "source": {
+                    "id": "investigate",
+                    "kind": "step"
+                   }
+                  },
+                  {
+                   "kind": "literal",
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 400
+                   },
+                   "value": "No reason was given."
+                  }
+                 ],
+                 "fn": "coalesce",
+                 "kind": "call"
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "kind": "action_intent",
+             "operation": "request_credit_note",
+             "policy_ref": "credit_approvers",
+             "target": {
+              "fields": [
+               {
+                "name": "invoice_id",
+                "value": {
+                 "kind": "ref",
+                 "pointer": "/invoice_id",
+                 "source": {
+                  "id": "invoice",
+                  "kind": "step"
+                 }
+                }
+               }
+              ],
+              "kind": "object"
+             }
+            },
+            {
+             "assignment_policy_ref": "credit_approvers",
+             "id": "credit_review",
+             "intent": {
+              "kind": "ref",
+              "pointer": "",
+              "source": {
+               "id": "credit_intent",
+               "kind": "step"
+              }
+             },
+             "kind": "human_task",
+             "mode": "review",
+             "timeout_seconds": 86400
+            },
+            {
+             "decision": {
+              "kind": "ref",
+              "pointer": "",
+              "source": {
+               "id": "credit_review",
+               "kind": "step"
+              }
+             },
+             "id": "credit_dispatch",
+             "intent": {
+              "kind": "ref",
+              "pointer": "",
+              "source": {
+               "id": "credit_intent",
+               "kind": "step"
+              }
+             },
+             "kind": "action_dispatch",
+             "retry": {
+              "backoff_seconds": 0,
+              "max_attempts": 1,
+              "retry_codes": [],
+              "timeout_seconds": 30
+             }
+            },
+            {
+             "connector_ref": "ap",
+             "id": "credit_verify",
+             "input": {
+              "kind": "literal",
+              "schema": {
+               "kind": "null"
+              },
+              "value": null
+             },
+             "kind": "outcome_verification",
+             "read_operation": "get_credit_note_request",
+             "receipt": {
+              "kind": "ref",
+              "pointer": "",
+              "source": {
+               "id": "credit_dispatch",
+               "kind": "step"
+              }
+             },
+             "rule_id": "credit-recorded",
+             "rules": [
+              {
+               "expected": {
+                "kind": "literal",
+                "schema": {
+                 "kind": "boolean"
+                },
+                "value": true
+               },
+               "op": "eq",
+               "readback_pointer": "/exists"
+              },
+              {
+               "expected": {
+                "kind": "ref",
+                "pointer": "/amount",
+                "source": {
+                 "id": "investigate",
+                 "kind": "step"
+                }
+               },
+               "op": "eq",
+               "readback_pointer": "/amount"
+              }
+             ],
+             "target": {
+              "fields": [
+               {
+                "name": "invoice_id",
+                "value": {
+                 "kind": "ref",
+                 "pointer": "/invoice_id",
+                 "source": {
+                  "id": "invoice",
+                  "kind": "step"
+                 }
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "version": "1"
+            }
+           ]
+          }
+         }
+        ]
+       },
+       "id": "route",
+       "kind": "decision",
+       "then_body": {
+        "result": {
+         "fields": [
+          {
+           "name": "status",
+           "value": {
+            "kind": "literal",
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            },
+            "value": "held"
+           }
+          },
+          {
+           "name": "exception_class",
+           "value": {
+            "kind": "ref",
+            "pointer": "/exception_class",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "resolution",
+           "value": {
+            "kind": "ref",
+            "pointer": "/resolution",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "amount",
+           "value": {
+            "kind": "ref",
+            "pointer": "/amount",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "reasons",
+           "value": {
+            "kind": "ref",
+            "pointer": "/reasons",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "clerk_decision",
+           "value": {
+            "kind": "literal",
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            },
+            "value": ""
+           }
+          },
+          {
+           "name": "comment",
+           "value": {
+            "kind": "literal",
+            "schema": {
+             "kind": "string",
+             "max_length": 1000
+            },
+            "value": ""
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "fields": [
+           {
+            "name": "status",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "exception_class",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "resolution",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "amount",
+            "required": true,
+            "schema": {
+             "kind": "decimal",
+             "precision": 18,
+             "scale": 2
+            }
+           },
+           {
+            "name": "reasons",
+            "required": true,
+            "schema": {
+             "items": {
+              "fields": [
+               {
+                "name": "text",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                }
+               },
+               {
+                "name": "tool",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 64
+                }
+               },
+               {
+                "name": "field",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 128
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "kind": "array",
+             "max_items": 5
+            }
+           },
+           {
+            "name": "clerk_decision",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "comment",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 1000
+            }
+           }
+          ],
+          "kind": "object"
+         }
+        },
+        "steps": [
+         {
+          "approval": "human",
+          "connector_ref": "ap",
+          "expiry_seconds": 86400,
+          "id": "hold_intent",
+          "independent_review": false,
+          "input": {
+           "fields": [
+            {
+             "name": "amount",
+             "value": {
+              "kind": "ref",
+              "pointer": "/amount",
+              "source": {
+               "id": "investigate",
+               "kind": "step"
+              }
+             }
+            },
+            {
+             "name": "reason",
+             "value": {
+              "args": [
+               {
+                "kind": "ref",
+                "pointer": "/reasons/0/text",
+                "source": {
+                 "id": "investigate",
+                 "kind": "step"
+                }
+               },
+               {
+                "kind": "literal",
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                },
+                "value": "No reason was given."
+               }
+              ],
+              "fn": "coalesce",
+              "kind": "call"
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "action_intent",
+          "operation": "set_payment_hold",
+          "policy_ref": "hold_approvers",
+          "target": {
+           "fields": [
+            {
+             "name": "invoice_id",
+             "value": {
+              "kind": "ref",
+              "pointer": "/invoice_id",
+              "source": {
+               "id": "invoice",
+               "kind": "step"
+              }
+             }
+            }
+           ],
+           "kind": "object"
+          }
+         },
+         {
+          "assignment_policy_ref": "hold_approvers",
+          "id": "hold_review",
+          "intent": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "hold_intent",
+            "kind": "step"
+           }
+          },
+          "kind": "human_task",
+          "mode": "review",
+          "timeout_seconds": 86400
+         },
+         {
+          "decision": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "hold_review",
+            "kind": "step"
+           }
+          },
+          "id": "hold_dispatch",
+          "intent": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "hold_intent",
+            "kind": "step"
+           }
+          },
+          "kind": "action_dispatch",
+          "retry": {
+           "backoff_seconds": 0,
+           "max_attempts": 1,
+           "retry_codes": [],
+           "timeout_seconds": 30
+          }
+         },
+         {
+          "connector_ref": "ap",
+          "id": "hold_verify",
+          "input": {
+           "kind": "literal",
+           "schema": {
+            "kind": "null"
+           },
+           "value": null
+          },
+          "kind": "outcome_verification",
+          "read_operation": "get_payment_hold",
+          "receipt": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "hold_dispatch",
+            "kind": "step"
+           }
+          },
+          "rule_id": "hold-recorded",
+          "rules": [
+           {
+            "expected": {
+             "kind": "literal",
+             "schema": {
+              "kind": "boolean"
+             },
+             "value": true
+            },
+            "op": "eq",
+            "readback_pointer": "/exists"
+           },
+           {
+            "expected": {
+             "kind": "ref",
+             "pointer": "/amount",
+             "source": {
+              "id": "investigate",
+              "kind": "step"
+             }
+            },
+            "op": "eq",
+            "readback_pointer": "/amount"
+           }
+          ],
+          "target": {
+           "fields": [
+            {
+             "name": "invoice_id",
+             "value": {
+              "kind": "ref",
+              "pointer": "/invoice_id",
+              "source": {
+               "id": "invoice",
+               "kind": "step"
+              }
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "version": "1"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    "id": "matched",
+    "kind": "decision",
+    "then_body": {
+     "result": {
+      "fields": [
+       {
+        "name": "status",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         },
+         "value": "matched"
+        }
+       },
+       {
+        "name": "exception_class",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         },
+         "value": "none"
+        }
+       },
+       {
+        "name": "resolution",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         },
+         "value": "none"
+        }
+       },
+       {
+        "name": "amount",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "decimal",
+          "precision": 18,
+          "scale": 2
+         },
+         "value": "0.00"
+        }
+       },
+       {
+        "name": "reasons",
+        "value": {
+         "item_schema": {
+          "kind": "data",
+          "schema": {
+           "fields": [
+            {
+             "name": "text",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             }
+            },
+            {
+             "name": "tool",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 64
+             }
+            },
+            {
+             "name": "field",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 128
+             }
+            }
+           ],
+           "kind": "object"
+          }
+         },
+         "items": [],
+         "kind": "array"
+        }
+       },
+       {
+        "name": "clerk_decision",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         },
+         "value": ""
+        }
+       },
+       {
+        "name": "comment",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "string",
+          "max_length": 1000
+         },
+         "value": ""
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "fields": [
+        {
+         "name": "status",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "exception_class",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "resolution",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "amount",
+         "required": true,
+         "schema": {
+          "kind": "decimal",
+          "precision": 18,
+          "scale": 2
+         }
+        },
+        {
+         "name": "reasons",
+         "required": true,
+         "schema": {
+          "items": {
+           "fields": [
+            {
+             "name": "text",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             }
+            },
+            {
+             "name": "tool",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 64
+             }
+            },
+            {
+             "name": "field",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 128
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "array",
+          "max_items": 5
+         }
+        },
+        {
+         "name": "clerk_decision",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "comment",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 1000
+         }
+        }
+       ],
+       "kind": "object"
+      }
+     },
+     "steps": []
+    }
+   }
+  ]
+ },
+ "connectors": [
+  {
+   "id": "ap",
+   "ref": {
+    "kind": "connector",
+    "name": "ap-standin",
+    "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+    "version": "0.1.0"
+   }
+  }
+ ],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "fields": [
+   {
+    "name": "invoice_id",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 900,
+  "elapsed_seconds": 691200,
+  "max_cost_microusd": 250000,
+  "max_input_tokens": 60000,
+  "max_output_tokens": 4000,
+  "max_steps": 200,
+  "retained_waits": 10
+ },
+ "models": [
+  {
+   "id": "investigator",
+   "ref": {
+    "kind": "model",
+    "name": "ap-investigator-model",
+    "sha256": "4d1d2eefcfe6ab3776c75ed1f108881aa55af9ef41036bf231b410b9f3c82c18",
+    "version": "0.1.0"
+   }
+  }
+ ],
+ "name": "Invoice exception triage (synthetic reference)",
+ "output_schema": {
+  "fields": [
+   {
+    "name": "status",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   },
+   {
+    "name": "exception_class",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   },
+   {
+    "name": "resolution",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   },
+   {
+    "name": "amount",
+    "required": true,
+    "schema": {
+     "kind": "decimal",
+     "precision": 18,
+     "scale": 2
+    }
+   },
+   {
+    "name": "reasons",
+    "required": true,
+    "schema": {
+     "items": {
+      "fields": [
+       {
+        "name": "text",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 400
+        }
+       },
+       {
+        "name": "tool",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 64
+        }
+       },
+       {
+        "name": "field",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 128
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "kind": "array",
+     "max_items": 5
+    }
+   },
+   {
+    "name": "clerk_decision",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   },
+   {
+    "name": "comment",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 1000
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "package_id": "invoice-exception-triage",
+ "policies": [
+  {
+   "id": "clerks",
+   "ref": {
+    "kind": "policy",
+    "name": "ap-clerks",
+    "sha256": "e64fb754e5b12d58399f125bc7241eacb329d45f0f140bcea323e51f8c3556a8",
+    "version": "0.1.0"
+   }
+  },
+  {
+   "id": "hold_approvers",
+   "ref": {
+    "kind": "policy",
+    "name": "ap-payment-hold",
+    "sha256": "1546aacb1ab4489e862c239105f71745f01facb1a6baa3086c9e3d29cca4671a",
+    "version": "0.1.0"
+   }
+  },
+  {
+   "id": "credit_approvers",
+   "ref": {
+    "kind": "policy",
+    "name": "ap-credit-note",
+    "sha256": "e0f907be1f240ffbf89434365aac522296722a52372e80b2db6e8eb24bc0263c",
+    "version": "0.1.0"
+   }
+  }
+ ],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "0.1.0"
+}

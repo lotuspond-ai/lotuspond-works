@@ -1,0 +1,438 @@
+{
+ "definition": {
+  "configuration_revision": "1",
+  "configuration_sha256": "457b71b7291298227fb00c087a73b2f212a660940abd8c362398bd36748e136b",
+  "input_schema": {
+   "fields": [
+    {
+     "name": "invoice",
+     "required": true,
+     "schema": {
+      "fields": [
+       {
+        "name": "invoice_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "supplier_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "po_number",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "currency",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 3
+        }
+       },
+       {
+        "name": "total",
+        "required": true,
+        "schema": {
+         "kind": "decimal",
+         "precision": 18,
+         "scale": 2
+        }
+       },
+       {
+        "name": "total_quantity",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 1000000,
+         "min": 0
+        }
+       },
+       {
+        "name": "status",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 16
+        }
+       },
+       {
+        "name": "lines",
+        "required": true,
+        "schema": {
+         "items": {
+          "fields": [
+           {
+            "name": "sku",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "quantity",
+            "required": true,
+            "schema": {
+             "kind": "integer",
+             "max": 1000000,
+             "min": 0
+            }
+           },
+           {
+            "name": "unit_price",
+            "required": true,
+            "schema": {
+             "kind": "decimal",
+             "precision": 18,
+             "scale": 2
+            }
+           }
+          ],
+          "kind": "object"
+         },
+         "kind": "array",
+         "max_items": 50
+        }
+       }
+      ],
+      "kind": "object"
+     }
+    },
+    {
+     "name": "order",
+     "required": true,
+     "schema": {
+      "fields": [
+       {
+        "name": "po_number",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "supplier_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "currency",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 3
+        }
+       },
+       {
+        "name": "total",
+        "required": true,
+        "schema": {
+         "kind": "decimal",
+         "precision": 18,
+         "scale": 2
+        }
+       },
+       {
+        "name": "total_quantity",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 1000000,
+         "min": 0
+        }
+       },
+       {
+        "name": "invoiced_quantity",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 1000000,
+         "min": 0
+        }
+       },
+       {
+        "name": "lines",
+        "required": true,
+        "schema": {
+         "items": {
+          "fields": [
+           {
+            "name": "sku",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "quantity",
+            "required": true,
+            "schema": {
+             "kind": "integer",
+             "max": 1000000,
+             "min": 0
+            }
+           },
+           {
+            "name": "unit_price",
+            "required": true,
+            "schema": {
+             "kind": "decimal",
+             "precision": 18,
+             "scale": 2
+            }
+           }
+          ],
+          "kind": "object"
+         },
+         "kind": "array",
+         "max_items": 50
+        }
+       }
+      ],
+      "kind": "object"
+     }
+    },
+    {
+     "name": "receipt",
+     "required": true,
+     "schema": {
+      "fields": [
+       {
+        "name": "po_number",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "received_quantity",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 1000000,
+         "min": 0
+        }
+       },
+       {
+        "name": "receipts",
+        "required": true,
+        "schema": {
+         "items": {
+          "fields": [
+           {
+            "name": "receipt_id",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "sku",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "quantity",
+            "required": true,
+            "schema": {
+             "kind": "integer",
+             "max": 1000000,
+             "min": 0
+            }
+           }
+          ],
+          "kind": "object"
+         },
+         "kind": "array",
+         "max_items": 50
+        }
+       }
+      ],
+      "kind": "object"
+     }
+    },
+    {
+     "name": "variance",
+     "required": true,
+     "schema": {
+      "fields": [
+       {
+        "name": "price_delta",
+        "required": true,
+        "schema": {
+         "kind": "decimal",
+         "precision": 38,
+         "scale": 2
+        }
+       },
+       {
+        "name": "quantity_needed",
+        "required": true,
+        "schema": {
+         "kind": "integer"
+        }
+       }
+      ],
+      "kind": "object"
+     }
+    }
+   ],
+   "kind": "object"
+  },
+  "limits": {
+   "max_cost_microusd": 250000,
+   "max_input_tokens": 60000,
+   "max_output_tokens": 4000,
+   "max_steps": 14,
+   "timeout_seconds": 240
+  },
+  "output_schema": {
+   "fields": [
+    {
+     "name": "exception_class",
+     "required": true,
+     "schema": {
+      "kind": "string",
+      "max_length": 32
+     }
+    },
+    {
+     "name": "resolution",
+     "required": true,
+     "schema": {
+      "kind": "string",
+      "max_length": 32
+     }
+    },
+    {
+     "name": "amount",
+     "required": true,
+     "schema": {
+      "kind": "decimal",
+      "precision": 18,
+      "scale": 2
+     }
+    },
+    {
+     "name": "reasons",
+     "required": true,
+     "schema": {
+      "items": {
+       "fields": [
+        {
+         "name": "text",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 400
+         }
+        },
+        {
+         "name": "tool",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 64
+         }
+        },
+        {
+         "name": "field",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 128
+         }
+        }
+       ],
+       "kind": "object"
+      },
+      "kind": "array",
+      "max_items": 5
+     }
+    }
+   ],
+   "kind": "object"
+  },
+  "profile": "anthropic-messages",
+  "read_tools": [
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "ap-standin",
+     "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+     "version": "0.1.0"
+    },
+    "operation": "get_supplier_contract",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   },
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "ap-standin",
+     "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+     "version": "0.1.0"
+    },
+    "operation": "list_supplier_invoices",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   },
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "ap-standin",
+     "sha256": "d0d6714b0687f31967b6aba966c3a0772c8b759a1acca00e73a8614c6583456b",
+     "version": "0.1.0"
+    },
+    "operation": "list_credit_notes",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "model",
+ "name": "ap-investigator-model",
+ "schemas": [],
+ "version": "0.1.0"
+}

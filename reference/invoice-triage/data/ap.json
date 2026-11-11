@@ -1,0 +1,326 @@
+{
+  "_note": "Synthetic stand-in AP records. Not a customer system; no real suppliers, people or amounts.",
+  "contracts": {
+    "SUP-ACME": {
+      "supplier_id": "SUP-ACME",
+      "prices": [
+        {
+          "sku": "PAPER-A4",
+          "unit_price": "4.50",
+          "effective_from": "2026-01-01"
+        },
+        {
+          "sku": "TONER-K",
+          "unit_price": "62.00",
+          "effective_from": "2026-01-01"
+        }
+      ],
+      "price_change_terms": "Prices fixed for 2026; no change clause."
+    },
+    "SUP-BOLT": {
+      "supplier_id": "SUP-BOLT",
+      "prices": [
+        {
+          "sku": "BOLT-M8",
+          "unit_price": "0.42",
+          "effective_from": "2026-10-01"
+        }
+      ],
+      "price_change_terms": "BOLT-M8 rose from 0.38 to 0.42 on 2026-10-01 under clause 4.2."
+    }
+  },
+  "purchase_orders": {
+    "PO-5001": {
+      "po_number": "PO-5001",
+      "supplier_id": "SUP-ACME",
+      "currency": "USD",
+      "total": "1070.00",
+      "total_quantity": 110,
+      "invoiced_quantity": 0,
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        },
+        {
+          "sku": "TONER-K",
+          "quantity": 10,
+          "unit_price": "62.00"
+        }
+      ]
+    },
+    "PO-5002": {
+      "po_number": "PO-5002",
+      "supplier_id": "SUP-BOLT",
+      "currency": "USD",
+      "total": "380.00",
+      "total_quantity": 1000,
+      "invoiced_quantity": 0,
+      "lines": [
+        {
+          "sku": "BOLT-M8",
+          "quantity": 1000,
+          "unit_price": "0.38"
+        }
+      ]
+    },
+    "PO-5003": {
+      "po_number": "PO-5003",
+      "supplier_id": "SUP-ACME",
+      "currency": "USD",
+      "total": "620.00",
+      "total_quantity": 10,
+      "invoiced_quantity": 0,
+      "lines": [
+        {
+          "sku": "TONER-K",
+          "quantity": 10,
+          "unit_price": "62.00"
+        }
+      ]
+    },
+    "PO-5004": {
+      "po_number": "PO-5004",
+      "supplier_id": "SUP-ACME",
+      "currency": "USD",
+      "total": "450.00",
+      "total_quantity": 100,
+      "invoiced_quantity": 0,
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        }
+      ]
+    },
+    "PO-5005": {
+      "po_number": "PO-5005",
+      "supplier_id": "SUP-BOLT",
+      "currency": "USD",
+      "total": "210.00",
+      "total_quantity": 500,
+      "invoiced_quantity": 0,
+      "lines": [
+        {
+          "sku": "BOLT-M8",
+          "quantity": 500,
+          "unit_price": "0.42"
+        }
+      ]
+    },
+    "PO-5006": {
+      "po_number": "PO-5006",
+      "supplier_id": "SUP-ACME",
+      "currency": "USD",
+      "total": "450.00",
+      "total_quantity": 100,
+      "invoiced_quantity": 100,
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        }
+      ]
+    }
+  },
+  "goods_receipts": {
+    "PO-5001": {
+      "po_number": "PO-5001",
+      "received_quantity": 110,
+      "receipts": [
+        {
+          "receipt_id": "GR-9001",
+          "sku": "PAPER-A4",
+          "quantity": 100
+        },
+        {
+          "receipt_id": "GR-9002",
+          "sku": "TONER-K",
+          "quantity": 10
+        }
+      ]
+    },
+    "PO-5002": {
+      "po_number": "PO-5002",
+      "received_quantity": 1000,
+      "receipts": [
+        {
+          "receipt_id": "GR-9003",
+          "sku": "BOLT-M8",
+          "quantity": 1000
+        }
+      ]
+    },
+    "PO-5003": {
+      "po_number": "PO-5003",
+      "received_quantity": 10,
+      "receipts": [
+        {
+          "receipt_id": "GR-9004",
+          "sku": "TONER-K",
+          "quantity": 10
+        }
+      ]
+    },
+    "PO-5004": {
+      "po_number": "PO-5004",
+      "received_quantity": 80,
+      "receipts": [
+        {
+          "receipt_id": "GR-9005",
+          "sku": "PAPER-A4",
+          "quantity": 80
+        }
+      ]
+    },
+    "PO-5005": {
+      "po_number": "PO-5005",
+      "received_quantity": 0,
+      "receipts": []
+    },
+    "PO-5006": {
+      "po_number": "PO-5006",
+      "received_quantity": 100,
+      "receipts": [
+        {
+          "receipt_id": "GR-9006",
+          "sku": "PAPER-A4",
+          "quantity": 100
+        }
+      ]
+    }
+  },
+  "invoices": {
+    "INV-0990": {
+      "invoice_id": "INV-0990",
+      "supplier_id": "SUP-ACME",
+      "po_number": "PO-5006",
+      "currency": "USD",
+      "total": "450.00",
+      "total_quantity": 100,
+      "status": "posted",
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        }
+      ]
+    },
+    "INV-1001": {
+      "invoice_id": "INV-1001",
+      "supplier_id": "SUP-ACME",
+      "po_number": "PO-5001",
+      "currency": "USD",
+      "total": "1070.00",
+      "total_quantity": 110,
+      "status": "received",
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        },
+        {
+          "sku": "TONER-K",
+          "quantity": 10,
+          "unit_price": "62.00"
+        }
+      ]
+    },
+    "INV-1002": {
+      "invoice_id": "INV-1002",
+      "supplier_id": "SUP-BOLT",
+      "po_number": "PO-5002",
+      "currency": "USD",
+      "total": "420.00",
+      "total_quantity": 1000,
+      "status": "received",
+      "lines": [
+        {
+          "sku": "BOLT-M8",
+          "quantity": 1000,
+          "unit_price": "0.42"
+        }
+      ]
+    },
+    "INV-1003": {
+      "invoice_id": "INV-1003",
+      "supplier_id": "SUP-ACME",
+      "po_number": "PO-5003",
+      "currency": "USD",
+      "total": "680.00",
+      "total_quantity": 10,
+      "status": "received",
+      "lines": [
+        {
+          "sku": "TONER-K",
+          "quantity": 10,
+          "unit_price": "68.00"
+        }
+      ]
+    },
+    "INV-1004": {
+      "invoice_id": "INV-1004",
+      "supplier_id": "SUP-ACME",
+      "po_number": "PO-5004",
+      "currency": "USD",
+      "total": "450.00",
+      "total_quantity": 100,
+      "status": "received",
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        }
+      ]
+    },
+    "INV-1005": {
+      "invoice_id": "INV-1005",
+      "supplier_id": "SUP-BOLT",
+      "po_number": "PO-5005",
+      "currency": "USD",
+      "total": "210.00",
+      "total_quantity": 500,
+      "status": "received",
+      "lines": [
+        {
+          "sku": "BOLT-M8",
+          "quantity": 500,
+          "unit_price": "0.42"
+        }
+      ]
+    },
+    "INV-1006": {
+      "invoice_id": "INV-1006",
+      "supplier_id": "SUP-ACME",
+      "po_number": "PO-5006",
+      "currency": "USD",
+      "total": "450.00",
+      "total_quantity": 100,
+      "status": "received",
+      "lines": [
+        {
+          "sku": "PAPER-A4",
+          "quantity": 100,
+          "unit_price": "4.50"
+        }
+      ]
+    }
+  },
+  "credit_notes": {
+    "SUP-ACME": [],
+    "SUP-BOLT": [
+      {
+        "credit_note_id": "CN-7001",
+        "invoice_id": "INV-0950",
+        "amount": "12.00",
+        "status": "issued"
+      }
+    ]
+  }
+}

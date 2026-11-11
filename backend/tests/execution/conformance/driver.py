@@ -101,10 +101,16 @@ def _code(response):
 class Operator:
     """Sets up one world's tenant and drives it as its owner."""
 
-    def __init__(self, world, processes, *, contracts=CONTRACTS, flows=FLOWS):
+    def __init__(self, world, processes, *, contracts=CONTRACTS, flows=FLOWS, connector=None):
         self.world, self.processes = world, processes
         self.contracts, self.flows = contracts, flows
         self.documents = catalog_documents(contracts)
+        # The connector each pool's connection and each runtime serve; its read
+        # operations are the connection's. The catalog fixture connector by default.
+        self.connector = connector or self.documents[0]
+        self.read_operations = tuple(
+            op["id"] for op in self.connector["definition"]["operations"] if op["effect"] == "read"
+        )
         self.published = {}
         self.deployed = {}
 
@@ -204,7 +210,7 @@ class Operator:
 
         from lotuspond import models
 
-        connector = self.documents[0]
+        connector = self.connector
         pin = ConnectorPin(
             name=connector["name"],
             version=connector["version"],
@@ -218,7 +224,7 @@ class Operator:
             db.flush()
             config = ConnectionConfig(
                 connector=pin,
-                operations=("read",),
+                operations=self.read_operations,
                 destinations=(),
                 secrets=(),
                 # The longest call a connection allows (E03's 30 s bound), so a
@@ -269,10 +275,11 @@ class Operator:
         return issued["token"]
 
     def runtime(self, customer, name, *, model_document=None, start=True, **scripts):
-        connector, model = self.documents[0], model_document or self.model_document()
+        connector, model = self.connector, model_document or self.model_document()
         return self.processes.start_runtime(
             name,
             self.enrollment(customer),
+            operations=list(self.read_operations),
             dependencies={
                 "connector": catalog_ref(connector),
                 "installed": {

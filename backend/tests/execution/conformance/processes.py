@@ -236,7 +236,15 @@ class Processes:
     # ---------------------------------------------------------------- runtimes
 
     def start_runtime(
-        self, name, enrollment_token, *, read=None, model=None, dependencies, start=True
+        self,
+        name,
+        enrollment_token,
+        *,
+        read=None,
+        model=None,
+        dependencies,
+        start=True,
+        operations=("read",),
     ):
         """Enroll and start one installed runtime with synthetic providers.
 
@@ -274,7 +282,7 @@ class Processes:
                     {
                         "provider_id": "fixture-read",
                         "dependency": dependencies["connector"],
-                        "operations": ["read"],
+                        "operations": list(operations),
                         "connector": dependencies["installed"],
                         "script": read_script,
                     },

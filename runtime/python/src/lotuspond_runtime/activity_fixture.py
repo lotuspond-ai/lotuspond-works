@@ -90,7 +90,10 @@ class FixtureReadProvider:
     def invoke(self, records, arguments, deadline_ms) -> ProviderResult:
         if records.envelope.operation not in self.descriptor.operations:
             raise ActivityFailure("unavailable", reached=False)
-        step = self._script.get("read", {})
+        # `reads` scripts each declared operation separately; `read` is the default.
+        step = self._script.get("reads", {}).get(
+            records.envelope.operation, self._script.get("read", {})
+        )
         digests = [hashlib.sha256(secret).hexdigest() for secret in self._secrets]
         if "require_secrets" in step and step["require_secrets"] != digests:
             raise ActivityFailure("provider_failed", reached=False)
