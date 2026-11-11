@@ -407,11 +407,19 @@ class BudgetService:
             ref = resolve_occurrence(program, step.occurrence_path)
         except ProgramError:
             raise ExecutionError("dependency_unavailable") from None
-        if ref.selector is not None or ref.step_id != step.node_id:
+        # An action's command attempts are the dispatch step's `#dispatch` record (E05).
+        if ref.selector not in (None, "#dispatch") or ref.step_id != step.node_id:
+            raise ExecutionError("dependency_unavailable")
+        if ref.selector == "#dispatch" and ref.step.kind != "action_dispatch":
             raise ExecutionError("dependency_unavailable")
         source, node = ref.package.model_dump(mode="json"), ref.step.model_dump(mode="json")
         if node["kind"] == "connector_read":
             ref = next(d["ref"] for d in source["connectors"] if d["id"] == node["connector_ref"])
+        elif node["kind"] == "action_dispatch":
+            # E05: a dispatch is priced as its intent's connector operation.
+            intent_id = node["intent"]["source"]["id"]
+            intent = next(s for s in _all_steps(source["body"]) if s["id"] == intent_id)
+            ref = next(d["ref"] for d in source["connectors"] if d["id"] == intent["connector_ref"])
         elif node["kind"] == "agent":
             if node.get("model_ref"):
                 ref = next(d["ref"] for d in source["models"] if d["id"] == node["model_ref"])
@@ -923,3 +931,14 @@ class BudgetService:
             )
         )
         db.flush()
+
+
+def _all_steps(body):
+    """Every step of a package body at every nesting level (plain JSON)."""
+    for step in body.get("steps", []):
+        yield step
+        for key in ("then_body", "else_body", "body"):
+            if isinstance(step.get(key), dict):
+                yield from _all_steps(step[key])
+        for branch in step.get("branches", []) or []:
+            yield from _all_steps(branch["body"])

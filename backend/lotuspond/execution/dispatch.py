@@ -836,6 +836,13 @@ class ActivityService:
                 ~select(ExecutionActivityDelivery.id)
                 .where(ExecutionActivityDelivery.attempt_id == ExecutionAttempt.id)
                 .exists(),
+                # E05: an action's command attempts go only to the action poll.
+                ~select(ExecutionStepInstance.id)
+                .where(
+                    ExecutionStepInstance.id == ExecutionAttempt.step_instance_id,
+                    ExecutionStepInstance.occurrence_path.like("%#dispatch"),
+                )
+                .exists(),
             )
             .order_by(Execution.admission_sequence, ExecutionAttempt.ordinal, ExecutionAttempt.id)
         )

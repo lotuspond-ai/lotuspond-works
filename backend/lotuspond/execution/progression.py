@@ -31,6 +31,7 @@ from hashlib import sha256
 from lotuspond_runtime.protocol import Scope
 from lotuspond_sdk.activity import ArtifactHandle
 from lotuspond_sdk.executable.package import (
+    ActionDispatchStep,
     ActionIntentStep,
     AgentStep,
     ConnectorReadStep,
@@ -286,6 +287,16 @@ class ConsumeDecision:
 
 
 @dataclass(frozen=True)
+class CreateDispatch:
+    """E05 (v2): the command attempt of an approved (or unreviewed) intent."""
+
+    occurrence_path: str  # `<dispatch step>#dispatch`
+    node_id: str
+    intent_id: str
+    decision_id: str | None
+
+
+@dataclass(frozen=True)
 class CancelUndispatched:
     prefix: str
 
@@ -311,6 +322,7 @@ Action = (
     | CreateIntent
     | OpenTask
     | ConsumeDecision
+    | CreateDispatch
 )
 
 
@@ -384,6 +396,8 @@ def output_export(program, package, step, record=None):
         return data_export(child.output_schema, child.schemas)
     if isinstance(step, ActionIntentStep):
         return HandleExport(kind="handle", handle_kind="action_intent")
+    if isinstance(step, ActionDispatchStep):
+        return HandleExport(kind="handle", handle_kind="action_receipt")
     raise ExpressionError("type_mismatch")
 
 
@@ -764,6 +778,8 @@ class _RegionV2(_Region):
     """Interpreter v2: v1's semantics, plus the E05 steps implemented so far."""
 
     def step(self, step):
+        if isinstance(step, ActionDispatchStep):
+            return self.dispatch(step)
         if isinstance(step, HumanTaskStep):
             path = self.path(step.id)
             record = self.state.occurrences.get(path)
@@ -783,6 +799,60 @@ class _RegionV2(_Region):
                 return "failed", final.failure or "cancelled"
             return self.intent(step, path)
         return super().step(step)
+
+    def dispatch(self, step):
+        """Create the command attempt; its receipt or failure then closes the step."""
+        path = self.path(step.id)
+        record = self.state.occurrences.get(path)
+        final = record.final if record else None
+        if final is not None and final.state == "succeeded":
+            return "done", final.value
+        if final is not None:
+            return "failed", final.failure or "cancelled"
+        attempts_path = self.path(step.id + "#dispatch")
+        attempts = self.state.occurrences.get(attempts_path)
+        attempts = attempts.attempts if attempts else ()
+        if not attempts:
+            try:
+                intent = self.evaluate(step.intent)
+                decision = self.evaluate(step.decision) if step.decision is not None else None
+            except ExpressionError as error:
+                return "pending", Derivation(
+                    actions=(RecordPure(path, step.id, failure=error.code),)
+                )
+            if (
+                type(intent) is not dict
+                or intent.get("handle_kind") != "action_intent"
+                or (
+                    decision is not None
+                    and (
+                        type(decision) is not dict
+                        or decision.get("handle_kind") != "human_decision"
+                    )
+                )
+            ):
+                return "pending", Derivation(
+                    actions=(RecordPure(path, step.id, failure="type_mismatch"),)
+                )
+            return "pending", Derivation(
+                actions=(
+                    CreateDispatch(
+                        attempts_path,
+                        step.id,
+                        intent["id"],
+                        None if decision is None else decision["id"],
+                    ),
+                )
+            )
+        last = attempts[-1]
+        if last.state == "succeeded":
+            return "pending", Derivation(actions=(RecordPure(path, step.id, value=last.value),))
+        if last.state in ("failed", "cancelled"):
+            return "pending", Derivation(
+                actions=(RecordPure(path, step.id, failure=last.failure or "cancelled"),)
+            )
+        # Reserved, dispatched, claimed or uncertain: the runtime and read-back decide.
+        return "pending", Derivation()
 
     def task(self, step, path, record):
         """A review or (v2) form task: open it, then consume its decision or form."""
@@ -1473,6 +1543,8 @@ class InterpreterV1:
                 add(path + "#select")
             elif isinstance(step, SubworkflowStep):
                 add(path + "#input")
+            elif isinstance(step, ActionDispatchStep):
+                add(path + "#dispatch")
             elif isinstance(step, ParallelStep):
                 groups[path] = [path + ":" + b.id for b in step.branches]
                 for member in groups[path]:
@@ -2374,7 +2446,81 @@ class InterpreterV2(InterpreterV1):
             return self._open_task(db, execution, epoch, action)
         if isinstance(action, ConsumeDecision):
             return self._consume_decision(db, execution, epoch, action)
+        if isinstance(action, CreateDispatch):
+            return self._create_dispatch(db, execution, epoch, action)
         return super()._apply(db, execution, epoch, action)
+
+    def _create_dispatch(self, db, execution, epoch, action):
+        """The one command attempt of an intent, only once it may be dispatched.
+
+        Approval alone is not enough: dispatch rechecks everything under fresh
+        authority (Task 6). Here the intent must be this execution's, verified, not
+        yet dispatched, and approved by the bound decision (or unreviewed by design).
+        """
+        from ..models import ExecutionActionDecision, ExecutionActionIntent
+        from .actions import load_intent
+
+        if execution.interpreter_id != INTERPRETER_V2:
+            raise ProgramError("integrity")
+        instance = self._instance(db, execution, action.occurrence_path, action.node_id)
+        if self._attempts(db, execution, instance):
+            return False  # a repeated transition creates nothing
+        intent = db.scalar(
+            _scoped(ExecutionActionIntent, execution)
+            .where(
+                ExecutionActionIntent.id == action.intent_id,
+                ExecutionActionIntent.execution_id == execution.id,
+            )
+            .with_for_update()
+        )
+        if intent is None:
+            raise ProgramError("integrity")
+        load_intent(
+            db,
+            _scope(execution),
+            intent.id,
+            artifacts=self.artifacts,
+            keys=self._keys(),
+            installation_id=self.installation_id,
+        )
+        step_path = action.occurrence_path.rpartition("#")[0]
+        refused = None
+        if intent.approval_mode == "human":
+            decision = (
+                None
+                if action.decision_id is None
+                else db.scalar(
+                    _scoped(ExecutionActionDecision, execution).where(
+                        ExecutionActionDecision.id == action.decision_id,
+                        ExecutionActionDecision.intent_id == intent.id,
+                    )
+                )
+            )
+            if decision is None or decision.decision != "allow":
+                refused = "approval_denied"
+            elif intent.authorization_state != "approved":
+                refused = "binding_refused"
+        elif intent.authorization_state != "proposed" or action.decision_id is not None:
+            refused = "binding_refused"
+        if refused is None and intent.effect_state != "not_dispatched":
+            refused = "binding_refused"
+        if refused is None and intent.expires_at_ms <= database_now_ms(db):
+            refused = "approval_expired"
+        if refused is not None:
+            return self._record(
+                db, execution, epoch, RecordPure(step_path, action.node_id, failure=refused)
+            )
+        return self._create_attempt(
+            db,
+            execution,
+            epoch,
+            CreateAttempt(
+                action.occurrence_path,
+                action.node_id,
+                1,
+                {"intent_id": intent.id, "decision_id": action.decision_id},
+            ),
+        )
 
     def _with_tasks(self, db, execution, state):
         """Each wait's human task, if any, with its recorded decision."""

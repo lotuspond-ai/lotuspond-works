@@ -8,7 +8,7 @@ step or region occurrence:
     path    := segment ("/" segment)*
     segment := step_id | step_id ":" selector | step_id "#" record
     selector:= "then" | "else" | branch_id | item_index | "call"
-    record  := "select" | "items" | "input"
+    record  := "select" | "items" | "input" | "dispatch"
 
 A segment with a selector opens a region (decision branch, parallel branch,
 iteration item or subworkflow call). A final `#` segment names a composite's
@@ -29,6 +29,7 @@ from lotuspond_sdk.executable import (
 )
 from lotuspond_sdk.executable.catalog import validate_catalog
 from lotuspond_sdk.executable.package import (
+    ActionDispatchStep,
     DecisionStep,
     IterationStep,
     ParallelStep,
@@ -43,7 +44,8 @@ from .authorization import record, scoped
 from .interpreters import COMPILERS
 
 MAX_PATH = 1024
-RECORDS = frozenset({"#select", "#items", "#input"})
+# E05 adds `#dispatch`: an action dispatch step's command attempts.
+RECORDS = frozenset({"#select", "#items", "#input", "#dispatch"})
 _INDEX = re.compile(r"0|[1-9][0-9]{0,3}")
 
 
@@ -269,6 +271,7 @@ def resolve_occurrence(plan: Program, occurrence_path: str) -> StepRef:
                     (selector == "#select" and isinstance(step, DecisionStep))
                     or (selector == "#items" and isinstance(step, IterationStep))
                     or (selector == "#input" and isinstance(step, SubworkflowStep))
+                    or (selector == "#dispatch" and isinstance(step, ActionDispatchStep))
                 )
                 if not valid:
                     raise ProgramError("occurrence_unresolved")

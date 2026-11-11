@@ -43,6 +43,7 @@ from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
+    ExecutionActionCommand,
     ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionCapacity,
@@ -51,6 +52,7 @@ from ..models import (
     ExecutionStepInstance,
     ExecutionUsageReservation,
     ExecutionWait,
+    RuntimeCommandAdmission,
     Workspace,
 )
 from .authorization import record, scoped
@@ -384,6 +386,36 @@ class ExecutionSweeper:
                         .limit(limit)
                     )
                 ),
+                "lapsed_action_leases": list(
+                    db.scalars(
+                        select(ExecutionActionCommand.id)
+                        .where(
+                            ExecutionActionCommand.status == "claimed",
+                            ExecutionActionCommand.lease_expires_at_ms <= now,
+                        )
+                        .order_by(
+                            ExecutionActionCommand.lease_expires_at_ms, ExecutionActionCommand.id
+                        )
+                        .limit(limit)
+                    )
+                ),
+                "expired_action_commands": list(
+                    db.scalars(
+                        select(ExecutionActionCommand.id)
+                        .join(
+                            RuntimeCommandAdmission,
+                            RuntimeCommandAdmission.id == ExecutionActionCommand.admission_id,
+                        )
+                        .where(
+                            ExecutionActionCommand.status == "admitted",
+                            RuntimeCommandAdmission.command_expires_at_ms <= now,
+                        )
+                        .order_by(
+                            RuntimeCommandAdmission.command_expires_at_ms, ExecutionActionCommand.id
+                        )
+                        .limit(limit)
+                    )
+                ),
                 "released_claims": list(
                     db.scalars(
                         select(ExecutionHumanTask.id)
@@ -514,6 +546,19 @@ class ExecutionSweeper:
             return self._hold(db, identifier, epoch)
         elif kind == "waits":
             return self._wait(db, identifier, epoch)
+        elif kind == "lapsed_action_leases":
+            from .action_dispatch import lapse
+
+            changed = lapse(
+                db,
+                identifier,
+                epoch=epoch,
+                event=lambda e, code, attempt_id: leases._event(db, e, epoch, code, attempt_id),
+            )
+        elif kind == "expired_action_commands":
+            from .action_dispatch import expire_command
+
+            changed = expire_command(db, identifier, epoch=epoch, leases=leases)
         elif kind in {"escalated_tasks", "released_claims"}:
             from .human_tasks import escalate_task, expire_claim
 

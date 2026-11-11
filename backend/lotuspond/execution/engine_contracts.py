@@ -82,6 +82,9 @@ class SweepReport(Contract):
     # E05 Task 5: human tasks escalated at half their timeout, and expired claims released.
     escalated_tasks: Count = 0
     released_claims: Count = 0
+    # E05 Task 6: lapsed action leases (now uncertain) and unclaimed commands expired.
+    lapsed_action_leases: Count = 0
+    expired_action_commands: Count = 0
     # Amendment for RESTORE-1 (owner decision, 2026-10-28): executions admitted under
     # an older recovery epoch, held for reconciliation after a restore.
     restored_executions: Count = 0
