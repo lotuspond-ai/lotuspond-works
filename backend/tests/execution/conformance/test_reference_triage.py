@@ -1,7 +1,9 @@
-"""Reference workflow on real processes with the runtime's real providers (milestone 2).
+"""Reference workflow on real processes, production wiring and real providers.
 
 The invoice-triage prefix (the workflow before E05) runs on the API, orchestrator,
-sweeper and one enrolled runtime. The runtime's `https-json` connector reads the HTTPS
+sweeper and one enrolled runtime. The API and workers are built from an operator
+authority directory (`python -m lotuspond.authority`) with test mode off, as production
+builds them (milestone 3); only the runtime is in test mode, to reach loopback stand-ins. The runtime's `https-json` connector reads the HTTPS
 stand-in AP system (`reference/invoice-triage/standin/server.py`) with the connection's
 bearer token from a mounted secret, and its `anthropic-messages` provider calls a local
 Messages API double (`standin/model_double.py`) scripted from each scenario. Nothing
@@ -127,8 +129,14 @@ def prefix_expectation(scenario):
 
 
 @pytest.fixture
-def reference(system, linux):
-    w = system
+def reference(world, processes, linux):
+    w = world
+    drivers.worlds.operator_mode(w)  # before any process reads the world's authorities
+    processes.start_api()
+    processes.start_worker("orchestrator", "orchestrator-a", wait=False)
+    processes.start_worker("sweeper", "sweeper-a", wait=False)
+    processes.wait_ready("orchestrator-a", "sweeper-a")
+    w.processes = processes
     cert, key = certificate(drivers.worlds.private_directory(w.root / "tls"))
     server, ledger = standin.serve(0, cert, key, AP_TOKEN, host="127.0.0.1")
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -142,9 +150,8 @@ def reference(system, linux):
         secret_binding="ap_token",
     )
     customer = operator.tenant(w.engine, label="Reference")
-    # The execution's active budget is the smallest declared timeout (the agent's 600 s),
-    # and every attempt is charged its reservation: 20 s each leaves ample room.
-    operator.demand(20000)
+    # Each attempt's demand is the operator directory's (20 s of active time by default),
+    # well inside the agent's 600 s, which is the execution's active budget.
     revision = operator.deploy(
         customer,
         "invoice-triage-prefix",

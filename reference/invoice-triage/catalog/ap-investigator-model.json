@@ -304,7 +304,7 @@
   "limits": {
    "max_cost_microusd": 20000,
    "max_input_tokens": 60000,
-   "max_output_tokens": 4000,
+   "max_output_tokens": 16000,
    "max_steps": 20,
    "timeout_seconds": 600
   },

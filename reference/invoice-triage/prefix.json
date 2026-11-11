@@ -609,7 +609,7 @@
        "limits": {
         "max_cost_microusd": 20000,
         "max_input_tokens": 60000,
-        "max_output_tokens": 4000,
+        "max_output_tokens": 16000,
         "max_steps": 20,
         "timeout_seconds": 600
        },
@@ -1767,7 +1767,7 @@
   "elapsed_seconds": 691200,
   "max_cost_microusd": 20000,
   "max_input_tokens": 60000,
-  "max_output_tokens": 4000,
+  "max_output_tokens": 16000,
   "max_steps": 200,
   "retained_waits": 10
  },
@@ -1777,7 +1777,7 @@
    "ref": {
     "kind": "model",
     "name": "ap-investigator-model",
-    "sha256": "83e4f8aebf1ab9da4a6d75c88e7bb972dcc498ebfd71a3cdf2105247f4b4be81",
+    "sha256": "b029f8cfa7772ba84e32b15906488f40c2e4913409c65b5446d355a208aedfbb",
     "version": "0.1.0"
    }
   }

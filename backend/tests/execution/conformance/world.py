@@ -222,6 +222,29 @@ def _wall_ms():
 # ------------------------------------------------------------------ creation
 
 
+def operator_mode(world: World) -> Path:
+    """Switch a world to an operator authority directory before any process starts.
+
+    The directory is created by `python -m lotuspond.authority` exactly as an operator
+    would: the world's package key becomes a trusted publisher, execution is switched
+    on, and release decisions are not required (milestone 5 adds the release binding).
+    Runtimes pin the directory's activity trust.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from lotuspond.authority import init, switch, trust_publisher
+
+    directory = world.root / "operator-authority"
+    init(directory, INSTALLATION)
+    package = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(world.state("keys")["package"]))
+    trust_publisher(directory, package.public_key().public_bytes_raw().hex())
+    switch(directory, "entitlement.json", "execute", True)
+    switch(directory, "publishers.json", "release_required", False)
+    world.write("activity-trust", json.loads((directory / "activity-trust.json").read_text()))
+    world.write("operator", {"dir": str(directory)})
+    return directory
+
+
 def trust_set(private_hex: str) -> dict:
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -299,6 +322,11 @@ def create(root, database_url: str, schema: str, *, limits=None, demand=None) ->
 
 def admit_catalog(world: World, digest: str) -> None:
     """An operator admits one catalog document digest (before it is published)."""
+    if (world.root / "operator.json").exists():
+        from lotuspond.authority import admit
+
+        admit(Path(world.state("operator")["dir"]), [digest])
+        return
     state = world.state("authority")
     if digest not in state["catalog"]:
         world.update("authority", catalog=[*state["catalog"], digest])

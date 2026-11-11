@@ -58,139 +58,49 @@ def settings_for(world):
 
 
 def build(world, engine=None):
-    """Every execution service of one process, over the world's authorities."""
-    from sqlalchemy.orm import sessionmaker
+    """Every execution service of one process, over the world's authorities.
 
+    The wiring is production's (`lotuspond.execution.composition.compose`); only the
+    authorities are the world's file-backed test ones.
+    """
     from lotuspond.config import Settings
     from lotuspond.database import engine_for
-    from lotuspond.execution.admission import AdmissionService
-    from lotuspond.execution.artifacts import (
-        WORKSPACE_ACCESS_POLICY,
-        ArtifactPolicy,
-        ArtifactStore,
-    )
-    from lotuspond.execution.boundary import ExecutionServices
-    from lotuspond.execution.budgets import BudgetService
-    from lotuspond.execution.context import ContextSource
-    from lotuspond.execution.control import ControlService
-    from lotuspond.execution.dispatch import ActivityService
-    from lotuspond.execution.engine import PostgresExecutionEngine
-    from lotuspond.execution.inbox import InboxService
-    from lotuspond.execution.leases import LeaseService
-    from lotuspond.execution.progression import InterpreterV1
-    from lotuspond.execution.projections import EventProjection
-    from lotuspond.execution.publication import ExecutionDependencies
-    from lotuspond.execution.reconciliation import ReconciliationService
-    from lotuspond.execution.recovery import RecoveryFence
-    from lotuspond.execution.scheduler import Scheduler
-    from lotuspond.execution.sweeper import ExecutionSweeper
-    from lotuspond.fleet.authority import FleetDependencies
-    from lotuspond.fleet.catalog import InstalledCatalog
+    from lotuspond.execution.composition import compose
     from lotuspond.security import RateLimiter
 
     engine = engine or engine_for(settings_for(world))  # the production API's own pooling
+    if (world.root / "operator.json").exists():
+        # Operator mode: production's authorities from an operator directory, test mode
+        # off, exactly as the API and execution-worker build them from settings.
+        from lotuspond.execution.operator_authority import OperatorAuthorities
+
+        return compose(
+            OperatorAuthorities(world.state("operator")["dir"], worlds.INSTALLATION),
+            engine=engine,
+            installation_id=worlds.INSTALLATION,
+            limiter=RateLimiter(Settings(env="test")),
+        )
     entitlement = worlds.FileEntitlement(world)
-    recovery = worlds.FileRecovery(world)
-    dependencies = ExecutionDependencies(authority=worlds.FileAuthority(world), test_mode=True)
-    budgets = BudgetService(
+    authorities = SimpleNamespace(
+        recovery=worlds.FileRecovery(world),
         entitlement=entitlement,
-        tenant_policy=worlds.FileTenant(entitlement),
+        tenant=worlds.FileTenant(entitlement),
         charges=entitlement,
-        recovery=recovery,
-        installation_id=worlds.INSTALLATION,
-        deployments=dependencies,
-        test_mode=True,
-    )
-    keys, access = worlds.FileKeys(world), worlds.FileAccess(world)
-    store = ArtifactStore(keys, access, test_mode=True)
-    policy = ArtifactPolicy(
-        classification="customer-private",
-        source_id=None,
-        source_version=None,
+        demand=worlds.Demand(world),
+        publishers=worlds.FileAuthority(world),
+        keys=worlds.FileKeys(world),
+        access=worlds.FileAccess(world),
+        activity_trust=worlds.FileActivityTrust(world),
+        signer=worlds.FileSigner(world),
+        artifact_key_id="conformance",
         retain_until_ms=worlds.MAX_MS,
-        access_policy_id=WORKSPACE_ACCESS_POLICY,
-        key_id="conformance",
     )
-    fleet = FleetDependencies(
-        recovery=recovery,
-        catalog=InstalledCatalog(),
+    return compose(
+        authorities,
+        engine=engine,
         installation_id=worlds.INSTALLATION,
         limiter=RateLimiter(Settings(env="test")),
-    )
-    fence = RecoveryFence(fleet)
-    activities = ActivityService(
-        fleet=fleet,
-        budgets=budgets,
-        artifacts=store,
-        artifact_policy=policy,
-        trust=worlds.FileActivityTrust(world),
-        signer=worlds.FileSigner(world),
-        demand=worlds.Demand(world),
-        installation_id=worlds.INSTALLATION,
         test_mode=True,
-    )
-    leases = LeaseService(activities)
-    interpreter = InterpreterV1(
-        artifacts=store,
-        artifact_policy=policy,
-        budgets=budgets,
-        recovery=fence,
-        installation_id=worlds.INSTALLATION,
-        test_mode=True,
-    )
-    sweeper = ExecutionSweeper(
-        leases=leases,
-        recovery=fence,
-        scheduler=Scheduler(budgets, worlds.Demand(world), test_mode=True),
-    )
-    controls = ControlService(
-        budgets=budgets,
-        artifacts=store,
-        artifact_policy=policy,
-        installation_id=worlds.INSTALLATION,
-        recovery=fence,
-    )
-    inbox = InboxService(budgets=budgets, artifacts=store, artifact_policy=policy)
-    reconciliation = ReconciliationService(activities)
-    context = ContextSource(store)
-    services = ExecutionServices(
-        artifacts=store,
-        artifact_policy=policy,
-        budgets=budgets,
-        dependencies=dependencies,
-        admission=AdmissionService(
-            budgets=budgets, artifacts=store, artifact_policy=policy, interpreter_id=INTERPRETER
-        ),
-        inbox=inbox,
-        controls=controls,
-        activities=activities,
-        leases=leases,
-        reconciliation=reconciliation,
-        context=context,
-    )
-    return SimpleNamespace(
-        engine=engine,
-        sessions=sessionmaker(engine, expire_on_commit=False),
-        services=services,
-        fleet=fleet,
-        fence=fence,
-        store=store,
-        policy=policy,
-        budgets=budgets,
-        dependencies=dependencies,
-        activities=activities,
-        leases=leases,
-        controls=controls,
-        reconciliation=reconciliation,
-        events=EventProjection(
-            artifacts=store,
-            artifact_policy=policy,
-            installation_id=worlds.INSTALLATION,
-            recovery=fence,
-        ),
-        execution_engine=PostgresExecutionEngine(
-            interpreter, sweeper, fence, interpreter_ids=[INTERPRETER], test_mode=True
-        ),
     )
 
 

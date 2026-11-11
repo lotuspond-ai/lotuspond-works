@@ -249,7 +249,7 @@ AGENT_LIMITS = {
     "max_steps": 20,
     "timeout_seconds": 600,
     "max_input_tokens": 60000,
-    "max_output_tokens": 4000,
+    "max_output_tokens": 16000,  # thinking counts as output
     "max_cost_microusd": 20000,
 }
 # Claude Haiku 5.5 at medium effort: the cheapest current model with tool use and
@@ -597,7 +597,7 @@ def workflow(package_id, name, exception, policies):
             "elapsed_seconds": 8 * 86400,
             "retained_waits": 10,
             "max_input_tokens": 60000,
-            "max_output_tokens": 4000,
+            "max_output_tokens": 16000,  # thinking counts as output
             "max_cost_microusd": 20000,
         },
         "assurance": {

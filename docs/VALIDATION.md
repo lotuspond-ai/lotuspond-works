@@ -1497,3 +1497,29 @@ Local evidence only: no hosted CI (GitHub Actions refused every job for billing,
   - `validate`: the backend check suite 1,079 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed. The required PostgreSQL suite had 1,220 passed and 1 failed. The failure, `test_artifacts.py::test_retention_inventory_is_bounded_dry_run`, has a 250 ms retention cutoff that two writes outlasted on the loaded host; it involves no code this change touched, and alone it passed 5 of 5.
   - Three runtime expectations were updated for the new behaviour. Installed metadata now lists the optional extra, and a core install must not contain `anthropic` or `httpx2`. A synthetic configuration outside test mode is now refused as `invalid_input` rather than `unavailable`, so synthetic providers still run only in test mode.
 - **Not covered:** a live Anthropic call (no API key on this machine), a real AP system, writes (E05), and hosted CI.
+
+## Reference workflow, milestone 3: production execution authorities from an operator directory — 2026-11-11
+
+Local evidence only: no hosted CI (GitHub Actions refused every job for billing), no deployment, no live model call and no real AP system. Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6). No timing claim is made.
+
+- **What shipped:**
+  - `lotuspond.execution.operator_authority` provides recovery, entitlement, tenant policy, demand, publisher trust and admitted catalog, artifact keys, knowledge-source access, and the activity signer and trust. All of these are read from one private operator directory outside the database and reread on every lookup. A missing, readable-by-others, foreign or linked file denies.
+  - `python -m lotuspond.authority` with `init`, `trust-publisher`, `admit`, `execution`, `release-required`, `new-epoch` and `show`. `init` starts with execution off and release decisions required.
+  - `lotuspond.execution.composition.compose()` is the one wiring that both the API (`LOTUSPOND_AUTHORITY_DIR`) and `execution-worker` (`..._AUTHORITY_DIR`, `..._INSTALLATION_ID`) use, and so does the conformance harness. Without the directory, behaviour is unchanged: no execution services, and the worker refuses with `engine_unavailable`.
+  - Runbook: `docs/operations/operator-authority.md`.
+- **Mac:** 10 operator authority tests passed. They cover private files, refusals, immediate revocation, a new epoch, and the API and worker built from settings. The 22 reference tests passed.
+- **Linux, real processes:** `test_reference_triage.py` now runs the API and workers with the operator directory and test mode off, as production builds them; only the runtime stays in test mode, to reach loopback stand-ins. All six scenarios end as specified (1 passed, 88 s).
+- **Regression:**
+  - Conformance tier 1 and installed acceptance: 49 passed (35 min 26 s).
+  - Disruptive: 6 passed.
+  - `execution` and `restore` jobs passed.
+  - `validate`:
+    - backend check suite 1,089 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed;
+    - the required PostgreSQL suite had 1,230 passed and 1 failed. The failure is the same 250 ms `test_retention_inventory_is_bounded_dry_run` timing case as in milestone 2. Rerun alone, it passed 5 of 5.
+  - `docs`: the local runner's `pip` put `mkdocs` outside `PATH` (exit 127, a container issue). With `~/.local/bin` on `PATH` the strict build passed.
+- **Not covered:**
+  - a live Anthropic call;
+  - a real AP system;
+  - writes (E05);
+  - the package release binding (milestone 5; until then the harness turns `release-required` off);
+  - hosted CI.

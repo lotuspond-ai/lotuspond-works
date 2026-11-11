@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     registration_enabled: bool = False
     fleet_enabled: bool = False
     fleet_installation_id: str | None = None
+    # The operator authority directory (`python -m lotuspond.authority`). With it and
+    # the fleet enabled, the API builds its execution services; without it they refuse.
+    authority_dir: str | None = None
     session_hours: int = Field(default=24, ge=1, le=168)
     max_request_bytes: int = Field(default=2 * 1024 * 1024, ge=1024, le=10 * 1024 * 1024)
     mail_enabled: bool = False
@@ -66,6 +69,10 @@ class Settings(BaseSettings):
                 TypeAdapter(OpaqueId).validate_python(self.fleet_installation_id, strict=True)
             except ValueError:
                 raise ValueError("Fleet requires a valid installation ID") from None
+        if self.authority_dir is not None and (
+            not self.fleet_enabled or not self.authority_dir.startswith("/")
+        ):
+            raise ValueError("The authority directory needs the fleet and an absolute path")
         origin = urlsplit(self.origin)
         if (
             origin.scheme not in {"http", "https"}
@@ -108,10 +115,14 @@ class Settings(BaseSettings):
             raise ValueError("SMTP host must be a hostname or the ::1 loopback address")
         if self.mail_enabled:
             if not self.mail_encryption_key or not self.smtp_host or not self.smtp_from:
-                raise ValueError("Enabled mail requires encryption key, SMTP host, and from address")
+                raise ValueError(
+                    "Enabled mail requires encryption key, SMTP host, and from address"
+                )
             loopback = self.smtp_host in {"localhost", "127.0.0.1", "::1"}
             if not self.smtp_starttls and (self.env == "production" or not loopback):
-                raise ValueError("SMTP requires STARTTLS except for loopback development/test servers")
+                raise ValueError(
+                    "SMTP requires STARTTLS except for loopback development/test servers"
+                )
         if self.env == "production":
             if origin.scheme != "https" or origin.hostname in {"localhost", "127.0.0.1"}:
                 raise ValueError("Production requires a configured HTTPS origin")

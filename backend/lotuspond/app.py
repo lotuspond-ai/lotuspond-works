@@ -167,6 +167,18 @@ def create_app(
     owned_engine = engine is None
     engine = engine if engine is not None else engine_for(settings)
     limiter = RateLimiter(settings)
+    if execution_services is None and fleet_dependencies is None and settings.authority_dir:
+        # Production: every execution authority from the operator's directory.
+        from .execution.composition import compose
+        from .execution.operator_authority import OperatorAuthorities
+
+        graph = compose(
+            OperatorAuthorities(settings.authority_dir, settings.fleet_installation_id),
+            engine=engine,
+            installation_id=settings.fleet_installation_id,
+            limiter=limiter,
+        )
+        execution_services, fleet_dependencies = graph.services, graph.fleet
 
     dependencies = replace(
         fleet_dependencies or FleetDependencies(UnavailableRecoveryAuthority(), InstalledCatalog()),
@@ -188,8 +200,8 @@ def create_app(
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
-    # Production builds no execution services yet: routes that need one refuse
-    # (`authority_unavailable`) and database-only reads still answer (Task 14 wires them).
+    # Without an authority directory there are no execution services: routes that need
+    # one refuse (`authority_unavailable`) and database-only reads still answer.
     app.state.execution_services = execution_services
     from .fleet.commands import (
         CommandDependencies,
