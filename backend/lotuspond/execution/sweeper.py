@@ -46,6 +46,7 @@ from ..models import (
     ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionCapacity,
+    ExecutionHumanTask,
     ExecutionLease,
     ExecutionStepInstance,
     ExecutionUsageReservation,
@@ -369,6 +370,31 @@ class ExecutionSweeper:
                         _overdue(now).order_by(Execution.deadline_ms, Execution.id).limit(limit)
                     )
                 ),
+                # E05 Task 5, on the v16 due indexes.
+                "escalated_tasks": list(
+                    db.scalars(
+                        select(ExecutionHumanTask.id)
+                        .where(
+                            ExecutionHumanTask.state == "open",
+                            ExecutionHumanTask.escalated_at_ms.is_(None),
+                            ExecutionHumanTask.escalate_at_ms.is_not(None),
+                            ExecutionHumanTask.escalate_at_ms <= now,
+                        )
+                        .order_by(ExecutionHumanTask.escalate_at_ms, ExecutionHumanTask.id)
+                        .limit(limit)
+                    )
+                ),
+                "released_claims": list(
+                    db.scalars(
+                        select(ExecutionHumanTask.id)
+                        .where(
+                            ExecutionHumanTask.claim_user_id.is_not(None),
+                            ExecutionHumanTask.claim_expires_at_ms <= now,
+                        )
+                        .order_by(ExecutionHumanTask.claim_expires_at_ms, ExecutionHumanTask.id)
+                        .limit(limit)
+                    )
+                ),
             }
 
     @staticmethod
@@ -420,6 +446,16 @@ class ExecutionSweeper:
         timer = isinstance(step, TimerStep)
         wait.state = "satisfied" if timer else "expired"
         db.flush()
+        if not timer:
+            from .human_tasks import expire_task
+
+            # A human task (E05) expires with its wait, and so does its intent's review.
+            expire_task(
+                db,
+                execution,
+                wait,
+                event=lambda e, code: self.leases._event(db, e, epoch, code, None, None),
+            )
         mark_runnable(db, execution, now)
         return "timers" if timer else "expired_waits"
 
@@ -478,6 +514,16 @@ class ExecutionSweeper:
             return self._hold(db, identifier, epoch)
         elif kind == "waits":
             return self._wait(db, identifier, epoch)
+        elif kind in {"escalated_tasks", "released_claims"}:
+            from .human_tasks import escalate_task, expire_claim
+
+            hook = escalate_task if kind == "escalated_tasks" else expire_claim
+            changed = hook(
+                db,
+                identifier,
+                epoch=epoch,
+                event=lambda e, code: self.leases._event(db, e, epoch, code, None, None),
+            )
         else:
             return self._deadline(db, identifier, epoch)
         return kind if changed else None

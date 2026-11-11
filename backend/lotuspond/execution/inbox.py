@@ -19,6 +19,7 @@ from ..models import (
     ExecutionWait,
     new_id,
 )
+from .action_contracts import INTERPRETER_V2
 from .admission import _current_deployment
 from .artifacts import ArtifactPolicy
 from .authorization import lock, mark_replay, reauthorize, record, scoped
@@ -43,7 +44,7 @@ class InboxService:
         )
 
     @staticmethod
-    def _node(package, sources, step):
+    def _node(package, sources, step, *, tasked=False, v2=False):
         # The exact persisted occurrence path selects one node of one package;
         # an unresolved path is refused, never guessed from caller data.
         try:
@@ -57,6 +58,9 @@ class InboxService:
             raise ExecutionError("forbidden")
         if node.kind == "human_task" and node.mode != "form":
             raise ExecutionError("unsupported_step")
+        if node.kind == "human_task" and v2 and not tasked:
+            # A v2 form is a human task: submitted only through its task rules.
+            raise ExecutionError("forbidden")
         declaration = next(
             (p for p in package.policies if p.id == node.assignment_policy_ref), None
         )
@@ -68,15 +72,24 @@ class InboxService:
             and s.get("name") == declaration.ref.name
             and s.get("version") == declaration.ref.version
         ]
-        if len(policies) != 1 or policies[0]["definition"]["assignment"] != "workspace_admins":
+        if len(policies) != 1:
+            raise ExecutionError("unsupported_policy")
+        # E04's one form assignment; a task-checked (v2) form uses its task's instead.
+        if not tasked and policies[0]["definition"]["assignment"] != "workspace_admins":
             raise ExecutionError("unsupported_policy")
         return package, node
 
     @execution_service
-    def accept_signal(self, db, actor, execution_id: str, request: SignalRequest) -> SignalReceipt:
+    def accept_signal(
+        self, db, actor, execution_id: str, request: SignalRequest, *, task_check=None
+    ) -> SignalReceipt:
+        """E04's signal path. With `task_check` (E05: a v2 form submitted through its
+        human task) the task's claim and eligibility replace E04's owner/admin rule,
+        under the `review` operation; the typed, encrypted inbox path is the same."""
+        operation = "review" if task_check is not None else "signal"
         # The fair gates first, before any row lock (`authority_gate`).
-        execution_gates(db, actor.scope, execution_id, "signal", [actor.user_id])
-        actor = reauthorize(db, actor, "signal")  # first row lock: the workspace row
+        execution_gates(db, actor.scope, execution_id, operation, [actor.user_id])
+        actor = reauthorize(db, actor, operation)  # first row lock: the workspace row
         request = SignalRequest.model_validate(request)
         # Own the nested JSON graph before provider waits, preserving exact numeric
         # types until the declared wait schema validates them (including replays).
@@ -113,12 +126,22 @@ class InboxService:
 
         def current(*, typed=True, state=True):
             package, sources = self._deployment(db, actor, execution.deployment_revision_id)
-            source_package, node = self._node(package, sources, step)
-            current_actor = reauthorize(
-                db, actor, "human_form" if node.kind == "human_task" else "signal"
+            source_package, node = self._node(
+                package,
+                sources,
+                step,
+                tasked=task_check is not None,
+                v2=execution.interpreter_id == INTERPRETER_V2,
             )
-            if current_actor.role not in {"owner", "admin"}:
-                raise ExecutionError("forbidden")
+            if task_check is not None:
+                current_actor = reauthorize(db, actor, "review")
+                task_check(current_actor)
+            else:
+                current_actor = reauthorize(
+                    db, actor, "human_form" if node.kind == "human_task" else "signal"
+                )
+                if current_actor.role not in {"owner", "admin"}:
+                    raise ExecutionError("forbidden")
             now = database_now_ms(db)
             # E04 finding 2 (owner decision, 2 November 2026): an open, unexpired wait of
             # a live execution that the capacity step has not yet retained is listed

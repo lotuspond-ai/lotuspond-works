@@ -15,7 +15,19 @@ from ..security import Principal, enrollment_pending
 from .errors import ExecutionError, execution_service
 
 OPERATIONS = frozenset(
-    {"publish", "manage", "execute", "signal", "human_form", "read", "control", "reconcile"}
+    {
+        "publish",
+        "manage",
+        "execute",
+        "signal",
+        "human_form",
+        "read",
+        "control",
+        "reconcile",
+        # E05: claim, decide or submit a human task. Eligibility is the task's own
+        # assignment, checked by the task service; keys never hold it.
+        "review",
+    }
 )
 # Operations whose authority rows are only fenced against an authority change: they
 # share them (`share`, throughput option C), so two of them no longer queue for each
@@ -24,7 +36,7 @@ OPERATIONS = frozenset(
 # `accept_signal` authorizes `signal` and then `human_form` in one transaction, so
 # the two share alike or the second would upgrade. Every other write keeps the rows
 # `FOR UPDATE`.
-SHARED_OPERATIONS = frozenset({"execute", "signal", "human_form", "control"})
+SHARED_OPERATIONS = frozenset({"execute", "signal", "human_form", "control", "review"})
 _SEAL = object()
 _UUID = TypeAdapter(CanonicalUUID)
 _CHECKED = "lotuspond.execution.checked"

@@ -44,6 +44,17 @@ def bind(h, db, publication, documents, operations=("lookup", "submit"), artifac
     from lotuspond.execution.contracts import DependencyBinding
     from tests.execution.test_deployments import catalog_ref
 
+    if documents and documents[0]["kind"] != "connector":
+        # No connector in the closure (a form-only package): no connection to bind.
+        from tests.execution.test_deployments import deployment_request
+
+        template = deployment_request(h, publication.id)
+        bindings = tuple(DependencyBinding(dependency=catalog_ref(d)) for d in documents)
+        return template.model_copy(
+            update={
+                "configuration": template.configuration.model_copy(update={"bindings": bindings})
+            }
+        )
     if getattr(h, "connection_request", None) is None:
         h.connection_request = connection_request(db, h, publication, documents)
         h.connection_versions = 1

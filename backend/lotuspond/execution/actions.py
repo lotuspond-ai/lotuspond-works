@@ -221,40 +221,74 @@ class IntentService:
 
     def record_created(self, db, execution, epoch, intent, attempt_id):
         """Append the SDK `intent_created` event with the exact intent in its encrypted content."""
-        sequence = execution.next_event_sequence
-        content = {
-            "format": "lotuspond.execution-event.v1",
-            "execution_id": execution.id,
-            "sequence": sequence,
-            "kind": "intent_created",
-            "payload": {"intent": json.loads(intent.model_dump_json())},
-        }
-        handle = self._put(db, execution, content)
-        db.add(
-            ExecutionEvent(
-                **_scope(execution).model_dump(),
-                execution_id=execution.id,
-                attempt_id=attempt_id,
-                sequence=sequence,
-                family="sdk_runtime_event",
-                format_version=1,
-                installation_id=self.installation_id,
-                recovery_epoch=epoch,
-                source_id="orchestrator",
-                source_generation=1,
-                source_sequence=sequence,
-                event_id=f"orchestrator:{sequence}",
-                event_artifact_id=handle.id,
-                event_artifact_version=handle.version,
-                digest=handle.sha256,
-                code="intent_created",
-                occurred_at_ms=database_now_ms(db),
-                application_state="applied",
-                gap_slot=None,
-            )
+        record_sdk_event(
+            db,
+            self.artifacts,
+            self.policy,
+            self.installation_id,
+            execution,
+            epoch,
+            "intent_created",
+            {"intent": json.loads(intent.model_dump_json())},
+            attempt_id=attempt_id,
+            keys=self.keys,
         )
-        execution.next_event_sequence = sequence + 1
-        db.flush()
+
+
+def record_sdk_event(
+    db,
+    artifacts,
+    policy,
+    installation_id,
+    execution,
+    epoch,
+    kind,
+    payload,
+    *,
+    attempt_id=None,
+    keys=None,
+):
+    """An SDK runtime event in the execution's one gap-free sequence, its record encrypted.
+
+    The row holds the kind and references only; the record (intent, decision, ...)
+    is in the encrypted event artifact.
+    """
+    sequence = execution.next_event_sequence
+    content = {
+        "format": "lotuspond.execution-event.v1",
+        "execution_id": execution.id,
+        "sequence": sequence,
+        "kind": kind,
+        "payload": payload,
+    }
+    handle = artifacts._put_internal(
+        db, _scope(execution), canonical_value(content), policy, keys=keys
+    )
+    db.add(
+        ExecutionEvent(
+            **_scope(execution).model_dump(),
+            execution_id=execution.id,
+            attempt_id=attempt_id,
+            sequence=sequence,
+            family="sdk_runtime_event",
+            format_version=1,
+            installation_id=installation_id,
+            recovery_epoch=epoch,
+            source_id="orchestrator",
+            source_generation=1,
+            source_sequence=sequence,
+            event_id=f"orchestrator:{sequence}",
+            event_artifact_id=handle.id,
+            event_artifact_version=handle.version,
+            digest=handle.sha256,
+            code=kind,
+            occurred_at_ms=database_now_ms(db),
+            application_state="applied",
+            gap_slot=None,
+        )
+    )
+    execution.next_event_sequence = sequence + 1
+    db.flush()
 
 
 def intent_for(db, execution, step_instance_id):

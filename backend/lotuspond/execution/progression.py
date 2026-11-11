@@ -25,7 +25,7 @@ Persisted conventions shared with Tasks 9-11:
 import json
 import logging
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 
 from lotuspond_runtime.protocol import Scope
@@ -133,6 +133,9 @@ FAILURES = frozenset(
         "uncertain",
         # E05 (interpreter v2).
         "binding_refused",
+        "approval_denied",
+        "review_expired",
+        "approval_expired",
     }
 )
 
@@ -183,11 +186,22 @@ class SignalRecord:
 
 
 @dataclass(frozen=True)
+class TaskRecord:
+    """E05 (v2): the human task behind a wait, and a recorded decision if any."""
+
+    id: str
+    kind: str
+    state: str
+    decision: str | None = None
+
+
+@dataclass(frozen=True)
 class OccurrenceRecord:
     path: str
     attempts: tuple = ()
     wait: WaitRecord | None = None
     signals: tuple = ()
+    task: TaskRecord | None = None
 
     @property
     def final(self):
@@ -253,6 +267,25 @@ class CreateIntent:
 
 
 @dataclass(frozen=True)
+class OpenTask:
+    """E05 (v2): open a human task's wait and its task record."""
+
+    occurrence_path: str
+    node_id: str
+    deadline_ms: int
+    escalate_at_ms: int | None
+    intent_id: str | None
+
+
+@dataclass(frozen=True)
+class ConsumeDecision:
+    """E05 (v2): consume the one decision bound to a review task."""
+
+    occurrence_path: str
+    task_id: str
+
+
+@dataclass(frozen=True)
 class CancelUndispatched:
     prefix: str
 
@@ -276,6 +309,8 @@ Action = (
     | Complete
     | Fail
     | CreateIntent
+    | OpenTask
+    | ConsumeDecision
 )
 
 
@@ -322,6 +357,8 @@ def output_export(program, package, step, record=None):
         operation = next(op for op in document.definition.operations if op.id == step.operation)
         return data_export(operation.output_schema, document.schemas)
     if isinstance(step, HumanTaskStep):
+        if step.mode == "review":
+            return HandleExport(kind="handle", handle_kind="human_decision")
         return data_export(step.form_schema, definitions)
     if isinstance(step, ExternalWaitStep):
         return data_export(step.signal_schema, definitions)
@@ -727,6 +764,15 @@ class _RegionV2(_Region):
     """Interpreter v2: v1's semantics, plus the E05 steps implemented so far."""
 
     def step(self, step):
+        if isinstance(step, HumanTaskStep):
+            path = self.path(step.id)
+            record = self.state.occurrences.get(path)
+            final = record.final if record else None
+            if final is not None and final.state == "succeeded":
+                return "done", final.value
+            if final is not None:
+                return "failed", final.failure or "cancelled"
+            return self.task(step, path, record)
         if isinstance(step, ActionIntentStep):
             path = self.path(step.id)
             record = self.state.occurrences.get(path)
@@ -737,6 +783,49 @@ class _RegionV2(_Region):
                 return "failed", final.failure or "cancelled"
             return self.intent(step, path)
         return super().step(step)
+
+    def task(self, step, path, record):
+        """A review or (v2) form task: open it, then consume its decision or form."""
+        if record is None or record.wait is None:
+            timeout_ms = step.timeout_seconds * 1000
+            deadline = min(self.now_ms + timeout_ms, self.state.deadline_ms)
+            escalate = None
+            if step.escalation_policy_ref is not None:
+                escalate = self.now_ms + timeout_ms // 2
+                if escalate >= deadline:
+                    escalate = None  # capped below half the timeout: never escalates
+            intent_id = None
+            if step.mode == "review":
+                try:
+                    handle = self.evaluate(step.intent)
+                except ExpressionError as error:
+                    return "pending", Derivation(
+                        actions=(RecordPure(path, step.id, failure=error.code),)
+                    )
+                if (
+                    type(handle) is not dict
+                    or handle.get("handle_kind") != "action_intent"
+                    or type(handle.get("id")) is not str
+                ):
+                    return "pending", Derivation(
+                        actions=(RecordPure(path, step.id, failure="type_mismatch"),)
+                    )
+                intent_id = handle["id"]
+            return "pending", Derivation(
+                actions=(OpenTask(path, step.id, deadline, escalate, intent_id),)
+            )
+        if step.mode == "form":
+            return self.wait(step, path, record)  # E04's typed, encrypted form path
+        wait, task = record.wait, record.task
+        if wait.state == "cancelled":
+            return "pending", Derivation(actions=(RecordPure(path, step.id, failure="cancelled"),))
+        if task is not None and task.state == "decided":
+            return "pending", Derivation(actions=(ConsumeDecision(path, task.id),))
+        if wait.state == "expired" or (task is not None and task.state == "expired"):
+            return "pending", Derivation(
+                actions=(RecordPure(path, step.id, failure="review_expired"),)
+            )
+        return "pending", Derivation()
 
     def intent(self, step, path):
         document = self.program.document(self.package, "connectors", step.connector_ref)
@@ -854,6 +943,7 @@ def state_from_json(program: Program, raw: dict) -> ProgressionState:
                 )
                 for s in entry.get("signals", [])
             ),
+            None if entry.get("task") is None else TaskRecord(**entry["task"]),
         )
     return ProgressionState(
         execution_id=raw["execution_id"],
@@ -2272,12 +2362,188 @@ class InterpreterV2(InterpreterV1):
                 )
                 if scratch is not None:
                     scratch["intents_verified"] = True
-        return super().load_progression(db, execution, region_path, program=program)
+        state = super().load_progression(db, execution, region_path, program=program)
+        if execution.interpreter_id == INTERPRETER_V2:
+            state = self._with_tasks(db, execution, state)
+        return state
 
     def _apply(self, db, execution, epoch, action) -> bool:
         if isinstance(action, CreateIntent):
             return self._create_intent(db, execution, epoch, action)
+        if isinstance(action, OpenTask):
+            return self._open_task(db, execution, epoch, action)
+        if isinstance(action, ConsumeDecision):
+            return self._consume_decision(db, execution, epoch, action)
         return super()._apply(db, execution, epoch, action)
+
+    def _with_tasks(self, db, execution, state):
+        """Each wait's human task, if any, with its recorded decision."""
+        from ..models import ExecutionActionDecision, ExecutionHumanTask
+
+        waits = {r.wait.id: path for path, r in state.occurrences.items() if r.wait is not None}
+        if not waits:
+            return state
+        rows = list(
+            db.scalars(
+                _scoped(ExecutionHumanTask, execution).where(
+                    ExecutionHumanTask.execution_id == execution.id,
+                    ExecutionHumanTask.wait_id.in_(list(waits)),
+                )
+            )
+        )
+        if not rows:
+            return state
+        decisions = dict(
+            db.execute(
+                select(ExecutionActionDecision.task_id, ExecutionActionDecision.decision).where(
+                    ExecutionActionDecision.workspace_id == execution.workspace_id,
+                    ExecutionActionDecision.project_id == execution.project_id,
+                    ExecutionActionDecision.environment_id == execution.environment_id,
+                    ExecutionActionDecision.task_id.in_([r.id for r in rows]),
+                )
+            ).all()
+        )
+        occurrences = dict(state.occurrences)
+        for row in rows:
+            path = waits[row.wait_id]
+            occurrences[path] = replace(
+                occurrences[path],
+                task=TaskRecord(row.id, row.kind, row.state, decisions.get(row.id)),
+            )
+        return replace(state, occurrences=occurrences)
+
+    def _open_task(self, db, execution, epoch, action):
+        from ..models import ExecutionActionIntent, ExecutionHumanTask
+
+        if execution.interpreter_id != INTERPRETER_V2:
+            raise ProgramError("integrity")
+        program = load_program(db, _scope(execution), execution)
+        ref = resolve_occurrence(program, action.occurrence_path)
+        step = ref.step
+        if not isinstance(step, HumanTaskStep) or step.id != action.node_id:
+            raise ProgramError("integrity")
+        deadline = action.deadline_ms
+        intent_id = None
+        if step.mode == "review":
+            intent = db.scalar(
+                _scoped(ExecutionActionIntent, execution).where(
+                    ExecutionActionIntent.id == action.intent_id,
+                    ExecutionActionIntent.execution_id == execution.id,
+                )
+            )
+            if intent is None:
+                raise ProgramError("integrity")
+            intent_id = intent.id
+            # The earliest of the step's timeout, the intent's expiry and the deadline.
+            deadline = min(deadline, intent.expires_at_ms)
+        if not self._open_wait(
+            db, execution, epoch, OpenWait(action.occurrence_path, action.node_id, deadline)
+        ):
+            return False
+        wait = db.scalar(
+            _scoped(ExecutionWait, execution).where(
+                ExecutionWait.wait_key == wait_key(action.occurrence_path)
+            )
+        )
+        policy = program.document(ref.package, "policies", step.assignment_policy_ref)
+        escalate = action.escalate_at_ms
+        escalation = None
+        if step.escalation_policy_ref is not None and escalate is not None and escalate < deadline:
+            escalation = program.document(
+                ref.package, "policies", step.escalation_policy_ref
+            ).definition.assignment
+        else:
+            escalate = None
+        db.add(
+            ExecutionHumanTask(
+                **_scope(execution).model_dump(),
+                execution_id=execution.id,
+                step_instance_id=wait.step_instance_id,
+                wait_id=wait.id,
+                kind=step.mode,
+                intent_id=intent_id,
+                assignment=policy.definition.assignment,
+                escalation_assignment=escalation,
+                escalate_at_ms=escalate,
+                deadline_ms=deadline,
+                state="open",
+            )
+        )
+        db.flush()
+        self._event(db, execution, epoch, "task_opened", path=action.occurrence_path)
+        return True
+
+    def _consume_decision(self, db, execution, epoch, action):
+        # Every task, decision and intent row is locked here, as everywhere in E05,
+        # only while the execution row is held, which serializes them all.
+        from ..models import ExecutionActionDecision, ExecutionActionIntent, ExecutionHumanTask
+
+        task = db.scalar(
+            _scoped(ExecutionHumanTask, execution)
+            .where(
+                ExecutionHumanTask.id == action.task_id,
+                ExecutionHumanTask.execution_id == execution.id,
+            )
+            .with_for_update()
+        )
+        if task is None or task.state != "decided" or task.kind != "review":
+            raise ProgramError("integrity")
+        # Only the decision bound to this task, for this task's intent.
+        decision = db.scalar(
+            _scoped(ExecutionActionDecision, execution).where(
+                ExecutionActionDecision.task_id == task.id
+            )
+        )
+        if decision is None or decision.intent_id != task.intent_id:
+            raise ProgramError("integrity")
+        intent = db.scalar(
+            _scoped(ExecutionActionIntent, execution)
+            .where(ExecutionActionIntent.id == task.intent_id)
+            .with_for_update()
+        )
+        instance = self._instance(db, execution, action.occurrence_path, task_step_node(db, task))
+        attempts = self._attempts(db, execution, instance)
+        if attempts and attempts[-1].state in ("succeeded", "failed", "cancelled"):
+            return False
+        wait = db.scalar(
+            _scoped(ExecutionWait, execution)
+            .where(ExecutionWait.id == task.wait_id)
+            .with_for_update()
+        )
+        if wait is not None and wait.state == "open":
+            wait.state = "satisfied"
+        node = instance.node_id
+        now = database_now_ms(db)
+        if intent is None or intent.authorization_state != "awaiting_review":
+            # Superseded, withdrawn or already closed (say by recovery) between the
+            # decision and now: the decision authorizes nothing.
+            return self._record(
+                db,
+                execution,
+                epoch,
+                RecordPure(action.occurrence_path, node, failure="binding_refused"),
+            )
+        if intent.expires_at_ms <= now:
+            intent.authorization_state = "expired"
+            db.flush()
+            return self._record(
+                db,
+                execution,
+                epoch,
+                RecordPure(action.occurrence_path, node, failure="approval_expired"),
+            )
+        if decision.decision == "allow":
+            intent.authorization_state = "approved"
+            outcome = RecordPure(
+                action.occurrence_path,
+                node,
+                value={"handle_kind": "human_decision", "id": decision.id},
+            )
+        else:
+            intent.authorization_state = "denied"
+            outcome = RecordPure(action.occurrence_path, node, failure="approval_denied")
+        db.flush()
+        return self._record(db, execution, epoch, outcome)
 
     def _create_intent(self, db, execution, epoch, action):
         from .actions import BindingRefused, IntentService, intent_for, intent_handle
@@ -2328,3 +2594,8 @@ class InterpreterV2(InterpreterV1):
         attempt = self._attempts(db, execution, instance)[-1]
         service.record_created(db, execution, epoch, intent, attempt.id)
         return True
+
+
+def task_step_node(db, task):
+    """The authored step ID of a task's step instance."""
+    return db.get(ExecutionStepInstance, task.step_instance_id).node_id
