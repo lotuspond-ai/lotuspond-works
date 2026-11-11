@@ -191,7 +191,7 @@ def main():
     cases = {}
     try:
         for package, version in (
-            ("lotuspond-api", "0.3.0"),
+            ("lotuspond-api", "0.4.0"),
             ("lotuspond-runtime", "0.2.0"),
             ("lotuspond-sdk", "0.3.0"),
         ):

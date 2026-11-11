@@ -21,6 +21,7 @@ from lotuspond.execution.interpreters import (
 from lotuspond.execution.program import ProgramError, load_program
 from lotuspond.execution_worker import WorkerRefused, run_execution_worker
 from lotuspond.models import Execution, SchemaVersion
+from lotuspond.schema_version import SCHEMA_VERSION
 
 from .engine_fixtures import FixtureFence, FixtureProgression, FixtureSweeper, fixture_engine
 from .test_admission import admission as admission
@@ -71,7 +72,7 @@ def test_unsupported_interpreter_is_never_admitted_or_claimed(flows):
     # A build lacking a version that a non-terminal execution pins never starts.
     with Session(h.engine) as db, db.begin():
         if db.scalar(select(SchemaVersion.version)) is None:
-            db.add(SchemaVersion(version=15))
+            db.add(SchemaVersion(version=SCHEMA_VERSION))
     # Were it to start, it would stop after 5 s, and the test would fail, not hang.
     started = threading.Event()
     timer = threading.Timer(5, started.set)

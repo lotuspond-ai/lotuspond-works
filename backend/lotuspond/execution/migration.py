@@ -1,8 +1,9 @@
-"""Additive exact-v13 → v14 and exact-v14 → v15 migrations.
+"""Additive exact-v13 → v14, exact-v14 → v15 and exact-v15 → v16 migrations.
 
 The caller owns its transaction and advisory lock. Engine state is product schema
 (ADR-0011): v15 adds only the orchestration claim marker, the restore hold's epoch
-and sweep indexes. No authority backfill, reset or downgrade belongs here.
+and sweep indexes; v16 (E05) adds the action, task and outcome records and widens
+two closed vocabularies. No authority backfill, reset or downgrade belongs here.
 """
 
 from copy import deepcopy
@@ -12,7 +13,15 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.schema import AddConstraint, CreateColumn, CreateIndex, CreateTable
 
 from ..fleet.migration import ERROR, V12_CHECKS, _normalize_check
-from ..models import EXECUTION_TABLES, Base, SchemaVersion
+from ..models import (
+    EXECUTION_CONTROL_CODES_V15,
+    EXECUTION_REASONS_V15,
+    EXECUTION_TABLES,
+    V16_TABLES,
+    Base,
+    SchemaVersion,
+    sql_values,
+)
 
 LEGACY_ADDITIONS = frozenset(
     {
@@ -38,9 +47,38 @@ V15_INDEXES = {
 }
 
 
-def _v14_metadata():
-    """A private copy of the authoritative model without any v15 object."""
+# Schema v16 replaces exactly these two checks, under their v15 names, with supersets.
+V16_WIDENED = {
+    "executions": "executions_reason_check",
+    "execution_events": "execution_events_check1",
+}
+_V15_TEXT = {
+    "executions_reason_check": f"reason IN ({sql_values(EXECUTION_REASONS_V15)})",
+    "execution_events_check1": (
+        "(family = 'sdk_runtime_event' AND code IN ('admission','step_started','step_result',"
+        "'step_failed','wait_started','signal_received','timer_elapsed','intent_created',"
+        "'decision_recorded','action_dispatched','action_receipt','dispatch_timeout',"
+        "'reconciliation_observed','outcome_recorded','execution_completed',"
+        "'cancellation_requested','execution_failed')) OR "
+        f"(family = 'execution_control' AND code IN ({sql_values(EXECUTION_CONTROL_CODES_V15)}))"
+    ),
+}
+
+
+def _v15_metadata():
+    """A private copy of the authoritative model without any v16 object."""
     metadata = deepcopy(Base.metadata)
+    for name in V16_TABLES:
+        metadata.remove(metadata.tables[name])
+    for table_name, check_name in V16_WIDENED.items():
+        (check,) = [c for c in metadata.tables[table_name].constraints if c.name == check_name]
+        check.sqltext = text(_V15_TEXT[check_name])
+    return metadata
+
+
+def _v14_metadata():
+    """A private copy of the authoritative model without any v15 or v16 object."""
+    metadata = _v15_metadata()
     for name, names in V15_INDEXES.items():
         table = metadata.tables[name]
         for index in [i for i in table.indexes if i.name in names]:
@@ -51,8 +89,8 @@ def _v14_metadata():
     return metadata
 
 
-def _columns(table):
-    return [c for c in table.columns if c.name not in V15_COLUMNS.get(table.name, ())]
+def _columns(table, excluded=V15_COLUMNS):
+    return [c for c in table.columns if c.name not in excluded.get(table.name, ())]
 
 
 def _create(connection, table):
@@ -146,7 +184,14 @@ def _verify_catalog(connection: Connection) -> None:
         raise ValueError(ERROR)
 
 
-def _verify_tables(connection: Connection, tables, frozen_checks, excluded_unique=frozenset()):
+def _verify_tables(
+    connection: Connection,
+    tables,
+    frozen_checks,
+    excluded_unique=frozenset(),
+    excluded_columns=V15_COLUMNS,
+    frozen_predicates=None,
+):
     """Compare every table with its frozen definition and recheck stored values."""
     inspector = inspect(connection)
     quote = connection.dialect.identifier_preparer.quote
@@ -160,10 +205,13 @@ def _verify_tables(connection: Connection, tables, frozen_checks, excluded_uniqu
                 (
                     "nextval('schema_version_version_seq'::regclass)"
                     if name == "schema_version" and c.name == "version"
+                    # v15's only server default; v14 checks exclude the column.
+                    else "0"
+                    if name == "executions" and c.name == "recovery_epoch"
                     else None
                 ),
             )
-            for c in _columns(table)
+            for c in _columns(table, excluded_columns)
         ]
         actual = [
             (
@@ -228,7 +276,9 @@ def _verify_tables(connection: Connection, tables, frozen_checks, excluded_uniqu
                 i.name,
                 tuple(c.name for c in i.columns),
                 bool(i.unique),
-                _predicate(i.dialect_options["postgresql"].get("where")),
+                (frozen_predicates or {}).get(
+                    i.name, _predicate(i.dialect_options["postgresql"].get("where"))
+                ),
             )
             for i in table.indexes
         }
@@ -281,7 +331,9 @@ def _verify_tables(connection: Connection, tables, frozen_checks, excluded_uniqu
 def _preflight(connection: Connection) -> None:
     inspector = inspect(connection)
     old_tables = {
-        name: table for name, table in Base.metadata.tables.items() if name not in EXECUTION_TABLES
+        name: table
+        for name, table in _v15_metadata().tables.items()
+        if name not in EXECUTION_TABLES
     }
     if set(inspector.get_table_names()) != set(old_tables):
         raise ValueError(ERROR)
@@ -761,4 +813,71 @@ def migrate_execution_v15(connection: Connection) -> None:
     if result.rowcount != 1 or list(
         connection.execute(select(SchemaVersion.version)).scalars()
     ) != [15]:
+        raise ValueError(ERROR)
+
+
+# Frozen PostgreSQL expressions of exact v15: v14's plus the three v15 execution checks.
+V15_FROZEN_CHECKS = V14_CHECKS | {
+    "executions": [
+        *V14_CHECKS["executions"],
+        "recovery_epoch >= 0 AND recovery_epoch <= '9007199254740991'::bigint",
+        "runnable_at_ms >= 0 AND runnable_at_ms <= '9007199254740991'::bigint",
+        "runnable_at_ms IS NULL OR (state <> ALL (ARRAY['succeeded', 'failed', 'cancelled']))",
+    ],
+}
+
+
+# Partial-index predicates of exact v15 as PostgreSQL renders them, where `_predicate`
+# does not already reduce them to the model's text.
+V15_FROZEN_PREDICATES = {
+    "execution_restored_idx": "(state) <> ALL ((ARRAY['succeeded', 'failed', 'cancelled']))",
+    "execution_wait_due_idx": "(state) = 'open'",
+}
+
+
+def _preflight_v16(connection: Connection) -> None:
+    tables = dict(_v15_metadata().tables)
+    if set(inspect(connection).get_table_names()) != set(tables):
+        raise ValueError(ERROR)
+    _lock(connection, tables)
+    _version(connection, 15)
+    _verify_catalog(connection)
+    _verify_tables(
+        connection,
+        tables,
+        V15_FROZEN_CHECKS,
+        excluded_columns={},
+        frozen_predicates=V15_FROZEN_PREDICATES,
+    )
+
+
+def migrate_execution_v16(connection: Connection) -> None:
+    """Validate exact v15, add the E05 records, widen two checks, then the ledger.
+
+    Never commits. Creates the seven action, task and outcome tables with their
+    indexes. Replaces `executions_reason_check` and `execution_events_check1` with
+    supersets under the same names; every existing row still satisfies them. No other
+    column, constraint or row changes.
+    """
+    if connection.dialect.name != "postgresql" or not connection.in_transaction():
+        raise ValueError(ERROR)
+    _preflight_v16(connection)
+    for table in Base.metadata.sorted_tables:
+        if table.name in V16_TABLES:
+            connection.execute(CreateTable(table))
+            for index in sorted(table.indexes, key=lambda index: index.name):
+                connection.execute(CreateIndex(index))
+    quote = connection.dialect.identifier_preparer.quote
+    for table_name, check_name in sorted(V16_WIDENED.items()):
+        connection.execute(
+            text(f"ALTER TABLE {quote(table_name)} DROP CONSTRAINT {quote(check_name)}")
+        )
+        (check,) = [c for c in Base.metadata.tables[table_name].constraints if c.name == check_name]
+        connection.execute(AddConstraint(check, isolate_from_table=False))
+    result = connection.execute(
+        SchemaVersion.__table__.update().where(SchemaVersion.version == 15).values(version=16)
+    )
+    if result.rowcount != 1 or list(
+        connection.execute(select(SchemaVersion.version)).scalars()
+    ) != [16]:
         raise ValueError(ERROR)

@@ -47,7 +47,7 @@ def test_v13_upgrade_preserves_all_rows(execution_database, monkeypatch):
         assert after_legacy_rows == before_legacy_rows
         assert connection.scalar(select(SchemaVersion.installed_at)) == installed_at
         # The chain continues through every later reviewed step (v15 since Task 7).
-        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION == 15
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION == 16
 
 
 def test_fresh_upgrade_signature_equal(execution_database, monkeypatch):

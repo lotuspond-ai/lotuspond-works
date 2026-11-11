@@ -196,7 +196,7 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(
-        title="Lotuspond API", version="0.3.0", lifespan=lifespan, docs_url=None, redoc_url=None
+        title="Lotuspond API", version="0.4.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
@@ -283,7 +283,7 @@ def create_app(
 
     @app.get("/api/v1/health")
     def health():
-        return {"status": "ok", "product": "Lotuspond", "version": "0.3.0"}
+        return {"status": "ok", "product": "Lotuspond", "version": "0.4.0"}
 
     @app.get("/api/v1/ready")
     def ready():
