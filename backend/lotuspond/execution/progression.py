@@ -31,6 +31,7 @@ from hashlib import sha256
 from lotuspond_runtime.protocol import Scope
 from lotuspond_sdk.activity import ArtifactHandle
 from lotuspond_sdk.executable.package import (
+    ActionIntentStep,
     AgentStep,
     ConnectorReadStep,
     DecisionStep,
@@ -42,7 +43,13 @@ from lotuspond_sdk.executable.package import (
     TimerStep,
     TransformStep,
 )
-from lotuspond_sdk.executable.types import ArrayExport, ExportField, ObjectExport, parse_export
+from lotuspond_sdk.executable.types import (
+    ArrayExport,
+    ExportField,
+    HandleExport,
+    ObjectExport,
+    parse_export,
+)
 from sqlalchemy import String, any_, bindparam, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import ARRAY
 
@@ -64,6 +71,7 @@ from ..models import (
     Workspace,
 )
 from ..security import Principal
+from .action_contracts import INTERPRETER_V2
 from .artifacts import ArtifactPolicy
 from .authorization import authorize_execution, lock, record, scoped, share
 from .contracts import canonical_value
@@ -123,6 +131,8 @@ FAILURES = frozenset(
         "timeout_before_dispatch",
         "provider_failed",
         "uncertain",
+        # E05 (interpreter v2).
+        "binding_refused",
     }
 )
 
@@ -233,6 +243,16 @@ class ConsumeSignal:
 
 
 @dataclass(frozen=True)
+class CreateIntent:
+    """E05 (v2): create this occurrence's action intent from evaluated values."""
+
+    occurrence_path: str
+    node_id: str
+    target: object
+    input: object
+
+
+@dataclass(frozen=True)
 class CancelUndispatched:
     prefix: str
 
@@ -248,7 +268,14 @@ class Fail:
 
 
 Action = (
-    RecordPure | CreateAttempt | OpenWait | ConsumeSignal | CancelUndispatched | Complete | Fail
+    RecordPure
+    | CreateAttempt
+    | OpenWait
+    | ConsumeSignal
+    | CancelUndispatched
+    | Complete
+    | Fail
+    | CreateIntent
 )
 
 
@@ -318,6 +345,8 @@ def output_export(program, package, step, record=None):
     if isinstance(step, SubworkflowStep):
         _, child = program.child(package, step.workflow_ref)
         return data_export(child.output_schema, child.schemas)
+    if isinstance(step, ActionIntentStep):
+        return HandleExport(kind="handle", handle_kind="action_intent")
     raise ExpressionError("type_mismatch")
 
 
@@ -694,17 +723,54 @@ class _Region:
         return self.finish()
 
 
+class _RegionV2(_Region):
+    """Interpreter v2: v1's semantics, plus the E05 steps implemented so far."""
+
+    def step(self, step):
+        if isinstance(step, ActionIntentStep):
+            path = self.path(step.id)
+            record = self.state.occurrences.get(path)
+            final = record.final if record else None
+            if final is not None and final.state == "succeeded":
+                return "done", final.value
+            if final is not None:
+                return "failed", final.failure or "cancelled"
+            return self.intent(step, path)
+        return super().step(step)
+
+    def intent(self, step, path):
+        document = self.program.document(self.package, "connectors", step.connector_ref)
+        operation = next(op for op in document.definition.operations if op.id == step.operation)
+        try:
+            target = plain(
+                typed_export(
+                    plain(self.evaluate(step.target)),
+                    data_export(operation.target_schema, document.schemas),
+                )
+            )
+            value = plain(
+                typed_export(
+                    plain(self.evaluate(step.input)),
+                    data_export(operation.input_schema, document.schemas),
+                )
+            )
+        except ExpressionError as error:
+            return "pending", Derivation(actions=(RecordPure(path, step.id, failure=error.code),))
+        return "pending", Derivation(actions=(CreateIntent(path, step.id, target, value),))
+
+
 def _is_activity(step):
     return isinstance(step, (ConnectorReadStep, AgentStep))
 
 
-def derive(program: Program, state: ProgressionState, now_ms: int) -> Derivation:
+def derive(program: Program, state: ProgressionState, now_ms: int, region=None) -> Derivation:
+    region = region or _Region
     try:
-        return _Region(program, state, now_ms).derive()
+        return region(program, state, now_ms).derive()
     except ProgramError:
         raise
     except ExpressionError as error:
-        return _Region(program, state, now_ms).fail(error.code)
+        return region(program, state, now_ms).fail(error.code)
 
 
 def next_actions(plan: Program, state: ProgressionState, now_ms: int) -> tuple:
@@ -1079,6 +1145,10 @@ class InterpreterV1:
         if self.policy.source_id is not None:
             raise ValueError("Progression requires workspace response policy")
         self.installation_id = installation_id
+
+    def region_for(self, execution):
+        """v1 derives every execution it claims with v1's rules."""
+        return _Region
 
     # ---------------------------------------------------------- values
 
@@ -1735,7 +1805,7 @@ class InterpreterV1:
                 if program is None:
                     program = load_program(db, _scope(execution), execution)
                 state = self.load_progression(db, execution, region, program=program)
-                derivation = derive(program, state, now)
+                derivation = derive(program, state, now, self.region_for(execution))
             if derivation.wake_at_ms is not None:
                 wake = derivation.wake_at_ms if wake is None else min(wake, derivation.wake_at_ms)
             pure = [a for a in derivation.actions if not isinstance(a, (Complete, Fail))]
@@ -2171,3 +2241,90 @@ class InterpreterV1:
             runnable=execution.runnable_at_ms is not None,
             reason=None,
         )
+
+
+class InterpreterV2(InterpreterV1):
+    """Progression for `lotuspond.execution-interpreter.v2` (E05), and v1 unchanged.
+
+    One worker may claim both versions: each execution is derived with the rules of
+    the version it pins, so a v1 execution never sees an E05 semantic.
+    """
+
+    interpreter_id = INTERPRETER_V2
+
+    def region_for(self, execution):
+        return _RegionV2 if execution.interpreter_id == INTERPRETER_V2 else _Region
+
+    def load_progression(self, db, execution, region_path, *, program=None):
+        if execution.interpreter_id == INTERPRETER_V2:
+            from .actions import verify_intents
+
+            scratch = _SCRATCH.get()
+            if scratch is None or not scratch.get("intents_verified"):
+                # Every later read recomputes each intent's digests (spec, "Action intents").
+                verify_intents(
+                    db,
+                    execution,
+                    artifacts=self.artifacts,
+                    keys=self._keys(),
+                    program=program,
+                    installation_id=self.installation_id,
+                )
+                if scratch is not None:
+                    scratch["intents_verified"] = True
+        return super().load_progression(db, execution, region_path, program=program)
+
+    def _apply(self, db, execution, epoch, action) -> bool:
+        if isinstance(action, CreateIntent):
+            return self._create_intent(db, execution, epoch, action)
+        return super()._apply(db, execution, epoch, action)
+
+    def _create_intent(self, db, execution, epoch, action):
+        from .actions import BindingRefused, IntentService, intent_for, intent_handle
+
+        if execution.interpreter_id != INTERPRETER_V2:
+            raise ProgramError("integrity")
+        instance = self._instance(db, execution, action.occurrence_path, action.node_id)
+        attempts = self._attempts(db, execution, instance)
+        if intent_for(db, execution, instance.id) is not None or (
+            attempts and attempts[-1].state in ("succeeded", "failed", "cancelled")
+        ):
+            return False  # a repeated transition creates nothing
+        program = load_program(db, _scope(execution), execution)
+        ref = resolve_occurrence(program, action.occurrence_path)
+        if not isinstance(ref.step, ActionIntentStep) or ref.step.id != action.node_id:
+            raise ProgramError("integrity")
+        service = IntentService(
+            artifacts=self.artifacts,
+            artifact_policy=self.policy,
+            installation_id=self.installation_id,
+            keys=self._keys(),
+        )
+        try:
+            row, intent = service.create(
+                db,
+                execution,
+                instance,
+                ref.step,
+                program,
+                ref.package,
+                action.target,
+                action.input,
+                epoch=epoch,
+            )
+        except BindingRefused:
+            return self._record(
+                db,
+                execution,
+                epoch,
+                RecordPure(action.occurrence_path, action.node_id, failure="binding_refused"),
+            )
+        self._record(
+            db,
+            execution,
+            epoch,
+            RecordPure(action.occurrence_path, action.node_id, value=intent_handle(row.id)),
+        )
+        attempt = self._attempts(db, execution, instance)[-1]
+        service.record_created(db, execution, epoch, intent, attempt.id)
+        return True

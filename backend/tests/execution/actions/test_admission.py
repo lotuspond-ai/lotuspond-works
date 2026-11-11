@@ -82,8 +82,14 @@ def bind(h, db, publication, documents, operations=("lookup", "submit"), artifac
     )
 
 
-def deploy(h, db, publication, documents, key, operations=("lookup", "submit"), artifact=None):
+def deploy(
+    h, db, publication, documents, key, operations=("lookup", "submit"), artifact=None, package=None
+):
+    from tests.execution.test_deployments import within
+
     h.last_request = bind(h, db, publication, documents, operations, artifact)
+    if package is not None:
+        h.last_request = within(h.last_request, package)  # no wider than the package
     return create_deployment(db, h.actor, h.last_request, key, dependencies=h.dependencies)
 
 
