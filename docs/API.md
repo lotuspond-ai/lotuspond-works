@@ -1,4 +1,4 @@
-# Lotuspond API and workers
+# LotusPond Works API and workers
 
 The API root is `/api/v1`. JSON errors contain `error` and `message`; validation errors list field paths without echoing submitted secrets. Mutations require `application/json`. The normal request limit is 2 MiB. Readiness is `/ready`; `/health` only reports process liveness. `/changelog` returns the console's `items` collection.
 
@@ -104,7 +104,7 @@ Infrastructure errors and timeouts are unknown outcomes. Omitted cost, or explic
 
 ## Stored incidents
 
-`GET /incidents` accepts `status` (`open` or `resolved`), `category` (`manual`, `assessment_failed`, or `assessment_unavailable`), `project_id`, and the core `limit`/`before`/`before_id` cursor. `GET /incidents/:id` returns `{incident,project,trace,voice_session,assessment,monitor,history,alerts}` with nullable linked records. Alert payloads, endpoint URLs, signing secrets and lease hashes are excluded. Nothing opens, resolves, reopens or delivers incidents any more; incidents for Lotuspond's own executions are planned with human tasks (E05) and verified outcomes (E06).
+`GET /incidents` accepts `status` (`open` or `resolved`), `category` (`manual`, `assessment_failed`, or `assessment_unavailable`), `project_id`, and the core `limit`/`before`/`before_id` cursor. `GET /incidents/:id` returns `{incident,project,trace,voice_session,assessment,monitor,history,alerts}` with nullable linked records. Alert payloads, endpoint URLs, signing secrets and lease hashes are excluded. Nothing opens, resolves, reopens or delivers incidents any more; incidents for LotusPond Works executions are planned with human tasks (E05) and verified outcomes (E06).
 
 New run creation rejects larger frozen snapshots with HTTP 413 and `run_snapshot_too_large` before creating a run or audit record. Capability matching occurs before claim row locking; all frozen scenario modalities must be supported, missing modality defaults to text, and an empty runner capability list remains unrestricted. Leases last 15 minutes and renewal resets expiry to 15 minutes from server time. Customer-side clients accept `LOTUSPOND_API_URL` as an origin or as the `/api/v1` base. See [runner execution](../docs-site/docs/runners.md) for subprocess deadlines, cancellation, packaged commands and credential handling.
 

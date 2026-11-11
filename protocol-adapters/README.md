@@ -1,6 +1,6 @@
-# Lotuspond HTTP runner adapter
+# LotusPond Works HTTP runner adapter
 
-This isolated package lets the local Lotuspond runner evaluate one operator-configured agent behind HTTP against frozen scenarios. Scenario input cannot select the endpoint, headers or credentials. The MCP and A2A adapters were retired on 2026-11-11 ([ADR-0014](../docs/architecture/0014-focus-on-the-core-loop.md)); the package now has no dependencies.
+This isolated package lets the local LotusPond Works runner evaluate one operator-configured agent behind HTTP against frozen scenarios. Scenario input cannot select the endpoint, headers or credentials. The MCP and A2A adapters were retired on 2026-11-11 ([ADR-0014](../docs/architecture/0014-focus-on-the-core-loop.md)); the package now has no dependencies.
 
 ## HTTP endpoint adapter
 

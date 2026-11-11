@@ -1,4 +1,4 @@
-# Lotuspond documentation site
+# LotusPond Works documentation site
 
 The site uses pinned MkDocs 1.6.1 and only its bundled theme/assets, so the generated site can be served from GitHub Pages, an internal static host, or an offline web server.
 

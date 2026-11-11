@@ -1,5 +1,5 @@
-site_name: Lotuspond Documentation
-site_description: Install, operate, and evaluate agents with Lotuspond
+site_name: LotusPond Works Documentation
+site_description: Install, operate, and evaluate agents with LotusPond Works
 docs_dir: docs
 site_dir: site
 use_directory_urls: false

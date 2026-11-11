@@ -1,5 +1,5 @@
 ---
-description: Lotuspond application and data boundaries
+description: LotusPond Works application and data boundaries
 alwaysApply: true
 ---
-Follow the root AGENTS.md, CLAUDE.md, and SECURITY.md. This root is one repository for one product: Lotuspond. Keep implementation focused on the current product, workspace access scoped, release evidence honest, and databases isolated to development. Validate with npm run check and the database integration test when appropriate. Interface work follows DESIGN.md and docs/design-system.md: real product rules instead of invented marketing claims, the documented tokens, and browser checks at desktop and phone widths.
+Follow the root AGENTS.md, CLAUDE.md, and SECURITY.md. This root is one repository for one product: LotusPond Works. Keep implementation focused on the current product, workspace access scoped, release evidence honest, and databases isolated to development. Validate with npm run check and the database integration test when appropriate. Interface work follows DESIGN.md and docs/design-system.md: real product rules instead of invented marketing claims, the documented tokens, and browser checks at desktop and phone widths.

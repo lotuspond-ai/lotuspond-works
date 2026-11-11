@@ -122,7 +122,7 @@ export function AccountSecurity({
         </p>
         {account.capabilities?.mail_enabled && (
           <p className="hint">
-            Lotuspond emails you whenever your password or authenticator changes. The message
+            LotusPond Works emails you whenever your password or authenticator changes. The message
             carries no link and no code, so treat any that does as suspicious.
           </p>
         )}

@@ -1,4 +1,4 @@
-/* Lotuspond console. A calm daylight workspace: a soft grey frame with the navigation, an
+/* LotusPond Works console. A calm daylight workspace: a soft grey frame with the navigation, an
    inset white panel for the work, one green for action, and semantic colours that always
    travel with a written label. The public pages use the same tokens but a warmer paper;
    see landing.css. */
@@ -191,6 +191,12 @@ button kbd {
   font-weight: 650;
   letter-spacing: -0.04em;
   color: var(--ink);
+}
+.wordmark-name {
+  white-space: nowrap;
+}
+.wordmark-product {
+  font-weight: 400;
 }
 .wordmark-dot {
   width: 6px;

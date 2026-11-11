@@ -1,6 +1,6 @@
-# What Lotuspond is for
+# What LotusPond Works is for
 
-Status: the product's direction, set on 2026-11-11 by [ADR-0014](architecture/0014-focus-on-the-core-loop.md). Every feature must serve one step of the core loop below, or the foundation beneath it. Anything else is removed or not built. [CAPABILITIES.md](CAPABILITIES.md) records what each step can do today, and [VALIDATION.md](VALIDATION.md) the evidence for it.
+Status: the product's direction, set on 2026-11-11 by [ADR-0014](architecture/0014-focus-on-the-core-loop.md); the product's name, LotusPond Works, was set on 2026-11-12 by [ADR-0015](architecture/0015-name-the-product-lotuspond-works.md). Every feature must serve one step of the core loop below, or the foundation beneath it. Anything else is removed or not built. [CAPABILITIES.md](CAPABILITIES.md) records what each step can do today, and [VALIDATION.md](VALIDATION.md) the evidence for it.
 
 ## The problem
 
@@ -11,9 +11,9 @@ Companies can build an AI agent in an afternoon. They cannot yet trust one insid
 3. **Nobody is in charge of what it does.** A payment, refund or record change happens without a named person deciding.
 4. **Nobody can say what happened.** When something goes wrong, there is no record of which version acted, on what input, with whose approval.
 
-## What Lotuspond does
+## What LotusPond Works does
 
-**Lotuspond runs AI-agent workflows inside a company's real processes: each version is proven before it is released, each consequential action waits for a person's decision, and every outcome is recorded.**
+**LotusPond Works runs AI-agent workflows inside a company's real processes: each version is proven before it is released, each consequential action waits for a person's decision, and every outcome is recorded.**
 
 It is used by three kinds of people:
 
@@ -47,7 +47,7 @@ Everything in the product belongs to one of four steps, in this order, or to the
 
 These were removed, or are not planned, because they serve none of the four steps:
 
-- Monitoring agents that run outside Lotuspond: trace ingestion, monitors, incidents and their alerts ([ADR-0013](architecture/0013-trim-to-the-automation-core.md)).
+- Monitoring agents that run outside LotusPond Works: trace ingestion, monitors, incidents and their alerts ([ADR-0013](architecture/0013-trim-to-the-automation-core.md)).
 - Voice, software sandboxes, the model gateway, trace-plan billing, the Go collector and the Rust verifier ([ADR-0012](architecture/0012-retire-assurance-extras.md)).
 - Air-gapped operation, offline identity enrollment, organization-wide and installation-wide authenticator rules, the tool-authorization endpoint, MCP and A2A evaluation runners, the Operations page and the on-premises Compose variant ([ADR-0014](architecture/0014-focus-on-the-core-loop.md)).
 - Commercial editions and usage metering, delegated partner access, enterprise federation, multi-topology qualification, industry pack libraries, and the services operating model. These are business decisions for later, not product features; the delivery plans keep them as history.

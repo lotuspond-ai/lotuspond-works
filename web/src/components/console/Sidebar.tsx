@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Wordmark } from '../Wordmark.js';
 import type { Account, Workspace } from '../../api.js';
 import { initials } from '../../lib/format.js';
 import type { SetupProgress } from '../../lib/setup.js';
@@ -93,10 +94,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <a className="wordmark" href="#home">
-          Lotuspond
-          <span className="wordmark-dot" />
-        </a>
+        <Wordmark href="#home" />
         <button
           ref={toggle}
           className="mobile-nav-toggle secondary"

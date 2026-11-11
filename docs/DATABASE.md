@@ -1,4 +1,4 @@
-# Lotuspond database
+# LotusPond Works database
 
 The authoritative model is `backend/lotuspond/models.py`, using SQLAlchemy 2 with PostgreSQL, UTC timestamps, generated UUID identifiers, explicit state constraints, and workspace-scoped composite foreign keys. Queries are parameterized. This is a separate database; the transitional TypeScript schema does not apply to it.
 

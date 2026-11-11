@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Wordmark } from '../components/Wordmark.js';
 import { api, ApiError, type Account } from '../api.js';
 import { Alert, StatusBadge } from '../components/ui.js';
 import type { IdentityLinks } from '../lib/identityLinks.js';
@@ -10,10 +11,7 @@ export function IdentityFrame({ children, signedIn }: { children: ReactNode; sig
   return (
     <div className="welcome identity-page">
       <header>
-        <a className="wordmark" href="#releases">
-          Lotuspond
-          <span className="wordmark-dot" />
-        </a>
+        <Wordmark href="#releases" />
         <a className="text-button" href={signedIn ? '#releases' : '#login'}>
           {signedIn ? 'Open workspace' : 'Sign in'}
         </a>

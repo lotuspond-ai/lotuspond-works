@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useState, useRef, type FormEvent } from 'react';
+import { Wordmark } from './components/Wordmark.js';
 import { api, ApiError, type Account, type Row } from './api.js';
 import { Alert, RelativeTime, StatusBadge } from './components/ui.js';
 import { Admin } from './pages/Admin.js';
@@ -160,7 +161,7 @@ const definitions: Record<string, Definition> = {
   },
   members: {
     title: 'Workspace members',
-    description: 'Add an existing Lotuspond account with the least privilege needed.',
+    description: 'Add an existing LotusPond Works account with the least privilege needed.',
     fields: [
       { key: 'email', label: 'Account email', type: 'email' },
       { key: 'role', label: 'Workspace role', options: ['viewer', 'editor', 'admin'] },
@@ -349,7 +350,7 @@ export function App({
   if (loading)
     return (
       <div className="center" role="status">
-        Opening Lotuspond…
+        Opening LotusPond Works…
       </div>
     );
   const invitationToken = identityLinks.token('accept-invitation');
@@ -728,10 +729,7 @@ function Welcome({
   return (
     <div className="welcome">
       <header>
-        <a className="wordmark" href="/">
-          Lotuspond
-          <span className="wordmark-dot" />
-        </a>
+        <Wordmark href="/" />
         <button
           className="text-button"
           disabled={busy || !!challenge}
@@ -780,7 +778,7 @@ function Welcome({
             <>
               <p className="eyebrow">Your workspace</p>
               <h1 className="auth-title" ref={heading} tabIndex={-1}>
-                {mode === 'register' ? 'Start with Lotuspond' : 'Welcome back'}
+                {mode === 'register' ? 'Start with LotusPond Works' : 'Welcome back'}
               </h1>
               {invitationToken && (
                 <p className="notice">
@@ -800,7 +798,7 @@ function Welcome({
                       <input name="name" required maxLength={160} autoComplete="name" />
                     </label>
                     <fieldset className="account-type">
-                      <legend>How will you use Lotuspond?</legend>
+                      <legend>How will you use LotusPond Works?</legend>
                       <label>
                         <input
                           type="radio"
@@ -882,7 +880,7 @@ function Welcome({
         </section>
       </main>
       <footer>
-        <span>Lotuspond</span>
+        <span>LotusPond Works</span>
         <span>Release decisions grounded in evidence.</span>
       </footer>
     </div>
@@ -1649,7 +1647,7 @@ function Changelog() {
     <>
       <div className="page-heading">
         <div>
-          <p className="eyebrow">Lotuspond</p>
+          <p className="eyebrow">LotusPond Works</p>
           <h1>What’s new</h1>
         </div>
       </div>

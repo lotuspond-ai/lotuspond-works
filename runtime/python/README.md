@@ -1,4 +1,4 @@
-# Lotuspond runtime contracts
+# LotusPond Works runtime contracts
 
 `lotuspond-runtime==0.2.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
 This independently installable distribution supplies pure, strict fleet models

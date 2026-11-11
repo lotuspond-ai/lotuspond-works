@@ -31,7 +31,7 @@ export function RecentlyShipped() {
         <h2 id="shipped-title" className="section-title">
           Recently shipped
         </h2>
-        <p>Read from Lotuspond’s own changelog.</p>
+        <p>Read from the LotusPond Works changelog.</p>
       </div>
       <ol className="shipped-list">
         {(entries ?? [null, null, null]).map((entry, index) => (

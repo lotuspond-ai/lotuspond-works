@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { Wordmark } from '../components/Wordmark.js';
 import { Pond, type PadLayout } from '../components/Pond.js';
 import { InkGlyph } from '../components/InkGlyph.js';
 import { PondPlate } from '../components/PondPlate.js';
@@ -300,10 +301,7 @@ export function Landing({
         data-tone={header.overPond ? 'pond' : 'page'}
       >
         <div className="landing-container landing-header-inner">
-          <a className="wordmark" href="/">
-            Lotuspond
-            <span className="wordmark-dot" />
-          </a>
+          <Wordmark href="/" />
           <nav className="landing-nav" aria-label="Overview sections">
             {headerLinks.map((id) => (
               <a key={id} href={`#${id}`} onClick={(event) => jumpTo(event, id)}>
@@ -333,9 +331,9 @@ export function Landing({
           <div className="pond-copy">
             {error && <Alert>{error}</Alert>}
             <p className="pond-lede">
-              Lotuspond helps companies put AI agents to work in real business processes: rules
-              where rules suffice, agents where judgment helps, and people where accountability
-              belongs.
+              LotusPond Works helps companies put AI agents to work in real business processes:
+              rules where rules suffice, agents where judgment helps, and people where
+              accountability belongs.
             </p>
             <div className="landing-actions">
               <button onClick={() => onCreateAccount()}>
@@ -381,8 +379,8 @@ export function Landing({
               </h2>
               <p className="section-lede">
                 Systems do what rules can. An agent reasons where judgment helps, within limits you
-                set. A person decides where accountability belongs. A Lotuspond workflow package
-                declares all three, so what an automation may touch is known before it runs.
+                set. A person decides where accountability belongs. A LotusPond Works workflow
+                package declares all three, so what an automation may touch is known before it runs.
               </p>
               <nav className="contents" aria-labelledby="contents-title">
                 <p id="contents-title">On this page</p>
@@ -494,9 +492,9 @@ export function Landing({
               <div className="platform-today">
                 <h3>Available today: the assurance console, deciding in front of you.</h3>
                 <p>
-                  A sample workspace running Lotuspond’s release rules in your browser. Change an
-                  outcome or the policy and the verdict follows, with the same reasons the server
-                  records.
+                  A sample workspace running the LotusPond Works release rules in your browser.
+                  Change an outcome or the policy and the verdict follows, with the same reasons the
+                  server records.
                 </p>
               </div>
               <ConsolePreview />
@@ -562,9 +560,9 @@ export function Landing({
                 Shared capabilities, qualified one workflow at a time.
               </h2>
               <p className="section-lede">
-                Most business automation falls into a handful of families. Lotuspond builds each
-                capability once, packages industry knowledge on top, and proves every workflow with
-                its own evidence before calling it supported.
+                Most business automation falls into a handful of families. LotusPond Works builds
+                each capability once, packages industry knowledge on top, and proves every workflow
+                with its own evidence before calling it supported.
               </p>
               <ul className="rule-grid rule-grid-three">
                 {families.map(([tag, title, examples, evidence]) => (
@@ -594,8 +592,8 @@ export function Landing({
                 Runs on infrastructure you control.
               </h2>
               <p className="section-lede">
-                Install Lotuspond where your systems are. Evaluation and, later, workflow steps run
-                on workers inside your own boundary.
+                Install LotusPond Works where your systems are. Evaluation and, later, workflow
+                steps run on workers inside your own boundary.
               </p>
               <ul className="panel-grid panel-grid-two">
                 {deployments.map(([title, copy], index) => (
@@ -664,10 +662,7 @@ export function Landing({
 
       <footer className="landing-footer">
         <div className="landing-container landing-footer-inner">
-          <span className="wordmark">
-            Lotuspond
-            <span className="wordmark-dot" />
-          </span>
+          <Wordmark />
           <span>Business automation with people in charge.</span>
           <a className="landing-footer-contact" href={`mailto:${contactEmail}`}>
             {contactEmail}
