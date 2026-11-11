@@ -120,13 +120,16 @@ def test_each_bound_field_changes_the_digest():
         changed = ac.derive_intent(fields(**{name: value}))
         assert changed.sha256 not in seen, name
         seen.add(changed.sha256)
-        if changed.binding.approval_mode == "human":
-            report = check_decision(
-                changed,
-                old_decision,
-                ac.decision_context(changed, RECORDS["decision"]["issued_at_ms"]),
-            )
-            assert report.code in {"intent_mismatch", "context_mismatch"}, name
+        report = check_decision(
+            changed,
+            old_decision,
+            ac.decision_context(changed, RECORDS["decision"]["issued_at_ms"]),
+        )
+        expected = {
+            "approval_mode": "approval_unexpected",  # an unreviewed intent takes no decision
+            "policy_sha256": "context_mismatch",  # the decision quotes the old policy
+        }.get(name, "intent_mismatch")
+        assert report.code == expected, name
     # The expiry is bounded by the execution deadline.
     assert (
         ac.derive_binding(fields(execution_deadline_ms=1800000001000)).expires_at_ms
@@ -204,11 +207,101 @@ def test_closed_vocabularies():
         ac.ResolutionRequest(resolution_id="r", kind="resend", evidence=None)
 
 
+def test_constants_and_state_vocabularies_are_pinned():
+    from typing import get_args
+
+    assert (ac.TASK_CLAIM_MS, ac.ACTION_LEASE_MS, ac.ACTION_RENEW_MS, ac.MAX_READBACKS) == (
+        900_000,
+        60_000,
+        20_000,
+        5,
+    )
+    assert ac.assignment_roles("workspace_owners") == {"owner"}
+    assert set(ac.ASSIGNMENT_ROLES) == {"workspace_owners", "workspace_admins", "workspace_editors"}
+    for values, alias in (
+        (ac.AUTHORIZATION_STATES, ac.Authorization),
+        (ac.EFFECT_STATES, ac.Effect),
+        (ac.OUTCOME_STATES, ac.Outcome),
+        (ac.TASK_KINDS, ac.TaskKind),
+        (ac.TASK_STATES, ac.TaskState),
+        (ac.RESOLUTION_KINDS, ac.ResolutionKind),
+    ):
+        assert values == get_args(alias)
+    assert len(ac.AUTHORIZATION_STATES) == 8 and len(ac.EFFECT_STATES) == 6
+    assert ac.COMMAND_STATES == ("admitted", "claimed", "stopped", "uncertain", "expired")
+
+
+USAGE = {"input_tokens": None, "output_tokens": None, "cost_microusd": None, "completed_at_ms": 1}
+VALID_DTOS = [
+    (
+        ac.ProposalView,
+        {
+            "intent_sha256": "a" * 64,
+            "connector_name": "c",
+            "connector_version": "1.0.0",
+            "operation": "submit",
+            "policy_name": "p",
+            "policy_version": "1.0.0",
+            "approval_mode": "human",
+            "independent_approval": True,
+            "requester_id": "u-1",
+            "issued_at_ms": 1,
+            "expires_at_ms": 2,
+            "target": {"a": 1},
+            "input": [1, "x"],
+        },
+        {"approval_mode": "auto"},
+    ),
+    (ac.SubmissionRequest, {"submission_id": "s-1", "payload": {"x": 1}}, {"payload": object()}),
+    (
+        ac.ActionView,
+        {
+            "action_id": "a-1",
+            "step_id": "hold",
+            "occurrence_path": "hold",
+            "intent_sha256": "a" * 64,
+            "authorization": "approved",
+            "effect": "observed",
+            "outcome": "verified",
+            "task_id": None,
+            "receipt_status": None,
+            "evidence": (),
+        },
+        {"authorization": "pending", "outcome": "done"},
+    ),
+    (
+        ac.ActionLease,
+        {
+            "attempt_id": "a",
+            "command_id": "c",
+            "lease_revision": 1,
+            "expires_at_ms": 2,
+            "deadline_ms": 3,
+        },
+        {"lease_revision": "1"},
+    ),
+    (
+        ac.ActionStop,
+        {"attempt_id": "a", "lease_revision": 1, "code": "not_started", "usage": USAGE},
+        {"code": "stopped"},
+    ),
+]
+
+
+@pytest.mark.parametrize("model, valid, bad", VALID_DTOS, ids=lambda v: getattr(v, "__name__", ""))
+def test_every_dto_refuses_unknown_values_and_fields(model, valid, bad):
+    model(**valid)
+    for change in (bad, {"unexpected": 1}):
+        with pytest.raises(REFUSED):
+            model(**{**valid, **change})
+
+
 def test_contracts_module_is_inert():
     probe = (
         "import sys, threading; import lotuspond.execution.action_contracts; "
         "bad = [m for m in sys.modules if m.split('.')[0] in "
-        "{'sqlalchemy','fastapi','starlette','socket','anthropic','httpx','httpx2','psycopg'}"
+        "{'sqlalchemy','fastapi','starlette','socket','ssl','urllib3','anthropic','httpx','httpx2','psycopg'}"
+        " or m in {'lotuspond.db', 'lotuspond.models', 'http.client'}"
         " or m.startswith('lotuspond_runtime.https_json')"
         " or m.startswith('lotuspond_runtime.anthropic_messages')]; "
         "bad += ['thread'] * (threading.active_count() - 1); print(','.join(bad))"

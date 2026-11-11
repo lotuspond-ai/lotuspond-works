@@ -38,7 +38,8 @@ TASK_CLAIM_MS = 900_000
 ACTION_LEASE_MS = 60_000
 ACTION_RENEW_MS = 20_000
 MAX_READBACKS = 5
-assert COMMAND_LIFETIME_MS == 300_000
+if COMMAND_LIFETIME_MS != 300_000:  # the plan's frozen command lifetime
+    raise ImportError("unexpected SDK command lifetime")
 
 AUTHORIZATION_STATES = (
     "proposed",
@@ -70,6 +71,7 @@ FAILURE_CODES = (
     "recovery_epoch_changed",
 )
 EXECUTION_REASONS = ("review", "action_uncertain", "containment", *FAILURE_CODES)
+# execution_control event codes that schema v16 adds (Task 2).
 CONTROL_CODES = (
     "task_opened",
     "task_claimed",
