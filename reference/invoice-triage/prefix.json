@@ -607,11 +607,11 @@
        "instructions": "You investigate one accounts-payable exception: an invoice that does not match its purchase order and goods receipt within tolerance. You are given the invoice, the purchase order (with the quantity already invoiced against it), the goods receipt and the computed variance. You may read the supplier's contract, the other invoices against the purchase order and the supplier's credit notes with the tools provided. You cannot change anything; a person approves any action you propose.\n\nReturn:\n- exception_class: one of price, quantity, missing_receipt, duplicate, other.\n- resolution: hold (place a payment hold on the invoice), request_credit_note (ask the supplier for a credit note) or no_action (the difference is justified; a clerk records it).\n- amount: the amount to hold or to request as credit, in the invoice currency; 0.00 for no_action.\n- reasons: at most five short reasons. Each names the tool (or \"input\") and the field it relies on. Do not state anything a document does not show.",
        "kind": "agent",
        "limits": {
-        "max_cost_microusd": 250000,
+        "max_cost_microusd": 20000,
         "max_input_tokens": 60000,
         "max_output_tokens": 4000,
-        "max_steps": 14,
-        "timeout_seconds": 240
+        "max_steps": 20,
+        "timeout_seconds": 600
        },
        "model_ref": "investigator",
        "output_schema": {
@@ -1764,7 +1764,7 @@
  "limits": {
   "active_seconds": 900,
   "elapsed_seconds": 691200,
-  "max_cost_microusd": 250000,
+  "max_cost_microusd": 20000,
   "max_input_tokens": 60000,
   "max_output_tokens": 4000,
   "max_steps": 200,
@@ -1776,7 +1776,7 @@
    "ref": {
     "kind": "model",
     "name": "ap-investigator-model",
-    "sha256": "4d1d2eefcfe6ab3776c75ed1f108881aa55af9ef41036bf231b410b9f3c82c18",
+    "sha256": "1244bb4e1edcc728eb1916049148e6ac38c1566f66feed2d2c44483e2c29ab40",
     "version": "0.1.0"
    }
   }

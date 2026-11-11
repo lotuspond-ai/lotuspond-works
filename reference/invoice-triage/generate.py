@@ -223,13 +223,18 @@ RETRY = {
 ONCE = {"max_attempts": 1, "timeout_seconds": 30, "backoff_seconds": 0, "retry_codes": []}
 TOOLS = ["get_supplier_contract", "list_supplier_invoices", "list_credit_notes"]
 AGENT_LIMITS = {
-    "max_steps": 14,
-    "timeout_seconds": 240,
+    # Also the execution's step budget (E04 takes the smallest): 3 reads, the agent root,
+    # 6 model rounds and 8 tool calls is 18.
+    "max_steps": 20,
+    "timeout_seconds": 600,
     "max_input_tokens": 60000,
     "max_output_tokens": 4000,
-    "max_cost_microusd": 250000,
+    "max_cost_microusd": 20000,
 }
-MODEL_CONFIGURATION = {"model": "claude-sonnet-5-5", "temperature": 0}
+# Claude Haiku 5.5 at medium effort: the cheapest current model with tool use and
+# structured output (decision 3). No sampling parameters: API version 2026-10-21
+# refuses them. The 600 s timeout also bounds the execution's active time (finding 1).
+MODEL_CONFIGURATION = {"model": "claude-haiku-5-5", "effort": "medium"}
 model = {
     "format_version": 1,
     "kind": "model",
@@ -559,7 +564,7 @@ def workflow(package_id, name, exception, policies):
             "retained_waits": 10,
             "max_input_tokens": 60000,
             "max_output_tokens": 4000,
-            "max_cost_microusd": 250000,
+            "max_cost_microusd": 20000,
         },
         "assurance": {
             "evaluation_refs": [],

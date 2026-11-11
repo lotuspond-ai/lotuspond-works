@@ -101,9 +101,9 @@ def reference(system, linux):
     w = system
     operator = drivers.Operator(w, w.processes, connector=gen.connector)
     customer = operator.tenant(w.engine, label="Reference")
-    # The execution's active budget is the smallest declared timeout (the agent's 240 s),
+    # The execution's active budget is the smallest declared timeout (the agent's 600 s),
     # and every attempt is charged its reservation: 3 reads, the agent root and up to 4
-    # children at 20 s each fit (160 s), where 60 s each would not.
+    # children at 20 s each use 160 s of it.
     operator.demand(20000)
     revision = operator.deploy(
         customer,

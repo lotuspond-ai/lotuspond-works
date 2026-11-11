@@ -1,7 +1,7 @@
 {
  "definition": {
   "configuration_revision": "1",
-  "configuration_sha256": "457b71b7291298227fb00c087a73b2f212a660940abd8c362398bd36748e136b",
+  "configuration_sha256": "dbacb5731642b59bd33a570349542685ab2d9c44dfd5f63bb8f4ede7667c2ad6",
   "input_schema": {
    "fields": [
     {
@@ -302,11 +302,11 @@
    "kind": "object"
   },
   "limits": {
-   "max_cost_microusd": 250000,
+   "max_cost_microusd": 20000,
    "max_input_tokens": 60000,
    "max_output_tokens": 4000,
-   "max_steps": 14,
-   "timeout_seconds": 240
+   "max_steps": 20,
+   "timeout_seconds": 600
   },
   "output_schema": {
    "fields": [
