@@ -3,8 +3,6 @@
 from enum import StrEnum
 from functools import wraps
 
-from sqlalchemy.exc import SQLAlchemyError
-
 
 class ExecutionCode(StrEnum):
     CAPACITY_UNAVAILABLE = "capacity_unavailable"
@@ -47,9 +45,12 @@ def execution_service(function):
             return function(*args, **kwargs)
         except ExecutionError:
             raise
-        except SQLAlchemyError:
-            raise ExecutionError("authority_unavailable") from None
-        except Exception:
+        except Exception as error:
+            # Imported here so that pure modules raising ExecutionError load no database code.
+            from sqlalchemy.exc import SQLAlchemyError
+
+            if isinstance(error, SQLAlchemyError):
+                raise ExecutionError("authority_unavailable") from None
             raise ExecutionError("invalid_request") from None
 
     return invoke
