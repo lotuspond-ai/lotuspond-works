@@ -49,7 +49,7 @@ from lotuspond_sdk.executable.package import (
 )
 from lotuspond_sdk.executable.wire import ReconciliationObservedPayload
 from pydantic import TypeAdapter
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 
 from .. import authority_gate
 from ..fleet.authority import database_now_ms
@@ -292,6 +292,37 @@ def _intent_of(db, artifacts, scope, attempt, keys=None):
     return value["intent_id"]
 
 
+def _restored_intent(db, scope, execution, program, step):
+    """The intent a `#reconcile` record's dispatch step names, restored and never
+    dispatched in these rows (read-back ordinal 0)."""
+    ref = dispatch_ref(program, step.occurrence_path)
+    source = getattr(ref.step.intent, "source", None)
+    if getattr(source, "kind", None) != "step":
+        raise ProgramError("integrity")
+    base = step.occurrence_path[: -len(READBACK_SUFFIX)]
+    region = base.rpartition("/")[0]
+    path = (region + "/" if region else "") + source.id
+    intent = db.scalar(
+        scoped(ExecutionActionIntent, scope)
+        .join(
+            ExecutionStepInstance,
+            ExecutionStepInstance.id == ExecutionActionIntent.step_instance_id,
+        )
+        .where(
+            ExecutionActionIntent.execution_id == execution.id,
+            ExecutionStepInstance.occurrence_path == path,
+        )
+        .with_for_update(of=ExecutionActionIntent)
+    )
+    if (
+        intent is None
+        or execution.recovery_epoch is None
+        or intent.recovery_epoch >= execution.recovery_epoch
+    ):
+        raise ProgramError("integrity")
+    return intent
+
+
 def stop_confirmed(db, scope, attempt_id) -> bool:
     reservation = db.scalar(
         scoped(ExecutionUsageReservation, scope).where(
@@ -409,11 +440,16 @@ class ReadbackService:
         ):
             raise ProgramError("integrity")
         observation_id = "readback:" + attempt.id
-        write_attempt = _write_attempt(
-            db, scope, execution, step, attempt.ordinal // READBACK_STRIDE
-        )
-        intent_id = _intent_of(db, self.artifacts, scope, write_attempt, keys)
-        intent = record(db, ExecutionActionIntent, scope, intent_id, locked=True)
+        program = program or load_program(db, scope, execution)
+        if attempt.ordinal // READBACK_STRIDE == 0:
+            # Task 10: a restored intent these rows never dispatched; no write to name.
+            write_attempt, intent = None, _restored_intent(db, scope, execution, program, step)
+        else:
+            write_attempt = _write_attempt(
+                db, scope, execution, step, attempt.ordinal // READBACK_STRIDE
+            )
+            intent_id = _intent_of(db, self.artifacts, scope, write_attempt, keys)
+            intent = record(db, ExecutionActionIntent, scope, intent_id, locked=True)
         existing = db.scalar(
             scoped(ExecutionActionObservation, scope).where(
                 ExecutionActionObservation.intent_id == intent.id,
@@ -422,7 +458,6 @@ class ReadbackService:
         )
         if existing is not None:
             return existing
-        program = program or load_program(db, scope, execution)
         spec = write_spec(program, dispatch_ref(program, step.occurrence_path))
         result, evidence, handle = UNKNOWN, [], None
         if attempt.state == "succeeded" and attempt.result_artifact_id is not None:
@@ -464,16 +499,26 @@ class ReadbackService:
                 result = UNKNOWN  # an unreadable or ill-typed result settles nothing
         # A late receipt reporting the effect contradicts an absence (the target's read
         # model may lag): never qualified, so an owner decides, citing that receipt.
-        reported = db.scalar(
-            scoped(ExecutionActionReceipt, scope).where(
-                ExecutionActionReceipt.attempt_id == write_attempt.id,
-                ExecutionActionReceipt.status.in_(("accepted", "observed_effect")),
+        reported = (
+            None
+            if write_attempt is None
+            else db.scalar(
+                scoped(ExecutionActionReceipt, scope).where(
+                    ExecutionActionReceipt.attempt_id == write_attempt.id,
+                    ExecutionActionReceipt.status.in_(("accepted", "observed_effect")),
+                )
             )
         )
+        # No write in these rows: none can still run once its owner released the
+        # execution with every runtime journal reconciled (E04's restore hold).
         qualified = (
             result == ABSENT
             and reported is None
-            and (spec.target_key or stop_confirmed(db, scope, write_attempt.id))
+            and (
+                spec.target_key
+                or write_attempt is None
+                or stop_confirmed(db, scope, write_attempt.id)
+            )
         )
         content, payload = _payload(
             intent, result, RECONCILIATION_RULE, spec.rule_version, evidence, qualified
@@ -706,10 +751,17 @@ class ResolutionService:
             return action_view(db, scope, intent)
         if execution.state in TERMINAL:
             raise ExecutionError("conflict")
-        if execution.recovery_epoch != epoch or intent.recovery_epoch != epoch:
-            raise ExecutionError("conflict")  # a restored action waits for Task 10's release
+        # Held after a restore (Task 10): only a write's confirmed stop, which its
+        # owner's release needs. Released: an older-epoch intent is resolved like any.
+        held = execution.recovery_epoch is None
+        if (held and request.kind != "compute_stopped") or (
+            not held and execution.recovery_epoch != epoch
+        ):
+            raise ExecutionError("conflict")
         awaiting = (
-            execution.state == "reconciliation_required" and execution.reason == "action_uncertain"
+            not held
+            and execution.state == "reconciliation_required"
+            and execution.reason == "action_uncertain"
         )
         # Containment only: a write read-back already settled, whose lapse left its
         # compute stop unconfirmed, keeps the execution from ending; an owner may
@@ -720,7 +772,7 @@ class ResolutionService:
             if request.kind != "compute_stopped":
                 raise ExecutionError("conflict")
             write_attempt, path, node_id, reads = (
-                self._unstopped(db, scope, execution, intent),
+                self._unstopped(db, scope, execution, intent, held=held),
                 None,
                 None,
                 [],
@@ -823,7 +875,13 @@ class ResolutionService:
         mark_runnable(db, execution, now)
         return action_view(db, scope, intent)
 
-    def _unstopped(self, db, scope, execution, intent):
+    def _unstopped(self, db, scope, execution, intent, *, held=False):
+        """A write of this intent whose compute stop is unconfirmed: one closed after
+        an uncertain command, or (held after a restore) one the hold left uncertain."""
+        closed = and_(
+            ExecutionActionCommand.status == "uncertain",
+            ExecutionAttempt.state.in_(("succeeded", "failed")),
+        )
         writes = list(
             db.scalars(
                 scoped(ExecutionAttempt, scope)
@@ -834,8 +892,7 @@ class ResolutionService:
                 .where(
                     ExecutionAttempt.execution_id == execution.id,
                     ExecutionActionCommand.intent_id == intent.id,
-                    ExecutionActionCommand.status == "uncertain",
-                    ExecutionAttempt.state.in_(("succeeded", "failed")),
+                    or_(closed, ExecutionAttempt.state == "uncertain") if held else closed,
                 )
                 .order_by(ExecutionAttempt.ordinal)
             )

@@ -178,9 +178,10 @@ def actions(tasks):
     return h
 
 
-def action_runtime(h, pin):
+def action_runtime(h, pin, epoch=1):
     """A runtime instance whose observation ceiling includes the synthetic connector."""
-    principal = runtime(h)
+    h.pin = pin
+    principal = runtime(h, epoch=epoch)
     with Session(h.engine) as db, db.begin():
         instance = db.get(RuntimeInstance, principal.identity.instance_id)
         instance.observation_ceiling = json.dumps(
@@ -203,7 +204,7 @@ def intent_row(h, execution_id):
         )
 
 
-def dispatch_attempt(h, execution_id):
+def dispatch_attempt(h, execution_id, last=False):
     with Session(h.engine) as db:
         return db.scalar(
             select(ExecutionAttempt.id)
@@ -214,6 +215,8 @@ def dispatch_attempt(h, execution_id):
                 ExecutionAttempt.execution_id == execution_id,
                 ExecutionStepInstance.occurrence_path.like("%#dispatch"),
             )
+            .order_by(ExecutionAttempt.ordinal.desc() if last else ExecutionAttempt.ordinal)
+            .limit(1)
         )
 
 

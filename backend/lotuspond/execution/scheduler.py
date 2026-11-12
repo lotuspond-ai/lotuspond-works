@@ -26,7 +26,7 @@ from .budgets import BudgetDemand, installation_active
 from .contracts import Contract
 from .deployments import _pool, gates, load_deployment
 from .errors import ExecutionError, execution_service
-from .orchestrator import OUT_OF_TIME, mark_runnable
+from .orchestrator import OUT_OF_TIME, mark_runnable, runs_clause
 from .publication import _Lookup
 
 
@@ -145,7 +145,7 @@ class Scheduler:
                     Execution.workspace_id == scope.workspace_id,
                     Execution.project_id == scope.project_id,
                     Execution.environment_id == scope.environment_id,
-                    Execution.requested_state == "running",
+                    runs_clause(ExecutionAttempt.id),
                     Execution.state.in_(("pending", "running")),
                     Execution.deadline_ms > now,
                     or_(Execution.reason.is_(None), Execution.reason != OUT_OF_TIME),

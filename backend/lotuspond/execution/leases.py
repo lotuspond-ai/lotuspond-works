@@ -36,7 +36,7 @@ from .activity_records import lease_revision, lease_view, reserved_until, scope_
 from .authorization import lock, record, scoped, share
 from .dispatch import activity_service, failure_content
 from .errors import ExecutionError
-from .orchestrator import TERMINAL, mark_runnable
+from .orchestrator import TERMINAL, mark_runnable, may_run
 from .progression import record_event
 
 # One row per declined delivery: makes an equal repeated decline a no-op.
@@ -107,7 +107,7 @@ class LeaseService:
             raise ExecutionError("conflict")
         # A pause or a cancellation is reported by refusing renewal: the runtime then
         # stops the provider and reports `cancelled` with what it observed.
-        if execution.requested_state != "running" or execution.state in TERMINAL:
+        if not may_run(execution, rows["step"].occurrence_path) or execution.state in TERMINAL:
             raise ExecutionError("forbidden")
         if rows["parent"] is not None:
             # A child runs only inside its parent's live lease.

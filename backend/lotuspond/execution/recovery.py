@@ -23,6 +23,7 @@ reservation expiry skip an execution whose `recovery_epoch` is not current.
 
 from ..fleet.authority import FleetDependencies
 from ..models import (
+    ExecutionActionIntent,
     ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionLease,
@@ -35,6 +36,9 @@ from .orchestrator import TERMINAL, clear_runnable
 
 # Attempt states a restored row may show while the runtime had already moved on.
 IN_FLIGHT = frozenset({"dispatched", "claimed"})
+# E05: an intent no observation or decision has settled (`execution_action_hold_idx`).
+UNSETTLED_EFFECTS = ("not_dispatched", "dispatching", "accepted", "unknown")
+CLOSED_AUTHORIZATIONS = ("denied", "review_expired", "expired", "withdrawn", "superseded")
 
 
 class RecoveryFence:
@@ -168,6 +172,7 @@ def hold_restored(db, execution, epoch: int, event) -> bool:
         attempt.state = "uncertain"
         db.flush()
         event("attempt_uncertain", attempt.id)
+    hold_old_epoch_intents(db, execution, epoch=epoch, event=event)
     if execution.state not in ("pending", "reconciliation_required"):
         execution.state, execution.reason = "reconciliation_required", "uncertain"
     execution.recovery_epoch = None
@@ -175,3 +180,32 @@ def hold_restored(db, execution, epoch: int, event) -> bool:
     db.flush()
     event("reconciliation_required", None)
     return True
+
+
+def hold_old_epoch_intents(db, execution, *, epoch: int, event) -> int:
+    """Hold each unsettled intent of a restored execution with it (E05 decision 13).
+
+    The caller holds the execution row and is holding it (`hold_restored`): this runs
+    in that transaction, after its attempts. Every intent created under an older
+    epoch whose effect is not settled and whose authorization is still open is held:
+    one `intent_held` event each, by ID (`execution_action_hold_idx`). Nothing is
+    scheduled: no intent of a held execution is dispatched, read back or decided
+    into a dispatch until its owner releases the execution, and then each is read
+    back under the new epoch (`InterpreterV2`), never re-delivered. Returns the count.
+    """
+    intents = list(
+        db.scalars(
+            scoped(ExecutionActionIntent, scope_of(execution))
+            .where(
+                ExecutionActionIntent.execution_id == execution.id,
+                ExecutionActionIntent.recovery_epoch < epoch,
+                ExecutionActionIntent.effect_state.in_(UNSETTLED_EFFECTS),
+                ExecutionActionIntent.authorization_state.notin_(CLOSED_AUTHORIZATIONS),
+            )
+            .order_by(ExecutionActionIntent.recovery_epoch, ExecutionActionIntent.id)
+            .with_for_update()
+        )
+    )
+    for _ in intents:
+        event("intent_held", None)
+    return len(intents)

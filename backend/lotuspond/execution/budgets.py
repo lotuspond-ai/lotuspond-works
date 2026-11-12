@@ -59,6 +59,7 @@ from .deployments import (
 )
 from .entitlement import EntitlementGrant, PolicyGrant
 from .errors import ExecutionError, execution_service
+from .orchestrator import may_run
 from .program import ProgramError, program_from, resolve_occurrence
 from .publication import _Lookup, current_snapshot, load_publication
 
@@ -330,7 +331,7 @@ class BudgetService:
         if tenant.expires_at_ms <= now:
             raise ExecutionError("authority_unavailable")
 
-    def _final(self, db, actor, revision, grant, tenant, recovery, execution=None):
+    def _final(self, db, actor, revision, grant, tenant, recovery, execution=None, path=""):
         # These exact parents were acquired before execution children. Re-entry
         # reloads mutable keys/source pins and independently current publisher trust.
         _, _, assurance = load_deployment(
@@ -360,7 +361,7 @@ class BudgetService:
         check_assurance_current(db, assurance, package, snapshot, sources)
         if execution and (
             execution.deadline_ms <= database_now_ms(db)
-            or execution.requested_state != "running"
+            or not may_run(execution, path)
             or execution.state not in {"pending", "running"}
         ):
             raise ExecutionError("forbidden")
@@ -533,14 +534,15 @@ class BudgetService:
             raise ExecutionError("capacity_unavailable")  # visibly full: no lookups
         grant, tenant, recovery = self._grants(db, actor.scope)
         limits, packages, catalog = self._limits(db, actor.scope, revision, grant, tenant)
+        path = step.occurrence_path
         if (
-            execution.requested_state != "running"
+            not may_run(execution, path)
             or execution.state not in {"pending", "running"}
             or execution.deadline_ms <= database_now_ms(db)
         ):
             raise ExecutionError("forbidden")
         if existing:
-            self._final(db, actor, revision, grant, tenant, recovery, execution)
+            self._final(db, actor, revision, grant, tenant, recovery, execution, path)
             return view(existing)
         if execution.recovery_epoch != recovery.epoch:
             # Restored: held for an owner's release, never reserved before (recovery.py).
@@ -581,7 +583,7 @@ class BudgetService:
                 for key in BudgetDemand.model_fields
             }
         )
-        self._final(db, actor, revision, grant, tenant, recovery, execution)
+        self._final(db, actor, revision, grant, tenant, recovery, execution, path)
         reservations = list(
             db.scalars(
                 scoped(ExecutionUsageReservation, actor.scope).where(

@@ -142,6 +142,7 @@ FAILURES = frozenset(
         "not_applied",
         "outcome_not_verified",
         "outcome_unknown",
+        "recovery_epoch_changed",
     }
 )
 
@@ -150,6 +151,12 @@ def _failure(code):
     return code if code in FAILURES else "invalid_result"
 
 
+# E05 occurrence suffixes: an action's command attempts and its read-backs.
+DISPATCH_SUFFIX, READBACK_SUFFIX = "#dispatch", "#reconcile"
+# An intent no decision has settled yet: a cancellation withdraws it (Task 10).
+UNDECIDED = ("proposed", "awaiting_review")
+# Authorizations that close an intent (`execution_action_hold_idx`).
+CLOSED_AUTHORIZATIONS = ("denied", "review_expired", "expired", "withdrawn", "superseded")
 # The record of a `cancelled` activity attempt that a pause released before it
 # started, or that stopped when its lease renewal was refused short of a
 # cancellation (Task 11). It is never a step's outcome: on resume the step gets a
@@ -226,6 +233,10 @@ class ActionRecord:
     receipts: dict = field(default_factory=dict)
     # When each finished read-back settled (its reservation's completion time).
     finished: dict = field(default_factory=dict)
+    # Task 10: the intent's authorization, and whether it predates the execution's
+    # current recovery epoch (created before a restore its owner released).
+    authorization: str = "proposed"
+    restored: bool = False
 
 
 @dataclass(frozen=True)
@@ -388,6 +399,16 @@ class CancelUndispatched:
 
 
 @dataclass(frozen=True)
+class SupersedeIntent:
+    """E05 (v2, Task 10): a restored intent's qualified absence closes it; it is never
+    re-proposed or resent under the new recovery epoch."""
+
+    occurrence_path: str  # the dispatch step
+    node_id: str
+    intent_id: str
+
+
+@dataclass(frozen=True)
 class Complete:
     value: object
 
@@ -414,6 +435,7 @@ Action = (
     | SettleWrite
     | RequireResolution
     | RecordOutcome
+    | SupersedeIntent
 )
 
 
@@ -940,9 +962,33 @@ class _RegionV2(_Region):
                 )
             )
         last = attempts[-1]
+        if last.state == "cancelled" and last.failure == INTERRUPTED:
+            # A pause released it before any claim (`InterpreterV2._released`): one
+            # new attempt under the same intent and decision, never counted a retry.
+            try:
+                intent = self.evaluate(step.intent)
+                decision = self.evaluate(step.decision) if step.decision is not None else None
+            except ExpressionError as error:
+                return "pending", Derivation(
+                    actions=(RecordPure(path, step.id, failure=error.code),)
+                )
+            return "pending", Derivation(
+                actions=(
+                    CreateDispatch(
+                        attempts_path,
+                        step.id,
+                        intent["id"],
+                        None if decision is None else decision["id"],
+                        last.ordinal + 1,
+                    ),
+                )
+            )
         if last.state == "succeeded":
             return "pending", Derivation(actions=(RecordPure(path, step.id, value=last.value),))
         if last.state == "failed" and last.failure == "not_applied":
+            restored = self.superseded(step, path)
+            if restored is not None:
+                return "pending", restored
             resend = self.resend(step, path, last)
             if resend is not None:
                 return "pending", resend
@@ -954,6 +1000,100 @@ class _RegionV2(_Region):
             return self.settle(step, path, last)
         # Reserved, dispatched or claimed: the runtime decides.
         return "pending", Derivation()
+
+    def derive(self):
+        """v2: before anything else, read back each restored intent (Task 10)."""
+        state = self.state
+        if state.requested_state == "running" and not (
+            state.region_path == "" and self.now_ms >= state.deadline_ms
+        ):
+            for step in self.body.steps:
+                if isinstance(step, ActionDispatchStep):
+                    held = self.restored(step)
+                    if held is not None:
+                        return held
+        return super().derive()
+
+    def superseded(self, step, path):
+        """A restored intent's qualified absence: supersede it, then fail the step
+        `recovery_epoch_changed`, with no automatic re-proposal. None: not restored."""
+        action = self.state.actions.get(path)
+        if action is None or not action.restored:
+            return None
+        if action.authorization != "superseded":
+            return Derivation(actions=(SupersedeIntent(path, step.id, action.intent_id),))
+        return self.fail("recovery_epoch_changed")
+
+    def restored(self, step):
+        """Decision 13 at the owner's release: an unsettled intent created before the
+        restore is read back under the new epoch, in place of any re-delivery.
+
+        Present keeps a dispatched write's effect (`observed`) and verification
+        continues; present for an intent these rows never dispatched, or a qualified
+        absence, fails `recovery_epoch_changed` (the intent superseded); unknown
+        follows decision 11's bound, then an owner. A write still in flight or
+        uncertain is Task 8's (`settle`). None when nothing is due here.
+        """
+        from .action_contracts import MAX_READBACKS
+        from .budgets import READBACK_STRIDE
+
+        path = self.path(step.id)
+        action = self.state.actions.get(path)
+        if action is None or not action.restored:
+            return None
+        record = self.state.occurrences.get(self.path(step.id + DISPATCH_SUFFIX))
+        writes = record.attempts if record else ()
+        last = writes[-1] if writes else None
+        if last is not None and last.state not in ("succeeded", "failed", "cancelled"):
+            return None  # in flight or uncertain: `settle` reads it back
+        written = last is not None and last.state == "succeeded"
+        ordinal = last.ordinal if last is not None else 0
+        low = ordinal * READBACK_STRIDE
+        reconcile = self.state.occurrences.get(self.path(step.id + READBACK_SUFFIX))
+        reads = [
+            a
+            for a in (reconcile.attempts if reconcile else ())
+            if low < a.ordinal < low + READBACK_STRIDE
+        ]
+        held = action.effect in ("not_dispatched", "accepted") and action.authorization not in (
+            CLOSED_AUTHORIZATIONS
+        )
+        reconcile_path = self.path(step.id + READBACK_SUFFIX)
+        if not reads:
+            if not held:
+                return None  # settled before the restore
+            return Derivation(
+                actions=(
+                    CreateReadback(reconcile_path, step.id, action.intent_id, low + 1, "restored"),
+                )
+            )
+        if last is not None and last.state == "failed":
+            return None  # Task 8 settled that write before the restore
+        latest = reads[-1]
+        if latest.state in ACTIVE or latest.state == "uncertain":
+            return Derivation()  # the read-back runs; nothing else here moves
+        seen = self._seen(action, latest)
+        if seen is None:
+            return Derivation(actions=(RecordReadback(reconcile_path, step.id, latest.id),))
+        if seen.result == "effect_present":
+            return None if written else self.fail("recovery_epoch_changed")
+        if seen.result == "effect_absent" and seen.qualified:
+            return self.superseded(step, path)
+        if seen.result == "effect_absent":
+            return Derivation(actions=(RequireResolution(path, step.id),))
+        if len(reads) >= MAX_READBACKS or latest.ordinal + 1 >= low + READBACK_STRIDE:
+            return Derivation(actions=(RequireResolution(path, step.id),))
+        settled = action.finished.get(latest.id) or latest.failed_at_ms or 0
+        due = settled + step.retry.backoff_seconds * 1000
+        if due > self.now_ms:
+            return Derivation(wake_at_ms=due)
+        return Derivation(
+            actions=(
+                CreateReadback(
+                    reconcile_path, step.id, action.intent_id, latest.ordinal + 1, "unknown"
+                ),
+            )
+        )
 
     def _reads(self, step, last):
         """Read-back attempts of write `last`: ordinals 100k + 1 .. 100k + 99."""
@@ -983,7 +1123,17 @@ class _RegionV2(_Region):
         under the same intent, decision and key, only for a `target_key` operation with
         attempts left in the dispatch step's retry policy. None: no resend."""
         action = self.state.actions.get(path)
-        if action is None or not action.target_key or last.ordinal >= step.retry.max_attempts:
+        record = self.state.occurrences.get(self.path(step.id + "#dispatch"))
+        paused = sum(
+            1
+            for a in (record.attempts if record else ())
+            if a.state == "cancelled" and a.failure == INTERRUPTED
+        )
+        if (
+            action is None
+            or not action.target_key
+            or last.ordinal - paused >= step.retry.max_attempts
+        ):
             return None
         reads = self._reads(step, last)
         seen = self._seen(action, reads[-1]) if reads else None
@@ -2154,6 +2304,15 @@ class InterpreterV1:
         )
         return True
 
+    def _cancelling(self, db, execution, now):
+        """The root derivation of a requested cancellation: undispatched work ends
+        now, and the terminal state waits for containment."""
+        return Derivation(actions=(CancelUndispatched(""), Fail("cancelled")))
+
+    def _spared(self, db, execution):
+        """Occurrence path pattern of reserved attempts a cancellation leaves to run."""
+        return None
+
     def _cancel(self, db, execution, epoch, action):
         """Cancel undispatched attempts and open waits under a region prefix.
 
@@ -2168,11 +2327,17 @@ class InterpreterV1:
             ExecutionStepInstance.execution_id == execution.id,
             ExecutionStepInstance.occurrence_path.like(pattern, escape="\\"),
         )
+        spared = self._spared(db, execution)
+        cancellable = (
+            instances
+            if spared is None
+            else instances.where(~ExecutionStepInstance.occurrence_path.like(spared))
+        )
         attempts = list(
             db.scalars(
                 _scoped(ExecutionAttempt, execution)
                 .where(
-                    ExecutionAttempt.step_instance_id.in_(instances),
+                    ExecutionAttempt.step_instance_id.in_(cancellable),
                     ExecutionAttempt.state == "reserved",
                 )
                 .order_by(ExecutionAttempt.id)
@@ -2245,7 +2410,11 @@ class InterpreterV1:
             self._event(
                 db, execution, epoch, "cancelled", attempt_id=attempt.id, detail=INTERRUPTED
             )
+        self._released(db, execution, attempts)
         return len(attempts)
+
+    def _released(self, db, execution, attempts):
+        """Hook: root attempts a pause just released before any claim."""
 
     def _apply(self, db, execution, epoch, action) -> bool:
         """Apply one pure action; False when its effect already exists."""
@@ -2280,7 +2449,7 @@ class InterpreterV1:
                 derivation = Derivation(actions=(CancelUndispatched(""), Fail("deadline_exceeded")))
             elif region == "" and execution.requested_state == "cancelled":
                 # Likewise a cancellation ends work whatever the inputs hold.
-                derivation = Derivation(actions=(CancelUndispatched(""), Fail("cancelled")))
+                derivation = self._cancelling(db, execution, now)
             elif region == "" and not _progressing(execution):
                 # Paused, or fenced for reconciliation: nothing new, and nothing loaded.
                 derivation = Derivation()
@@ -2304,8 +2473,9 @@ class InterpreterV1:
             if final is not None:
                 terminal = final
                 continue
-            if pure:
-                # Every action's effect already exists: the rows changed under us.
+            if pure and not all(isinstance(a, CancelUndispatched) for a in pure):
+                # Every action's effect already exists: the rows changed under us. (A
+                # cancellation still containing work repeats its no-op cancel.)
                 raise ProgramError("integrity")
             stack.extend(reversed(derivation.regions))
         return applied, terminal, wake, touched
@@ -2781,6 +2951,8 @@ class InterpreterV2(InterpreterV1):
             return self._require_resolution(db, execution, epoch, action)
         if isinstance(action, RecordOutcome):
             return self._record_outcome(db, execution, epoch, action)
+        if isinstance(action, SupersedeIntent):
+            return self._supersede(db, execution, epoch, action)
         return super()._apply(db, execution, epoch, action)
 
     def _record_outcome(self, db, execution, epoch, action):
@@ -2822,6 +2994,159 @@ class InterpreterV2(InterpreterV1):
             if refused is not None:
                 action = Fail(refused)
         return super()._terminal(db, execution, program, epoch, action)
+
+    # ------------------------------------------------------------ controls (Task 10)
+
+    def _spared(self, db, execution):
+        """Decision 12: a requested cancellation leaves the read-backs of uncertain
+        writes to run, since they contain an effect that may exist. The deadline ends
+        them with everything else."""
+        if (
+            execution.interpreter_id == INTERPRETER_V2
+            and execution.requested_state == "cancelled"
+            and not past_deadline(execution, database_now_ms(db))
+        ):
+            return "%" + READBACK_SUFFIX
+        return None
+
+    def _cancel(self, db, execution, epoch, action):
+        """v2: also cancel the open tasks and withdraw the undecided intents under the
+        prefix. A decided or dispatched intent keeps its state: only what it observed
+        settles it."""
+        from ..models import ExecutionActionIntent, ExecutionHumanTask
+
+        changed = super()._cancel(db, execution, epoch, action)
+        if execution.interpreter_id != INTERPRETER_V2:
+            return changed
+        pattern = action.prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        instances = select(ExecutionStepInstance.id).where(
+            ExecutionStepInstance.workspace_id == execution.workspace_id,
+            ExecutionStepInstance.project_id == execution.project_id,
+            ExecutionStepInstance.environment_id == execution.environment_id,
+            ExecutionStepInstance.execution_id == execution.id,
+            ExecutionStepInstance.occurrence_path.like(pattern + "%", escape="\\"),
+        )
+        tasks = list(
+            db.scalars(
+                _scoped(ExecutionHumanTask, execution)
+                .where(
+                    ExecutionHumanTask.step_instance_id.in_(instances),
+                    ExecutionHumanTask.state == "open",
+                )
+                .order_by(ExecutionHumanTask.id)
+                .with_for_update()
+            )
+        )
+        intents = list(
+            db.scalars(
+                _scoped(ExecutionActionIntent, execution)
+                .where(
+                    ExecutionActionIntent.step_instance_id.in_(instances),
+                    ExecutionActionIntent.authorization_state.in_(UNDECIDED),
+                    ExecutionActionIntent.effect_state == "not_dispatched",
+                )
+                .order_by(ExecutionActionIntent.id)
+                .with_for_update()
+            )
+        )
+        for task in tasks:
+            task.state = "cancelled"
+        for intent in intents:
+            intent.authorization_state = "withdrawn"
+        db.flush()
+        return changed or bool(tasks or intents)
+
+    def _cancelling(self, db, execution, now):
+        """v2: while a write is uncertain its read-backs continue (decision 12); the
+        cancellation ends the execution only once every write has settled."""
+        base = super()._cancelling(db, execution, now)
+        if execution.interpreter_id != INTERPRETER_V2 or past_deadline(execution, now):
+            return base
+        actions, waiting, wake = self._contain(db, execution, now)
+        if actions:
+            return Derivation(actions=(CancelUndispatched(""), *actions))
+        if waiting:
+            return Derivation(actions=(CancelUndispatched(""),), wake_at_ms=wake)
+        return base
+
+    def _contain(self, db, execution, now):
+        """Task 8's settlement of each uncertain write, and nothing else: no
+        verification, no resend. Returns (actions, waiting, wake-up)."""
+        uncertain = db.execute(
+            select(
+                ExecutionAttempt.id,
+                ExecutionStepInstance.occurrence_path,
+                ExecutionStepInstance.node_id,
+            )
+            .join(
+                ExecutionStepInstance, ExecutionStepInstance.id == ExecutionAttempt.step_instance_id
+            )
+            .where(
+                ExecutionAttempt.workspace_id == execution.workspace_id,
+                ExecutionAttempt.project_id == execution.project_id,
+                ExecutionAttempt.environment_id == execution.environment_id,
+                ExecutionAttempt.execution_id == execution.id,
+                ExecutionAttempt.parent_attempt_id.is_(None),
+                ExecutionAttempt.state == "uncertain",
+                ExecutionStepInstance.occurrence_path.like("%" + DISPATCH_SUFFIX),
+            )
+            .order_by(ExecutionStepInstance.occurrence_path)
+        ).all()
+        actions, waiting, wake = [], False, None
+        if not uncertain:
+            return (), False, None
+        program = load_program(db, _scope(execution), execution)
+        for attempt_id, path, node_id in uncertain:
+            base = path[: -len(DISPATCH_SUFFIX)]
+            region_path = base.rpartition("/")[0]
+            state = self.load_progression(db, execution, region_path, program=program)
+            region = self.region_for(execution)(program, state, now)
+            step = next(s for s in region.body.steps if s.id == node_id)
+            record = state.occurrences.get(path)
+            if record is None or not record.attempts or record.attempts[-1].id != attempt_id:
+                continue
+            _, derivation = region.settle(step, base, record.attempts[-1])
+            if derivation.actions:
+                actions.extend(derivation.actions)
+                continue
+            waiting = True
+            if derivation.wake_at_ms is not None:
+                wake = derivation.wake_at_ms if wake is None else min(wake, derivation.wake_at_ms)
+        return tuple(actions), waiting, wake
+
+    def _released(self, db, execution, attempts):
+        """A pause released command attempts no runtime claimed: their commands can
+        never be claimed or offered again, and the intent was never dispatched."""
+        from ..models import ExecutionActionCommand, ExecutionActionIntent
+
+        if execution.interpreter_id != INTERPRETER_V2 or not attempts:
+            return
+        commands = list(
+            db.scalars(
+                _scoped(ExecutionActionCommand, execution)
+                .where(ExecutionActionCommand.attempt_id.in_([a.id for a in attempts]))
+                .order_by(ExecutionActionCommand.id)
+                .with_for_update()
+            )
+        )
+        for command in commands:
+            if command.status != "admitted":
+                raise ProgramError("integrity")  # an unclaimed attempt's command
+            # Never claimable or offered again (`_pending`, `claim`). Its E03 admission
+            # is a fleet row, locked only before an execution row, so it is left to
+            # expire as E03 retires every unclaimed command.
+            command.status = "stopped"
+            intent = db.scalar(
+                _scoped(ExecutionActionIntent, execution)
+                .where(ExecutionActionIntent.id == command.intent_id)
+                .with_for_update()
+            )
+            if intent.effect_state == "dispatching":
+                # Nothing could run without a claim: back to what preceded the command.
+                intent.effect_state = (
+                    "absent" if self._absence_seen(db, execution, intent) else "not_dispatched"
+                )
+        db.flush()
 
     def _settle_write(self, db, execution, epoch, action):
         """Close the uncertain write: succeeded with the receipt handle, or failed.
@@ -2892,11 +3217,8 @@ class InterpreterV2(InterpreterV1):
         ):
             raise ProgramError("integrity")
         base = action.occurrence_path[: -len("#reconcile")]
-        write = self._uncertain_write(
-            db, execution, base + "#dispatch", action.node_id, action.ordinal // READBACK_STRIDE
-        )
-        if write is None:
-            return False
+        ordinal = action.ordinal // READBACK_STRIDE
+        write = self._uncertain_write(db, execution, base + "#dispatch", action.node_id, ordinal)
         intent = db.scalar(
             _scoped(ExecutionActionIntent, execution)
             .where(
@@ -2905,13 +3227,31 @@ class InterpreterV2(InterpreterV1):
             )
             .with_for_update()
         )
-        command = db.scalar(
-            _scoped(ExecutionActionCommand, execution).where(
-                ExecutionActionCommand.attempt_id == write.id
+        if intent is None:
+            raise ProgramError("integrity")
+        if write is None:
+            # Task 10: a restored intent is read back at its owner's release whatever
+            # its last write's state, or with none (ordinal 0).
+            write = self._restored_write(db, execution, intent, base, action.node_id, ordinal)
+            if write is False:
+                return False
+        command = (
+            None
+            if write is None
+            else db.scalar(
+                _scoped(ExecutionActionCommand, execution).where(
+                    ExecutionActionCommand.attempt_id == write.id
+                )
             )
         )
-        if intent is None or command is None or command.intent_id != intent.id:
+        if command is not None and command.intent_id != intent.id:
             raise ProgramError("integrity")
+        if command is None and write is not None and write.state == "uncertain":
+            # Never commanded: only a restored write, which its input names.
+            from .action_reconciliation import _intent_of
+
+            if _intent_of(db, self.artifacts, _scope(execution), write, self._keys()) != intent.id:
+                raise ProgramError("integrity")
         created = self._readbacks().schedule(
             db,
             execution,
@@ -2926,6 +3266,51 @@ class InterpreterV2(InterpreterV1):
         if created is not None and execution.state == "waiting":
             execution.state = "running"
         return created is not None
+
+    def _restored_write(self, db, execution, intent, base, node_id, ordinal):
+        """The closed last write `ordinal` (None for 0) of a restored intent, or False."""
+        if execution.recovery_epoch is None or intent.recovery_epoch >= execution.recovery_epoch:
+            return False
+        instance = db.scalar(
+            _scoped(ExecutionStepInstance, execution).where(
+                ExecutionStepInstance.execution_id == execution.id,
+                ExecutionStepInstance.occurrence_path == base + "#dispatch",
+            )
+        )
+        attempts = [] if instance is None else self._attempts(db, execution, instance)
+        if ordinal == 0:
+            return None if not attempts else False
+        if not attempts or attempts[-1].ordinal != ordinal:
+            return False
+        if attempts[-1].state not in ("succeeded", "failed", "cancelled", "uncertain"):
+            return False
+        return attempts[-1]
+
+    def _supersede(self, db, execution, epoch, action):
+        """Close a restored intent whose qualified absence was read back (Task 10)."""
+        from ..models import ExecutionActionIntent
+
+        intent = db.scalar(
+            _scoped(ExecutionActionIntent, execution)
+            .where(
+                ExecutionActionIntent.id == action.intent_id,
+                ExecutionActionIntent.execution_id == execution.id,
+            )
+            .with_for_update()
+        )
+        if (
+            intent is None
+            or execution.recovery_epoch is None
+            or intent.recovery_epoch >= execution.recovery_epoch
+            or intent.effect_state != "absent"
+        ):
+            raise ProgramError("integrity")
+        if intent.authorization_state == "superseded":
+            return False
+        intent.authorization_state = "superseded"
+        db.flush()
+        self._event(db, execution, epoch, "intent_superseded", path=action.occurrence_path)
+        return True
 
     def _record_readback(self, db, execution, epoch, action):
         from ..models import ExecutionActionObservation
@@ -2959,7 +3344,10 @@ class InterpreterV2(InterpreterV1):
         return True
 
     def _with_actions(self, db, execution, state, program):
-        """Each dispatch occurrence's intent, observations, receipts and confirmed stops."""
+        """Each dispatch occurrence's intent, observations, receipts and confirmed stops.
+
+        A record exists for every dispatch step of the region whose intent exists, its
+        commands or not, so a restored intent never dispatched is read back too."""
         from ..models import (
             ExecutionActionCommand,
             ExecutionActionIntent,
@@ -2968,13 +3356,40 @@ class InterpreterV2(InterpreterV1):
         )
         from .action_reconciliation import dispatch_ref, write_spec
 
-        writes = {
-            path: record.attempts
-            for path, record in state.occurrences.items()
-            if path.endswith("#dispatch") and record.attempts
-        }
-        if not writes:
+        program = program or load_program(db, _scope(execution), execution)
+        _, _, body = region_body(program, state.region_path)
+        bases = {}
+        for step in body.steps:
+            source = getattr(getattr(step, "intent", None), "source", None)
+            if isinstance(step, ActionDispatchStep) and getattr(source, "kind", None) == "step":
+                bases[child_path(state.region_path, step.id)] = child_path(
+                    state.region_path, source.id
+                )
+        if not bases:
             return state
+        intents = {
+            path: intent
+            for intent, path in db.execute(
+                select(ExecutionActionIntent, ExecutionStepInstance.occurrence_path)
+                .join(
+                    ExecutionStepInstance,
+                    ExecutionStepInstance.id == ExecutionActionIntent.step_instance_id,
+                )
+                .where(
+                    ExecutionActionIntent.workspace_id == execution.workspace_id,
+                    ExecutionActionIntent.project_id == execution.project_id,
+                    ExecutionActionIntent.environment_id == execution.environment_id,
+                    ExecutionActionIntent.execution_id == execution.id,
+                    ExecutionStepInstance.occurrence_path.in_(sorted(set(bases.values()))),
+                )
+            )
+        }
+        writes = {
+            base: state.occurrences[base + DISPATCH_SUFFIX].attempts
+            if base + DISPATCH_SUFFIX in state.occurrences
+            else ()
+            for base in bases
+        }
         ids = [a.id for attempts in writes.values() for a in attempts]
         commands = {
             row.attempt_id: row
@@ -2985,9 +3400,9 @@ class InterpreterV2(InterpreterV1):
             )
         }
         reads = {
-            path: state.occurrences[path[: -len("#dispatch")] + "#reconcile"].attempts
-            for path in writes
-            if path[: -len("#dispatch")] + "#reconcile" in state.occurrences
+            base: state.occurrences[base + READBACK_SUFFIX].attempts
+            for base in bases
+            if base + READBACK_SUFFIX in state.occurrences
         }
         reservations = {
             row.attempt_id: row
@@ -3000,17 +3415,31 @@ class InterpreterV2(InterpreterV1):
             )
         }
         actions = {}
-        for path, attempts in writes.items():
-            intent_ids = {commands[a.id].intent_id for a in attempts if a.id in commands}
-            if not intent_ids:
-                continue
-            if len(intent_ids) != 1:
+        for base, attempts in writes.items():
+            intent = intents.get(bases[base])
+            commanded = {commands[a.id].intent_id for a in attempts if a.id in commands}
+            if len(commanded) > 1:
                 raise ProgramError("integrity")
-            intent = db.scalar(
-                _scoped(ExecutionActionIntent, execution).where(
-                    ExecutionActionIntent.id == next(iter(intent_ids))
+            if intent is None and commanded:
+                # An intent step outside this region: the commands name it.
+                intent = db.scalar(
+                    _scoped(ExecutionActionIntent, execution).where(
+                        ExecutionActionIntent.id == next(iter(commanded))
+                    )
                 )
-            )
+            if intent is None:
+                continue
+            if commanded - {intent.id}:
+                raise ProgramError("integrity")  # a command of another intent
+            if (
+                not attempts
+                and intent.effect_state == "not_dispatched"
+                and not (
+                    execution.recovery_epoch is not None
+                    and intent.recovery_epoch < execution.recovery_epoch
+                )
+            ):
+                continue  # nothing dispatched or restored: nothing to settle yet
             observations = tuple(
                 ObservationRecord(
                     row.id,
@@ -3035,9 +3464,10 @@ class InterpreterV2(InterpreterV1):
                     .order_by(ExecutionActionReceipt.source, ExecutionActionReceipt.id)
                 )
             }
-            program = program or load_program(db, _scope(execution), execution)
-            target_key = write_spec(program, dispatch_ref(program, path)).target_key
-            actions[path[: -len("#dispatch")]] = ActionRecord(
+            target_key = write_spec(
+                program, dispatch_ref(program, base + DISPATCH_SUFFIX)
+            ).target_key
+            actions[base] = ActionRecord(
                 intent_id=intent.id,
                 effect=intent.effect_state,
                 target_key=target_key,
@@ -3050,9 +3480,12 @@ class InterpreterV2(InterpreterV1):
                 receipts=receipts,
                 finished={
                     a.id: reservations[a.id].completed_at_ms
-                    for a in reads.get(path, ())
+                    for a in reads.get(base, ())
                     if a.id in reservations and reservations[a.id].completed_at_ms is not None
                 },
+                authorization=intent.authorization_state,
+                restored=execution.recovery_epoch is not None
+                and intent.recovery_epoch < execution.recovery_epoch,
             )
         return replace(state, actions=actions)
 
@@ -3065,6 +3498,7 @@ class InterpreterV2(InterpreterV1):
         """
         from ..models import ExecutionActionDecision, ExecutionActionIntent
         from .actions import load_intent
+        from .dispatch import interrupted
 
         if execution.interpreter_id != INTERPRETER_V2:
             raise ProgramError("integrity")
@@ -3075,8 +3509,12 @@ class InterpreterV2(InterpreterV1):
         if action.ordinal > 1 and (
             not existing
             or existing[-1].ordinal != action.ordinal - 1
-            or existing[-1].state != "failed"
+            or existing[-1].state not in ("failed", "cancelled")
         ):
+            return False
+        # After a pause released the previous attempt unclaimed: the same dispatch again.
+        resumed = action.ordinal > 1 and existing[-1].state == "cancelled"
+        if resumed and not interrupted(self.artifacts, db, _scope(execution), existing[-1]):
             return False
         intent = db.scalar(
             _scoped(ExecutionActionIntent, execution)
@@ -3115,7 +3553,12 @@ class InterpreterV2(InterpreterV1):
                 refused = "binding_refused"
         elif intent.authorization_state != "proposed" or action.decision_id is not None:
             refused = "binding_refused"
-        if refused is None and action.ordinal > 1:
+        if refused is None and resumed:
+            if intent.effect_state not in ("not_dispatched", "absent"):
+                refused = "binding_refused"
+            elif decision is not None and decision.expires_at_ms <= database_now_ms(db):
+                refused = "approval_expired"
+        elif refused is None and action.ordinal > 1:
             # Task 8: a resend only after a qualified absence of this very write.
             if intent.effect_state != "absent" or not self._qualified_absence(
                 db, execution, intent, existing[-1]
@@ -3141,6 +3584,24 @@ class InterpreterV2(InterpreterV1):
                 action.ordinal,
                 {"intent_id": intent.id, "decision_id": action.decision_id},
             ),
+        )
+
+    def _absence_seen(self, db, execution, intent):
+        """A read-back of an earlier write of this intent observed a qualified absence."""
+        from ..models import ExecutionActionObservation
+
+        return (
+            db.scalar(
+                _scoped(ExecutionActionObservation, execution)
+                .where(
+                    ExecutionActionObservation.intent_id == intent.id,
+                    ExecutionActionObservation.source == "readback",
+                    ExecutionActionObservation.result == "effect_absent",
+                    ExecutionActionObservation.qualified.is_(True),
+                )
+                .limit(1)
+            )
+            is not None
         )
 
     def _qualified_absence(self, db, execution, intent, write):

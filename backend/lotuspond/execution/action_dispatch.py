@@ -133,6 +133,10 @@ def _attempt_input(artifacts, db, attempt):
 # ---------------------------------------------------------------- E03 hooks
 
 
+# Execution refusals that mean the command's authority is gone, not unreachable.
+REVOKED = frozenset({"forbidden", "deployment_unavailable", "budget_exceeded", "invalid_request"})
+
+
 class ExecutionPinnedRecordSource:
     """E03's `PinnedRecordSource`: a command's records, rebuilt under current authority."""
 
@@ -145,8 +149,16 @@ class ExecutionPinnedRecordSource:
     def load(self, db, command) -> PinnedCommandRecords:
         try:
             return self._load(db, command)
-        except (FleetError, ExecutionError):
+        except FleetError:
             raise
+        except ExecutionError as error:
+            # E03 wraps anything else as `authority_unavailable`: keep the refusal's code.
+            # A revocation or refusal stays one; a lookup that may recover stays transient.
+            if error.code in ("conflict", "not_found"):
+                raise FleetError(error.code) from None
+            if error.code in REVOKED:
+                raise FleetError("forbidden") from None
+            raise FleetError("authority_unavailable") from None
         except Exception:
             raise FleetError("authority_unavailable") from None
 
@@ -180,10 +192,22 @@ class ExecutionPinnedRecordSource:
         )
         revision = record(db, ExecutionDeploymentRevision, scope, execution.deployment_revision_id)
         grant, tenant, recovery = self.budgets._grants(db, scope)
-        self.budgets._final(db, actor, revision, grant, tenant, recovery, execution)
+        # A claimed write finishes and records its status under a pause or a
+        # cancellation (decision 12); nothing new is admitted or claimed then.
+        claimed = db.scalar(
+            scoped(ExecutionActionCommand, scope).where(
+                ExecutionActionCommand.command_id == command.command_id,
+                ExecutionActionCommand.status.in_(("claimed", "stopped", "uncertain")),
+            )
+        )
+        finishing = claimed is not None and execution.requested_state != "running"
+        self.budgets._final(
+            db, actor, revision, grant, tenant, recovery, None if finishing else execution
+        )
         if (
-            execution.requested_state != "running"
-            or execution.state != "running"
+            (execution.requested_state != "running" and not finishing)
+            # A pause observes `paused` at once; its claimed writes still finish.
+            or execution.state not in (("running", "paused") if finishing else ("running",))
             or recovery.epoch != intent_row.recovery_epoch
             or recovery.epoch != command.recovery_epoch
             or execution.recovery_epoch != recovery.epoch
@@ -495,6 +519,11 @@ class ActionDispatchService:
         self._gates(db, principal, candidates)
         pending = self._pending(db, principal)
         if pending is not None:
+            # The session before the hand-out: a runtime whose session ended
+            # (disconnected or revoked) is refused, its pending command included. Read
+            # without row locks, `_pending` keeps E03's identity-first order. With
+            # nothing pending each candidate is authenticated under its own savepoint.
+            self._finish(db, self.commands._current(db, principal))
             return pending
         for attempt_id in self._candidates(db, principal, database_now_ms(db)):
             try:
@@ -513,12 +542,21 @@ class ActionDispatchService:
                 ExecutionActionCommand,
                 ExecutionActionCommand.admission_id == RuntimeCommandAdmission.id,
             )
+            .join(ExecutionAttempt, ExecutionAttempt.id == ExecutionActionCommand.attempt_id)
+            .join(Execution, Execution.id == ExecutionAttempt.execution_id)
             .where(
                 RuntimeCommandAdmission.instance_id == identity.instance_id,
                 RuntimeCommandAdmission.session_id == principal.session_id,
                 RuntimeCommandAdmission.generation == identity.generation,
                 RuntimeCommandAdmission.status == "admitted",
                 RuntimeCommandAdmission.command_expires_at_ms > database_now_ms(db),
+                # Only a command its execution can still claim (Task 10): one a pause
+                # released, a cancellation or a restore left behind is never offered.
+                ExecutionActionCommand.status == "admitted",
+                ExecutionAttempt.state == "dispatched",
+                Execution.requested_state == "running",
+                Execution.state == "running",
+                Execution.recovery_epoch == identity.recovery_epoch,
             )
             .order_by(RuntimeCommandAdmission.admitted_at_ms, RuntimeCommandAdmission.id)
             .limit(1)
@@ -624,6 +662,8 @@ class ActionDispatchService:
         self._gates(db, principal, [hint.attempt_id])
         rows = self._rows(db, principal, hint.attempt_id)
         self._held(rows, principal, self._finish(db, rows["locked"]))
+        if rows["execution"].requested_state != "running":
+            raise FleetError("forbidden")  # a write not yet started never starts now
         command = json.loads(bytes(row.command_bytes))
         from lotuspond_sdk.executable.wire import validate_runtime_command
 
@@ -723,6 +763,10 @@ class ActionDispatchService:
         command = self._held(rows, principal, now, lease.lease_revision)
         if lease.command_id != command.command_id:
             raise ExecutionError("conflict")
+        if execution.requested_state != "running":
+            # A pause or cancellation is reported by refusing renewal: the runtime
+            # finishes or stops the write and reports what it observed.
+            raise ExecutionError("forbidden")
         self.commands._status_row(db, principal, command.command_id)
         if now - command.renewed_at_ms >= ACTION_RENEW_MS:
             expires = min(now + ACTION_LEASE_MS, deadline)
