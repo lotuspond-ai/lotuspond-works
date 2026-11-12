@@ -32,6 +32,7 @@ from lotuspond_sdk.executable.package import (
     ActionDispatchStep,
     DecisionStep,
     IterationStep,
+    OutcomeVerificationStep,
     ParallelStep,
     SubworkflowStep,
 )
@@ -45,8 +46,9 @@ from .interpreters import COMPILERS
 
 MAX_PATH = 1024
 # E05 adds `#dispatch` (an action dispatch step's command attempts) and `#reconcile`
-# (its read-back attempts, Task 8).
-RECORDS = frozenset({"#select", "#items", "#input", "#dispatch", "#reconcile"})
+# (its read-back attempts, Task 8), and `#outcome` (an outcome verification step's
+# evaluated outcome, Task 9; its read attempts are the step's own record).
+RECORDS = frozenset({"#select", "#items", "#input", "#dispatch", "#reconcile", "#outcome"})
 _INDEX = re.compile(r"0|[1-9][0-9]{0,3}")
 
 
@@ -276,6 +278,7 @@ def resolve_occurrence(plan: Program, occurrence_path: str) -> StepRef:
                         selector in ("#dispatch", "#reconcile")
                         and isinstance(step, ActionDispatchStep)
                     )
+                    or (selector == "#outcome" and isinstance(step, OutcomeVerificationStep))
                 )
                 if not valid:
                     raise ProgramError("occurrence_unresolved")

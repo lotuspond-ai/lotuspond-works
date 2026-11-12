@@ -284,6 +284,36 @@ def test_intent_task_and_decision_uniqueness(engine):
             connection.execute(tasks.update().values(assignment="reviewers"))
 
 
+def test_outcome_names_exactly_one_receipt_or_observation(engine):
+    """Task 9: a receipt row, or the effect-present observation acting as one."""
+    base, rows = populated()
+    other_base, other = populated(1)
+    outcome = rows["execution_action_outcomes"]
+    observation = rows["execution_action_observations"]["id"]
+    with engine.begin() as connection:
+        load(connection, base)
+        load(connection, rows)
+        load(connection, other_base)
+        load(connection, other)
+        table = Base.metadata.tables["execution_action_outcomes"]
+        where = table.c.id == outcome["id"]
+        for values in (
+            {"observation_row_id": observation},  # both
+            {"receipt_row_id": None},  # neither
+            # another execution's observation
+            {
+                "receipt_row_id": None,
+                "observation_row_id": other["execution_action_observations"]["id"],
+            },
+        ):
+            with pytest.raises(IntegrityError), connection.begin_nested():
+                connection.execute(table.update().where(where).values(**values))
+        # Positive control: the observation alone.
+        connection.execute(
+            table.update().where(where).values(receipt_row_id=None, observation_row_id=observation)
+        )
+
+
 def test_widened_checks_are_supersets(engine):
     assert set(EXECUTION_REASONS_V15) < set(EXECUTION_REASONS)
     assert set(EXECUTION_CONTROL_CODES_V15) < set(EXECUTION_CONTROL_CODES)

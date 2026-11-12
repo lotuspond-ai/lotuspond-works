@@ -26,7 +26,12 @@ from lotuspond_sdk.activity import (
     canonical_activity_json,
     validate_activity,
 )
-from lotuspond_sdk.executable.package import AgentStep, ArtifactRef, ConnectorReadStep
+from lotuspond_sdk.executable.package import (
+    AgentStep,
+    ArtifactRef,
+    ConnectorReadStep,
+    OutcomeVerificationStep,
+)
 
 from ..fleet.management import stored_config
 from ..models import (
@@ -309,6 +314,26 @@ class ActivityRecordSource:
                 input_schema=input_schema,
                 output_schema=output_schema,
                 timeout_ms=node.retry.timeout_seconds * 1000,
+            )
+        if isinstance(node, OutcomeVerificationStep):
+            # E05 Task 9: the step's declared read operation, under the fixed
+            # verification read policy (the SDK step declares no retry policy).
+            from .action_verification import VERIFICATION_READ
+
+            declared = next(d.ref for d in ref.package.connectors if d.id == node.connector_ref)
+            document = program.catalog[declared.sha256]
+            input_schema, output_schema = _read_schemas(
+                document, _operation(document, node.read_operation)
+            )
+            return ActivityPins(
+                **common,
+                kind="connector_read",
+                dependency=declared,
+                operation=node.read_operation,
+                connection=connection_for(db, scope, revision, declared, node.read_operation),
+                input_schema=input_schema,
+                output_schema=output_schema,
+                timeout_ms=VERIFICATION_READ.timeout_seconds * 1000,
             )
         if isinstance(node, AgentStep):
             model_ref, model, agent = _model(program, ref)

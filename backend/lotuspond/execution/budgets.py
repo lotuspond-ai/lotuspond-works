@@ -452,7 +452,8 @@ class BudgetService:
         if ref.selector is not None and ref.step.kind != "action_dispatch":
             raise ExecutionError("dependency_unavailable")
         source, node = ref.package.model_dump(mode="json"), ref.step.model_dump(mode="json")
-        if node["kind"] == "connector_read":
+        if node["kind"] in ("connector_read", "outcome_verification"):
+            # E05 Task 9: a verification read is priced as its declared connector.
             ref = next(d["ref"] for d in source["connectors"] if d["id"] == node["connector_ref"])
         elif node["kind"] == "action_dispatch":
             # E05: a dispatch is priced as its intent's connector operation.

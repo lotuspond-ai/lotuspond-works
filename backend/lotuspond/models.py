@@ -2353,6 +2353,7 @@ class ExecutionActionObservation(FleetScoped, Base):
     __table_args__ = fleet_scoped(
         execution_parent("execution_action_intents", "intent_id"),
         execution_parent("execution_attempts", "attempt_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
         UniqueConstraint(*FLEET_SCOPE, "intent_id", "observation_id"),
         CheckConstraint("result IN ('effect_present','effect_absent','unknown')"),
         CheckConstraint("NOT qualified OR result = 'effect_absent'"),
@@ -2370,7 +2371,10 @@ class ExecutionActionOutcome(FleetScoped, Base):
     __tablename__ = "execution_action_outcomes"
     execution_id: Mapped[str] = mapped_column(String(36))
     intent_id: Mapped[str] = mapped_column(String(36))
-    receipt_row_id: Mapped[str] = mapped_column(String(36))
+    # The receipt it verifies, or (a write settled by read-back with no receipt row)
+    # the effect-present observation acting as receipt evidence: exactly one.
+    receipt_row_id: Mapped[str | None] = mapped_column(String(36))
+    observation_row_id: Mapped[str | None] = mapped_column(String(36))
     outcome_bytes: Mapped[bytes] = mapped_column(LargeBinary)
     outcome_sha256: Mapped[str] = mapped_column(String(64))
     state: Mapped[str] = mapped_column(String(20))
@@ -2380,7 +2384,9 @@ class ExecutionActionOutcome(FleetScoped, Base):
     __table_args__ = fleet_scoped(
         execution_parent("execution_action_intents", "intent_id"),
         execution_parent("execution_action_receipts", "receipt_row_id"),
+        execution_parent("execution_action_observations", "observation_row_id"),
         UniqueConstraint(*FLEET_SCOPE, "intent_id"),
+        CheckConstraint("(receipt_row_id IS NULL) <> (observation_row_id IS NULL)"),
         CheckConstraint("state IN ('verified','not_verified','unknown')"),
         CheckConstraint("length(rule_id) BETWEEN 1 AND 128"),
         CheckConstraint("length(rule_version) BETWEEN 1 AND 128"),

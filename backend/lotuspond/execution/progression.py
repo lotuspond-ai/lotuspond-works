@@ -39,6 +39,7 @@ from lotuspond_sdk.executable.package import (
     ExternalWaitStep,
     HumanTaskStep,
     IterationStep,
+    OutcomeVerificationStep,
     ParallelStep,
     SubworkflowStep,
     TimerStep,
@@ -139,6 +140,7 @@ FAILURES = frozenset(
         "review_expired",
         "approval_expired",
         "not_applied",
+        "outcome_not_verified",
         "outcome_unknown",
     }
 )
@@ -370,6 +372,17 @@ class RequireResolution:
 
 
 @dataclass(frozen=True)
+class RecordOutcome:
+    """E05 (v2): record what a verification read settled to (Task 9)."""
+
+    occurrence_path: str  # `<verification step>#outcome`
+    node_id: str
+    attempt_id: str  # the step's last read attempt
+    receipt_id: str  # the dispatch value's `action_receipt` handle ID
+    state: str  # verified | not_verified | unknown, from the step's rules
+
+
+@dataclass(frozen=True)
 class CancelUndispatched:
     prefix: str
 
@@ -400,6 +413,7 @@ Action = (
     | RecordReadback
     | SettleWrite
     | RequireResolution
+    | RecordOutcome
 )
 
 
@@ -475,6 +489,8 @@ def output_export(program, package, step, record=None):
         return HandleExport(kind="handle", handle_kind="action_intent")
     if isinstance(step, ActionDispatchStep):
         return HandleExport(kind="handle", handle_kind="action_receipt")
+    if isinstance(step, OutcomeVerificationStep):
+        return HandleExport(kind="handle", handle_kind="verification_evidence")
     raise ExpressionError("type_mismatch")
 
 
@@ -857,6 +873,8 @@ class _RegionV2(_Region):
     def step(self, step):
         if isinstance(step, ActionDispatchStep):
             return self.dispatch(step)
+        if isinstance(step, OutcomeVerificationStep):
+            return self.verify(step)
         if isinstance(step, HumanTaskStep):
             path = self.path(step.id)
             record = self.state.occurrences.get(path)
@@ -1059,6 +1077,82 @@ class _RegionV2(_Region):
             )
         )
 
+    def activity_input(self, step):
+        if isinstance(step, _VerificationRead):
+            operation, document = step.operation(self)
+            return plain(
+                {
+                    "target": typed_export(
+                        plain(self.evaluate(step.step.target)),
+                        data_export(operation.target_schema, document.schemas),
+                    ),
+                    "input": typed_export(
+                        plain(self.evaluate(step.step.input)),
+                        data_export(operation.input_schema, document.schemas),
+                    ),
+                }
+            )
+        return super().activity_input(step)
+
+    def verify(self, step):
+        """Read the target back, apply the step's rules, then record the outcome.
+
+        The read is an E04 connector-read attempt on the step's own record, under
+        `VERIFICATION_READ`. Its typed result settles the rules here, where their
+        expected values can read the package's input and earlier steps; the
+        `#outcome` record then holds the evidence handle, or the failure.
+        """
+        from .action_verification import OUTCOME_SUFFIX, UNKNOWN, outcome_state
+
+        path = self.path(step.id)
+        outcome_path = self.path(step.id + OUTCOME_SUFFIX)
+        outcome = self.state.occurrences.get(outcome_path)
+        final = outcome.final if outcome else None
+        if final is not None and final.state == "succeeded":
+            return "done", final.value
+        if final is not None:
+            return "failed", final.failure or "cancelled"
+        try:
+            receipt = self.evaluate(step.receipt)
+        except ExpressionError as error:
+            return "pending", Derivation(
+                actions=(RecordPure(outcome_path, step.id, failure=error.code),)
+            )
+        if (
+            type(receipt) is not dict
+            or receipt.get("handle_kind") != "action_receipt"
+            or type(receipt.get("id")) is not str
+        ):
+            return "pending", Derivation(
+                actions=(RecordPure(outcome_path, step.id, failure="type_mismatch"),)
+            )
+        read = _VerificationRead(step)
+        record = self.state.occurrences.get(path)
+        status, detail = self.activity(read, path, record)
+        if status == "pending":
+            return status, detail
+        last = record.attempts[-1]
+        if last.state == "cancelled" and last.failure != INTERRUPTED:
+            # A cancelled read verifies nothing and records nothing. Interruptions
+            # that exhausted the read's attempts fall through: an unknown outcome.
+            return "pending", Derivation(
+                actions=(RecordPure(outcome_path, step.id, failure="cancelled"),)
+            )
+        state = UNKNOWN
+        if status == "done":
+            operation, document = read.operation(self)
+            try:
+                readback = typed_export(
+                    plain(detail), data_export(operation.output_schema, document.schemas)
+                )
+            except ExpressionError:
+                readback = MISSING
+            if readback is not MISSING:
+                state = outcome_state(step.rules, plain(readback), self.env(), self.package.schemas)
+        return "pending", Derivation(
+            actions=(RecordOutcome(outcome_path, step.id, last.id, receipt["id"], state),)
+        )
+
     def task(self, step, path, record):
         """A review or (v2) form task: open it, then consume its decision or form."""
         if record is None or record.wait is None:
@@ -1125,6 +1219,22 @@ class _RegionV2(_Region):
 
 def _is_activity(step):
     return isinstance(step, (ConnectorReadStep, AgentStep))
+
+
+class _VerificationRead:
+    """An outcome verification step seen as its read activity (E05 Task 9)."""
+
+    def __init__(self, step):
+        from .action_verification import VERIFICATION_READ
+
+        self.step, self.id, self.retry = step, step.id, VERIFICATION_READ
+
+    def operation(self, region):
+        document = region.program.document(region.package, "connectors", self.step.connector_ref)
+        operation = next(
+            op for op in document.definition.operations if op.id == self.step.read_operation
+        )
+        return operation, document
 
 
 def derive(program: Program, state: ProgressionState, now_ms: int, region=None) -> Derivation:
@@ -1714,6 +1824,9 @@ class InterpreterV1:
                     paths = {path}
                     if isinstance(step, DecisionStep):
                         paths.add(path + "#select")
+                    if isinstance(step, OutcomeVerificationStep):
+                        path += "#outcome"  # its value; the step's own record holds reads
+                        paths = {path}
                     records = self._occurrences(db, execution, paths, values_for=lambda *_: True)
                     record = records.get(path)
                     if record is None or record.final is None or record.final.state != "succeeded":
@@ -1751,6 +1864,8 @@ class InterpreterV1:
             elif isinstance(step, ActionDispatchStep):
                 add(path + "#dispatch")
                 add(path + "#reconcile")
+            elif isinstance(step, OutcomeVerificationStep):
+                add(path + "#outcome")
             elif isinstance(step, ParallelStep):
                 groups[path] = [path + ":" + b.id for b in step.branches]
                 for member in groups[path]:
@@ -2567,7 +2682,8 @@ class InterpreterV1:
         else:
             program = load_program(db, scope, execution)
             state = self.load_progression(db, execution, "", program=program)
-            derivation = derive(program, state, database_now_ms(db))
+            # The execution's own interpreter rules: a v2 plan never derives as v1.
+            derivation = derive(program, state, database_now_ms(db), self.region_for(execution))
         terminal = next((a for a in derivation.actions if isinstance(a, (Complete, Fail))), None)
         if terminal is not None:
             for action in derivation.actions:
@@ -2663,7 +2779,49 @@ class InterpreterV2(InterpreterV1):
             return self._settle_write(db, execution, epoch, action)
         if isinstance(action, RequireResolution):
             return self._require_resolution(db, execution, epoch, action)
+        if isinstance(action, RecordOutcome):
+            return self._record_outcome(db, execution, epoch, action)
         return super()._apply(db, execution, epoch, action)
+
+    def _record_outcome(self, db, execution, epoch, action):
+        """Task 9: one outcome row and event, then the `#outcome` record that closes
+        the verification step with its evidence handle or failure."""
+        from .action_verification import VerificationService
+
+        if execution.interpreter_id != INTERPRETER_V2:
+            raise ProgramError("integrity")
+        instance = self._instance(db, execution, action.occurrence_path, action.node_id)
+        attempts = self._attempts(db, execution, instance)
+        if attempts and attempts[-1].state in ("succeeded", "failed", "cancelled"):
+            return False  # a repeated transition is a no-op
+        row, failure = VerificationService(
+            artifacts=self.artifacts,
+            artifact_policy=self.policy,
+            installation_id=self.installation_id,
+        ).record(
+            db,
+            execution,
+            epoch,
+            path=action.occurrence_path,
+            node_id=action.node_id,
+            attempt_id=action.attempt_id,
+            receipt_id=action.receipt_id,
+            state=action.state,
+            keys=self._keys(),
+        )
+        value = None if row is None else {"handle_kind": "verification_evidence", "id": row.id}
+        closed = RecordPure(action.occurrence_path, action.node_id, value=value, failure=failure)
+        return self._record(db, execution, epoch, closed)
+
+    def _terminal(self, db, execution, program, epoch, action):
+        """v2: success only when every dispatched action's outcome is verified."""
+        if isinstance(action, Complete) and execution.interpreter_id == INTERPRETER_V2:
+            from .action_verification import completion_allowed, dispatched_outcomes
+
+            refused = completion_allowed(dispatched_outcomes(db, execution))
+            if refused is not None:
+                action = Fail(refused)
+        return super()._terminal(db, execution, program, epoch, action)
 
     def _settle_write(self, db, execution, epoch, action):
         """Close the uncertain write: succeeded with the receipt handle, or failed.
