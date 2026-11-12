@@ -11,9 +11,12 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from .config import Settings
 from .database import engine_for, sessions_for
+from .execution.action_routes import router as execution_action_router
+from .execution.action_runtime_routes import router as execution_action_runtime_router
 from .execution.boundary import ExecutionRequestBoundary, ExecutionServices
 from .execution.routes import router as execution_router
 from .execution.runtime_routes import router as execution_runtime_router
+from .execution.task_routes import router as execution_task_router
 from .fleet.authority import FleetDependencies, UnavailableRecoveryAuthority
 from .fleet.catalog import InstalledCatalog
 from .fleet.management_routes import FleetRequestBoundary
@@ -304,6 +307,13 @@ def create_app(
             "product": "Lotuspond",
             "items": [
                 {
+                    "version": "0.4.0",
+                    "id": "human-task-action-apis",
+                    "date": "2026-11-12",
+                    "title": "Human task and action APIs",
+                    "description": "The opt-in fleet API adds human task routes (list, read, proposal, claim, release, decision and submission), action routes for a production execution (list, read and an owner's or admin's resolution) and runtime action routes (poll, records, claim, renew, receipts, stops and values). Claims, decisions, submissions and resolutions need a person's session; API keys are refused. Proposal values are served only by the proposal route, never cached, and their reads are audited without the values. A wait is listed only once it is retained, and a signal to one not yet retained is refused with 409 conflict. Production installations do not compose the action services yet, so these routes answer 503 there.",
+                },
+                {
                     "version": "0.3.0",
                     "id": "core-loop-focus",
                     "date": "2026-11-11",
@@ -579,7 +589,10 @@ def create_app(
     app.include_router(fleet_management_router)
     app.include_router(fleet_runtime_router)
     app.include_router(execution_router)
+    app.include_router(execution_task_router)
+    app.include_router(execution_action_router)
     app.include_router(execution_runtime_router)
+    app.include_router(execution_action_runtime_router)
     app.include_router(workflow_router)
     app.include_router(traces_router)
 

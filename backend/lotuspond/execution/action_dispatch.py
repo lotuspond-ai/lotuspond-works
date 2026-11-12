@@ -525,7 +525,9 @@ class ActionDispatchService:
             # nothing pending each candidate is authenticated under its own savepoint.
             self._finish(db, self.commands._current(db, principal))
             return pending
-        for attempt_id in self._candidates(db, principal, database_now_ms(db)):
+        # Only the candidates whose gates were taken: one reserved since then waits
+        # for the next poll.
+        for attempt_id in candidates:
             try:
                 with db.begin_nested():
                     return self._dispatch(db, principal, attempt_id)

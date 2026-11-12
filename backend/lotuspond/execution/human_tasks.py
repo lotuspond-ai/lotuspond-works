@@ -45,7 +45,7 @@ from .action_contracts import (
 )
 from .actions import load_intent, record_sdk_event
 from .artifacts import ArtifactPolicy
-from .authorization import reauthorize, record, scoped
+from .authorization import mark_replay, reauthorize, record, scoped
 from .contracts import SignalRequest
 from .control import retained_clause
 from .deployments import execution_gates
@@ -229,13 +229,17 @@ class HumanTaskService:
         return values
 
     def proposal(self, db, actor, task_id) -> ProposalView:
-        self._gates(db, actor, task_id)
-        actor = reauthorize(db, actor, "review")
-        execution, task, intent = self._locked(db, actor, task_id, actionable=False)
-        if task.kind != "review" or intent is None:
-            raise ExecutionError("not_found")
-        if not eligible(task, actor.role):
+        """Both values, to a person who may read the execution (Task 11: viewers read
+        proposals too) and can currently read both proposal artifacts. A read: no row
+        locks, as `get`; never to a key, which holds no person's review."""
+        actor = reauthorize(db, actor, "read")
+        if actor.api_key_id is not None or actor.user_id is None:
             raise ExecutionError("forbidden")
+        task = record(db, ExecutionHumanTask, actor.scope, task_id)
+        if not _retained(db, task) or task.kind != "review" or task.intent_id is None:
+            raise ExecutionError("not_found")
+        execution = record(db, Execution, actor.scope, task.execution_id)
+        intent = record(db, ExecutionActionIntent, actor.scope, task.intent_id)
         verified = load_intent(db, actor.scope, intent.id, artifacts=self.artifacts)
         target, value = self._values(db, actor, intent)
         b = verified.intent.binding
@@ -293,6 +297,7 @@ class HumanTaskService:
         now = database_now_ms(db)
         actor = reauthorize(db, actor, "review")
         if task.claim_user_id is None:
+            mark_replay(db)  # nothing held: nothing changes
             return task_view(task, actor, now)
         if task.claim_user_id != actor.user_id and actor.role not in {"owner", "admin"}:
             raise ExecutionError("forbidden")
@@ -331,6 +336,7 @@ class HumanTaskService:
                 and existing.actor_user_id == actor.user_id
                 and intent.intent_sha256 == request.intent_sha256
             ):
+                mark_replay(db)
                 return task_view(task, actor, now)
             raise ExecutionError("conflict")
         # 1. current role after every lock wait; 2. live claim and eligibility.

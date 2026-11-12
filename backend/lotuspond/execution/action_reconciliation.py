@@ -71,7 +71,15 @@ from ..models import (
 from .action_contracts import ActionView, ResolutionRequest
 from .action_rules import ABSENT, PRESENT, UNKNOWN, settle
 from .artifacts import ArtifactPolicy
-from .authorization import authorize_execution, lock, reauthorize, record, scoped, share
+from .authorization import (
+    authorize_execution,
+    lock,
+    mark_replay,
+    reauthorize,
+    record,
+    scoped,
+    share,
+)
 from .budgets import (
     DISPATCH_SUFFIX,
     READBACK_STRIDE,
@@ -748,6 +756,7 @@ class ResolutionService:
                 or cited != wanted
             ):
                 raise ExecutionError("conflict")
+            mark_replay(db)
             return action_view(db, scope, intent)
         if execution.state in TERMINAL:
             raise ExecutionError("conflict")
