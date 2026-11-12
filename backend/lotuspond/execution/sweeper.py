@@ -22,7 +22,10 @@ One pass, in this order:
    progression follows the step's declared expiry path (an execution fenced for
    reconciliation keeps its waits until it resumes);
 7. an overdue execution with nothing due (or due only later than any engine
-   back-off) is marked due, so progression stops its work at the next boundary.
+   back-off) is marked due, so progression stops its work at the next boundary;
+8. (E05 Task 8) read-backs of uncertain writes are reserved against the slot each
+   write retains (`action_reconciliation.reserve_readback`), so they never wait
+   for new capacity, not even on a full installation.
 
 No item changes a capacity counter except through those Task 9 services, in Task
 5's lock order; wait quota is returned by the orchestrator's capacity step. Each
@@ -55,6 +58,7 @@ from ..models import (
     RuntimeCommandAdmission,
     Workspace,
 )
+from .action_reconciliation import readback_candidates, reserve_readback
 from .authorization import record, scoped
 from .budgets import installation_active
 from .contracts import Contract
@@ -290,12 +294,17 @@ def _schedulable(db) -> bool:
 class ExecutionSweeper:
     """Task 11's sweeper; explicitly constructed with Task 9's lease service and the fence."""
 
-    def __init__(self, *, leases, recovery, scheduler=None):
+    def __init__(self, *, leases, recovery, scheduler=None, readbacks=None):
         if leases is None or recovery is None:
             raise ValueError("Lease service and recovery fence are required")
         self.leases, self.recovery = leases, recovery
         # Task 5's scheduler, run after each pass's items in batches (Task 13).
         self.scheduler = scheduler
+        # E05 Task 8: (budgets, demand provider) for read-back reservations; the
+        # scheduler's own when it has one.
+        if readbacks is None and scheduler is not None:
+            readbacks = (scheduler.budgets, scheduler.demand_provider)
+        self.readbacks = readbacks
         self.test_only = bool(getattr(recovery, "test_only", False))
         # The last pass's queue depths, for the worker's metrics; None until read.
         self.depths = None
@@ -416,6 +425,9 @@ class ExecutionSweeper:
                         .limit(limit)
                     )
                 ),
+                "reserved_readbacks": []
+                if self.readbacks is None
+                else list(db.scalars(readback_candidates(limit))),
                 "released_claims": list(
                     db.scalars(
                         select(ExecutionHumanTask.id)
@@ -559,6 +571,9 @@ class ExecutionSweeper:
             from .action_dispatch import expire_command
 
             changed = expire_command(db, identifier, epoch=epoch, leases=leases)
+        elif kind == "reserved_readbacks":
+            budgets, demand = self.readbacks
+            changed = reserve_readback(db, budgets, demand, identifier)
         elif kind in {"escalated_tasks", "released_claims"}:
             from .human_tasks import escalate_task, expire_claim
 

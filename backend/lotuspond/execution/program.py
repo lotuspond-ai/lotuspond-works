@@ -44,8 +44,9 @@ from .authorization import record, scoped
 from .interpreters import COMPILERS
 
 MAX_PATH = 1024
-# E05 adds `#dispatch`: an action dispatch step's command attempts.
-RECORDS = frozenset({"#select", "#items", "#input", "#dispatch"})
+# E05 adds `#dispatch` (an action dispatch step's command attempts) and `#reconcile`
+# (its read-back attempts, Task 8).
+RECORDS = frozenset({"#select", "#items", "#input", "#dispatch", "#reconcile"})
 _INDEX = re.compile(r"0|[1-9][0-9]{0,3}")
 
 
@@ -271,7 +272,10 @@ def resolve_occurrence(plan: Program, occurrence_path: str) -> StepRef:
                     (selector == "#select" and isinstance(step, DecisionStep))
                     or (selector == "#items" and isinstance(step, IterationStep))
                     or (selector == "#input" and isinstance(step, SubworkflowStep))
-                    or (selector == "#dispatch" and isinstance(step, ActionDispatchStep))
+                    or (
+                        selector in ("#dispatch", "#reconcile")
+                        and isinstance(step, ActionDispatchStep)
+                    )
                 )
                 if not valid:
                     raise ProgramError("occurrence_unresolved")

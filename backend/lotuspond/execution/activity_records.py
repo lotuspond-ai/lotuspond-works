@@ -243,7 +243,7 @@ class ActivityRecordSource:
             ref = resolve_occurrence(program, step.occurrence_path)
         except ProgramError:
             raise ExecutionError("dependency_unavailable") from None
-        if ref.selector is not None or ref.step_id != step.node_id:
+        if ref.step_id != step.node_id or ref.selector not in (None, "#reconcile"):
             raise ExecutionError("dependency_unavailable")
         common = dict(
             scope=scope,
@@ -262,6 +262,8 @@ class ActivityRecordSource:
             ),
         )
         node = ref.step
+        if ref.selector == "#reconcile":
+            return self._readback(db, scope, revision, program, ref, attempt, common)
         if attempt.parent_attempt_id is not None:
             if not isinstance(node, AgentStep):
                 raise ExecutionError("dependency_unavailable")
@@ -323,6 +325,31 @@ class ActivityRecordSource:
                 declarations=declarations(program, ref),
             )
         raise ExecutionError("unsupported_step")
+
+    @staticmethod
+    def _readback(db, scope, revision, program, ref, attempt, common):
+        """E05 Task 8: a `#reconcile` attempt is the write's reconciliation read, with
+        its connector pin and connection, and the intent's exact target and input as
+        the attempt input (stored by `ReadbackService.schedule`)."""
+        from .action_reconciliation import write_spec
+
+        if attempt.parent_attempt_id is not None:
+            raise ExecutionError("dependency_unavailable")
+        try:
+            spec = write_spec(program, ref)  # the `#reconcile` record's dispatch step
+        except ProgramError:
+            raise ExecutionError("dependency_unavailable") from None
+        input_schema, output_schema = _read_schemas(spec.document, spec.read)
+        return ActivityPins(
+            **common,
+            kind="connector_read",
+            dependency=spec.connector,
+            operation=spec.read.id,
+            connection=connection_for(db, scope, revision, spec.connector, spec.read.id),
+            input_schema=input_schema,
+            output_schema=output_schema,
+            timeout_ms=spec.dispatch.retry.timeout_seconds * 1000,
+        )
 
     def deadline(self, db, execution, pins, issued_at_ms) -> int:
         """The attempt's absolute deadline; a child never outlives its parent."""

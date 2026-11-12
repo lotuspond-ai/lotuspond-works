@@ -149,23 +149,30 @@ def test_receipts_need_a_registered_response_and_one_digest(actions):
 
 
 def test_a_late_receipt_after_a_lapse_changes_nothing(actions):
+    """Task 8: a late receipt is historical evidence only. It changes no lease, attempt
+    or execution state; it may settle known usage and confirm the compute stop."""
+    from lotuspond.models import ExecutionActionCommand, ExecutionActionReceipt
+
     h = actions
     execution_id = h.reviewed("late", active_ms=4000)
     lease = h.claim(h.poll())
     until(h, lease.expires_at_ms)
     assert h.sweep().lapsed_action_leases == 1
-    assert code_of(report, h, receipt_for(h, execution_id, lease)) == "conflict"
+    report(h, receipt_for(h, execution_id, lease))
     assert code_of(renew, h, lease) == "conflict"
     with Session(h.engine) as db:
         assert db.get(ExecutionAttempt, lease.attempt_id).state == "uncertain"
-        # The slot and liability stay: the compute stop is not confirmed.
+        command = db.scalar(select(ExecutionActionCommand))
+        assert (command.status, command.lease_revision) == ("uncertain", lease.lease_revision)
+        assert db.scalar(select(ExecutionActionReceipt)).source == "historical"
+        # Its known usage settled the write and confirmed its stop.
         reservation = db.scalar(
             select(ExecutionUsageReservation).where(
                 ExecutionUsageReservation.attempt_id == lease.attempt_id
             )
         )
-        assert reservation.compute_stopped_at_ms is None
-        # No owner fence: the execution keeps running.
+        assert reservation.compute_stopped_at_ms is not None
+        # No owner fence: the execution keeps running, and read-back decides.
         assert db.get(Execution, execution_id).state == "running"
 
 

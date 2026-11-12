@@ -791,7 +791,8 @@ class ActionDispatchService:
             if existing.receipt_sha256 != wire_digest(receipt):
                 raise ExecutionError("conflict")
             return  # an equal repeated receipt changes nothing
-        command = self._held(rows, principal, now, report.lease_revision)
+        live = self._live(rows, principal, now, report.lease_revision)
+        command = rows["command"] if live else self._late(db, principal, rows, now, report)
         if (
             receipt.intent_sha256 != intent.intent_sha256
             or receipt.action_id != intent.action_id
@@ -807,6 +808,8 @@ class ActionDispatchService:
             )
             if registered is None:
                 raise ExecutionError("forbidden")
+        if not live:
+            return self._historical(db, rows, receipt, report, now)
         row = ExecutionActionReceipt(
             **scope.model_dump(),
             id=new_id(),
@@ -857,6 +860,101 @@ class ActionDispatchService:
             self._event(db, execution, epoch, "attempt_succeeded", attempt.id)
         mark_runnable(db, execution, now)
 
+    # ------------------------------------------------------------ late reports
+
+    @staticmethod
+    def _live(rows, principal, now, lease_revision) -> bool:
+        """Whether this session holds the command's live lease at this revision."""
+        command = rows["command"]
+        return not (
+            command is None
+            or command.status != "claimed"
+            or command.lease_token_digest != _token(command.id, principal.session_id)
+            or now >= command.lease_expires_at_ms
+            or lease_revision > command.lease_revision
+        )
+
+    def _late(self, db, principal, rows, now, report):
+        """A report without a live lease: historical evidence, or refused (Task 8).
+
+        Only the runtime instance and generation that claimed the command may send it
+        (a restart's new session included), at a revision it was granted, and only
+        once its lease is over. A lease past its expiry that the sweeper has not
+        reached lapses here first, exactly as the sweeper would lapse it. It never
+        extends a lease or issues work.
+        """
+        command = rows["command"]
+        identity = principal.identity
+        admission = (
+            None if command is None else db.get(RuntimeCommandAdmission, command.admission_id)
+        )
+        if (
+            command is None
+            or admission is None
+            or command.lease_revision is None
+            or report.lease_revision > command.lease_revision
+            or admission.instance_id != identity.instance_id
+            or admission.generation != identity.generation
+        ):
+            raise ExecutionError("conflict")
+        if command.status == "claimed":
+            if now < command.lease_expires_at_ms:
+                raise ExecutionError("conflict")  # another session's live lease
+            _lapse(
+                db,
+                rows,
+                admission,
+                now,
+                lambda execution, code, attempt_id: self._event(
+                    db, execution, identity.recovery_epoch, code, attempt_id
+                ),
+            )
+        elif command.status not in ("uncertain", "stopped"):
+            raise ExecutionError("conflict")
+        return command
+
+    def _historical(self, db, rows, receipt, report, now):
+        """Record a late receipt as evidence: it may settle known usage and confirm the
+        write's compute stop, and supports a resolution; nothing else changes."""
+        from .action_reconciliation import register_evidence
+
+        execution, attempt, intent = rows["execution"], rows["attempt"], rows["intent"]
+        scope = _scope(execution)
+        response = report.response
+        row = ExecutionActionReceipt(
+            **scope.model_dump(),
+            id=new_id(),
+            execution_id=execution.id,
+            attempt_id=attempt.id,
+            intent_id=intent.id,
+            receipt_id=receipt.receipt_id,
+            receipt_bytes=canonical_wire_json(receipt),
+            receipt_sha256=wire_digest(receipt),
+            status=receipt.status,
+            response_artifact_id=None if response is None else response.id,
+            response_artifact_version=None if response is None else response.version,
+            response_sha256=None if response is None else response.sha256,
+            source="historical",
+        )
+        db.add(row)
+        db.flush()
+        handle = self.artifacts._put_internal(
+            db,
+            scope,
+            canonical_value({"handle_kind": "action_receipt", "id": row.id}),
+            self.policy,
+        )
+        register_evidence(db, scope, execution.id, intent.id, handle)
+        if response is not None:
+            register_evidence(db, scope, execution.id, intent.id, response)
+        self._confirm_late(db, rows, "receipt:" + row.id, report.usage)
+        mark_runnable(db, execution, now)
+
+    def _confirm_late(self, db, rows, key, usage):
+        reservation = rows["reservation"]
+        if reservation is not None and reservation.compute_stopped_at_ms is None:
+            self._stop_compute(db, rows, key, usage)
+
     def _uncertain(self, db, principal, rows, command):
         """The write may have happened: read back before anything else (Task 8)."""
         execution, attempt, intent = rows["execution"], rows["attempt"], rows["intent"]
@@ -876,13 +974,19 @@ class ActionDispatchService:
         rows = self._rows(db, principal, stop.attempt_id)
         execution = rows["execution"]
         now = self._finish(db, rows["locked"])
-        command = self._held(rows, principal, now, stop.lease_revision)
+        live = self._live(rows, principal, now, stop.lease_revision)
+        command = rows["command"] if live else self._late(db, principal, rows, now, stop)
         usage = stop.usage
         if stop.code == "not_started":
             # Nothing ran, so zero is known; a read-back still precedes any resend.
             usage = UsageObservation(
                 input_tokens=0, output_tokens=0, cost_microusd=0, completed_at_ms=now
             )
+        if not live:
+            # A journal's late stop: it confirms the stop, and changes nothing else.
+            self._confirm_late(db, rows, "stop:" + command.id, usage)
+            mark_runnable(db, execution, now)
+            return
         self._stop_compute(db, rows, "stop:" + command.id, usage)
         self._uncertain(db, principal, rows, command)
         mark_runnable(db, execution, now)
@@ -926,22 +1030,27 @@ def lapse(db, command_row_id, *, epoch, event):
     rows = _swept(db, command_row_id)
     if rows is None:
         return False
-    command, attempt, intent = rows["command"], rows["attempt"], rows["intent"]
-    execution = rows["execution"]
+    command = rows["command"]
     now = database_now_ms(db)
     if command.status != "claimed" or command.lease_expires_at_ms > now:
         return False
+    _lapse(db, rows, db.get(RuntimeCommandAdmission, command.admission_id), now, event)
+    return True
+
+
+def _lapse(db, rows, admission, now, event):
+    """The lapse transition itself, under the caller's locks (sweeper or late report)."""
+    command, attempt, intent = rows["command"], rows["attempt"], rows["intent"]
+    execution = rows["execution"]
     command.status = "uncertain"
     attempt.state = "uncertain"
     intent.effect_state = "unknown"
     execution.reason = "action_uncertain"
-    admission = db.get(RuntimeCommandAdmission, command.admission_id)
     if admission is not None and admission.status == "claimed":
         admission.status = "uncertain"  # E03's own record of the lapse
     db.flush()
     event(execution, "attempt_uncertain", attempt.id)
     mark_runnable(db, execution, now)
-    return True
 
 
 def expire_command(db, command_row_id, *, epoch, leases):

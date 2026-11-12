@@ -144,6 +144,43 @@ def _admission_room(capacity, limits) -> None:
         raise ExecutionError("capacity_unavailable")
 
 
+READBACK_SUFFIX, DISPATCH_SUFFIX = "#reconcile", "#dispatch"
+# Read-back n (1..99) of an action's command attempt k has ordinal 100k + n on the
+# dispatch step's `#reconcile` record (E05 Task 8).
+READBACK_STRIDE = 100
+
+
+def _readback_parent(db, scope, step, attempt):
+    """The uncertain write whose retained slot a read-back shares (E05 Task 8).
+
+    A read-back is a root attempt on the dispatch step's `#reconcile` record; the
+    write it settles is the `#dispatch` record's attempt its ordinal names, and only
+    while that write is `uncertain`. Anything else shares nothing.
+    """
+    path = step.occurrence_path
+    if not path.endswith(READBACK_SUFFIX):
+        return None
+    sibling = db.scalar(
+        scoped(ExecutionStepInstance, scope).where(
+            ExecutionStepInstance.execution_id == step.execution_id,
+            ExecutionStepInstance.occurrence_path
+            == path[: -len(READBACK_SUFFIX)] + DISPATCH_SUFFIX,
+        )
+    )
+    if sibling is None or sibling.node_id != step.node_id:
+        return None
+    return db.scalar(
+        select(ExecutionAttempt.id).where(
+            *(getattr(ExecutionAttempt, k) == v for k, v in scope.model_dump().items()),
+            ExecutionAttempt.execution_id == step.execution_id,
+            ExecutionAttempt.step_instance_id == sibling.id,
+            ExecutionAttempt.parent_attempt_id.is_(None),
+            ExecutionAttempt.ordinal == attempt.ordinal // READBACK_STRIDE,
+            ExecutionAttempt.state == "uncertain",
+        )
+    )
+
+
 class BudgetService:
     def __init__(
         self,
@@ -407,10 +444,12 @@ class BudgetService:
             ref = resolve_occurrence(program, step.occurrence_path)
         except ProgramError:
             raise ExecutionError("dependency_unavailable") from None
-        # An action's command attempts are the dispatch step's `#dispatch` record (E05).
-        if ref.selector not in (None, "#dispatch") or ref.step_id != step.node_id:
+        # An action's command attempts are the dispatch step's `#dispatch` record and
+        # its read-backs the `#reconcile` record (E05), both priced as the intent's
+        # connector.
+        if ref.selector not in (None, "#dispatch", "#reconcile") or ref.step_id != step.node_id:
             raise ExecutionError("dependency_unavailable")
-        if ref.selector == "#dispatch" and ref.step.kind != "action_dispatch":
+        if ref.selector is not None and ref.step.kind != "action_dispatch":
             raise ExecutionError("dependency_unavailable")
         source, node = ref.package.model_dump(mode="json"), ref.step.model_dump(mode="json")
         if node["kind"] == "connector_read":
@@ -450,7 +489,9 @@ class BudgetService:
         `shared` (Task 9) admits an agent's child attempt into its parent's running
         compute: the shared budget still applies, but no compute slot is taken. A
         `capacity.shared:` request row records this, so stopping that child returns
-        no slot. Without it a child takes its own slot like any attempt.
+        no slot. Without it a child takes its own slot like any attempt. An action's
+        read-back (E05) shares the slot its uncertain write retains in the same way
+        (`_readback_parent`), so it never waits for new capacity.
 
         A slot meets the installation limit last, under the cursor (`_leaf`), after
         every lookup, lock and write. A visibly full installation refuses before any
@@ -506,13 +547,16 @@ class BudgetService:
         if attempt.state != "reserved":
             raise ExecutionError("conflict")
         if shared:
+            parent_id = attempt.parent_attempt_id or _readback_parent(
+                db, actor.scope, step, attempt
+            )
             parent = (
                 db.scalar(
                     scoped(ExecutionUsageReservation, actor.scope).where(
-                        ExecutionUsageReservation.attempt_id == attempt.parent_attempt_id
+                        ExecutionUsageReservation.attempt_id == parent_id
                     )
                 )
-                if attempt.parent_attempt_id is not None
+                if parent_id is not None
                 else None
             )
             if parent is None or parent.compute_stopped_at_ms is not None:

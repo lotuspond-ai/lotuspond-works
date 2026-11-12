@@ -72,6 +72,7 @@ from ..models import (
     Workspace,
 )
 from ..security import Principal
+from .action_contracts import FAILURE_CODES as ACTION_FAILURES
 from .action_contracts import INTERPRETER_V2
 from .artifacts import ArtifactPolicy
 from .authorization import authorize_execution, lock, record, scoped, share
@@ -137,6 +138,8 @@ FAILURES = frozenset(
         "approval_denied",
         "review_expired",
         "approval_expired",
+        "not_applied",
+        "outcome_unknown",
     }
 )
 
@@ -197,6 +200,33 @@ class TaskRecord:
 
 
 @dataclass(frozen=True)
+class ObservationRecord:
+    """E05 (v2): one read-back observation or resolution of an action."""
+
+    id: str
+    attempt_id: str | None
+    result: str
+    qualified: bool
+    source: str
+    kind: str | None = None  # a resolution's kind
+
+
+@dataclass(frozen=True)
+class ActionRecord:
+    """E05 (v2): what settles a dispatch step's uncertain writes (Task 8)."""
+
+    intent_id: str
+    effect: str
+    target_key: bool
+    observations: tuple = ()
+    # Command attempts whose compute stop is confirmed, and each one's receipt row.
+    stopped: frozenset = frozenset()
+    receipts: dict = field(default_factory=dict)
+    # When each finished read-back settled (its reservation's completion time).
+    finished: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class OccurrenceRecord:
     path: str
     attempts: tuple = ()
@@ -221,6 +251,8 @@ class ProgressionState:
     index: int | None = None
     outer: dict = field(default_factory=dict)
     occurrences: dict = field(default_factory=dict)
+    # E05 (v2): each dispatch step occurrence's `ActionRecord`, by its path.
+    actions: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- pure actions
@@ -294,6 +326,47 @@ class CreateDispatch:
     node_id: str
     intent_id: str
     decision_id: str | None
+    # A later ordinal resends after a qualified absence (Task 8), never otherwise.
+    ordinal: int = 1
+
+
+@dataclass(frozen=True)
+class CreateReadback:
+    """E05 (v2): read back an uncertain write before anything else (Task 8)."""
+
+    occurrence_path: str  # `<dispatch step>#reconcile`
+    node_id: str
+    intent_id: str
+    ordinal: int  # 100k + n: read-back n of command attempt k
+    reason: str
+
+
+@dataclass(frozen=True)
+class RecordReadback:
+    """E05 (v2): apply the write's rules to a finished read-back (Task 8)."""
+
+    occurrence_path: str  # `<dispatch step>#reconcile`
+    node_id: str
+    attempt_id: str
+
+
+@dataclass(frozen=True)
+class SettleWrite:
+    """E05 (v2): close an uncertain write as read-back or an owner settled it (Task 8)."""
+
+    occurrence_path: str  # `<dispatch step>#dispatch`
+    node_id: str
+    attempt_id: str
+    value: object = MISSING
+    failure: str | None = None
+
+
+@dataclass(frozen=True)
+class RequireResolution:
+    """E05 (v2): an uncertain write only an owner or admin can settle (Task 8)."""
+
+    occurrence_path: str  # the dispatch step
+    node_id: str
 
 
 @dataclass(frozen=True)
@@ -323,6 +396,10 @@ Action = (
     | OpenTask
     | ConsumeDecision
     | CreateDispatch
+    | CreateReadback
+    | RecordReadback
+    | SettleWrite
+    | RequireResolution
 )
 
 
@@ -847,12 +924,140 @@ class _RegionV2(_Region):
         last = attempts[-1]
         if last.state == "succeeded":
             return "pending", Derivation(actions=(RecordPure(path, step.id, value=last.value),))
+        if last.state == "failed" and last.failure == "not_applied":
+            resend = self.resend(step, path, last)
+            if resend is not None:
+                return "pending", resend
         if last.state in ("failed", "cancelled"):
             return "pending", Derivation(
                 actions=(RecordPure(path, step.id, failure=last.failure or "cancelled"),)
             )
-        # Reserved, dispatched, claimed or uncertain: the runtime and read-back decide.
+        if last.state == "uncertain":
+            return self.settle(step, path, last)
+        # Reserved, dispatched or claimed: the runtime decides.
         return "pending", Derivation()
+
+    def _reads(self, step, last):
+        """Read-back attempts of write `last`: ordinals 100k + 1 .. 100k + 99."""
+        from .budgets import READBACK_STRIDE
+
+        record = self.state.occurrences.get(self.path(step.id + "#reconcile"))
+        low = last.ordinal * READBACK_STRIDE
+        return [
+            a
+            for a in (record.attempts if record else ())
+            if low < a.ordinal < low + READBACK_STRIDE
+        ]
+
+    @staticmethod
+    def _seen(action, attempt):
+        return next(
+            (
+                o
+                for o in action.observations
+                if o.source == "readback" and o.attempt_id == attempt.id
+            ),
+            None,
+        )
+
+    def resend(self, step, path, last):
+        """After a qualified absence closed write `last` (`not_applied`): one more command
+        under the same intent, decision and key, only for a `target_key` operation with
+        attempts left in the dispatch step's retry policy. None: no resend."""
+        action = self.state.actions.get(path)
+        if action is None or not action.target_key or last.ordinal >= step.retry.max_attempts:
+            return None
+        reads = self._reads(step, last)
+        seen = self._seen(action, reads[-1]) if reads else None
+        if seen is None or seen.result != "effect_absent" or not seen.qualified:
+            return None
+        try:
+            decision = self.evaluate(step.decision) if step.decision is not None else None
+        except ExpressionError as error:
+            return Derivation(actions=(RecordPure(path, step.id, failure=error.code),))
+        return Derivation(
+            actions=(
+                CreateDispatch(
+                    self.path(step.id + "#dispatch"),
+                    step.id,
+                    action.intent_id,
+                    None if decision is None else decision["id"],
+                    last.ordinal + 1,
+                ),
+            )
+        )
+
+    def settle(self, step, path, last):
+        """An uncertain write: read back, then follow what was observed (Task 8).
+
+        Never a blind replacement. Effect present closes the write as succeeded; a
+        qualified absence closes it `not_applied` (then `resend` decides); an
+        unqualified absence, or `MAX_READBACKS` unknown results since the last
+        re-read an owner asked for, waits for an owner.
+        """
+        from .action_contracts import MAX_READBACKS
+        from .action_reconciliation import FINAL, REREAD
+        from .budgets import READBACK_STRIDE
+
+        action = self.state.actions.get(path)
+        if action is None:
+            return "pending", Derivation()
+        writes = self.path(step.id + "#dispatch")
+        reconcile_path = self.path(step.id + "#reconcile")
+        low = last.ordinal * READBACK_STRIDE
+        reads = self._reads(step, last)
+
+        def present(observation):
+            value = {
+                "handle_kind": "action_receipt",
+                "id": action.receipts.get(last.id, observation.id),
+            }
+            return "pending", Derivation(actions=(SettleWrite(writes, step.id, last.id, value),))
+
+        resolutions = [o for o in action.observations if o.source == "resolution"]
+        final = next((o for o in resolutions if o.kind in FINAL and o.attempt_id == last.id), None)
+        if final is not None:
+            if final.kind == "effect_present":
+                return present(final)
+            closed = SettleWrite(writes, step.id, last.id, failure="outcome_unknown")
+            return "pending", Derivation(actions=(closed,))
+        if not reads:
+            return "pending", Derivation(
+                actions=(
+                    CreateReadback(reconcile_path, step.id, action.intent_id, low + 1, "uncertain"),
+                )
+            )
+        latest = reads[-1]
+        if latest.state in ACTIVE or latest.state == "uncertain":
+            return "pending", Derivation()  # a read-back in flight, or fenced by E04
+        seen = self._seen(action, latest)
+        if seen is None:
+            return "pending", Derivation(
+                actions=(RecordReadback(reconcile_path, step.id, latest.id),)
+            )
+        if seen.result == "effect_present":
+            return present(seen)
+        if seen.result == "effect_absent" and seen.qualified:
+            closed = SettleWrite(writes, step.id, last.id, failure="not_applied")
+            return "pending", Derivation(actions=(closed,))
+        if seen.result == "effect_absent":
+            return "pending", Derivation(actions=(RequireResolution(path, step.id),))
+        # Unknown: bounded read-backs under the step's back-off, then an owner.
+        requested = {o.attempt_id for o in resolutions if o.kind in REREAD}
+        start = max((i for i, a in enumerate(reads) if a.id in requested), default=0)
+        if len(reads) - start >= MAX_READBACKS or latest.ordinal + 1 >= low + READBACK_STRIDE:
+            return "pending", Derivation(actions=(RequireResolution(path, step.id),))
+        settled = action.finished.get(latest.id) or latest.failed_at_ms or 0
+        due = settled + step.retry.backoff_seconds * 1000
+        if due > self.now_ms:
+            return "pending", Derivation(wake_at_ms=due)
+        return "pending", Derivation(
+            actions=(
+                CreateReadback(
+                    reconcile_path, step.id, action.intent_id, latest.ordinal + 1, "unknown"
+                ),
+            )
+        )
 
     def task(self, step, path, record):
         """A review or (v2) form task: open it, then consume its decision or form."""
@@ -1545,6 +1750,7 @@ class InterpreterV1:
                 add(path + "#input")
             elif isinstance(step, ActionDispatchStep):
                 add(path + "#dispatch")
+                add(path + "#reconcile")
             elif isinstance(step, ParallelStep):
                 groups[path] = [path + ":" + b.id for b in step.branches]
                 for member in groups[path]:
@@ -2292,7 +2498,7 @@ class InterpreterV1:
                 "rate_limited": "provider_unavailable",
                 "timeout_before_dispatch": "provider_unavailable",
                 "provider_failed": "provider_unavailable",
-            }.get(code, "invalid_result")
+            }.get(code, code if code in ACTION_FAILURES else "invalid_result")
             self._event(db, execution, epoch, "failed", detail=code)
         db.flush()
 
@@ -2437,6 +2643,7 @@ class InterpreterV2(InterpreterV1):
         state = super().load_progression(db, execution, region_path, program=program)
         if execution.interpreter_id == INTERPRETER_V2:
             state = self._with_tasks(db, execution, state)
+            state = self._with_actions(db, execution, state, program)
         return state
 
     def _apply(self, db, execution, epoch, action) -> bool:
@@ -2448,7 +2655,248 @@ class InterpreterV2(InterpreterV1):
             return self._consume_decision(db, execution, epoch, action)
         if isinstance(action, CreateDispatch):
             return self._create_dispatch(db, execution, epoch, action)
+        if isinstance(action, CreateReadback):
+            return self._create_readback(db, execution, epoch, action)
+        if isinstance(action, RecordReadback):
+            return self._record_readback(db, execution, epoch, action)
+        if isinstance(action, SettleWrite):
+            return self._settle_write(db, execution, epoch, action)
+        if isinstance(action, RequireResolution):
+            return self._require_resolution(db, execution, epoch, action)
         return super()._apply(db, execution, epoch, action)
+
+    def _settle_write(self, db, execution, epoch, action):
+        """Close the uncertain write: succeeded with the receipt handle, or failed.
+
+        Its reservation is untouched: a write whose compute stop is not confirmed
+        (a lapse) keeps its slot and liability, so the execution still waits for
+        that stop before it can end (containment)."""
+        from ..models import ExecutionAttempt
+
+        write = db.scalar(
+            _scoped(ExecutionAttempt, execution)
+            .where(ExecutionAttempt.id == action.attempt_id)
+            .with_for_update()
+        )
+        instance = self._instance(db, execution, action.occurrence_path, action.node_id)
+        if write is None or write.step_instance_id != instance.id:
+            raise ProgramError("integrity")
+        if write.state != "uncertain":
+            return False
+        if action.failure is None:
+            handle = self._put(db, execution, action.value)
+            write.state, code = "succeeded", "attempt_succeeded"
+        else:
+            content = {"failure": _failure(action.failure), "failed_at_ms": database_now_ms(db)}
+            handle = self._put(db, execution, content)
+            write.state, code = "failed", "attempt_failed"
+        write.result_artifact_id = handle.id
+        write.result_artifact_version = handle.version
+        write.result_sha256 = handle.sha256
+        if execution.reason == "action_uncertain":
+            execution.reason = None
+        db.flush()
+        self._event(
+            db,
+            execution,
+            epoch,
+            code,
+            path=action.occurrence_path,
+            attempt_id=write.id,
+            detail=action.failure and _failure(action.failure),
+        )
+        return True
+
+    def _readbacks(self):
+        from .action_reconciliation import ReadbackService
+
+        return ReadbackService(
+            artifacts=self.artifacts,
+            artifact_policy=self.policy,
+            installation_id=self.installation_id,
+        )
+
+    def _uncertain_write(self, db, execution, path, node_id, ordinal):
+        """The `#dispatch` record's attempt `ordinal`, which must be its last and uncertain."""
+        instance = self._instance(db, execution, path, node_id)
+        attempts = self._attempts(db, execution, instance)
+        if not attempts or attempts[-1].ordinal != ordinal or attempts[-1].state != "uncertain":
+            return None
+        return attempts[-1]
+
+    def _create_readback(self, db, execution, epoch, action):
+        """Task 8: a read-back of the uncertain write its ordinal names."""
+        from ..models import ExecutionActionCommand, ExecutionActionIntent
+        from .budgets import READBACK_STRIDE
+
+        if execution.interpreter_id != INTERPRETER_V2 or not action.occurrence_path.endswith(
+            "#reconcile"
+        ):
+            raise ProgramError("integrity")
+        base = action.occurrence_path[: -len("#reconcile")]
+        write = self._uncertain_write(
+            db, execution, base + "#dispatch", action.node_id, action.ordinal // READBACK_STRIDE
+        )
+        if write is None:
+            return False
+        intent = db.scalar(
+            _scoped(ExecutionActionIntent, execution)
+            .where(
+                ExecutionActionIntent.id == action.intent_id,
+                ExecutionActionIntent.execution_id == execution.id,
+            )
+            .with_for_update()
+        )
+        command = db.scalar(
+            _scoped(ExecutionActionCommand, execution).where(
+                ExecutionActionCommand.attempt_id == write.id
+            )
+        )
+        if intent is None or command is None or command.intent_id != intent.id:
+            raise ProgramError("integrity")
+        created = self._readbacks().schedule(
+            db,
+            execution,
+            intent,
+            path=action.occurrence_path,
+            node_id=action.node_id,
+            ordinal=action.ordinal,
+            reason=action.reason,
+            epoch=epoch,
+            keys=self._keys(),
+        )
+        if created is not None and execution.state == "waiting":
+            execution.state = "running"
+        return created is not None
+
+    def _record_readback(self, db, execution, epoch, action):
+        from ..models import ExecutionActionObservation
+
+        existing = db.scalar(
+            _scoped(ExecutionActionObservation, execution).where(
+                ExecutionActionObservation.attempt_id == action.attempt_id,
+                ExecutionActionObservation.source == "readback",
+            )
+        )
+        if existing is not None:
+            return False
+        self._readbacks().record(db, execution, epoch, action.attempt_id, keys=self._keys())
+        return True
+
+    def _require_resolution(self, db, execution, epoch, action):
+        """Only an owner or admin settles it now (`ResolutionService`); nothing else runs."""
+        if execution.state in TERMINAL or execution.state == "reconciliation_required":
+            return False
+        execution.state, execution.reason = "reconciliation_required", "action_uncertain"
+        clear_runnable(db, execution)
+        db.flush()
+        self._event(
+            db,
+            execution,
+            epoch,
+            "reconciliation_required",
+            path=action.occurrence_path,
+            detail="action_uncertain",
+        )
+        return True
+
+    def _with_actions(self, db, execution, state, program):
+        """Each dispatch occurrence's intent, observations, receipts and confirmed stops."""
+        from ..models import (
+            ExecutionActionCommand,
+            ExecutionActionIntent,
+            ExecutionActionObservation,
+            ExecutionActionReceipt,
+        )
+        from .action_reconciliation import dispatch_ref, write_spec
+
+        writes = {
+            path: record.attempts
+            for path, record in state.occurrences.items()
+            if path.endswith("#dispatch") and record.attempts
+        }
+        if not writes:
+            return state
+        ids = [a.id for attempts in writes.values() for a in attempts]
+        commands = {
+            row.attempt_id: row
+            for row in db.scalars(
+                _scoped(ExecutionActionCommand, execution).where(
+                    ExecutionActionCommand.attempt_id.in_(ids)
+                )
+            )
+        }
+        reads = {
+            path: state.occurrences[path[: -len("#dispatch")] + "#reconcile"].attempts
+            for path in writes
+            if path[: -len("#dispatch")] + "#reconcile" in state.occurrences
+        }
+        reservations = {
+            row.attempt_id: row
+            for row in db.scalars(
+                _scoped(ExecutionUsageReservation, execution).where(
+                    ExecutionUsageReservation.attempt_id.in_(
+                        ids + [a.id for attempts in reads.values() for a in attempts]
+                    )
+                )
+            )
+        }
+        actions = {}
+        for path, attempts in writes.items():
+            intent_ids = {commands[a.id].intent_id for a in attempts if a.id in commands}
+            if not intent_ids:
+                continue
+            if len(intent_ids) != 1:
+                raise ProgramError("integrity")
+            intent = db.scalar(
+                _scoped(ExecutionActionIntent, execution).where(
+                    ExecutionActionIntent.id == next(iter(intent_ids))
+                )
+            )
+            observations = tuple(
+                ObservationRecord(
+                    row.id,
+                    row.attempt_id,
+                    row.result,
+                    row.qualified,
+                    row.source,
+                    row.rule_id.removeprefix("resolution-") if row.source == "resolution" else None,
+                )
+                for row in db.scalars(
+                    _scoped(ExecutionActionObservation, execution)
+                    .where(ExecutionActionObservation.intent_id == intent.id)
+                    .order_by(ExecutionActionObservation.id)
+                )
+            )
+            receipts = {
+                row.attempt_id: row.id
+                for row in db.scalars(
+                    _scoped(ExecutionActionReceipt, execution)
+                    .where(ExecutionActionReceipt.intent_id == intent.id)
+                    # "historical" sorts first, so a live receipt names the write.
+                    .order_by(ExecutionActionReceipt.source, ExecutionActionReceipt.id)
+                )
+            }
+            program = program or load_program(db, _scope(execution), execution)
+            target_key = write_spec(program, dispatch_ref(program, path)).target_key
+            actions[path[: -len("#dispatch")]] = ActionRecord(
+                intent_id=intent.id,
+                effect=intent.effect_state,
+                target_key=target_key,
+                observations=observations,
+                stopped=frozenset(
+                    a.id
+                    for a in attempts
+                    if a.id in reservations and reservations[a.id].compute_stopped_at_ms is not None
+                ),
+                receipts=receipts,
+                finished={
+                    a.id: reservations[a.id].completed_at_ms
+                    for a in reads.get(path, ())
+                    if a.id in reservations and reservations[a.id].completed_at_ms is not None
+                },
+            )
+        return replace(state, actions=actions)
 
     def _create_dispatch(self, db, execution, epoch, action):
         """The one command attempt of an intent, only once it may be dispatched.
@@ -2463,8 +2911,15 @@ class InterpreterV2(InterpreterV1):
         if execution.interpreter_id != INTERPRETER_V2:
             raise ProgramError("integrity")
         instance = self._instance(db, execution, action.occurrence_path, action.node_id)
-        if self._attempts(db, execution, instance):
+        existing = self._attempts(db, execution, instance)
+        if action.ordinal == 1 and existing:
             return False  # a repeated transition creates nothing
+        if action.ordinal > 1 and (
+            not existing
+            or existing[-1].ordinal != action.ordinal - 1
+            or existing[-1].state != "failed"
+        ):
+            return False
         intent = db.scalar(
             _scoped(ExecutionActionIntent, execution)
             .where(
@@ -2484,7 +2939,7 @@ class InterpreterV2(InterpreterV1):
             installation_id=self.installation_id,
         )
         step_path = action.occurrence_path.rpartition("#")[0]
-        refused = None
+        refused, decision = None, None
         if intent.approval_mode == "human":
             decision = (
                 None
@@ -2502,7 +2957,15 @@ class InterpreterV2(InterpreterV1):
                 refused = "binding_refused"
         elif intent.authorization_state != "proposed" or action.decision_id is not None:
             refused = "binding_refused"
-        if refused is None and intent.effect_state != "not_dispatched":
+        if refused is None and action.ordinal > 1:
+            # Task 8: a resend only after a qualified absence of this very write.
+            if intent.effect_state != "absent" or not self._qualified_absence(
+                db, execution, intent, existing[-1]
+            ):
+                refused = "binding_refused"
+            elif decision is not None and decision.expires_at_ms <= database_now_ms(db):
+                refused = "approval_expired"  # the same decision, only while unexpired
+        elif refused is None and intent.effect_state != "not_dispatched":
             refused = "binding_refused"
         if refused is None and intent.expires_at_ms <= database_now_ms(db):
             refused = "approval_expired"
@@ -2517,10 +2980,31 @@ class InterpreterV2(InterpreterV1):
             CreateAttempt(
                 action.occurrence_path,
                 action.node_id,
-                1,
+                action.ordinal,
                 {"intent_id": intent.id, "decision_id": action.decision_id},
             ),
         )
+
+    def _qualified_absence(self, db, execution, intent, write):
+        """The last read-back of `write` observed a qualified absence."""
+        from ..models import ExecutionActionObservation, ExecutionAttempt
+        from .budgets import READBACK_STRIDE
+
+        low = write.ordinal * READBACK_STRIDE
+        latest = db.execute(
+            select(ExecutionActionObservation.result, ExecutionActionObservation.qualified)
+            .join(ExecutionAttempt, ExecutionAttempt.id == ExecutionActionObservation.attempt_id)
+            .where(
+                ExecutionActionObservation.workspace_id == execution.workspace_id,
+                ExecutionActionObservation.intent_id == intent.id,
+                ExecutionActionObservation.source == "readback",
+                ExecutionAttempt.ordinal > low,
+                ExecutionAttempt.ordinal < low + READBACK_STRIDE,
+            )
+            .order_by(ExecutionAttempt.ordinal.desc())
+            .limit(1)
+        ).first()
+        return latest is not None and latest.result == "effect_absent" and latest.qualified
 
     def _with_tasks(self, db, execution, state):
         """Each wait's human task, if any, with its recorded decision."""

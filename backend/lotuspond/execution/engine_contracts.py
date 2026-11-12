@@ -88,6 +88,8 @@ class SweepReport(Contract):
     # Amendment for RESTORE-1 (owner decision, 2026-10-28): executions admitted under
     # an older recovery epoch, held for reconciliation after a restore.
     restored_executions: Count = 0
+    # E05 Task 8: read-backs reserved against the slot their uncertain write retains.
+    reserved_readbacks: Count = 0
 
 
 class EngineObservation(Contract):
