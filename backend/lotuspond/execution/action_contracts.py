@@ -184,6 +184,8 @@ class ResolutionRequest(Contract):
 class ActionLease(Contract):
     attempt_id: OpaqueId
     command_id: OpaqueId
+    # The dispatch ordinal: a receipt's `attempt` must equal it.
+    ordinal: SafeInt
     lease_revision: SafeInt
     expires_at_ms: SafeInt
     deadline_ms: SafeInt

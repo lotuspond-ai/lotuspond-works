@@ -274,6 +274,7 @@ VALID_DTOS = [
         {
             "attempt_id": "a",
             "command_id": "c",
+            "ordinal": 1,
             "lease_revision": 1,
             "expires_at_ms": 2,
             "deadline_ms": 3,

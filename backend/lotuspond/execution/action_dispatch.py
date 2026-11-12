@@ -660,6 +660,7 @@ class ActionDispatchService:
         return ActionLease(
             attempt_id=attempt.id,
             command_id=command.command_id,
+            ordinal=attempt.ordinal,
             lease_revision=command.lease_revision,
             expires_at_ms=command.lease_expires_at_ms,
             deadline_ms=deadline,

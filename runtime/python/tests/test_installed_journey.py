@@ -18,7 +18,7 @@ from pathlib import Path
 import lotuspond_runtime
 import lotuspond_sdk
 from lotuspond_runtime.commands import validate_delivery
-assert metadata.version("lotuspond-runtime") == "0.2.0"
+assert metadata.version("lotuspond-runtime") == "0.3.0"
 assert metadata.version("lotuspond-sdk") == "0.3.0"
 for name, module in (("lotuspond-runtime", lotuspond_runtime), ("lotuspond-sdk", lotuspond_sdk)):
  assert Path(module.__file__).is_relative_to(Path(sys.prefix))

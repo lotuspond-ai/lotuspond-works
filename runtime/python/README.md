@@ -1,6 +1,6 @@
 # Lotuspond runtime contracts
 
-`lotuspond-runtime==0.2.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
+`lotuspond-runtime==0.3.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
 This independently installable distribution supplies pure, strict fleet models
 and domain-separated connection/pool content identities. Importing the package
 or `lotuspond_runtime.protocol` performs no I/O or runtime initialization.

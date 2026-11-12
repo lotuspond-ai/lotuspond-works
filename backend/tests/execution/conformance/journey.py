@@ -22,7 +22,7 @@ import driver as drivers  # noqa: E402
 import world as worlds  # noqa: E402
 from processes import Processes, wait_for  # noqa: E402
 
-VERSIONS = {"lotuspond-api": "0.4.0", "lotuspond-runtime": "0.2.0", "lotuspond-sdk": "0.3.0"}
+VERSIONS = {"lotuspond-api": "0.4.0", "lotuspond-runtime": "0.3.0", "lotuspond-sdk": "0.3.0"}
 POINTS = ("admission", "signal", "claim", "result", "transition", "projection")
 
 

@@ -44,7 +44,78 @@ def _token(path):
     return validate_token(SecretStr(text.strip()), "lpe_")
 
 
-def _serve_activities(config, client, store, setup, stop) -> int:
+def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, failed):
+    """One action worker on its own transport, beside the activity worker (E05).
+
+    Test mode only: `actions` is the configuration's synthetic write providers and
+    their command trust. It shares the activity worker's journal (one holder per
+    process) and server-anchored clock, and the supervisor's live session.
+    """
+    from .action_client import ActionClient
+    from .action_fixture import FixtureCommandTrust
+    from .action_invocation import WriteProviderSet
+    from .action_worker import ActionDependencies, ActionWorker
+
+    trust_file, descriptors = actions
+
+    def live():
+        shared = supervisor.activity_session()
+        return None if shared is None else shared[:2]
+
+    def work():
+        transport = None
+        try:
+            transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
+            providers = WriteProviderSet(descriptors, test_mode=setup.test_mode)
+            trust = FixtureCommandTrust(trust_file, clock)
+            worker = current = None
+            idle = IDLE_MIN_S
+            while not stop.is_set():
+                shared = supervisor.activity_session()
+                if shared is None:
+                    stop.wait(0.2)
+                    continue
+                if shared is not current:
+                    token, secret, identity = shared
+                    deps = ActionDependencies(
+                        identity=identity,
+                        client=ActionClient(transport, token, secret, live=live),
+                        trust=trust,
+                        providers=providers,
+                        journal=journal,
+                        clock=clock,
+                    )
+                    if worker is None:
+                        worker = ActionWorker(deps)
+                    else:
+                        worker.deps = deps
+                    current = shared
+                try:
+                    status = worker.run_once()
+                except FleetError as error:
+                    if error.code == "unsafe_storage":
+                        raise
+                    status = "unavailable"
+                if status == "idle":
+                    stop.wait(idle)
+                    idle = min(idle * 2, IDLE_MAX_S)
+                    continue
+                idle = IDLE_MIN_S
+                if status in ("fenced", "unavailable", "refused"):
+                    stop.wait(1.0)
+        except Exception as error:  # noqa: BLE001 - reported as a fixed exit code only
+            failed.append(error)
+            stop.set()
+        finally:
+            if transport is not None:
+                transport.close()
+
+    thread = threading.Thread(target=work, name="action-worker", daemon=True)
+    thread.start()
+    return thread
+
+
+def _serve_activities(config, client, store, setup, stop, actions=None) -> int:
     """The E03 session loop, plus one activity worker on its own transport.
 
     `setup` is test mode's synthetic fixture or an operator's real providers
@@ -75,11 +146,13 @@ def _serve_activities(config, client, store, setup, stop) -> int:
         shared = supervisor.activity_session()
         return None if shared is None else shared[:2]
 
+    # One journal holder per process: the action worker, when configured, shares it.
+    journal = InvocationJournal(journal_directory)
+
     def work():
-        transport = journal = None
+        transport = None
         try:
             transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
-            journal = InvocationJournal(journal_directory)
             providers = ProviderSet(descriptors, test_mode=setup.test_mode)
             worker = current = None
             idle = IDLE_MIN_S
@@ -128,19 +201,24 @@ def _serve_activities(config, client, store, setup, stop) -> int:
             failed.append(error)
             stop.set()
         finally:
-            if journal is not None:
-                journal.close()
             if transport is not None:
                 transport.close()
 
-    thread = threading.Thread(target=work, name="activity-worker", daemon=True)
-    thread.start()
+    threads = [threading.Thread(target=work, name="activity-worker", daemon=True)]
+    threads[0].start()
     try:
+        if actions is not None:
+            threads.append(
+                _serve_actions(config, setup, actions, journal, clock, supervisor, stop, failed)
+            )
         result = supervisor.run(stop)
     finally:
         stop.set()
-        thread.join(timeout=60)
-    if thread.is_alive():
+        for thread in threads:
+            thread.join(timeout=60)
+        if not any(thread.is_alive() for thread in threads):
+            journal.close()
+    if any(thread.is_alive() for thread in threads):
         return 3
     if failed:
         error = failed[0]
@@ -164,7 +242,7 @@ def _execute(argv, clients) -> int:
         config = RuntimeConfig.model_validate_json(
             read_private_file(Path(args.config).absolute(), 65536)
         )
-        fixture = None
+        fixture = actions = None
         if args.command == "activity-worker":
             if args.activity_config is None:
                 # Without an operator's provider configuration nothing can be served.
@@ -178,10 +256,17 @@ def _execute(argv, clients) -> int:
 
                     fixture = operator_config(raw, test_mode=True)
                 elif config.mode == "test":
-                    # Otherwise test mode runs the packaged synthetic providers (Task 13).
+                    # Otherwise test mode runs the packaged synthetic providers (Task 13),
+                    # and the synthetic target's write providers when it names them (E05).
                     from .activity_fixture import FixtureTrust, worker_config
                     from .provider_config import ActivitySetup
 
+                    data = json.loads(raw)
+                    if type(data) is dict and "actions" in data:
+                        from .action_fixture import worker_config as action_config
+
+                        actions = action_config(data.pop("actions"))
+                        raw = json.dumps(data).encode()
                     trust_file, journal, descriptors = worker_config(raw)
                     fixture = ActivitySetup(
                         FixtureTrust(trust_file), journal, descriptors, None, True
@@ -218,7 +303,9 @@ def _execute(argv, clients) -> int:
                         previous[sig] = signal.signal(sig, lambda signum, frame: stop.set())
                 try:
                     if fixture is not None:
-                        result = _serve_activities(config, client, store, fixture, stop)
+                        result = _serve_activities(
+                            config, client, store, fixture, stop, actions=actions
+                        )
                     else:
                         result = RuntimeSupervisor(
                             client,
