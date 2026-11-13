@@ -6,7 +6,7 @@ import test from 'node:test';
 // a control edge below its WCAG 2.2 contrast floor fails here instead of in an audit.
 const styles = new URL('../styles/', import.meta.url);
 const consoleCss = readFileSync(new URL('console.css', styles), 'utf8');
-const landingCss = readFileSync(new URL('landing.css', styles), 'utf8');
+const homeCss = readFileSync(new URL('home.css', styles), 'utf8');
 
 function block(css: string, selector: string): string {
   const start = css.indexOf(`${selector} {`);
@@ -35,8 +35,8 @@ function contrast(a: string, b: string): number {
 }
 
 const app = tokens(consoleCss, ':root,\n.console-window');
-const paper = tokens(landingCss, '.landing');
-const scene = tokens(landingCss, ".landing-header[data-tone='pond'],\n.pond,\n.landing-footer");
+// The signed-out introduction's design system values (home.css, from tokens.json).
+const home = tokens(homeCss, '.home');
 // Table headers, wells and the form panel are drawn on --sunken (console.css).
 const tableHead = app['--sunken'];
 const formPanel = app['--sunken'];
@@ -79,33 +79,40 @@ test('field edges and the focus ring meet 3:1 wherever they are drawn', () => {
   atLeast(3, [
     ['field edge on paper', app['--field-line'], app['--paper']],
     ['field edge on the form panel', app['--field-line'], formPanel],
-    ['field edge on public paper', app['--field-line'], paper['--paper']],
     ['focus on paper', app['--focus'], app['--paper']],
     ['focus on canvas', app['--focus'], app['--canvas']],
     ['focus on sunken', app['--focus'], app['--sunken']],
-    ['focus on public canvas', app['--focus'], paper['--canvas']],
-    ['focus on public paper', app['--focus'], paper['--paper']],
-    ['focus on public sunken', app['--focus'], paper['--sunken']],
-    ['scene focus on the pond', scene['--focus'], paper['--pond-deep']],
+    ['focus on the sage field', home['--pine-900'], home['--sage-500']],
+    ['focus on a sheet', home['--pine-900'], home['--off-white']],
+    ['focus on the pine chapter', home['--on-deep'], home['--pine-900']],
+    ['outline button and tag edge on a sheet', home['--line-control'], home['--off-white']],
+    ['outline button edge on a tinted panel', home['--line-control'], home['--sage-100']],
   ]);
 });
 
-test('public page text meets its floor on paper and on the scene', () => {
+test('public page text meets 4.5:1 on the field, the sheets and the pine chapter', () => {
   atLeast(4.5, [
-    ['ink on public canvas', paper['--ink'], paper['--canvas']],
-    ['muted on public canvas', paper['--muted'], paper['--canvas']],
-    ['muted on public paper', paper['--muted'], paper['--paper']],
-    ['scene text on the pond', paper['--pond-paper'], paper['--pond-deep']],
+    ['ink on the sage field', home['--pine-900'], home['--sage-500']],
+    ['muted text on the sage field', home['--on-field-muted'], home['--sage-500']],
+    ['ink on a sheet', home['--pine-900'], home['--off-white']],
+    ['muted text on a sheet', home['--ink-muted'], home['--off-white']],
+    ['muted text on a tinted panel', home['--ink-muted'], home['--sage-100']],
+    ['sage labels on a sheet', home['--sage-700'], home['--off-white']],
+    ['sage labels on a tinted panel', home['--sage-700'], home['--sage-100']],
+    ['ink on a chip', home['--pine-900'], home['--off-white']],
+    ['ink on a live tag', home['--pine-900'], home['--sage-200']],
+    ['ink button label', home['--off-white'], home['--pine-900']],
+    ['text on the pine chapter', home['--on-deep'], home['--pine-900']],
+    ['muted text on the pine chapter', home['--on-deep-muted'], home['--pine-900']],
+    ['code output on its ground', home['--on-deep-muted'], home['--deep-raised']],
   ]);
-  // The introduction pins its own action green until it is redrawn (ADR-0016).
-  atLeast(4.5, [
-    ['public link on paper', paper['--accent'], paper['--paper']],
-    ['public button text', '#ffffff', paper['--accent']],
-  ]);
-  // The warm note is only ever set as large display type (the charter numerals).
+});
+
+test('tomato never sits on the sage field, and holds 3:1 where the page marks with it', () => {
+  assert.ok(contrast(home['--tomato-500'], home['--sage-500']) < 3, 'tomato would read on sage');
   atLeast(3, [
-    ['warm numerals on public canvas', paper['--lotus-ink'], paper['--canvas']],
-    ['warm numerals on public paper', paper['--lotus-ink'], paper['--paper']],
+    ['underline on a sheet', home['--tomato-500'], home['--off-white']],
+    ['underline on the pine chapter', home['--tomato-500'], home['--pine-900']],
   ]);
 });
 

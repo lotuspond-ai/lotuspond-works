@@ -48,7 +48,7 @@ Unchanged, on purpose:
 
 Not done yet, in this order:
 
-1. Redraw the signed-out introduction in the system. Its claims must still trace to `docs/CAPABILITIES.md`.
+1. Redraw the signed-out introduction in the system. Its claims must still trace to `docs/CAPABILITIES.md`. Done on 2026-11-14: `Landing.tsx` is drawn from `home.css`, and the field-record pond, plates and their styles were removed.
 2. Replace the early-access page with the company site. That is a hosted change with its own scope.
 
 ## Consequences
