@@ -1,0 +1,15 @@
+{
+ "definition": {
+  "allowed_capability_classes": [],
+  "allowed_operation_classes": [],
+  "approval": "human",
+  "assignment": "workspace_admins",
+  "escalation": "after_half_timeout",
+  "independent_review": true
+ },
+ "format_version": 1,
+ "kind": "policy",
+ "name": "escalating-reviewers",
+ "schemas": [],
+ "version": "1.0.0"
+}

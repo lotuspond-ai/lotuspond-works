@@ -24,6 +24,7 @@ from lotuspond.execution_worker import (
     run_execution_worker,
 )
 from lotuspond.models import Execution, ExecutionOutbox, SchemaVersion
+from lotuspond.schema_version import SCHEMA_VERSION
 
 from .conftest import execution_test_url
 from .engine_fixtures import FixtureFence, FixtureProgression, fixture_engine
@@ -50,7 +51,7 @@ def versioned(admission):
     """A harness schema built from the model carries no ledger row; installs do."""
     with Session(admission.engine) as db, db.begin():
         if db.scalar(select(SchemaVersion.version)) is None:
-            db.add(SchemaVersion(version=15))
+            db.add(SchemaVersion(version=SCHEMA_VERSION))
     return admission
 
 
@@ -180,12 +181,12 @@ def test_worker_refuses_unsafe_startup(versioned, monkeypatch, capsys):
     assert refused.value.code == "invalid_configuration"
     # A database that is not at the current schema version is refused before work.
     with Session(h.engine) as db, db.begin():
-        db.execute(SchemaVersion.__table__.update().values(version=14))
+        db.execute(SchemaVersion.__table__.update().values(version=SCHEMA_VERSION - 1))
     with pytest.raises(WorkerRefused) as refused:
         run_execution_worker(settings_for(h), engine=fixture_engine())
     assert refused.value.code == "schema_unavailable"
     with Session(h.engine) as db, db.begin():
-        db.execute(SchemaVersion.__table__.update().values(version=15))
+        db.execute(SchemaVersion.__table__.update().values(version=SCHEMA_VERSION))
     url = scoped_url(h)
     monkeypatch.setenv("LOTUSPOND_EXECUTION_WORKER_DATABASE_URL", url)
     monkeypatch.setenv("LOTUSPOND_EXECUTION_WORKER_WORKER_ID", "configured")

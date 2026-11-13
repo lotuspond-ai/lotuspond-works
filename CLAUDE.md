@@ -4,7 +4,7 @@ LotusPond Works runs AI-agent workflows inside a company's real processes: each 
 
 ## Structure
 
-`backend/lotuspond/` owns the Python API, relational models, identity, release workflow, read-only stored traces and incidents, and the durable execution engine. `web/` owns the React console. `scripts/` contains Node execution and delivery clients and local development commands. `docs-site/` is the Git-backed documentation site, and `deploy/` is delivery packaging, including the separate customer-side execution image.
+`backend/lotuspond/` owns the Python API, relational models, identity, release workflow, read-only stored traces and incidents, and the durable execution engine. `web/` owns the React console. `scripts/` contains Node execution and delivery clients and local development commands. `docs-site/` is the Git-backed documentation site, and `deploy/` is delivery packaging, including the separate customer-side execution image. `reference/invoice-triage/` holds the first, synthetic reference workflow: its generator, packages, catalog documents, scenarios and stand-in AP service.
 
 The initial TypeScript API and schema were preserved in the separate recovery archive after Python workflow validation. There is one active API and one authoritative relational model. Do not restore archived agent-testing features; never restore credentials, unrelated products, or inherited history. `protocol-adapters/` contains the HTTP evaluation runner. ADR-0012, ADR-0013 and ADR-0014 retired the assurance-era extras, outside-agent monitoring, air-gapped operation, offline identity, the authenticator requirements, tool authorization, the MCP and A2A runners and the Operations page; their tables stay, unwritten, and the schema is unchanged.
 

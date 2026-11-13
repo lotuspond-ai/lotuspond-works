@@ -1,0 +1,15 @@
+{
+ "definition": {
+  "allowed_capability_classes": [],
+  "allowed_operation_classes": [],
+  "approval": "human",
+  "assignment": "workspace_owners",
+  "escalation": null,
+  "independent_review": true
+ },
+ "format_version": 1,
+ "kind": "policy",
+ "name": "owners",
+ "schemas": [],
+ "version": "1.0.0"
+}

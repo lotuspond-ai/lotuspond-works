@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -43,8 +44,82 @@ def _token(path):
     return validate_token(SecretStr(text.strip()), "lpe_")
 
 
-def _serve_activities(config, client, store, fixture, stop) -> int:
-    """Test mode only: the E03 session loop, plus one activity worker on its own transport.
+def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, failed):
+    """One action worker on its own transport, beside the activity worker (E05).
+
+    Test mode only: `actions` is the configuration's synthetic write providers and
+    their command trust. It shares the activity worker's journal (one holder per
+    process) and server-anchored clock, and the supervisor's live session.
+    """
+    from .action_client import ActionClient
+    from .action_fixture import FixtureCommandTrust
+    from .action_invocation import WriteProviderSet
+    from .action_worker import ActionDependencies, ActionWorker
+
+    trust_file, descriptors = actions
+
+    def live():
+        shared = supervisor.activity_session()
+        return None if shared is None else shared[:2]
+
+    def work():
+        transport = None
+        try:
+            transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
+            providers = WriteProviderSet(descriptors, test_mode=setup.test_mode)
+            trust = FixtureCommandTrust(trust_file, clock)
+            worker = current = None
+            idle = IDLE_MIN_S
+            while not stop.is_set():
+                shared = supervisor.activity_session()
+                if shared is None:
+                    stop.wait(0.2)
+                    continue
+                if shared is not current:
+                    token, secret, identity = shared
+                    deps = ActionDependencies(
+                        identity=identity,
+                        client=ActionClient(transport, token, secret, live=live),
+                        trust=trust,
+                        providers=providers,
+                        journal=journal,
+                        clock=clock,
+                    )
+                    if worker is None:
+                        worker = ActionWorker(deps)
+                    else:
+                        worker.deps = deps
+                    current = shared
+                try:
+                    status = worker.run_once()
+                except FleetError as error:
+                    if error.code == "unsafe_storage":
+                        raise
+                    status = "unavailable"
+                if status == "idle":
+                    stop.wait(idle)
+                    idle = min(idle * 2, IDLE_MAX_S)
+                    continue
+                idle = IDLE_MIN_S
+                if status in ("fenced", "unavailable", "refused"):
+                    stop.wait(1.0)
+        except Exception as error:  # noqa: BLE001 - reported as a fixed exit code only
+            failed.append(error)
+            stop.set()
+        finally:
+            if transport is not None:
+                transport.close()
+
+    thread = threading.Thread(target=work, name="action-worker", daemon=True)
+    thread.start()
+    return thread
+
+
+def _serve_activities(config, client, store, setup, stop, actions=None) -> int:
+    """The E03 session loop, plus one activity worker on its own transport.
+
+    `setup` is test mode's synthetic fixture or an operator's real providers
+    (`provider_config`); nothing else differs between them.
 
     The worker polls with the supervisor's live credential and session: every request,
     including one from an invocation in flight across a rotation, carries the current
@@ -52,12 +127,11 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
     by every session and heartbeat response. A worker failure stops both.
     """
     from .activity_client import ActivityClient, ControlPlaneSources
-    from .activity_fixture import FixtureTrust
     from .activity_state import InvocationJournal
     from .activity_worker import ActivityDependencies, ActivityWorker, ServerClock
     from .providers import ProviderSet
 
-    trust_file, journal_directory, descriptors = fixture
+    journal_directory, descriptors = setup.journal_directory, setup.descriptors
     clock = ServerClock()
     supervisor = RuntimeSupervisor(
         client,
@@ -72,12 +146,14 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
         shared = supervisor.activity_session()
         return None if shared is None else shared[:2]
 
+    # One journal holder per process: the action worker, when configured, shares it.
+    journal = InvocationJournal(journal_directory)
+
     def work():
-        transport = journal = None
+        transport = None
         try:
             transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
-            journal = InvocationJournal(journal_directory)
-            providers = ProviderSet(descriptors, test_mode=True)
+            providers = ProviderSet(descriptors, test_mode=setup.test_mode)
             worker = current = None
             idle = IDLE_MIN_S
             while not stop.is_set():
@@ -94,11 +170,12 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
                         client=activity_client,
                         records=sources,
                         values=sources,
-                        trust=FixtureTrust(trust_file),
+                        trust=setup.trust,
                         providers=providers,
                         journal=journal,
                         clock=clock,
                         context=sources,
+                        secrets=setup.secrets,
                     )
                     if worker is None:
                         worker = ActivityWorker(deps)
@@ -124,19 +201,24 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
             failed.append(error)
             stop.set()
         finally:
-            if journal is not None:
-                journal.close()
             if transport is not None:
                 transport.close()
 
-    thread = threading.Thread(target=work, name="activity-worker", daemon=True)
-    thread.start()
+    threads = [threading.Thread(target=work, name="activity-worker", daemon=True)]
+    threads[0].start()
     try:
+        if actions is not None:
+            threads.append(
+                _serve_actions(config, setup, actions, journal, clock, supervisor, stop, failed)
+            )
         result = supervisor.run(stop)
     finally:
         stop.set()
-        thread.join(timeout=60)
-    if thread.is_alive():
+        for thread in threads:
+            thread.join(timeout=60)
+        if not any(thread.is_alive() for thread in threads):
+            journal.close()
+    if any(thread.is_alive() for thread in threads):
         return 3
     if failed:
         error = failed[0]
@@ -160,25 +242,53 @@ def _execute(argv, clients) -> int:
         config = RuntimeConfig.model_validate_json(
             read_private_file(Path(args.config).absolute(), 65536)
         )
-        fixture = None
+        fixture = actions = None
         if args.command == "activity-worker":
-            if config.mode != "test" or args.activity_config is None:
-                # No real read or model provider is installed in this distribution.
-                # Report unavailable rather than claim work it cannot do; only test
-                # mode runs the packaged synthetic providers (Task 13).
+            if args.activity_config is None:
+                # Without an operator's provider configuration nothing can be served.
                 raise FleetError("authority_unavailable")
-            from .activity_fixture import worker_config
-
+            raw = read_private_file(Path(args.activity_config).absolute(), 1048576)
             try:
-                fixture = worker_config(
-                    read_private_file(Path(args.activity_config).absolute(), 262144)
-                )
-            except (ValueError, TypeError):
+                operator_format = "secrets" in json.loads(raw)
+                if config.mode == "test" and operator_format:
+                    # A test-mode runtime may run real providers against local stand-ins.
+                    from .provider_config import worker_config as operator_config
+
+                    fixture = operator_config(raw, test_mode=True)
+                elif config.mode == "test":
+                    # Otherwise test mode runs the packaged synthetic providers (Task 13),
+                    # and the synthetic target's write providers when it names them (E05).
+                    from .activity_fixture import FixtureTrust, worker_config
+                    from .provider_config import ActivitySetup
+
+                    data = json.loads(raw)
+                    if type(data) is dict and "actions" in data:
+                        from .action_fixture import worker_config as action_config
+
+                        actions = action_config(data.pop("actions"))
+                        raw = json.dumps(data).encode()
+                    trust_file, journal, descriptors = worker_config(raw)
+                    fixture = ActivitySetup(
+                        FixtureTrust(trust_file), journal, descriptors, None, True
+                    )
+                else:
+                    from .provider_config import worker_config as operator_config
+
+                    fixture = operator_config(raw)
+            except (ValueError, TypeError, KeyError):
                 raise FleetError("invalid_request") from None
-        # No executable connector is registered in this foundation. Operator
-        # declarations cannot invent installed capability; Task7 owns that catalog.
+        # No executable connector is installed outside test mode: an operator's
+        # declaration cannot invent installed capability. A test-mode runtime may
+        # report the synthetic connectors its action providers serve (E05), and its
+        # worker refuses to start reporting any connector none of them serves; no
+        # other command reports one.
         if config.observation.connectors:
-            raise FleetError("invalid_request")
+            if config.mode != "test" or args.command not in ("enroll", "activity-worker"):
+                raise FleetError("invalid_request")
+            if args.command == "activity-worker":
+                served = {d.connector for d in actions[1]} if actions is not None else set()
+                if not set(config.observation.connectors) <= served:
+                    raise FleetError("invalid_request")
         client = RuntimeClient(
             ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
         )
@@ -201,7 +311,9 @@ def _execute(argv, clients) -> int:
                         previous[sig] = signal.signal(sig, lambda signum, frame: stop.set())
                 try:
                     if fixture is not None:
-                        result = _serve_activities(config, client, store, fixture, stop)
+                        result = _serve_activities(
+                            config, client, store, fixture, stop, actions=actions
+                        )
                     else:
                         result = RuntimeSupervisor(
                             client,

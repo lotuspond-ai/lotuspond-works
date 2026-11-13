@@ -11,11 +11,18 @@ rollback leaves both the marker and the rows pending. Callers own the
 transaction; nothing here commits or calls the network.
 """
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
+from sqlalchemy.orm import aliased
 
 from .. import authority_gate
 from ..fleet.authority import database_now_ms
-from ..models import Execution, ExecutionOutbox, Workspace
+from ..models import (
+    Execution,
+    ExecutionAttempt,
+    ExecutionOutbox,
+    ExecutionStepInstance,
+    Workspace,
+)
 from .engine_contracts import WorkerIdentity
 from .errors import ExecutionError, execution_service
 
@@ -38,6 +45,50 @@ OUT_OF_TIME = "deadline_exceeded"
 def past_deadline(execution: Execution, now_ms: int) -> bool:
     """At its deadline, or retired by the scheduler as unable to meet it."""
     return now_ms >= execution.deadline_ms or execution.reason == OUT_OF_TIME
+
+
+# E05 decision 12: under a requested cancellation, a read-back of an uncertain write
+# still runs, because it contains an effect that may already exist. Nothing else of
+# a cancelling execution is reserved, delivered, claimed or renewed.
+READBACK_PATTERN = "%#reconcile"
+
+
+def containment_read(execution: Execution, occurrence_path: str) -> bool:
+    """A cancelling, still running execution's read-back of an uncertain write."""
+    return (
+        execution.requested_state == "cancelled"
+        and execution.state == "running"
+        and occurrence_path.endswith(READBACK_PATTERN[1:])
+    )
+
+
+def may_run(execution: Execution, occurrence_path: str) -> bool:
+    """Work of this execution may be reserved, delivered, claimed or renewed: running
+    is requested, or it is a containment read (`containment_read`)."""
+    return execution.requested_state == "running" or containment_read(execution, occurrence_path)
+
+
+def runs_clause(attempt_id):
+    """SQL for `may_run` over the attempt `attempt_id` names, joined to `Execution`."""
+    # Its own alias: correlated to the outer attempt ID, whichever table carries it.
+    inner = aliased(ExecutionAttempt)
+    readback = (
+        select(ExecutionStepInstance.id)
+        .join(inner, inner.step_instance_id == ExecutionStepInstance.id)
+        .where(
+            inner.id == attempt_id,
+            ExecutionStepInstance.occurrence_path.like(READBACK_PATTERN),
+        )
+        .exists()
+    )
+    return or_(
+        Execution.requested_state == "running",
+        and_(
+            Execution.requested_state == "cancelled",
+            Execution.state == "running",
+            readback,
+        ),
+    )
 
 
 def _held(db, execution):

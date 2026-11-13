@@ -91,6 +91,18 @@ GRANT UPDATE ON
   execution_activity_deliveries, execution_usage_reservations
   TO lotuspond_orchestrator;
 GRANT UPDATE (id) ON api_keys TO lotuspond_orchestrator;
+-- E05 (measured over Task 12's tier 1 action cases): intents, reviews, read-backs and
+-- outcomes; decisions, commands and receipts are read only.
+GRANT SELECT ON
+  execution_action_commands, execution_action_decisions, execution_action_intents,
+  execution_action_observations, execution_action_outcomes, execution_action_receipts,
+  execution_human_tasks
+  TO lotuspond_orchestrator;
+GRANT INSERT ON
+  execution_action_intents, execution_action_observations, execution_action_outcomes,
+  execution_human_tasks
+  TO lotuspond_orchestrator;
+GRANT UPDATE ON execution_action_intents, execution_human_tasks TO lotuspond_orchestrator;
 ```
 
 ```sql
@@ -124,6 +136,17 @@ GRANT UPDATE (workspace_id) ON memberships TO lotuspond_sweeper;  -- no id colum
 -- Paths tier 1 never ran: scheduling authorizes an API key's execution under lock.
 GRANT SELECT ON api_keys, mfa_factors TO lotuspond_sweeper;
 GRANT UPDATE (id) ON api_keys TO lotuspond_sweeper;
+-- E05 (measured over Task 12's tier 1 action cases): task escalation and expiry,
+-- action lease lapses and unclaimed command expiry (E03's admission row with them).
+GRANT SELECT ON
+  execution_action_commands, execution_action_intents, execution_human_tasks,
+  runtime_command_admissions
+  TO lotuspond_sweeper;
+GRANT INSERT ON execution_requests TO lotuspond_sweeper;
+GRANT UPDATE ON
+  execution_action_commands, execution_action_intents, execution_human_tasks,
+  runtime_command_admissions
+  TO lotuspond_sweeper;
 ```
 
 Nothing else is granted: no `DELETE` or `TRUNCATE` on any table, and no `UPDATE` on `execution_events`. The schema name is this installation's.
@@ -267,7 +290,7 @@ Each of these must be qualified before production use. Every goal remains in the
 - The actual customer workflow.
 - Real read and model providers. This release ships synthetic test-mode providers only, and the runtime's activity worker refuses outside test mode.
 - Signed commercial issuance: entitlement, price and tenant-policy providers.
-- E05/E06 effects and verified outcomes.
+- E06 verified business outcomes. E05's reviewed writes are qualified only against a synthetic target; see [the actions and human tasks guide](actions-human-tasks.md).
 - The agent-first E07 builder and operations experience. No UI or engine-console parity is implied.
 - Enterprise, topology, security, capacity and service-level evidence. Hosted CI has not run this work, and tier 3 measured an application-level serialization limit far below the planning target.
 - Production wiring of the API's single in-flight authority lookup (Task 12's recorded limitation).

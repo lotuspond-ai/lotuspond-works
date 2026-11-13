@@ -35,6 +35,70 @@ FLOWS = (
     if (_COPIED / "control-flow").exists()
     else _HERE.parent / "fixtures/control-flow"
 )
+# E05: the synthetic target connector, its policies and the reviewed-action package.
+ACTIONS = (
+    _COPIED / "actions" if (_COPIED / "actions").exists() else _HERE.parent / "fixtures/actions"
+)
+
+
+def action_document(name, actions=ACTIONS):
+    return json.loads((actions / f"{name}.json").read_text())
+
+
+def _flag(value):
+    return {"kind": "literal", "schema": {"kind": "boolean"}, "value": value}
+
+
+def decisive_connector(actions=ACTIONS):
+    """The synthetic target connector with rules that can tell present from absent.
+
+    The shared fixture's `present` rules test only that `/present` exists, so every
+    read-back matches both its effect and absence rules (undecidable) and any read
+    verifies. Here `/present` true means the effect is present, false that it is absent.
+    """
+    connector = action_document("connector", actions)
+    submit = next(o for o in connector["definition"]["operations"] if o["id"] == "submit")
+    submit["reconciliation"]["effect_rules"] = [
+        {"op": "eq", "readback_pointer": "/present", "expected": _flag(True)}
+    ]
+    submit["reconciliation"]["absence_rules"] = [
+        {"op": "eq", "readback_pointer": "/present", "expected": _flag(False)}
+    ]
+    # ACT-10: the same write without a target key: never resent, absent only once its
+    # stop is confirmed.
+    once = json.loads(json.dumps(submit))
+    once.update(id="submit_once", idempotency="none")
+    connector["definition"]["operations"].append(once)
+    return connector
+
+
+def decisive(package, connector):
+    """Pin `connector` and verify that `/present` is true, not merely that it exists."""
+    from lotuspond_sdk.executable.catalog import catalog_document_digest
+
+    package["connectors"][0]["ref"]["sha256"] = catalog_document_digest(connector)
+    for step in package["body"]["steps"]:
+        if step["kind"] == "outcome_verification":
+            step["rules"] = [{"op": "eq", "readback_pointer": "/present", "expected": _flag(True)}]
+    return package
+
+
+def reviewed_action(record_id, *, max_attempts=1, actions=ACTIONS):
+    """E05's reviewed-action package (intent, review, dispatch, verify) for one record,
+    over `decisive_connector()`."""
+    package = json.loads(
+        json.dumps(action_document("reviewed_action", actions)).replace("R-100", record_id)
+    )
+    package = decisive(package, decisive_connector(actions))
+    package["package_id"] = f"e05-{record_id.lower()}"
+    # Room for read-backs on a loaded host: each attempt is charged at least its
+    # reservation, so five read-backs and a verification outrun the fixture's 100 s.
+    package["limits"].update(active_seconds=1000, elapsed_seconds=3600)
+    retry = package["body"]["steps"][2]["retry"]
+    retry["max_attempts"] = max_attempts
+    if max_attempts > 1:
+        retry["retry_codes"] = ["timeout_before_dispatch"]
+    return package
 
 
 def catalog_documents(contracts=CONTRACTS):
@@ -101,10 +165,39 @@ def _code(response):
 class Operator:
     """Sets up one world's tenant and drives it as its owner."""
 
-    def __init__(self, world, processes, *, contracts=CONTRACTS, flows=FLOWS):
+    def __init__(
+        self,
+        world,
+        processes,
+        *,
+        contracts=CONTRACTS,
+        flows=FLOWS,
+        connector=None,
+        destinations=(),
+        secret_binding=None,
+        actions=None,
+    ):
         self.world, self.processes = world, processes
         self.contracts, self.flows = contracts, flows
         self.documents = catalog_documents(contracts)
+        # The connector each pool's connection and each runtime serve; its read
+        # operations are the connection's. The catalog fixture connector by default.
+        self.connector = connector or self.documents[0]
+        self.read_operations = tuple(
+            op["id"] for op in self.connector["definition"]["operations"] if op["effect"] == "read"
+        )
+        # The connection's destinations and, when named, one bound secret reference.
+        self.destinations, self.secret_binding = tuple(destinations), secret_binding
+        # E05: the synthetic target connector's pin, when runtimes serve its writes. The
+        # connection then admits its writes too, and enrollments admit the connector.
+        self.actions = actions
+        # A deployment refuses a connection allowing a write its package never makes:
+        # the connection allows the reads and the write(s) named (`submit` by default).
+        self.operations = (
+            self.read_operations + tuple(actions.get("writes", ("submit",)))
+            if actions is not None
+            else self.read_operations
+        )
         self.published = {}
         self.deployed = {}
 
@@ -194,7 +287,9 @@ class Operator:
             ConnectionConfig,
             ConnectorPin,
             DataHandling,
+            DestinationRule,
             PoolPolicy,
+            SecretPin,
             canonical_connection_json,
             canonical_pool_json,
             connection_digest,
@@ -204,7 +299,7 @@ class Operator:
 
         from lotuspond import models
 
-        connector = self.documents[0]
+        connector = self.connector
         pin = ConnectorPin(
             name=connector["name"],
             version=connector["version"],
@@ -215,12 +310,20 @@ class Operator:
             db.add(models.RuntimePool(**scope, id=pool_id, name="Conformance", status="active"))
             connection = models.Connection(**scope, name="read-only", status="active")
             db.add(connection)
+            secrets = ()
+            if self.secret_binding is not None:
+                secret = models.SecretReference(
+                    **scope, binding_id=self.secret_binding, version=1, status="active"
+                )
+                db.add(secret)
+                db.flush()
+                secrets = (SecretPin(reference_id=secret.id, version=1),)
             db.flush()
             config = ConnectionConfig(
                 connector=pin,
-                operations=("read",),
-                destinations=(),
-                secrets=(),
+                operations=self.operations,
+                destinations=tuple(DestinationRule.model_validate(d) for d in self.destinations),
+                secrets=secrets,
                 # The longest call a connection allows (E03's 30 s bound), so a
                 # lease renewal (every 20 s) happens inside one read.
                 data_handling=DataHandling(timeout_ms=30000),
@@ -234,6 +337,16 @@ class Operator:
                     config_digest=connection_digest(config),
                 )
             )
+            for secret_pin in secrets:
+                db.add(
+                    models.ConnectionVersionSecret(
+                        **scope,
+                        connection_id=connection.id,
+                        connection_version=1,
+                        secret_reference_id=secret_pin.reference_id,
+                        secret_version=secret_pin.version,
+                    )
+                )
             policy = PoolPolicy(
                 connectors=(pin,),
                 platforms=("linux",),
@@ -257,22 +370,31 @@ class Operator:
                 )
             )
             db.get(models.RuntimePool, pool_id).current_policy_version = 1
-            connection_view = {"id": connection.id, "version": 1}
+            connection_view = {
+                "id": connection.id,
+                "version": 1,
+                "secrets": [p.model_dump(mode="json") for p in secrets],
+            }
         return pool_id, connection_view
 
     def enrollment(self, customer) -> str:
         issued = customer.call(
             "POST",
             f"/runtime-pools/{customer.pool_id}/enrollments",
-            {"platform": "linux", "connectors": []},
+            {
+                "platform": "linux",
+                "connectors": [] if self.actions is None else [self.actions["pin"]],
+            },
         )
         return issued["token"]
 
-    def runtime(self, customer, name, *, model_document=None, start=True, **scripts):
-        connector, model = self.documents[0], model_document or self.model_document()
+    def runtime(self, customer, name, *, model_document=None, start=True, activity=None, **scripts):
+        connector, model = self.connector, model_document or self.model_document()
         return self.processes.start_runtime(
             name,
             self.enrollment(customer),
+            operations=list(self.read_operations),
+            activity=activity,
             dependencies={
                 "connector": catalog_ref(connector),
                 "installed": {
@@ -283,8 +405,67 @@ class Operator:
                 "model": catalog_ref(model),
             },
             start=start,
+            actions=None if self.actions is None else self._runtime_actions(),
             **scripts,
         )
+
+    def _runtime_actions(self):
+        definition = self.connector["definition"]
+        return {
+            "pin": self.actions["pin"],
+            "connector_ref": catalog_ref(self.connector),
+            "read_operations": [
+                op["id"] for op in definition["operations"] if op["effect"] == "read"
+            ],
+            "write_operations": {
+                op["id"]: op["idempotency"]
+                for op in definition["operations"]
+                if op["effect"] == "write"
+            },
+        }
+
+    def member(self, customer, role, person=None):
+        """Another person in the customer's workspace with this role: a real session
+        from registration, made a member by operator provisioning. `person` (an earlier
+        result) joins this workspace instead of registering again: the API rate-limits
+        sign-ups."""
+        from sqlalchemy import select
+        from sqlalchemy.orm import Session
+
+        from lotuspond import models
+
+        if person is not None:
+            cookie, user_id = person.headers["cookie"], person.user_id
+            with Session(self.world.engine) as db, db.begin():
+                db.add(
+                    models.Membership(workspace_id=customer.workspace, user_id=user_id, role=role)
+                )
+            joined = Customer(
+                self.base_url,
+                self.processes.ca,
+                self.world.config["origin"],
+                cookie,
+                customer.workspace,
+                customer.prefix,
+            )
+            joined.user_id, joined.role, joined.scope = user_id, role, customer.scope
+            return joined
+        cookie, own = self.register(workspace=f"{role} home")
+        with Session(self.world.engine) as db, db.begin():
+            user_id = db.scalar(
+                select(models.Membership.user_id).where(models.Membership.workspace_id == own)
+            )
+            db.add(models.Membership(workspace_id=customer.workspace, user_id=user_id, role=role))
+        person = Customer(
+            self.base_url,
+            self.processes.ca,
+            self.world.config["origin"],
+            cookie,
+            customer.workspace,
+            customer.prefix,
+        )
+        person.user_id, person.role, person.scope = user_id, role, customer.scope
+        return person
 
     def demand(self, active_ms):
         """Each attempt's reserved active time from now on (a lease never outlives it)."""
@@ -485,17 +666,15 @@ class Operator:
     def open_wait(self, customer, execution_id, path, seconds=60):
         """The open wait at this occurrence path, once it can be signalled.
 
-        Progression opens a wait in one commit and the capacity step retains it in
-        the next. In between the wait is listed open, but an execution still
-        `pending` refuses its signal with 403 (a recorded Task 13 finding), so this
-        also waits for the execution to leave `pending`.
+        E04 finding 2 (fixed in E05 Task 5): a wait is listed open only once the
+        capacity step has retained it, and only then can it be signalled; a signal
+        before that is a 409 to retry. So a listed open wait is ready.
         """
         deadline = time.monotonic() + seconds
         while True:
             for item in self.waits(customer, execution_id):
                 if item["occurrence_path"] == path and item["state"] == "open":
-                    if self.execution(customer, execution_id)["state"] != "pending":
-                        return item
+                    return item
             if time.monotonic() > deadline:
                 raise AssertionError(f"no open wait at {path}")
             time.sleep(0.2)

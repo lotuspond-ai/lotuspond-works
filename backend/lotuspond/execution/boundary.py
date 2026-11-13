@@ -29,7 +29,8 @@ from .errors import ExecutionError
 # Customer execution paths under a project environment.
 CUSTOMER_PATH = re.compile(
     r"/api/v1/projects/[^/]+/environments/[^/]+/"
-    r"(?:executable-packages|deployments|executions|context-sources|artifacts)(?:/|$)"
+    r"(?:executable-packages|deployments|executions|context-sources|artifacts|human-tasks)"
+    r"(?:/|$)"
 )
 MAX_BODY_BYTES = 1048576
 MAX_HEADER_BYTES = 32768
@@ -46,6 +47,7 @@ SINGLE_HEADERS = (
 STATUS = {
     "invalid_request": 400,
     "unsupported_step": 400,
+    "unsupported_operation": 400,
     "unsupported_policy": 400,
     "command_rejected": 400,
     "unauthenticated": 401,
@@ -69,6 +71,9 @@ KEY_SCOPE = {
     "signal": "execution_signal",
     "human_form": "write",
     "reconcile": "write",
+    # E05: a claim, decision or submission is a person's; no key holds it, whatever
+    # its scopes, so `authorize_execution` refuses every key before any lock.
+    "review": "write",
 }
 
 
@@ -85,8 +90,26 @@ def error_response(code: str) -> JSONResponse:
 
 
 @dataclass(frozen=True)
+class ActionServices:
+    """E05's human task, action projection, resolution and runtime action services."""
+
+    tasks: object
+    projection: object
+    resolutions: object
+    dispatcher: object
+
+    def __post_init__(self):
+        if any(getattr(self, item.name) is None for item in fields(self)):
+            raise ValueError("Every action service is required")
+
+
+@dataclass(frozen=True)
 class ExecutionServices:
-    """Constructed execution services the API calls; none is built from settings."""
+    """Constructed execution services the API calls; none is built from settings.
+
+    `actions` is optional: production composes only interpreter v1 today, so its
+    action routes refuse with 503 `authority_unavailable` (`action_services`).
+    """
 
     artifacts: object
     artifact_policy: object
@@ -99,10 +122,13 @@ class ExecutionServices:
     leases: object
     reconciliation: object
     context: object
+    actions: ActionServices | None = None
 
     def __post_init__(self):
-        if any(getattr(self, item.name) is None for item in fields(self)):
+        if any(getattr(self, item.name) is None for item in fields(self) if item.name != "actions"):
             raise ValueError("Every execution service is required")
+        if self.actions is not None and type(self.actions) is not ActionServices:
+            raise ValueError("Invalid action services")
 
 
 class ExecutionRequestBoundary:
@@ -211,6 +237,13 @@ class ExecutionRoute(APIRoute):
 
 def services(request: Request) -> ExecutionServices:
     configured = request.app.state.execution_services
+    if configured is None:
+        raise ExecutionError("authority_unavailable")
+    return configured
+
+
+def action_services(request: Request) -> ActionServices:
+    configured = services(request).actions
     if configured is None:
         raise ExecutionError("authority_unavailable")
     return configured

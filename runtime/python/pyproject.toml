@@ -1,16 +1,21 @@
 [project]
 name = "lotuspond-runtime"
-version = "0.2.0"
+version = "0.3.0"
 description = "Strict fleet identity and connection contracts for the Lotuspond Linux runtime"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["lotuspond-sdk==0.3.0", "pydantic>=2.12,<3", "rfc8785==0.1.4"]
 
+[project.optional-dependencies]
+# The Anthropic model provider (`anthropic-messages`); without it that provider is
+# unavailable and every other part of the runtime is unchanged.
+anthropic = ["anthropic==2.3.0"]
+
 [project.scripts]
 lotuspond-runtime = "lotuspond_runtime.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=9,<10", "ruff>=0.14,<1"]
+dev = ["anthropic==2.3.0", "pytest>=9,<10", "ruff>=0.14,<1"]
 
 [build-system]
 requires = ["hatchling"]

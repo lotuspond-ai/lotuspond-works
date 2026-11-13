@@ -10,6 +10,12 @@ runtimes from the conformance harness, and admits through the public API:
   then the base rate again for `--recovery-minutes`, spread over `--environments`
   environments. A case reads twice, each read with log-normal latency (mean 1 s, p95
   3 s); 20 % of cases instead wait on a form that stays open.
+- `--reviewed-share` of cases (20 % by default, E05) instead carry one reviewed write:
+  a harness reviewer decides it through the public task routes after a log-normal
+  delay (mean `--review-mean-s`, 30 s), and the synthetic target adds log-normal
+  latency (mean 1 s) to each write and read. Recorded: decision-to-claim latency,
+  retained waits, a task's opening to its listing (retention), read-backs and target
+  writes per intent (at most one), and lookup waits by service call.
 - then `--waiting` executions into form waits; every worker and runtime is killed
   and restarted, and the time to resume, the claim latency after it, the sweep
   duration and the worker memory are recorded.
@@ -73,6 +79,9 @@ REFUSED_PORTS = {5432, 55439}
 # exp(N(mu, sigma)) seconds: mean 1 s, p95 3 s; capped inside the read's 30 s bound.
 LATENCY = {"mu": -0.4348, "sigma": 0.9325, "cap_s": 20}
 FORM_SHARE = 0.2
+# E05: the synthetic target's latency, mean 1 s like the reads'.
+TARGET_LATENCY = LATENCY
+REVIEW_TIMEOUT_MS = 600000  # the reviewed-action package's review timeout
 # Every runtime enrolls from this one host. The API allows a peer 20 enrollment
 # exchanges a minute, and the harness's reruns of a refused enrollment count too.
 ENROLLMENTS_PER_MINUTE = 15
@@ -622,7 +631,8 @@ def admit(customer, revision):
             break
         time.sleep(0.1)
     code = drivers._code(response) if response.status_code >= 400 else None
-    return response.status_code, code, tries, time.monotonic() - started
+    admitted = response.json().get("id") if response.status_code == 201 else None
+    return response.status_code, code, tries, time.monotonic() - started, admitted
 
 
 def reads_then_form():
@@ -656,6 +666,9 @@ class Load:
         self.keeper_lock, self.keeper_stop = threading.Lock(), threading.Event()
         self.keeper_thread = None
         self.phase = "setup"
+        # E05 reviewed writes: one action environment per tenant, its revision and a
+        # reviewer; the target; and each reviewed case's observed times.
+        self.reviewed, self.reviews, self.target = [], [], None
         self.cursor_log = Path(os.environ[CURSOR_LOG])
         self.cycle_log = Path(os.environ[CYCLE_LOG])
         self.lookup_log = Path(os.environ[LOOKUP_LOG])
@@ -685,11 +698,20 @@ class Load:
                 capacity=5,
             )
             self.tenants.append((customer, reads, form))
-            for r in range(self.args.runtimes_per_environment):
+
+            def paced():
                 if len(enrolled) >= ENROLLMENTS_PER_MINUTE:
                     window = enrolled[-ENROLLMENTS_PER_MINUTE] + 61 - time.monotonic()
                     time.sleep(max(0.0, window))
                 enrolled.append(time.monotonic())
+
+            if self.args.reviewed_share > 0:
+                environment, revision, reviewer = self.action_environment(n, customer)
+                self.reviewed.append((environment, revision, reviewer))
+                paced()  # its action runtime counts toward the enrollment allowance
+                self.runtimes.append(self.actions.runtime(environment, f"act-{n}"))
+            for r in range(self.args.runtimes_per_environment):
+                paced()
                 self.runtimes.append(
                     operator.runtime(
                         customer,
@@ -824,11 +846,109 @@ class Load:
             with self.lock:
                 self.samples.append(observed)
 
+    def action_environment(self, n, customer):
+        """E05: another environment of this tenant whose pool reaches the target."""
+        if self.target is None:
+            self.target = self.processes.start_target()
+            worlds.write_private(
+                self.target["directory"] / "latency.json", TARGET_LATENCY
+            )
+            self.actions = drivers.Operator(
+                self.world,
+                self.processes,
+                connector=drivers.decisive_connector(),
+                destinations=[
+                    {
+                        "host": "localhost",
+                        "port": self.target["port"],
+                        "path_prefix": "/t",
+                    }
+                ],
+                actions={"pin": self.world.state("actions")["connectors"][0]["pin"]},
+            )
+        environment = self.actions.environment(
+            self.world.engine, customer, label=f"Act {n}"
+        )
+        revision = self.actions.deploy(
+            environment,
+            f"reviewed-load-{n}",
+            package=drivers.reviewed_action(f"R-load-{n}", max_attempts=3),
+            dependencies=[self.actions.connector, drivers.action_document("reviewers")],
+            capacity=5,
+        )
+        # One reviewer, registered once (sign-ups are rate-limited), in every tenant.
+        first = self.reviewed[0][2] if self.reviewed else None
+        reviewer = self.actions.member(environment, "admin", person=first)
+        return environment, revision, reviewer
+
+    def review(self, environment, reviewer, execution_id, admitted):
+        """A harness reviewer: list, wait log-normally (mean 30 s), claim and allow."""
+        record = {"execution_id": execution_id, "admitted": admitted}
+        try:
+            deadline = time.monotonic() + 300
+            task = None
+            while task is None and time.monotonic() < deadline:
+                items = reviewer.call("GET", "/human-tasks")["items"]
+                task = next(
+                    (t for t in items if t["execution_id"] == execution_id), None
+                )
+                if task is None:
+                    time.sleep(1)
+            if task is None:
+                record["error"] = "never_listed"
+                return
+            record["listed"] = time.time()
+            # The task opened at its deadline less the review timeout (database time).
+            record["listed_after_open_s"] = round(
+                record["listed"] - (task["deadline_ms"] - REVIEW_TIMEOUT_MS) / 1000, 3
+            )
+            mean = self.args.review_mean_s
+            time.sleep(min(random.lognormvariate(math.log(mean) - 0.5, 1.0), 4 * mean))
+            path = f"/human-tasks/{task['id']}"
+            reviewer.call("POST", path + "/claim", {})
+            reviewer.call(
+                "POST",
+                path + "/decision",
+                {
+                    "decision_id": f"d-{uuid4().hex[:8]}",
+                    "intent_sha256": task["intent_sha256"],
+                    "decision": "allow",
+                },
+            )
+            record["decided"] = time.time()
+        except Exception as error:  # noqa: BLE001 - recorded in the report, never raised
+            record["error"] = type(error).__name__
+        finally:
+            with self.lock:
+                self.reviews.append(record)
+
     def one(self, n, form_share, phase, arrived):
         """One admission, timed from its scheduled arrival (open loop) and as sent."""
+        if self.reviewed and random.random() < self.args.reviewed_share:
+            environment, revision, reviewer = self.reviewed[n % len(self.reviewed)]
+            status, code, tries, seconds, execution_id = admit(environment, revision)
+            with self.lock:
+                self.admissions.append(
+                    {
+                        "phase": phase,
+                        "status": status,
+                        "code": code,
+                        "tries": tries,
+                        "s": time.monotonic() - arrived,
+                        "service_s": seconds,
+                        "reviewed": True,
+                    }
+                )
+            if status == 201 and execution_id:
+                threading.Thread(
+                    target=self.review,
+                    args=(environment, reviewer, execution_id, time.time()),
+                    daemon=True,
+                ).start()
+            return
         customer, reads, form = self.tenants[n % len(self.tenants)]
         revision = form if random.random() < form_share else reads
-        status, code, tries, seconds = admit(customer, revision)
+        status, code, tries, seconds, _ = admit(customer, revision)
         with self.lock:
             self.admissions.append(
                 {
@@ -1115,11 +1235,33 @@ def cursor_waits(path):
     }
 
 
-def lookup_waits(path):
-    """Provider lookups that waited for their slot (finding 3), by slot and role."""
+def lookup_waits(path, timeline=None):
+    """Provider lookups that waited for their slot (finding 3), by slot and role, and
+    (E05) by the service call that waited, per load phase."""
     entries = timing_log(path)
     keys = sorted({(item["slot"], item["role"]) for item in entries})
+    calls = sorted({str(item.get("call")) for item in entries})
+    by_call = {
+        phase: {
+            call: {
+                "waiting_callers": len(chosen),
+                "wait_ms": distribution([i["ms"] for i in chosen]),
+                "refused_after_the_bound": sum(1 for i in chosen if not i["acquired"]),
+            }
+            for call in calls
+            for chosen in [
+                [
+                    i
+                    for i in entries
+                    if str(i.get("call")) == call
+                    and window["start_ms"] <= i.get("at", 0) < window["end_ms"]
+                ]
+            ]
+        }
+        for phase, window in (timeline or {}).items()
+    }
     return {
+        "by_call_and_phase": by_call,
         "waiting_callers": len(entries),
         "wait_ms": distribution([item["ms"] for item in entries]),
         "refused_after_the_bound": sum(1 for item in entries if not item["acquired"]),
@@ -1134,6 +1276,81 @@ def lookup_waits(path):
             }
             for slot, role in keys
         },
+    }
+
+
+def reviewed_writes(load, world):
+    """E05: the reviewed cases' latencies, waits, read-backs and target writes."""
+    from lotuspond.execution.control import listed_wait_clause
+    from lotuspond.models import (
+        ExecutionActionCommand,
+        ExecutionActionDecision,
+        ExecutionAttempt,
+        ExecutionStepInstance,
+        ExecutionWait,
+    )
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+
+    ids = [r["execution_id"] for r in load.reviews]
+    with Session(world.engine) as db:
+        decided = dict(
+            db.execute(
+                select(
+                    ExecutionActionDecision.execution_id,
+                    ExecutionActionDecision.issued_at_ms,
+                ).where(ExecutionActionDecision.execution_id.in_(ids))
+            ).all()
+        )
+        claimed = {}
+        for execution_id, at in db.execute(
+            select(
+                ExecutionActionCommand.execution_id,
+                ExecutionActionCommand.claimed_at_ms,
+            )
+            .where(ExecutionActionCommand.execution_id.in_(ids))
+            .order_by(ExecutionActionCommand.claimed_at_ms)
+        ).all():
+            if at is not None:
+                claimed.setdefault(execution_id, at)
+        readbacks = db.scalar(
+            select(func.count())
+            .select_from(ExecutionAttempt)
+            .join(
+                ExecutionStepInstance,
+                ExecutionStepInstance.id == ExecutionAttempt.step_instance_id,
+            )
+            .where(
+                ExecutionAttempt.execution_id.in_(ids),
+                ExecutionStepInstance.occurrence_path.like("%#reconcile"),
+            )
+        )
+        retained = db.scalar(
+            select(func.count()).select_from(ExecutionWait).where(listed_wait_clause())
+        )
+    writes = {}
+    log = load.target["directory"] / "writes.jsonl"
+    for line in log.read_text().splitlines() if log.exists() else ():
+        key = json.loads(line)["idempotency_key"]
+        writes[key] = writes.get(key, 0) + 1
+    return {
+        "reviewed_cases": len(load.reviews),
+        "review_errors": sorted({r["error"] for r in load.reviews if "error" in r}),
+        "decision_to_claim_ms": distribution(
+            [claimed[e] - decided[e] for e in decided if e in claimed]
+        ),
+        "decided_never_claimed": sum(1 for e in decided if e not in claimed),
+        "task_open_to_listed_s": distribution(
+            [
+                r["listed_after_open_s"]
+                for r in load.reviews
+                if "listed_after_open_s" in r
+            ]
+        ),
+        "retained_waits_at_end": retained,
+        "readback_attempts": readbacks,
+        "target_writes": sum(writes.values()),
+        "max_writes_per_intent": max(writes.values(), default=0),
     }
 
 
@@ -1369,7 +1586,13 @@ def summarize(report, load, cluster, timeline, world):
     }
     report["revocation_probes"] = report["criteria"]["revocation_wait_bounded"]
     report["sweep_per_reservation"] = sweep_per_reservation(load.cycle_log)
-    report["lookup_slot_waits"] = lookup_waits(load.lookup_log)
+    report["lookup_slot_waits"] = lookup_waits(load.lookup_log, timeline)
+    if load.reviewed:
+        report["reviewed_writes"] = reviewed_writes(load, world)
+        report["criteria"]["at_most_one_target_write_per_intent"] = {
+            "max_writes_per_intent": report["reviewed_writes"]["max_writes_per_intent"],
+            "passed": report["reviewed_writes"]["max_writes_per_intent"] <= 1,
+        }
     report["service_calls"] = service_calls(load.call_log, timeline)
     report["deadlocks_logged"] = cluster.deadlocks_from_log()
     cycles = timing_log(load.cycle_log)
@@ -1409,6 +1632,15 @@ def main():
     parser.add_argument("--environments", type=int, default=8)
     parser.add_argument("--runtimes-per-environment", type=int, default=3)
     parser.add_argument("--waiting", type=int, default=10000)
+    parser.add_argument(
+        "--reviewed-share",
+        type=float,
+        default=0.2,
+        help="E05: cases with a reviewed write",
+    )
+    parser.add_argument(
+        "--review-mean-s", type=float, default=30.0, help="E05: mean reviewer delay"
+    )
     parser.add_argument("--sample-seconds", type=float, default=10.0)
     parser.add_argument(
         "--api-workers", type=int, default=1, help="API processes on one socket"
@@ -1477,6 +1709,9 @@ def main():
         cluster.start()
         report["cluster"] = {"image": IMAGE, "port": cluster.port}
         with worlds.owned(cluster.url, args.work.absolute() / "world") as world:
+            if args.reviewed_share > 0:
+                # E05: action authorities before any process starts.
+                worlds.actions_mode(world, drivers.decisive_connector())
             processes = Processes(
                 world, api_workers=args.api_workers, engine_cpus=args.engine_cpus
             )
@@ -1523,6 +1758,9 @@ def main():
                 report["process_cleanup"] = processes.close()
                 for customer, _, _ in load.tenants if load else ():
                     customer.close()
+                for environment, _, reviewer in load.reviewed if load else ():
+                    environment.close()
+                    reviewer.close()
         report["schema_dropped"] = True
     except BaseException as error:  # noqa: BLE001 - the report records the failure
         report["error"] = f"{type(error).__name__}: {str(error)[:300]}"

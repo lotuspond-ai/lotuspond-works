@@ -32,6 +32,7 @@ def journey(variant):
         ],
         "private_sentinels_found": [],
         "max_provider_calls_per_attempt": 1,
+        "max_target_writes_per_intent": 1,
         "cleanup_confirmed": True,
     }
 
@@ -69,6 +70,10 @@ class ReportVerifierTests(unittest.TestCase):
             ),
             "calls": lambda r: r["journeys"][1].update(
                 max_provider_calls_per_attempt=2
+            ),
+            "writes": lambda r: r["journeys"][0].update(max_target_writes_per_intent=2),
+            "uncounted writes": lambda r: r["journeys"][1].pop(
+                "max_target_writes_per_intent"
             ),
             "cleanup": lambda r: r.update(cleanup_receipt={"confirmed": False}),
             "journey cleanup": lambda r: r["journeys"][0].update(

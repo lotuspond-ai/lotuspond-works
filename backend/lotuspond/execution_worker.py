@@ -78,6 +78,10 @@ class ExecutionWorkerSettings(BaseSettings):
     lock_timeout_ms: Timeout = 15000
     idle_in_transaction_timeout_ms: Timeout = 15000
     shutdown_seconds: float = Field(default=20.0, gt=0, le=60)
+    # The operator authority directory and this installation's ID; without both the
+    # worker has no engine and refuses (`engine_unavailable`).
+    authority_dir: str | None = None
+    installation_id: OpaqueId | None = None
 
     @model_validator(mode="after")
     def bounded(self):
@@ -151,8 +155,25 @@ def _verify_session(database, settings):
 
 
 def production_engine(settings: ExecutionWorkerSettings):
-    """Production wiring requires the Task 8 interpreter and Task 11 sweeper/fence."""
-    raise WorkerRefused("engine_unavailable")
+    """The production engine over the operator's authority directory, or a refusal."""
+    if settings.authority_dir is None or settings.installation_id is None:
+        raise WorkerRefused("engine_unavailable")
+    from lotuspond.config import Settings
+    from lotuspond.execution.composition import compose
+    from lotuspond.execution.operator_authority import OperatorAuthorities
+    from lotuspond.security import RateLimiter
+
+    try:
+        authorities = OperatorAuthorities(settings.authority_dir, settings.installation_id)
+    except ValueError:
+        raise WorkerRefused("invalid_configuration") from None
+    return compose(
+        authorities,
+        engine=None,  # the worker passes its own sessions to every cycle
+        installation_id=settings.installation_id,
+        # The worker serves no route: an in-memory limiter that nothing consults.
+        limiter=RateLimiter(Settings(env="development", redis_url=None)),
+    ).execution_engine
 
 
 def _cycle(engine, sessions, worker, limit) -> bool:

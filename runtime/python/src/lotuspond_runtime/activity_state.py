@@ -16,6 +16,11 @@ invoked again. A `fenced` marker persists an unconfirmed provider cleanup across
 restarts until an operator removes it. A `declines` count keeps the worker's decline
 circuit breaker across workers and restarts. Entries hold identities and digests only,
 never values, prompts or secrets.
+
+Action writes (E05) keep `action` records under the same rules, named by their
+command: `action-<command id>.json`. They also hold the attempt, the lease revision
+and, once known, the report about to be sent (receipt identities, statuses and usage
+numbers, never response values).
 """
 
 from __future__ import annotations
@@ -33,7 +38,22 @@ from .state import private_directory
 
 PHASES = ("claimed", "started", "finished", "recorded", "abandoned")
 _ORDER = {"claimed": 0, "started": 1, "finished": 2, "recorded": 3, "abandoned": 3}
-_NAME = re.compile(r"attempt-[0-9a-f-]{36}\.json")
+KINDS = ("attempt", "action")
+_NAMES = {kind: re.compile(kind + r"-[0-9a-f-]{36}\.json") for kind in KINDS}
+_IDENTITY = (
+    "delivery_sha256",
+    "generation",
+    "result_sha256",
+    "outcome",
+    "group",
+    "boot",
+    "attempt",
+    "command_sha256",
+    "lease_revision",
+)
+# Fixed once written; everything else carries forward unless replaced.
+_FIXED = ("delivery_sha256", "generation", "command_sha256", "attempt")
+_CARRIED = ("outcome", "group", "boot", "lease_revision")
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _TEMP = ".journal-"
 _FENCE = "fenced"
@@ -85,20 +105,20 @@ class InvocationJournal:
         _regular(self._lock)
 
     @staticmethod
-    def _name(attempt_id):
-        if type(attempt_id) is not str or not _UUID.fullmatch(attempt_id):
+    def _name(attempt_id, kind="attempt"):
+        if type(attempt_id) is not str or not _UUID.fullmatch(attempt_id) or kind not in KINDS:
             raise FleetError("invalid_request")
-        return f"attempt-{attempt_id}.json"
+        return f"{kind}-{attempt_id}.json"
 
     def _open(self, name):
         return os.open(
             name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=self._directory
         )
 
-    def get(self, attempt_id: str) -> dict | None:
+    def get(self, attempt_id: str, *, kind="attempt") -> dict | None:
         """The attempt's entry, None when absent; an unreadable entry is ambiguous."""
         self._check()
-        name = self._name(attempt_id)
+        name = self._name(attempt_id, kind)
         try:
             fd = self._open(name)
         except FileNotFoundError:
@@ -162,7 +182,7 @@ class InvocationJournal:
             if fd >= 0:
                 os.close(fd)
 
-    def advance(self, attempt_id: str, phase: str, **identity) -> dict:
+    def advance(self, attempt_id: str, phase: str, *, kind="attempt", **identity) -> dict:
         """Move forward only; the delivery identity can never change once written.
 
         An unreadable entry may only be abandoned: it proves nothing, so it is
@@ -170,9 +190,9 @@ class InvocationJournal:
         """
         if phase not in PHASES:
             raise FleetError("invalid_request")
-        current = self.get(attempt_id)
+        current = self.get(attempt_id, kind=kind)
         entry = {"attempt_id": attempt_id, "phase": phase}
-        for key in ("delivery_sha256", "generation", "result_sha256", "outcome", "group", "boot"):
+        for key in _IDENTITY:
             if key in identity:
                 entry[key] = identity[key]
         if current is not None and current.get("unreadable"):
@@ -183,30 +203,36 @@ class InvocationJournal:
                 raise FleetError("conflict")
             if current["phase"] in ("recorded", "abandoned") and phase != current["phase"]:
                 raise FleetError("conflict")
-            for key in ("delivery_sha256", "generation"):
+            for key in _FIXED:
                 if key in current and entry.get(key, current[key]) != current[key]:
                     raise FleetError("conflict")
                 if key in current:
                     entry.setdefault(key, current[key])
-            for key in ("outcome", "group", "boot"):
+            for key in _CARRIED:
                 if key in current:
                     entry.setdefault(key, current[key])
         content = json.dumps(entry, sort_keys=True, separators=(",", ":")).encode("ascii")
         if len(content) > MAX_ENTRY:
             raise FleetError("input_limit")
-        self._write(self._name(attempt_id), content)
+        self._write(self._name(attempt_id, kind), content)
         return entry
 
-    def ambiguous(self) -> list[str]:
-        """Attempts that may have reached a provider without a recorded outcome."""
+    def entries(self, kind="attempt") -> list[dict]:
+        """Every entry of one kind, by name; an unreadable one reads as started."""
         self._check()
+        if kind not in KINDS:
+            raise FleetError("invalid_request")
         found = []
         for name in sorted(os.listdir(self._directory)):
-            if _NAME.fullmatch(name):
-                entry = self.get(name[len("attempt-") : -len(".json")])
-                if entry and entry["phase"] == "started":
-                    found.append(entry["attempt_id"])
+            if _NAMES[kind].fullmatch(name):
+                entry = self.get(name[len(kind) + 1 : -len(".json")], kind=kind)
+                if entry is not None:
+                    found.append(entry)
         return found
+
+    def ambiguous(self, kind="attempt") -> list[str]:
+        """Attempts that may have reached a provider without a recorded outcome."""
+        return [e["attempt_id"] for e in self.entries(kind) if e["phase"] == "started"]
 
     def fence(self):
         """Persist an unconfirmed provider cleanup; only an operator removes it."""

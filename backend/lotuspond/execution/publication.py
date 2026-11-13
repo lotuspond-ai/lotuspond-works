@@ -23,6 +23,7 @@ from pydantic import BeforeValidator, Field
 from ..fleet.authority import database_now_ms
 from ..models import ExecutableDependency, ExecutablePublication, FleetMutationRequest
 from . import memo
+from .action_policies import Closure, admit_closure, check_catalog_policy
 from .authorization import mark_replay, reauthorize, record, scoped
 from .contracts import Contract, PublicationRequest, PublicationView, array, canonical_value
 from .errors import ExecutionError, execution_service
@@ -135,49 +136,6 @@ def current_snapshot(db, snapshot):
         raise ExecutionError("trust_unavailable")
 
 
-def _unsupported(raw):
-    """Refuse future business effects at every nesting level before compilation."""
-
-    def body(value):
-        if not isinstance(value, dict) or not isinstance(value.get("steps"), list):
-            return
-        for step in value["steps"]:
-            if not isinstance(step, dict):
-                continue
-            kind = step.get("kind")
-            if kind in {"action_intent", "action_dispatch", "outcome_verification"} or (
-                kind == "human_task" and step.get("mode") == "review"
-            ):
-                raise ExecutionError("unsupported_step")
-            if step.get("escalation_policy_ref") is not None:
-                raise ExecutionError("unsupported_policy")
-            if kind == "decision":
-                body(step.get("then_body"))
-                body(step.get("else_body"))
-            elif kind == "iteration":
-                body(step.get("body"))
-            elif kind == "parallel":
-                for branch in step.get("branches", []):
-                    if isinstance(branch, dict):
-                        body(branch.get("body"))
-
-    if isinstance(raw, dict):
-        body(raw.get("body"))
-
-
-def _catalog_policy(document):
-    if document.kind == "policy":
-        definition = document.definition
-        # This is the one implemented E04 human assignment, not a dropped policy.
-        if (
-            definition.assignment != "workspace_admins"
-            or definition.escalation is not None
-            or definition.approval != "human"
-            or not definition.independent_review
-        ):
-            raise ExecutionError("unsupported_policy")
-
-
 def _trusted_workflow(raw, signature, snapshot):
     try:
         # The snapshot was fetched for this call; only the pure verdict is memoized.
@@ -197,7 +155,6 @@ def _read_publication(row, snapshot):
         raise ExecutionError("dependency_unavailable")
     try:
         raw = json.loads(row.canonical_package)
-        _unsupported(raw)
         if row.kind == "workflow":
             content = memo.package_bytes(raw)
             signature = json.loads(row.canonical_signature)
@@ -208,7 +165,7 @@ def _read_publication(row, snapshot):
         else:
             content = memo.catalog_bytes(raw)
             document = memo.catalog({"documents": [raw]}).documents[0]
-            _catalog_policy(document)
+            check_catalog_policy(document)
             name, version = document.name, document.version
             if row.kind != document.kind or row.package_sha256 not in snapshot.catalog:
                 raise ExecutionError("trust_unavailable")
@@ -280,6 +237,21 @@ def _check_dependency_links(db, scope, rows, sources):
                 raise ExecutionError("dependency_unavailable")
 
 
+def closure_of(root, rows, sources) -> Closure:
+    """The root package, its workflow packages and catalog documents by digest."""
+    return Closure(
+        packages=(
+            memo.package(root),
+            *(memo.package(sources[row.id]) for row in rows if row.kind == "workflow"),
+        ),
+        catalog={
+            row.package_sha256: memo.catalog({"documents": [sources[row.id]]}).documents[0]
+            for row in rows
+            if row.kind != "workflow"
+        },
+    )
+
+
 def _resolve(db, scope, root, rows, snapshot):
     """SDK resolves reachability/digest/cycles; normalized persisted closure must agree.
 
@@ -295,6 +267,8 @@ def _resolve(db, scope, root, rows, snapshot):
             [sources[row.id] for row in rows if row.kind != "workflow"],
         )
         _check_dependency_links(db, scope, rows, sources)
+        # E05's effect rules on the whole closure (publication, deployment, admission).
+        admit_closure(closure_of(root, rows, sources))
         return plan, sources, content
     except ExecutionError:
         raise
@@ -392,7 +366,6 @@ def publish_v2(
     actor = reauthorize(db, actor, "publish")
     try:
         request = PublicationRequest.model_validate(request)
-        _unsupported(request.package)
         snapshot = dependencies.current(db, actor.scope)
         root = request.package
         workflow = (
@@ -412,7 +385,7 @@ def publish_v2(
         else:
             content = canonical_catalog_document(root)
             document = validate_catalog({"documents": [root]}).documents[0]
-            _catalog_policy(document)
+            check_catalog_policy(document)
             if sha256(content).hexdigest() not in snapshot.catalog or request.signature is not None:
                 raise ExecutionError("trust_unavailable")
             # Catalog references have their own transitive model/read-tool closure.

@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 
 from .config import Settings
 from .database import engine_for
-from .execution.migration import migrate_execution_v14, migrate_execution_v15
+from .execution.migration import (
+    migrate_execution_v14,
+    migrate_execution_v15,
+    migrate_execution_v16,
+)
 from .fleet.migration import migrate_fleet_v13
 from .models import AuditEvent, Base, SchemaVersion, User
 from .schema_version import SCHEMA_VERSION
@@ -107,7 +111,7 @@ def migrate(settings: Settings):
                 raise ValueError("Unexpected schema state; no changes made")
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")
-            if versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
+            if versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}:
                 raise ValueError("Unexpected schema state; no changes made")
             current = versions[0]
             inspector = inspect(connection)
@@ -437,6 +441,10 @@ def migrate(settings: Settings):
                 connection.execute(SchemaVersion.__table__.update().values(version=14))
                 migrate_execution_v15(connection)
                 current = 15
+            if current == 15:
+                connection.execute(SchemaVersion.__table__.update().values(version=15))
+                migrate_execution_v16(connection)
+                current = 16
             connection.execute(SchemaVersion.__table__.update().values(version=current))
     finally:
         engine.dispose()

@@ -128,6 +128,11 @@ class DeploymentView(Contract):
     id: CanonicalUUID
     revision_id: CanonicalUUID | None
     status: Literal["enabled", "disabled", "revoked"]
+    # E05 (owner decision 3): `connector/operation` of each write that would dispatch
+    # without review. Listed on creation and in deployment detail.
+    unreviewed_operations: Annotated[
+        tuple[str, ...], BeforeValidator(array), Field(max_length=64)
+    ] = ()
 
 
 class ExecutionView(Contract):

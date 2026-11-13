@@ -1,0 +1,63 @@
+{
+ "binding_fields": {
+  "action_id": "00000000-0000-4000-8000-000000000005",
+  "approval_mode": "human",
+  "configuration_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "connector_artifact_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "connector_name": "synthetic-target",
+  "connector_version": "1.0.0",
+  "environment_id": "00000000-0000-4000-8000-000000000003",
+  "execution_deadline_ms": 1800086400000,
+  "execution_id": "00000000-0000-4000-8000-000000000004",
+  "expiry_seconds": 3600,
+  "independent_approval": true,
+  "input_sha256": "eaca23342e72e4e14f20729db7d8d45cedae7099f1a060636df4d929ed6d77c0",
+  "installation_id": "fixture-installation",
+  "issued_at_ms": 1800000000000,
+  "operation": "submit",
+  "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "policy_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "project_id": "00000000-0000-4000-8000-000000000002",
+  "recovery_epoch": 1,
+  "requester_id": "00000000-0000-4000-8000-000000000006",
+  "step_id": "intent",
+  "target_sha256": "1ed920890df5183566108eb5e0f8672654bda98219224f53b442133de4e58c11",
+  "workspace_id": "00000000-0000-4000-8000-000000000001"
+ },
+ "command": {
+  "attempt_deadline_ms": 1800000150000,
+  "command_id": "00000000-0000-4000-8000-000000000009",
+  "fencing_generation": 1,
+  "now_ms": 1800000120000,
+  "replay_id": "00000000-0000-4000-8000-000000000010",
+  "worker_id": "00000000-0000-4000-8000-000000000011"
+ },
+ "decision": {
+  "actor_id": "00000000-0000-4000-8000-000000000008",
+  "actor_kind": "human",
+  "decision": "allow",
+  "decision_id": "00000000-0000-4000-8000-000000000007",
+  "expires_at_ms": 1800003600000,
+  "issued_at_ms": 1800000060000,
+  "policy_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+ },
+ "expected": {
+  "binding_bytes": 1245,
+  "command_bytes": 783,
+  "command_expires_at_ms": 1800000150000,
+  "command_sha256": "678f627d787de45584199fd8aa5906fabb4a85c205b93c9b79c698d59431a9e9",
+  "decision_bytes": 419,
+  "decision_sha256": "c4887c888df1e8b9e797445071416630bd39db8fcb3298433c1ddbffef9b4ad6",
+  "input_sha256": "eaca23342e72e4e14f20729db7d8d45cedae7099f1a060636df4d929ed6d77c0",
+  "intent_sha256": "2c976a61d1ad7c137b0e453862854019b3c47c575f9e6f07303efd6fb0da81bd",
+  "target_sha256": "1ed920890df5183566108eb5e0f8672654bda98219224f53b442133de4e58c11"
+ },
+ "input": {
+  "amount_minor": 75000,
+  "currency": "EUR"
+ },
+ "target": {
+  "record_id": "R-100"
+ }
+}

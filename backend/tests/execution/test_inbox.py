@@ -13,6 +13,7 @@ from lotuspond.models import (
     Execution,
     ExecutionInbox,
     ExecutionOutbox,
+    ExecutionRequest,
     ExecutionStepInstance,
     ExecutionWait,
     new_id,
@@ -105,6 +106,9 @@ def signals(admission, request):
         db.add(wait)
         db.flush()
         h.wait_id = wait.id
+    # The capacity step retains the wait before it is listed or signalled (finding 2).
+    with Session(h.engine) as db, db.begin():
+        h.budgets.retain_wait(db, h.actor, h.wait_id)
     h.inbox = InboxService(budgets=h.budgets, artifacts=h.store, artifact_policy=h.policy)
     h.signal = SignalRequest(
         signal_id="signal",
@@ -500,3 +504,55 @@ def test_a_signal_takes_no_installation_cursor(signals):
     assert receipt == accept(h)  # durable: an equal replay returns the same receipt
     with Session(h.engine) as db:
         assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 1
+
+
+def unretain(h):
+    """Model the moment between opening a wait and the capacity step retaining it."""
+    with Session(h.engine) as db, db.begin():
+        db.execute(
+            ExecutionRequest.__table__.delete().where(
+                ExecutionRequest.request_key == "capacity.wait:" + h.wait_id
+            )
+        )
+
+
+def test_unretained_wait_refuses_signal_with_conflict(signals):
+    """E04 finding 2 (owner decision, 2 November 2026): a 409 to retry, never a 403."""
+    h = signals
+    unretain(h)
+    with pytest.raises(ExecutionError) as error:
+        accept(h)
+    unretained_signal_error = error.value
+    assert unretained_signal_error.code == "conflict"
+    with Session(h.engine) as db:
+        assert db.scalar(select(func.count()).select_from(ExecutionInbox)) == 0
+    # Once retained, the same signal_id is accepted.
+    with Session(h.engine) as db, db.begin():
+        h.budgets.retain_wait(db, h.actor, h.wait_id)
+    retried_signal_receipt = accept(h)
+    assert retried_signal_receipt.status == "pending"
+
+
+@pytest.mark.parametrize("state", ["paused", "running", "pending"])
+def test_paused_or_resumed_before_retention_refuses_with_conflict(signals, state):
+    h = signals
+    unretain(h)
+    with Session(h.engine) as db, db.begin():
+        db.get(Execution, h.execution_id).state = state
+    with pytest.raises(ExecutionError, match="conflict"):
+        accept(h)
+
+
+@pytest.mark.parametrize("closed", ["cancelled", "closed_wait", "expired_wait"])
+def test_unretained_but_closed_still_refuses_forbidden(signals, closed):
+    h = signals
+    unretain(h)
+    with Session(h.engine) as db, db.begin():
+        if closed == "cancelled":
+            db.get(Execution, h.execution_id).requested_state = "cancelled"
+        elif closed == "closed_wait":
+            db.get(ExecutionWait, h.wait_id).state = "expired"
+        else:
+            db.get(ExecutionWait, h.wait_id).deadline_ms = database_now_ms(db) - 1
+    with pytest.raises(ExecutionError, match="forbidden"):
+        accept(h)

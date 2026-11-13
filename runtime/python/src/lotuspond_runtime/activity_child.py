@@ -53,6 +53,7 @@ def _descriptor(raw) -> ProviderDescriptor:
         operations=frozenset(raw["operations"]),
         test_only=raw["test_only"] is True,
         script=raw["script"],
+        settings=raw.get("settings"),
         connector=None
         if raw["connector"] is None
         else ConnectorPin.model_validate(raw["connector"]),
@@ -80,9 +81,29 @@ def _provider(descriptor, secrets, test_mode):
         from . import activity_fixture
 
         implementation = activity_fixture.PROVIDERS.get(descriptor.provider_id)
+        if implementation is None and descriptor.effect == "read":
+            # The synthetic target's read operation (E05 read-back and verification).
+            from . import action_fixture
+
+            implementation = action_fixture.READ_PROVIDERS.get(descriptor.provider_id)
         if implementation is not None:
             return implementation(descriptor, secrets)
-    return None  # no real provider is installed in this distribution
+        return None
+    if descriptor.test_only:
+        return None
+    # Real providers, by fixed identifier only. One whose optional dependency is not
+    # installed is unavailable, never a fallback to anything else.
+    if descriptor.provider_id == "https-json" and descriptor.effect == "read":
+        from .https_json import HttpsJsonReadProvider
+
+        return HttpsJsonReadProvider(descriptor, secrets, test_mode=test_mode is True)
+    if descriptor.provider_id == "anthropic-messages" and descriptor.effect == "model":
+        try:
+            from .anthropic_messages import AnthropicModelProvider
+        except ImportError:
+            return None
+        return AnthropicModelProvider(descriptor, secrets)
+    return None
 
 
 def _failure(failure: ActivityFailure) -> dict:
@@ -123,6 +144,7 @@ def _answer(request):
                 "output": reply.output,
                 "tool_calls": calls,
                 "usage": reply.usage.model_dump(mode="json"),
+                "continuation": reply.continuation,
             }
         }
     except ActivityFailure as failure:

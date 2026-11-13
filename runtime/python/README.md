@@ -1,15 +1,15 @@
 # LotusPond Works runtime contracts
 
-`lotuspond-runtime==0.2.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
+`lotuspond-runtime==0.3.0` requires Python >=3.13 and `lotuspond-sdk==0.3.0`.
 This independently installable distribution supplies pure, strict fleet models
 and domain-separated connection/pool content identities. Importing the package
 or `lotuspond_runtime.protocol` performs no I/O or runtime initialization.
 
 The package supplies a private control client, direct TLS transport, durable C/P
 credential store and Linux lifecycle supervisor. It grants no execution authority.
-Runtime 0.2.0 adds the durable-execution activity worker (below); production read
-and model providers, connector and secret-provider integration remain separate
-work, so outside test mode it refuses rather than claim work. Observations are declarations,
+Runtime 0.2.0 adds the durable-execution activity worker and 0.3.0 its reviewed
+action writes (below); outside test mode it runs only an operator's configured read
+and model providers, and no write provider exists. Observations are declarations,
 not attestations. Empty allowlists grant no capability. Destination-free operations
 still require explicit catalog permission. Later runtime admission must recheck
 current scoped authority, identity, pool/connection status and destination policy.
@@ -266,13 +266,56 @@ private invocation journal records each call before it starts and is the evidenc
 for reconciliation after a lost lease or stop; an uncertain call is never retried
 blindly. A delivery the runtime cannot verify is declined, never run.
 
-This distribution installs no production read or model provider. Outside
-`mode: "test"`, or without `--activity-config`, the command exits 3 (`unavailable`)
-before doing anything. In test mode `--activity-config <private file>` names a
-reread trust file, a journal directory and up to eight synthetic `fixture-read` or
-`fixture-model` descriptors: they exist only to qualify the protocol (Task 13's
-conformance suite and installed acceptance), never to run customer work. While
+Without `--activity-config` the command exits 3 (`unavailable`) before doing
+anything. The configuration is one private file in one of two forms:
+
+- **Operator form (any mode):** a reread activity-trust file, a journal directory,
+  the mounted secret root and mapping with the pinned secret each binding serves, and
+  up to eight real providers (`provider_config.py`). `https-json` is the generic
+  connector's read side: its installed artifact is a routes document whose canonical
+  SHA-256 must equal the connector pin, and each read is one HTTPS GET through
+  `DestinationTransport` with the connection's one secret as a bearer token.
+  `anthropic-messages` is one model round on the Anthropic Messages API (install the
+  `anthropic` extra): its settings carry the pinned model document and configuration
+  (model ID, effort, price table), checked against the pin; the HTTP client takes no
+  proxy from the environment, follows no redirect and never retries. Loopback
+  destinations are allowed only for a test-mode runtime. These providers are tested
+  locally against a stand-in and an API double, not against a live system.
+- **Fixture form (test mode only):** up to eight synthetic `fixture-read` or
+  `fixture-model` descriptors, which exist only to qualify the protocol (Task 13's
+  conformance suite and installed acceptance), never to run customer work. While
 idle the worker polls again after 0.2 s, backing off to 1 s.
+
+## Reviewed actions (runtime 0.3.0)
+
+Runtime 0.3.0 adds the runtime side of reviewed actions (E05) to the same
+`activity-worker`: an action thread that polls for signed write commands addressed
+to its session. Nothing in a command is trusted until its exact signed bytes verify
+under current, separately provisioned command trust and name this runtime. After the
+claim, the worker checks the command against the records the control plane serves
+only to the lease holder, and checks the installed connector pin, the operation's
+write effect, the destination and the secret pins against its own provider.
+
+- **One write, journaled.** The private journal records `claimed`, then `started`
+  durably before any connector code runs, then the report about to be sent. A
+  restarted worker never invokes a journaled write again: it reports `started` as
+  `stopped_unknown` and `claimed`-only as `not_started`, as historical evidence.
+- **Leases.** A command is claimed under a 60 s lease renewed every 20 s from the
+  worker's own thread. A write that has started is never cancelled by its lease; its
+  outcome is reported only while the lease holds, and otherwise the control plane
+  reads the target back.
+- **Providers.** Each write runs in a fresh supervised child (E04's supervision),
+  selected by the exact connector pin and a declared write operation. The idempotency
+  key is the intent's `action_id`, sent only when the operation declares
+  `target_key` idempotency.
+- **Test mode only.** The only write providers are the synthetic target's
+  (`synthetic-target-write`, with `synthetic-target-read` for read-backs), selected
+  by the fixture form's `actions` section (`{"trust_file", "providers"}`). A test-mode
+  runtime may report the connector they serve in its observation ceiling, and its
+  worker refuses to start reporting one they don't. Outside test mode no write
+  provider exists, a synthetic one answers `unavailable` without reaching anything,
+  and a runtime reporting any connector is refused. The `https-json` write side is not
+  built.
 
 Operator bootstrap and qualification are documented in
 [`runtime-foundation.md`](../../docs-site/docs/runtime-foundation.md) and the
