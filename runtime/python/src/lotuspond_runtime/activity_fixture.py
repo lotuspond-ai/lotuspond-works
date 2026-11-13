@@ -183,9 +183,12 @@ def worker_config(raw: bytes):
         }:
             raise ValueError("Invalid provider")
         provider_id = item.get("provider_id")
-        if provider_id not in PROVIDERS:
+        # The synthetic target's read operation serves E05 read-backs and verification.
+        from .action_fixture import READ_PROVIDERS
+
+        if provider_id not in PROVIDERS and provider_id not in READ_PROVIDERS:
             raise ValueError("Unknown synthetic provider")
-        read = provider_id == "fixture-read"
+        read = provider_id == "fixture-read" or provider_id in READ_PROVIDERS
         operations = item.get("operations", [])
         if type(operations) is not list or any(type(name) is not str for name in operations):
             raise ValueError("Invalid operations")

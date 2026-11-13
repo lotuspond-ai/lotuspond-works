@@ -133,3 +133,32 @@ Metadata includes server `id`, UTC `created_at`, authenticated `workspace_id`, `
 Current admission identifiers are `lotuspond.workflow-package.validator.v1.1` and `lotuspond.workflow-package.canonical-json.v1`. The canonicalizer uses fully validated values with defaults, sorted object keys, UTF-8, compact JSON separators, finite numbers and preserved array order. These names permanently describe the stored content's admission, not execution compatibility. Future validator revisions must use a new server identifier and preserve existing stored bytes/identifiers.
 
 Pagination orders by descending `(created_at,id)`, so equal timestamps retain stable identity ordering. Cursors bind workspace and project; they confer no authority. New publications do not change the older rows reached by an existing cursor.
+
+## Reviewed actions and human tasks (E05)
+
+Every route is under `/api/v1/projects/{project_id}/environments/{environment_id}`, with E04's execution conventions: strict JSON bodies, keyset pages (`limit`, `after_id`; the response carries `next_after_id`), browser origin and MFA checks, and errors as `{error, message}` with fixed codes. Without a command key provider every route below answers 503 `authority_unavailable`, and only interpreter v1 runs.
+
+**Human tasks.** A task is listed only once its execution's wait is retained; before that its reads answer `not_found` and its mutations `conflict`.
+
+| Route | Who | Notes |
+| --- | --- | --- |
+| `GET /human-tasks` | `read` | Open tasks: `id`, `execution_id`, `kind` (`review`, `form`), `state`, `deadline_ms`, `escalated`, `escalate_at_ms`, `claim` (`none`, `caller`, `other`), `claim_expires_at_ms`, `intent_sha256` |
+| `GET /human-tasks/{id}` | `read` | One task, same shape |
+| `GET /human-tasks/{id}/proposal` | a person with `read` | The exact connector, operation, policy, target and input under review. `Cache-Control: no-store`; audited without its values. API keys are refused |
+| `POST /human-tasks/{id}/claim`, `/release` | a person, `review` | Empty body; idempotent by state. A claim lasts 15 minutes, never past the task's deadline; an owner or admin may release another person's claim |
+| `POST /human-tasks/{id}/decision` | a person, `review` | `{decision_id, intent_sha256, decision: "allow" \| "deny"}`. A digest other than the intent's is 409 `conflict`; with independent approval the requester is refused |
+| `POST /human-tasks/{id}/submission` | a person, `review` | `{submission_id, payload}` for a `form` task |
+
+API keys, runtimes, viewers and platform administrators never claim, decide or submit, whatever a key's scopes. A decision and a submission carry their own identity, so neither needs an `Idempotency-Key`; an equal retry is replayed and not audited again.
+
+**Actions.** The projection is metadata only, never a proposal's values.
+
+| Route | Who | Notes |
+| --- | --- | --- |
+| `GET /executions/{id}/actions` | `read` | `action_id`, `step_id`, `occurrence_path`, `intent_sha256`, `authorization`, `effect`, `outcome` |
+| `GET /executions/{id}/actions/{action_id}` | `read` | One action |
+| `POST /executions/{id}/actions/{action_id}/resolution` | owner or admin, by session | `{resolution_id, kind, evidence}`; `kind` is `readback`, `compute_stopped`, `effect_present` (citing an artifact already recorded for this intent) or `close_unknown`. Never resends |
+
+`authorization` is one of `proposed`, `awaiting_review`, `approved`, `denied`, `review_expired`, `expired`, `withdrawn`, `superseded`; `effect` one of `not_dispatched`, `dispatching`, `accepted`, `observed`, `unknown`, `absent`; `outcome` one of `unknown`, `verified`, `not_verified`. An execution that fails on an action names the cause in its `reason`: `approval_denied`, `review_expired`, `approval_expired`, `approval_revoked`, `binding_refused`, `not_applied`, `outcome_not_verified`, `outcome_unknown` or `recovery_epoch_changed`.
+
+**Runtime action routes** (`/api/v1/runtime/actions/…`: `poll`, `records`, `claim`, `renew`, `receipts`, `stops`, `{attempt_id}/values`) serve only an enrolled runtime's own session, under E03's command trust. A receipt or stop of a write already claimed is recorded even if its initiator has since lost `execute`; integrity, epoch, recipient, expiry and connection still decide. Operations: `docs/operations/actions-human-tasks.md`.

@@ -40,6 +40,7 @@ MAX_STEPS = 64
 MAX_TOOLS = 64
 MAX_CONTEXT = 64
 MAX_PROPOSALS = 16
+MAX_CONTINUATION = 262144  # one round's provider record, in worker memory only
 _LIMIT = 2**53 - 1
 
 
@@ -130,7 +131,10 @@ def _reply(raw, usage) -> ModelReply:
         if type(proposed) is not list or len(proposed) > MAX_PROPOSALS:
             raise ValueError
         calls = tuple(ToolProposal(item["name"], item["arguments"]) for item in proposed)
-        return ModelReply(raw.get("output"), calls, usage)
+        continuation = raw.get("continuation")
+        if continuation is not None and len(rfc8785.dumps(continuation)) > MAX_CONTINUATION:
+            raise ValueError
+        return ModelReply(raw.get("output"), calls, usage, continuation)
     except Exception:
         raise ActivityFailure("invalid_output") from None
 
@@ -439,6 +443,9 @@ def _run(request: AgentRequest, deps, keeper, children) -> ProviderResult:
             # checked by the caller. The root attempt itself called no provider: its
             # own usage is zero, each round and tool reported usage on its own child.
             return ProviderResult(reply.output, zero(deps))
+        if reply.continuation is not None:
+            # The model's own record of this round, for its next round only.
+            transcript.append({"model": reply.continuation})
         # Every proposal is checked, and its provider selected, before any of them runs.
         checked = []
         for proposal in reply.tool_calls:

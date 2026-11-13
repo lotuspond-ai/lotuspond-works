@@ -1,0 +1,238 @@
+{
+  "_note": "Synthetic scenarios. model_rounds script the synthetic model in test mode only; a real model is scored against expected in milestone 5.",
+  "scenarios": [
+    {
+      "id": "clean-match",
+      "description": "Totals and quantities agree; no model and no person.",
+      "input": {
+        "invoice_id": "INV-1001"
+      },
+      "expected": {
+        "status": "matched",
+        "exception_class": "none",
+        "resolution": "none",
+        "amount": "0.00"
+      }
+    },
+    {
+      "id": "justified-price",
+      "description": "Price above PO, explained by the contract's price change; clerk accepts.",
+      "input": {
+        "invoice_id": "INV-1002"
+      },
+      "expected": {
+        "status": "clerk_decided",
+        "exception_class": "price",
+        "resolution": "no_action",
+        "amount": "0.00",
+        "clerk_decision": "accept_variance"
+      },
+      "model_rounds": [
+        {
+          "tool_calls": [
+            {
+              "name": "ap-standin-get_supplier_contract",
+              "arguments": {
+                "target": {
+                  "supplier_id": "SUP-BOLT"
+                },
+                "input": null
+              }
+            }
+          ]
+        },
+        {
+          "output": {
+            "exception_class": "price",
+            "resolution": "no_action",
+            "amount": "0.00",
+            "reasons": [
+              {
+                "text": "The contract raised BOLT-M8 from 0.38 to 0.42 on 2026-10-01, which the invoice bills.",
+                "tool": "ap-standin-get_supplier_contract",
+                "field": "price_change_terms"
+              }
+            ]
+          }
+        }
+      ],
+      "clerk_form": {
+        "decision": "accept_variance",
+        "comment": "Contract clause 4.2 price change."
+      }
+    },
+    {
+      "id": "overcharge",
+      "description": "Unit price above contract; credit note for the difference.",
+      "input": {
+        "invoice_id": "INV-1003"
+      },
+      "expected": {
+        "status": "credit_requested",
+        "exception_class": "price",
+        "resolution": "request_credit_note",
+        "amount": "60.00"
+      },
+      "model_rounds": [
+        {
+          "tool_calls": [
+            {
+              "name": "ap-standin-get_supplier_contract",
+              "arguments": {
+                "target": {
+                  "supplier_id": "SUP-ACME"
+                },
+                "input": null
+              }
+            },
+            {
+              "name": "ap-standin-list_credit_notes",
+              "arguments": {
+                "target": {
+                  "supplier_id": "SUP-ACME"
+                },
+                "input": null
+              }
+            }
+          ]
+        },
+        {
+          "output": {
+            "exception_class": "price",
+            "resolution": "request_credit_note",
+            "amount": "60.00",
+            "reasons": [
+              {
+                "text": "Contract price for TONER-K is 62.00; the invoice bills 68.00 for 10 units.",
+                "tool": "ap-standin-get_supplier_contract",
+                "field": "prices"
+              },
+              {
+                "text": "No credit note has been issued for this difference.",
+                "tool": "ap-standin-list_credit_notes",
+                "field": "credit_notes"
+              }
+            ]
+          }
+        }
+      ],
+      "clerk_form": {
+        "decision": "manual_follow_up",
+        "comment": "Prefix run: the credit-note action needs E05."
+      }
+    },
+    {
+      "id": "short-receipt",
+      "description": "Invoiced 100, received 80; hold the unreceived part.",
+      "input": {
+        "invoice_id": "INV-1004"
+      },
+      "expected": {
+        "status": "held",
+        "exception_class": "quantity",
+        "resolution": "hold",
+        "amount": "90.00"
+      },
+      "model_rounds": [
+        {
+          "output": {
+            "exception_class": "quantity",
+            "resolution": "hold",
+            "amount": "90.00",
+            "reasons": [
+              {
+                "text": "100 units invoiced but 80 received; 20 units at 4.50 are unreceived.",
+                "tool": "input",
+                "field": "receipt.received_quantity"
+              }
+            ]
+          }
+        }
+      ],
+      "clerk_form": {
+        "decision": "manual_follow_up",
+        "comment": "Prefix run: the hold action needs E05."
+      }
+    },
+    {
+      "id": "missing-receipt",
+      "description": "Nothing received yet; hold the whole invoice.",
+      "input": {
+        "invoice_id": "INV-1005"
+      },
+      "expected": {
+        "status": "held",
+        "exception_class": "missing_receipt",
+        "resolution": "hold",
+        "amount": "210.00"
+      },
+      "model_rounds": [
+        {
+          "output": {
+            "exception_class": "missing_receipt",
+            "resolution": "hold",
+            "amount": "210.00",
+            "reasons": [
+              {
+                "text": "No goods receipt exists for PO-5005.",
+                "tool": "input",
+                "field": "receipt.receipts"
+              }
+            ]
+          }
+        }
+      ],
+      "clerk_form": {
+        "decision": "manual_follow_up",
+        "comment": "Prefix run: the hold action needs E05."
+      }
+    },
+    {
+      "id": "duplicate",
+      "description": "Same lines as posted INV-0990 on the same PO; hold.",
+      "input": {
+        "invoice_id": "INV-1006"
+      },
+      "expected": {
+        "status": "held",
+        "exception_class": "duplicate",
+        "resolution": "hold",
+        "amount": "450.00"
+      },
+      "model_rounds": [
+        {
+          "tool_calls": [
+            {
+              "name": "ap-standin-list_supplier_invoices",
+              "arguments": {
+                "target": {
+                  "supplier_id": "SUP-ACME",
+                  "po_number": "PO-5006"
+                },
+                "input": null
+              }
+            }
+          ]
+        },
+        {
+          "output": {
+            "exception_class": "duplicate",
+            "resolution": "hold",
+            "amount": "450.00",
+            "reasons": [
+              {
+                "text": "INV-0990, already posted, bills the same 100 PAPER-A4 against PO-5006.",
+                "tool": "ap-standin-list_supplier_invoices",
+                "field": "invoices"
+              }
+            ]
+          }
+        }
+      ],
+      "clerk_form": {
+        "decision": "manual_follow_up",
+        "comment": "Prefix run: the hold action needs E05."
+      }
+    }
+  ]
+}

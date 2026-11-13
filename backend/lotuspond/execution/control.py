@@ -42,26 +42,31 @@ from hashlib import sha256
 
 from lotuspond_runtime.protocol import CanonicalUUID
 from pydantic import TypeAdapter
-from sqlalchemy import literal, select
+from sqlalchemy import literal, or_, select
 
+from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
+    ExecutionActionCommand,
     ExecutionActivityDelivery,
     ExecutionAttempt,
+    ExecutionCapacity,
     ExecutionControlRequest,
     ExecutionDeploymentRevision,
     ExecutionEvent,
     ExecutionOutbox,
     ExecutionReconciliationObservation,
     ExecutionRequest,
+    ExecutionStepInstance,
     ExecutionUsageReservation,
     ExecutionWait,
+    Workspace,
 )
 from .activity_records import initiator, scope_of
 from .admission import execution_view
 from .artifacts import ArtifactPolicy
-from .authorization import lock, mark_replay, reauthorize, record, scoped
+from .authorization import lock, mark_replay, reauthorize, record, scoped, share
 from .budgets import liability
 from .contracts import ControlRequest, ExecutionView, canonical_value
 from .deployments import execution_gates, load_deployment
@@ -74,17 +79,39 @@ from .recovery import restored
 TARGET = {"pause": "paused", "resume": "running", "cancel": "cancelled"}
 
 
-def _retained_open_wait(db, execution) -> bool:
-    retained = (
+def retained_clause():
+    """The one retention predicate (E04 finding 2): the wait's capacity record exists.
+
+    Releasing a wait adds a separate `capacity.wait-release:` record and keeps this
+    one, so a wait once listed stays listed.
+    """
+    return (
         select(ExecutionRequest.id)
         .where(
-            ExecutionRequest.workspace_id == execution.workspace_id,
-            ExecutionRequest.project_id == execution.project_id,
-            ExecutionRequest.environment_id == execution.environment_id,
+            ExecutionRequest.workspace_id == ExecutionWait.workspace_id,
+            ExecutionRequest.project_id == ExecutionWait.project_id,
+            ExecutionRequest.environment_id == ExecutionWait.environment_id,
             ExecutionRequest.request_key == literal("capacity.wait:") + ExecutionWait.id,
         )
         .exists()
     )
+
+
+def wait_retained(db, wait) -> bool:
+    return bool(
+        db.scalar(
+            select(ExecutionWait.id).where(ExecutionWait.id == wait.id).where(retained_clause())
+        )
+    )
+
+
+def listed_wait_clause():
+    """Waits a listing shows: every non-open wait, and an open one once retained."""
+    return or_(ExecutionWait.state != "open", retained_clause())
+
+
+def _retained_open_wait(db, execution) -> bool:
+    retained = retained_clause()
     return bool(
         db.scalar(
             scoped(ExecutionWait, scope_of(execution))
@@ -103,15 +130,18 @@ def resumed_state(db, execution) -> str:
 
 
 def _delivered(db, scope, attempt) -> bool:
-    """Whether the rows hold any delivery of this attempt, under any epoch."""
-    return (
-        db.scalar(
-            scoped(ExecutionActivityDelivery, scope)
-            .where(ExecutionActivityDelivery.attempt_id == attempt.id)
-            .limit(1)
-        )
-        is not None
-    )
+    """Whether the rows hold any delivery of this attempt, under any epoch: an
+    activity delivery, or (E05) an action command."""
+    for model in (ExecutionActivityDelivery, ExecutionActionCommand):
+        if db.scalar(scoped(model, scope).where(model.attempt_id == attempt.id).limit(1)):
+            return True
+    return False
+
+
+def _write(db, scope, attempt) -> bool:
+    """An action's command attempt (E05): only a read-back settles it, never a release."""
+    step = record(db, ExecutionStepInstance, scope, attempt.step_instance_id)
+    return attempt.parent_attempt_id is None and step.occurrence_path.endswith("#dispatch")
 
 
 def observe_control(db, execution, event) -> bool:
@@ -298,6 +328,11 @@ class ControlService:
         epoch = self._fence(db)
         actor = reauthorize(db, actor, "reconcile")
         scope = actor.scope
+        # The workspace, then capacity, before the execution (Task 5's order): an
+        # action write the release confirms stopped frees its compute slot.
+        authority_gate.workspace(db, scope.workspace_id)
+        share(db, select(Workspace).where(Workspace.id == scope.workspace_id))
+        lock(db, scoped(ExecutionCapacity, scope))
         execution = record(db, Execution, scope, execution_id, locked=True)
         if restored(execution, epoch):
             raise ExecutionError("conflict")  # the restore hold comes first
@@ -317,7 +352,7 @@ class ControlService:
                 .with_for_update()
             )
         )
-        released = []
+        released, writes = [], []
         for attempt in attempts:
             reservation = lock(
                 db,
@@ -331,7 +366,20 @@ class ControlService:
                     ExecutionReconciliationObservation.code == "compute_stopped",
                 )
             )
-            if held and stopped is None and not _delivered(db, scope, attempt):
+            delivered = _delivered(db, scope, attempt)
+            if _write(db, scope, attempt):
+                # E05 decision 13: an action write is never reserved or delivered again,
+                # nor failed here. It stays uncertain and progression reads it back
+                # under the current epoch; one a runtime received must have stopped.
+                if delivered and (
+                    reservation is None
+                    or reservation.compute_stopped_at_ms is None
+                    or stopped is None
+                ):
+                    raise ExecutionError("conflict")
+                writes.append((attempt, reservation, held and not delivered))
+                continue
+            if held and stopped is None and not delivered:
                 released.append((attempt, reservation))  # in no runtime's journal
                 continue
             if reservation is None or reservation.compute_stopped_at_ms is None or stopped is None:
@@ -339,12 +387,33 @@ class ControlService:
                 raise ExecutionError("conflict")
         now = database_now_ms(db)
         ended = []
+        for attempt, reservation, undelivered in writes:
+            if (
+                undelivered
+                and reservation is not None
+                and reservation.compute_stopped_at_ms is None
+            ):
+                # In no runtime's journal and never commanded in these rows: nothing
+                # runs it, so its slot is freed; its liability stays uncertain.
+                observation = ExecutionReconciliationObservation(
+                    **scope.model_dump(),
+                    execution_id=execution.id,
+                    attempt_id=attempt.id,
+                    source_id="reconciliation",
+                    observation_id="released-undelivered",
+                    digest=sha256(b"released-undelivered:" + attempt.id.encode()).hexdigest(),
+                    code="compute_stopped",
+                    observed_at_ms=now,
+                )
+                db.add(observation)
+                db.flush()
+                self.budgets.confirm_stopped(db, attempt.id, observation.id)
         for attempt, reservation in released:
             attempt.state = "reserved"
             if reservation is not None and reservation.state == "uncertain":
                 reservation.state = "reserved"
             ended.append(("attempt_reserved", attempt.id, "released"))
-        returned = {attempt.id for attempt, _ in released}
+        returned = {attempt.id for attempt, _ in released} | {a.id for a, _, _ in writes}
         attempts = [attempt for attempt in attempts if attempt.id not in returned]
         for attempt in attempts:
             if keep_interrupted(self.artifacts, db, scope, attempt):

@@ -1,0 +1,254 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "literal",
+   "schema": {
+    "kind": "null"
+   },
+   "value": null
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "kind": "null"
+   }
+  },
+  "steps": [
+   {
+    "approval": "human",
+    "connector_ref": "store",
+    "expiry_seconds": 3600,
+    "id": "intent",
+    "independent_review": true,
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "fields": [
+       {
+        "name": "amount_minor",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 1000000000000,
+         "min": 0
+        }
+       },
+       {
+        "name": "currency",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 128
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "value": {
+      "amount_minor": 75000,
+      "currency": "EUR"
+     }
+    },
+    "kind": "action_intent",
+    "operation": "submit",
+    "policy_ref": "reviewers",
+    "target": {
+     "kind": "literal",
+     "schema": {
+      "fields": [
+       {
+        "name": "record_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 128
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "value": {
+      "record_id": "R-100"
+     }
+    }
+   },
+   {
+    "assignment_policy_ref": "reviewers",
+    "id": "review",
+    "intent": {
+     "kind": "ref",
+     "pointer": "",
+     "source": {
+      "id": "intent",
+      "kind": "step"
+     }
+    },
+    "kind": "human_task",
+    "mode": "review",
+    "timeout_seconds": 600
+   },
+   {
+    "decision": {
+     "kind": "ref",
+     "pointer": "",
+     "source": {
+      "id": "review",
+      "kind": "step"
+     }
+    },
+    "id": "dispatch",
+    "intent": {
+     "kind": "ref",
+     "pointer": "",
+     "source": {
+      "id": "intent",
+      "kind": "step"
+     }
+    },
+    "kind": "action_dispatch",
+    "retry": {
+     "backoff_seconds": 0,
+     "max_attempts": 1,
+     "retry_codes": [],
+     "timeout_seconds": 30
+    }
+   },
+   {
+    "connector_ref": "store",
+    "id": "verify",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "fields": [
+       {
+        "name": "amount_minor",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 1000000000000,
+         "min": 0
+        }
+       },
+       {
+        "name": "currency",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 128
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "value": {
+      "amount_minor": 75000,
+      "currency": "EUR"
+     }
+    },
+    "kind": "outcome_verification",
+    "read_operation": "lookup",
+    "receipt": {
+     "kind": "ref",
+     "pointer": "",
+     "source": {
+      "id": "dispatch",
+      "kind": "step"
+     }
+    },
+    "rule_id": "observed",
+    "rules": [
+     {
+      "op": "present",
+      "readback_pointer": "/present"
+     }
+    ],
+    "target": {
+     "kind": "literal",
+     "schema": {
+      "fields": [
+       {
+        "name": "record_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 128
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "value": {
+      "record_id": "R-100"
+     }
+    },
+    "version": "1"
+   }
+  ]
+ },
+ "connectors": [
+  {
+   "id": "store",
+   "ref": {
+    "kind": "connector",
+    "name": "synthetic-target",
+    "sha256": "668a0a05b1ee17d95227c5cc4bdce654d6b5d35318925c0f4e9060e716c35e28",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "kind": "null"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 100,
+  "elapsed_seconds": 1000,
+  "max_cost_microusd": 100000,
+  "max_input_tokens": 1000,
+  "max_output_tokens": 1000,
+  "max_steps": 100,
+  "retained_waits": 10
+ },
+ "models": [],
+ "name": "Synthetic only",
+ "output_schema": {
+  "kind": "null"
+ },
+ "package_id": "e05-reviewed-action",
+ "policies": [
+  {
+   "id": "reviewers",
+   "ref": {
+    "kind": "policy",
+    "name": "reviewers",
+    "sha256": "be16026fb8f3feb90db0a2ad8b281a15d0dfce2e9d7f3d04ab816e265fcada39",
+    "version": "1.0.0"
+   }
+  }
+ ],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [],
+ "subworkflows": [],
+ "version": "1.0.0"
+}

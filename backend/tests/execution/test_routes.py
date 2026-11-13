@@ -389,3 +389,63 @@ def test_openapi_names_production_executions_and_waits(api):
         for operation in methods.values()
         for segment in [operation["operationId"]]
     )
+
+
+def test_waits_listing_shows_open_waits_once_retained(api):
+    """E04 finding 2: an open wait is listed only once retained, over keyset pages."""
+    from lotuspond.fleet.authority import database_now_ms
+    from lotuspond.models import ExecutionRequest, ExecutionStepInstance, ExecutionWait
+
+    h = api
+    revision = h.deploy("waits", "waits.policy")
+    execution_id = post(h, "/executions", start_body(revision), h.owner, "w-r").json()["id"]
+    h.run()
+    retained = wait_of(h, execution_id, "pause").id  # retained by the capacity step
+    unretained = []
+    with Session(h.engine) as db, db.begin():
+        scope = {
+            k: getattr(db.get(ExecutionWait, retained), k)
+            for k in ("workspace_id", "project_id", "environment_id")
+        }
+        for n in range(3):
+            step = ExecutionStepInstance(
+                **scope, execution_id=execution_id, node_id="pause", occurrence_path=f"x{n}"
+            )
+            db.add(step)
+            db.flush()
+            wait = ExecutionWait(
+                **scope,
+                execution_id=execution_id,
+                step_instance_id=step.id,
+                wait_key=f"x{n}",
+                deadline_ms=database_now_ms(db) + 60000,
+            )
+            db.add(wait)
+            db.flush()
+            unretained.append(wait.id)
+
+    def listed():
+        ids, after = [], None
+        while True:
+            query = "?limit=1" + (f"&after_id={after}" if after else "")
+            page = get(h, f"/executions/{execution_id}/waits{query}", h.owner).json()
+            ids += [item["id"] for item in page["items"]]
+            after = page["next_after_id"]
+            if after is None:
+                return ids
+
+    listed_wait_ids = listed()
+    assert retained in listed_wait_ids
+    for unretained_wait_id in unretained:
+        assert unretained_wait_id not in listed_wait_ids
+    # Retaining one lists it; a released wait stays listed (its record stays).
+    with Session(h.engine) as db, db.begin():
+        db.add(
+            ExecutionRequest(
+                **scope,
+                execution_id=execution_id,
+                request_key="capacity.wait:" + unretained[1],
+                digest="a" * 64,
+            )
+        )
+    assert set(listed()) == {retained, unretained[1]}

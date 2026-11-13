@@ -294,15 +294,18 @@ def activity_config(tmp_path, **changes):
 
 
 def test_activity_worker_runs_synthetic_providers_only_in_test_mode(tmp_path, capsys):
-    """Task 13: test mode runs the packaged synthetic providers; nothing else does."""
+    """Task 13: only test mode runs the packaged synthetic providers. Other modes accept
+    only an operator's real-provider configuration (`provider_config`), so a synthetic
+    one is refused there as invalid, and no configuration at all is unavailable."""
     module = cli_module()
     activity = str(activity_config(tmp_path))
-    # Production and development modes install no provider, whatever is configured.
     for mode in ("production", "development"):
         config = str(config_file(tmp_path, mode=mode))
         assert (
-            module.main(["activity-worker", "--config", config, "--activity-config", activity]) == 3
+            module.main(["activity-worker", "--config", config, "--activity-config", activity]) == 2
         )
+        assert capsys.readouterr().err.strip() == "invalid_input"
+        assert module.main(["activity-worker", "--config", config]) == 3
         assert capsys.readouterr().err.strip() == "unavailable"
     # Test mode needs its activity configuration, and it must be exact closed data.
     config = str(config_file(tmp_path, mode="test"))
@@ -342,3 +345,71 @@ def test_synthetic_worker_configuration_and_trust_are_reread(tmp_path):
     rotated = {"format_version": 1, "keys": [{**entry, "state": "allowed"}]}
     path.write_text(json.dumps(rotated))
     assert len(trust.current(None, 0).keys) == 1  # a rewritten file is seen at once
+
+
+def test_test_mode_reports_only_the_connectors_its_action_providers_serve(tmp_path, capsys):
+    """E05: a test-mode runtime may report the synthetic connector its action providers
+    serve; reporting one that none serves refuses before any transport is built."""
+    pin = dict(name="synthetic-target", version="1.0.0", artifact_sha256="e" * 64)
+    module = cli_module()
+    config = config_file(tmp_path, mode="test")
+    value = json.loads(config.read_bytes())
+    value["observation"]["connectors"] = [pin]
+    config.write_text(json.dumps(value))
+    plain = str(activity_config(tmp_path))  # valid, but serves no action connector
+    assert (
+        module.main(["activity-worker", "--config", str(config), "--activity-config", plain]) == 2
+    )
+    assert capsys.readouterr().err.strip() == "invalid_input"
+    # Positive control: an action provider serving it passes the guard, and the worker
+    # proceeds until it finds it was never enrolled.
+    serving = activity_config(
+        tmp_path,
+        actions={
+            "trust_file": str(tmp_path / "command-trust.json"),
+            "providers": [
+                {
+                    "provider_id": "synthetic-target-write",
+                    "connector": pin,
+                    "operations": {"submit": "target_key"},
+                    "script": {"ca_file": str(tmp_path / "ca.pem")},
+                }
+            ],
+        },
+    )
+    code = module.main(
+        ["activity-worker", "--config", str(config), "--activity-config", str(serving)]
+    )
+    assert (code, capsys.readouterr().err.strip()) != (2, "invalid_input")
+    # No other command reports one, even in test mode.
+    assert module.main(["run", "--config", str(config)]) == 2
+    # Production mode never reports one at all.
+    value["mode"] = "production"
+    config.write_text(json.dumps(value))
+    assert module.main(["run", "--config", str(config)]) == 2
+
+
+def test_synthetic_target_read_provider_is_a_declared_read(tmp_path):
+    """E05: the synthetic target's read provider serves read-backs in test mode."""
+    from fixtures.activity_provider import CONNECTOR, INSTALLED
+
+    from lotuspond_runtime.activity_fixture import worker_config
+
+    path = activity_config(
+        tmp_path,
+        providers=[
+            {
+                "provider_id": "synthetic-target-read",
+                "dependency": CONNECTOR.model_dump(),
+                "operations": ["lookup"],
+                "connector": INSTALLED.model_dump(),
+                "script": {"ca_file": str(tmp_path / "ca.pem")},
+            }
+        ],
+    )
+    _, _, [descriptor] = worker_config(path.read_bytes())
+    assert (descriptor.provider_id, descriptor.effect) == ("synthetic-target-read", "read")
+    assert descriptor.operations == frozenset({"lookup"}) and descriptor.test_only
+    unknown = activity_config(tmp_path, providers=[{"provider_id": "synthetic-target-write"}])
+    with pytest.raises(ValueError):
+        worker_config(unknown.read_bytes())

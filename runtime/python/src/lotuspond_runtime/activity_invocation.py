@@ -142,8 +142,19 @@ def _decode(answer, started) -> ChildOutcome:
     return ChildOutcome(None, "provider_failed", Cleanup(False), started)
 
 
+CHILD_MODULES = frozenset(
+    {"lotuspond_runtime.activity_child", "lotuspond_runtime.action_invocation"}
+)
+
+
 def call_provider(
-    request: dict, *, deadline_ns: int, cancel, fence=None, spawned=None
+    request: dict,
+    *,
+    deadline_ns: int,
+    cancel,
+    fence=None,
+    spawned=None,
+    module="lotuspond_runtime.activity_child",
 ) -> ChildOutcome:
     """Run one provider call in a fresh child; never raises for provider failures.
 
@@ -152,7 +163,10 @@ def call_provider(
     given, persists an unconfirmed cleanup at once (the worker's journal), so a
     crash right after it cannot lose the fence. `spawned(group)`, when given,
     records the child's process group before the child receives its request.
+    `module` is one of the fixed child modules: E04's reads and models, or E05's writes.
     """
+    if module not in CHILD_MODULES:
+        raise ValueError("Unknown provider child")
     if fenced():
         raise Fenced  # earlier cleanup was not confirmed
     parent = channel = child = None
@@ -170,7 +184,7 @@ def call_provider(
                 sys.executable,
                 "-I",
                 "-m",
-                "lotuspond_runtime.activity_child",
+                module,
                 str(channel.fileno()),
                 str(os.getpid()),
             ],

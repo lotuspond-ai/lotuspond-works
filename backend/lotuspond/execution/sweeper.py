@@ -22,7 +22,10 @@ One pass, in this order:
    progression follows the step's declared expiry path (an execution fenced for
    reconciliation keeps its waits until it resumes);
 7. an overdue execution with nothing due (or due only later than any engine
-   back-off) is marked due, so progression stops its work at the next boundary.
+   back-off) is marked due, so progression stops its work at the next boundary;
+8. (E05 Task 8) read-backs of uncertain writes are reserved against the slot each
+   write retains (`action_reconciliation.reserve_readback`), so they never wait
+   for new capacity, not even on a full installation.
 
 No item changes a capacity counter except through those Task 9 services, in Task
 5's lock order; wait quota is returned by the orchestrator's capacity step. Each
@@ -43,15 +46,19 @@ from .. import authority_gate
 from ..fleet.authority import database_now_ms
 from ..models import (
     Execution,
+    ExecutionActionCommand,
     ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionCapacity,
+    ExecutionHumanTask,
     ExecutionLease,
     ExecutionStepInstance,
     ExecutionUsageReservation,
     ExecutionWait,
+    RuntimeCommandAdmission,
     Workspace,
 )
+from .action_reconciliation import readback_candidates, reserve_readback
 from .authorization import record, scoped
 from .budgets import installation_active
 from .contracts import Contract
@@ -287,12 +294,17 @@ def _schedulable(db) -> bool:
 class ExecutionSweeper:
     """Task 11's sweeper; explicitly constructed with Task 9's lease service and the fence."""
 
-    def __init__(self, *, leases, recovery, scheduler=None):
+    def __init__(self, *, leases, recovery, scheduler=None, readbacks=None):
         if leases is None or recovery is None:
             raise ValueError("Lease service and recovery fence are required")
         self.leases, self.recovery = leases, recovery
         # Task 5's scheduler, run after each pass's items in batches (Task 13).
         self.scheduler = scheduler
+        # E05 Task 8: (budgets, demand provider) for read-back reservations; the
+        # scheduler's own when it has one.
+        if readbacks is None and scheduler is not None:
+            readbacks = (scheduler.budgets, scheduler.demand_provider)
+        self.readbacks = readbacks
         self.test_only = bool(getattr(recovery, "test_only", False))
         # The last pass's queue depths, for the worker's metrics; None until read.
         self.depths = None
@@ -369,6 +381,64 @@ class ExecutionSweeper:
                         _overdue(now).order_by(Execution.deadline_ms, Execution.id).limit(limit)
                     )
                 ),
+                # E05 Task 5, on the v16 due indexes.
+                "escalated_tasks": list(
+                    db.scalars(
+                        select(ExecutionHumanTask.id)
+                        .where(
+                            ExecutionHumanTask.state == "open",
+                            ExecutionHumanTask.escalated_at_ms.is_(None),
+                            ExecutionHumanTask.escalate_at_ms.is_not(None),
+                            ExecutionHumanTask.escalate_at_ms <= now,
+                        )
+                        .order_by(ExecutionHumanTask.escalate_at_ms, ExecutionHumanTask.id)
+                        .limit(limit)
+                    )
+                ),
+                "lapsed_action_leases": list(
+                    db.scalars(
+                        select(ExecutionActionCommand.id)
+                        .where(
+                            ExecutionActionCommand.status == "claimed",
+                            ExecutionActionCommand.lease_expires_at_ms <= now,
+                        )
+                        .order_by(
+                            ExecutionActionCommand.lease_expires_at_ms, ExecutionActionCommand.id
+                        )
+                        .limit(limit)
+                    )
+                ),
+                "expired_action_commands": list(
+                    db.scalars(
+                        select(ExecutionActionCommand.id)
+                        .join(
+                            RuntimeCommandAdmission,
+                            RuntimeCommandAdmission.id == ExecutionActionCommand.admission_id,
+                        )
+                        .where(
+                            ExecutionActionCommand.status == "admitted",
+                            RuntimeCommandAdmission.command_expires_at_ms <= now,
+                        )
+                        .order_by(
+                            RuntimeCommandAdmission.command_expires_at_ms, ExecutionActionCommand.id
+                        )
+                        .limit(limit)
+                    )
+                ),
+                "reserved_readbacks": []
+                if self.readbacks is None
+                else list(db.scalars(readback_candidates(limit))),
+                "released_claims": list(
+                    db.scalars(
+                        select(ExecutionHumanTask.id)
+                        .where(
+                            ExecutionHumanTask.claim_user_id.is_not(None),
+                            ExecutionHumanTask.claim_expires_at_ms <= now,
+                        )
+                        .order_by(ExecutionHumanTask.claim_expires_at_ms, ExecutionHumanTask.id)
+                        .limit(limit)
+                    )
+                ),
             }
 
     @staticmethod
@@ -420,6 +490,16 @@ class ExecutionSweeper:
         timer = isinstance(step, TimerStep)
         wait.state = "satisfied" if timer else "expired"
         db.flush()
+        if not timer:
+            from .human_tasks import expire_task
+
+            # A human task (E05) expires with its wait, and so does its intent's review.
+            expire_task(
+                db,
+                execution,
+                wait,
+                event=lambda e, code: self.leases._event(db, e, epoch, code, None, None),
+            )
         mark_runnable(db, execution, now)
         return "timers" if timer else "expired_waits"
 
@@ -478,6 +558,32 @@ class ExecutionSweeper:
             return self._hold(db, identifier, epoch)
         elif kind == "waits":
             return self._wait(db, identifier, epoch)
+        elif kind == "lapsed_action_leases":
+            from .action_dispatch import lapse
+
+            changed = lapse(
+                db,
+                identifier,
+                epoch=epoch,
+                event=lambda e, code, attempt_id: leases._event(db, e, epoch, code, attempt_id),
+            )
+        elif kind == "expired_action_commands":
+            from .action_dispatch import expire_command
+
+            changed = expire_command(db, identifier, epoch=epoch, leases=leases)
+        elif kind == "reserved_readbacks":
+            budgets, demand = self.readbacks
+            changed = reserve_readback(db, budgets, demand, identifier)
+        elif kind in {"escalated_tasks", "released_claims"}:
+            from .human_tasks import escalate_task, expire_claim
+
+            hook = escalate_task if kind == "escalated_tasks" else expire_claim
+            changed = hook(
+                db,
+                identifier,
+                epoch=epoch,
+                event=lambda e, code: self.leases._event(db, e, epoch, code, None, None),
+            )
         else:
             return self._deadline(db, identifier, epoch)
         return kind if changed else None

@@ -65,6 +65,18 @@ _ACTIVITY_READ = re.compile(
     r"/activity-artifacts/(?:records|agent|"
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/(?:input|context))"
 )
+# Action routes (E05): all POST, all require the runtime session.
+_ACTION_ROUTES = {
+    "/actions/poll",
+    "/actions/records",
+    "/actions/claim",
+    "/actions/renew",
+    "/actions/receipts",
+    "/actions/stops",
+}
+_ACTION_VALUE = re.compile(
+    r"/actions/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/values"
+)
 # Response bounds: a delivery's two 64 KiB documents travel JSON-escaped, and a held
 # attempt's records, input and context may reach the 1 MiB artifact bound.
 MAX_RESPONSE_BYTES = 65536
@@ -73,9 +85,9 @@ MAX_READ_RESPONSE_BYTES = 1048576
 
 
 def response_bound(route: str) -> int:
-    if route == "/activities/poll":
+    if route in ("/activities/poll", "/actions/poll"):
         return MAX_DELIVERY_RESPONSE_BYTES
-    if _ACTIVITY_READ.fullmatch(route) is not None:
+    if _ACTIVITY_READ.fullmatch(route) is not None or route == "/actions/records":
         return MAX_READ_RESPONSE_BYTES
     return MAX_RESPONSE_BYTES
 
@@ -294,6 +306,8 @@ class ControlTransport:
             route in _ACTIVITY_ROUTES
             or _ACTIVITY_VALUE.fullmatch(route) is not None
             or _ACTIVITY_READ.fullmatch(route) is not None
+            or route in _ACTION_ROUTES
+            or _ACTION_VALUE.fullmatch(route) is not None
         )
         if (
             (route not in _ROUTES and not command_claim and not activity)

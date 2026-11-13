@@ -1461,3 +1461,98 @@ At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominat
 - Web: `tsc --noEmit`, 114 unit tests, `npm run build` and Prettier on every changed file passed. Protocol adapters (HTTP only): 17 passed. `deploy/checks`: 16 passed, with the local shim exposing Docker's Compose plugin. Strict MkDocs build passed.
 - Browser, Vite dev server against the disposable schema: Settings shows only the workspace name and identity card, Administration has Overview, Workspaces and Users, the policy form has no tool lists, retired routes return 405/404 on the live API, `/me` reports only the mail and registration capabilities, and the public deployment section describes the one service install and the execution image. No script errors.
 - **Not run:** `execution` (built image), `conformance`, `disruptive`, `load`, `restore` and `scripts/checks` against a built image.
+
+## Reference workflow, milestone 1: invoice exception triage on synthetic providers — 2026-11-11
+
+Local evidence only: no push of this code at the time of the runs, no hosted CI (GitHub Actions still refuses jobs over billing), no deployment, and no real model, connector or AP system. Specification: [reference workflow design](superpowers/specs/2026-11-11-reference-workflow-design.md). Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6), on battery power; no timing claim is made.
+
+- **Documents.** `reference/invoice-triage/generate.py` authors the full package (17 compiled steps: 3 reads, the tolerance decision, the tool-using investigation, payment-hold and credit-note actions behind review, dispatch and readback verification, and the clerk's form), a prefix package (11 steps, both action branches replaced by the form), the `ap-standin` connector, the investigator model and three policies. Both packages compile with the SDK. E04's publication guard refuses the full package (`unsupported_step`) and accepts the prefix.
+- **Mac, no database:** `backend/tests/test_reference_invoice_triage.py`, 19 passed. Covers committed documents equal to the generator's output, compilation, review and policy on each action, read-only agent tools, the package's own tolerance mappings evaluated by the engine's evaluator on every scenario's stand-in records, scripted proposals citing only tools they called, and the HTTPS stand-in (token refusal, routes, idempotent writes, a reused key with different content refused, a write that times out after committing visible on readback).
+- **Linux, real processes:** `tests/execution/conformance/test_reference_triage.py` runs the prefix on the API, orchestrator, sweeper and an enrolled runtime per scenario with test-mode synthetic providers scripted from the stand-in's records. All six scenarios end as specified: a clean match with 3 reads and no model or person; a contract-justified price rise, an overcharge, a short receipt, a missing receipt and a duplicate each reach the clerk's form with the scripted proposal, the exact read and model call counts, and the clerk's answer in the result.
+- **Regression:** full conformance tier 1 and installed acceptance, 49 passed in 31 min 48 s (48 before plus the new case); runtime job, ruff clean and 746 passed. Run before a final import-order-only lint fix in `driver.py`. `npm run lint:python` and `npm run check:contracts` pass on the Mac.
+- **Test-only changes:** the runtime's synthetic read fixture accepts per-operation scripts (`reads`), and the conformance driver takes a connector document whose read operations the pool connection and runtime serve. Defaults are unchanged.
+- **Finding:** an execution's active-time budget is the smallest declared `timeout_seconds` (the agent's 240 s), and each attempt is charged at least its reservation. 60 s per attempt failed with `budget_exceeded` on the agent's first tool call; 20 s fits. Recorded in the specification for milestone 2.
+- **Revision 3 (same day):** the model pin moved to `claude-haiku-5-5` at `medium` effort, the agent's limits to 600 s, 20 steps and a $0.02 cost cap. The reference case was rerun alone in the Linux container and passed (1 passed, 62 s). No real model was called: the pin is a catalog value, and the synthetic provider answers in test mode.
+- **Not covered:** the clerk's 3-day timeout, the action branches (E05), any real provider, and hosted CI.
+
+## Reference workflow, milestone 2: the runtime's real providers — 2026-11-11
+
+Local evidence only: no hosted CI (GitHub Actions refused every job for billing, 0 steps), no deployment, no live model call and no real AP system. Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6), on battery power; no timing claim is made.
+
+- **What shipped (runtime 0.2.0, unversioned change):**
+  - `https-json`, the generic connector's read side. Its installed artifact is a routes document whose canonical SHA-256 is the connector's pinned `artifact_sha256`. Reads go through `DestinationTransport` with the connection's one secret as a bearer token; `ConnectedDestination` now also accepts `Authorization: Bearer <token>`.
+  - `anthropic-messages`, one model round on the Anthropic Messages API through the official `anthropic` SDK 2.3.0, as an optional `anthropic` extra. It checks the pinned model document and configuration, uses strict tools and structured output, and sets no proxy from the environment, no redirects and no SDK retries.
+  - An opaque per-round `continuation`, so Claude's earlier turns and thinking blocks are replayed unchanged.
+  - An operator-form activity configuration (`provider_config.py`), which a test-mode runtime may also use against loopback stand-ins.
+  - The reference package now declares its `ap_token` secret, and the model configuration pins Anthropic's prices.
+- **Mac:** 22 reference tests passed, now including the pinned routes and the `https-json` connector reading the HTTPS stand-in. The runtime's new connector and model tests (16, against a local HTTPS server and a Messages API double) and the destination tests passed. `lint:python` passed.
+- **Linux, real processes:** `test_reference_triage.py` now runs the prefix on the API, orchestrator, sweeper and one enrolled runtime using the real providers. Reads go to the HTTPS stand-in with a mounted bearer token; model rounds go to a local Messages API double scripted from the scenarios, in the documented response shape. All six scenarios end as specified, with these checks:
+  - every read is an authorized GET;
+  - read and model call counts are exact;
+  - the requests name `claude-haiku-5-5` at `medium` effort with no sampling parameters and strict tools;
+  - the second round replays the model's thinking and tool-use turn unchanged.
+- **Regression:**
+  - Full conformance tier 1 and installed acceptance: 49 passed (33 min 26 s).
+  - Runtime job: 764 passed.
+  - `validate`: the backend check suite 1,079 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed. The required PostgreSQL suite had 1,220 passed and 1 failed. The failure, `test_artifacts.py::test_retention_inventory_is_bounded_dry_run`, has a 250 ms retention cutoff that two writes outlasted on the loaded host; it involves no code this change touched, and alone it passed 5 of 5.
+  - Three runtime expectations were updated for the new behaviour. Installed metadata now lists the optional extra, and a core install must not contain `anthropic` or `httpx2`. A synthetic configuration outside test mode is now refused as `invalid_input` rather than `unavailable`, so synthetic providers still run only in test mode.
+- **Not covered:** a live Anthropic call (no API key on this machine), a real AP system, writes (E05), and hosted CI.
+
+## Reference workflow, milestone 3: production execution authorities from an operator directory — 2026-11-11
+
+Local evidence only: no hosted CI (GitHub Actions refused every job for billing), no deployment, no live model call and no real AP system. Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6). No timing claim is made.
+
+- **What shipped:**
+  - `lotuspond.execution.operator_authority` provides recovery, entitlement, tenant policy, demand, publisher trust and admitted catalog, artifact keys, knowledge-source access, and the activity signer and trust. All of these are read from one private operator directory outside the database and reread on every lookup. A missing, readable-by-others, foreign or linked file denies.
+  - `python -m lotuspond.authority` with `init`, `trust-publisher`, `admit`, `execution`, `release-required`, `new-epoch` and `show`. `init` starts with execution off and release decisions required.
+  - `lotuspond.execution.composition.compose()` is the one wiring that both the API (`LOTUSPOND_AUTHORITY_DIR`) and `execution-worker` (`..._AUTHORITY_DIR`, `..._INSTALLATION_ID`) use, and so does the conformance harness. Without the directory, behaviour is unchanged: no execution services, and the worker refuses with `engine_unavailable`.
+  - Runbook: `docs/operations/operator-authority.md`.
+- **Mac:** 10 operator authority tests passed. They cover private files, refusals, immediate revocation, a new epoch, and the API and worker built from settings. The 22 reference tests passed.
+- **Linux, real processes:** `test_reference_triage.py` now runs the API and workers with the operator directory and test mode off, as production builds them; only the runtime stays in test mode, to reach loopback stand-ins. All six scenarios end as specified (1 passed, 88 s).
+- **Regression:**
+  - Conformance tier 1 and installed acceptance: 49 passed (35 min 26 s).
+  - Disruptive: 6 passed.
+  - `execution` and `restore` jobs passed.
+  - `validate`:
+    - backend check suite 1,089 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed;
+    - the required PostgreSQL suite had 1,230 passed and 1 failed. The failure is the same 250 ms `test_retention_inventory_is_bounded_dry_run` timing case as in milestone 2. Rerun alone, it passed 5 of 5.
+  - `docs`: the local runner's `pip` put `mkdocs` outside `PATH` (exit 127, a container issue). With `~/.local/bin` on `PATH` the strict build passed.
+- **Not covered:**
+  - a live Anthropic call;
+  - a real AP system;
+  - writes (E05);
+  - the package release binding (milestone 5; until then the harness turns `release-required` off);
+  - hosted CI.
+
+## Reviewed actions and human tasks, E05 Task 12: qualification — 2026-11-13
+
+Local evidence only: Linux containers on one Mac's Docker VM (`lotuspond-ci-runner:local`, PostgreSQL 18.6, 4 vCPUs), no hosted CI (GitHub Actions billing-blocked), no deployment, synthetic target and connector only. Full record: [actions and human tasks qualification](validation/2026-11-13-actions-human-tasks.md).
+
+- **Tier 1:** the 33 action cases passed (9 min 31 s). The full tier 1 run had 78 of 80 passing; its failures were the reference-triage prefix case, which fails identically at the branch's HEAD before Task 12, and the installed acceptance, fixed afterwards.
+- **Installed acceptance:** passed, including the reviewed write and its 14 rollbacks, with at most one target write per intent.
+- **Tier 2:** 13 passed (E04's disruptive cases and the seven action cases, including ENG-4 under the new grants).
+- **Tier 3 (planning target, `ci.yml`'s configuration, one in five admissions a reviewed write):** at most one target write per intent (877 writes) and at most one provider call per attempt held. Admission, queue age, backlog, burst recovery and revocation-wait criteria failed with the single API worker CPU-bound; E05's routes took about a quarter of its attributed CPU.
+- **Runtime:** 802 passed on Python 3.13 and on 3.14. **Backend action tests (macOS):** 154 passed.
+- **Product changes found by the cases:** a test-mode runtime may report the connector its action providers serve; the synthetic read provider is accepted; the runtime's test command trust no longer refuses itself under load; an unclaimed dispatch that timed out is rechecked (`approval_revoked`, `approval_expired`, or one retry under the same intent); a claimed write's receipt survives its initiator losing `execute`; composition wires interpreter v2 and the action services over a command key; the worker least-privilege grants include E05's tables.
+- **Open for the owner:** ACT-12's restatement, RESTORE-2 (present), and the lapsed-write slot.
+
+## Reviewed actions and human tasks, E05 Task 13: packaging and documentation — 2026-11-13
+
+Local evidence only: the same Linux containers as Task 12 (`lotuspond-ci-runner:local`, PostgreSQL 18.6, 4 vCPUs), no hosted CI (billing-blocked), no deployment, synthetic target only.
+
+- **What shipped:**
+  - `scripts/checks/test_action_packaging.py`, four checks that need no database. Production settings leave the synthetic write and read providers and the test command key unselectable. A missing command key leaves the action routes at 503 and interpreter v1 only, and a worker asked for v2 refuses (`unsupported_interpreter`). The installed acceptance report cannot pass without any of the 15 action scenarios or the write count, and required mode fails rather than skips. The E05 capability row claims synthetic, local evidence only, and the console's Human tasks page stays planned. Each refusal has a positive control.
+  - The operator guide `docs/operations/actions-human-tasks.md`, the docs-site page, the API section, the E05 capability row, and the runtime README and docs-site runtime page for runtime 0.3.0.
+  - `web/src/lib/roadmap.ts` was reviewed and left unchanged: Human tasks stays planned.
+- **Red, then green:** before the capability row existed, the packaging checks gave 1 failed and 3 passed; afterwards all 8 `scripts/checks` tests passed. On the Mac, `test_execution_packaging.py::test_image_dependency_and_command_boundary` needs `backend/.venv/bin` on `PATH` to find `execution-worker`, as before this task.
+- **Independent review:** five documentation findings, all confirmed against the code and fixed. The five-minute key overlap is operator policy, not enforced. A resend needs an operation that declares `target_key`, in both guides. A claim is capped at the task's deadline, an owner or admin may release it, and reading the proposal needs no claim. Upgrade and rollback guidance was missing. The packaging checks gained `match=` on each refusal, the synthetic read provider, word-boundary patterns and the roadmap stage check.
+- **A regression found by `validate`:** the first run failed `npm run check`'s SQLite suite with 2 failed, 1,263 passed and 237 skipped: `tests/fleet/test_schema.py::test_full_scope_fk_matrix` and `::test_pool_current_policy_requires_same_scope_existing_revision`. Both pass alone. Task 2's `tests/execution/actions/test_schema.py` ran `Base.metadata.create_all` on PostgreSQL. SQLAlchemy 2.0.54 then attaches a create rule to the shared metadata's `use_alter` foreign keys, and later SQLite schemas in the same process omit them (`runtime_pools_current_policy_fk` and the other cyclic keys), so the fleet checks found nothing to refuse. Reproduced on the Mac against a disposable PostgreSQL cluster. The fix copies the metadata first, as every other execution schema test already does (`deepcopy(Base.metadata).create_all`). After it, the pair passed (16), and the second `validate` run's SQLite suite passed: 1,265 passed, 237 skipped.
+- **A second gap found by `validate`:** that run then failed `deploy/checks` (1 failed, 15 passed). Task 12 made the installed acceptance report require `max_target_writes_per_intent`, but `deploy/checks/test_durable_execution_smoke.py` still built its complete report without it. The fixture now carries the count, and two refusal cases were added: a second write, and a missing count.
+- **A third gap found by `validate`:** the third run's required PostgreSQL suite had 3 failed and 1,404 passed, all in `tests/fleet/test_acceptance.py`. Task 2 raised the schema to v16, but the installed fleet harness still asserted that the v12 upgrade ends at v15, so every installed fleet journey stopped there and the outer-deadline case never reached its checkpoint. The harness now compares with `SCHEMA_VERSION`, as `tests/fleet/test_migration.py` does. The fleet acceptance cases then passed in Linux (15 passed).
+- **Linux runs** (from a clone synced before the review fixes; the product code is the same):
+  - Conformance tier 1 and installed acceptance, required: 82 passed (47 min 58 s). The reference-triage prefix case, which failed in Task 12, passed.
+  - Tier 2, required: 13 passed (5 min 20 s).
+  - Runtime: 802 passed on Python 3.13 and on 3.14.
+  - `validate`, rerun after all three fixes: the job passed. The repository check passed (SQLite 1,265 passed with 237 skipped; 1,514 passed; runtime 802 passed), as did the schema export check and `deploy/checks` (16 passed). The required PostgreSQL suite with installed fleet acceptance passed 1,407 (45 min 52 s). The API image built (`sha256:9ba53c7d41ea093baf5c1ba635ba5434c4f979880527d49bb7d9237d3193085b`), its metadata check passed, durable execution packaging against that image passed 8, and the strict operator docs build passed.
+- **Mac:** `git diff --check` and the strict mkdocs build passed.
+- **Not covered:** real connectors, a production command key provider, notification, compensation, the task inbox UI, hosted CI and the planning-target load (see Task 12).

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.exc import DataError, IntegrityError
 
 from lotuspond import models
-from lotuspond.models import EXECUTION_TABLES, Base, new_id, now
+from lotuspond.models import EXECUTION_TABLES, V16_TABLES, Base, new_id, now
 from tests.fleet.test_schema import load, records
 
 MODEL_NAMES = (
@@ -363,7 +363,10 @@ def test_full_scope_fk_matrix(engine, boundary):
         load(connection, left)
         load(connection, right)
         checked = set()
-        assert set(left) & EXECUTION_TABLES == EXECUTION_TABLES - {"execution_scheduler_cursors"}
+        # v16 records have their own matrix in tests/execution/actions/test_schema.py.
+        assert set(left) & EXECUTION_TABLES == EXECUTION_TABLES - V16_TABLES - {
+            "execution_scheduler_cursors"
+        }
         for name in (name for name in left if name in EXECUTION_TABLES):
             table = Base.metadata.tables[name]
             for fk in table.foreign_key_constraints:
