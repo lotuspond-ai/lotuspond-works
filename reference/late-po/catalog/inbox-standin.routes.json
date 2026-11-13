@@ -1,0 +1,17 @@
+{
+ "connector": {
+  "name": "inbox-standin",
+  "version": "0.1.0"
+ },
+ "format": "lotuspond.https-json.routes.v1",
+ "operations": {
+  "get_customer_update": {
+   "method": "GET",
+   "path": "/inbox/sent/{sales_order_id}"
+  },
+  "list_supplier_messages": {
+   "method": "GET",
+   "path": "/inbox/purchase-orders/{po_number}"
+  }
+ }
+}

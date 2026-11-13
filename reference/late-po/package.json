@@ -1,0 +1,1416 @@
+{
+ "agents": [],
+ "artifacts": [],
+ "assurance": {
+  "evaluation_refs": [],
+  "outcome_rule_refs": [],
+  "required_classification": "synthetic"
+ },
+ "body": {
+  "result": {
+   "kind": "ref",
+   "pointer": "",
+   "source": {
+    "id": "on_time",
+    "kind": "step"
+   }
+  },
+  "result_schema": {
+   "kind": "data",
+   "schema": {
+    "fields": [
+     {
+      "name": "status",
+      "required": true,
+      "schema": {
+       "kind": "string",
+       "max_length": 32
+      }
+     },
+     {
+      "name": "new_promised_day",
+      "required": true,
+      "schema": {
+       "kind": "integer",
+       "max": 200000,
+       "min": 0
+      }
+     },
+     {
+      "name": "notify_customer",
+      "required": true,
+      "schema": {
+       "kind": "boolean"
+      }
+     },
+     {
+      "name": "reasons",
+      "required": true,
+      "schema": {
+       "items": {
+        "fields": [
+         {
+          "name": "text",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 400
+          }
+         },
+         {
+          "name": "tool",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 64
+          }
+         },
+         {
+          "name": "field",
+          "required": true,
+          "schema": {
+           "kind": "string",
+           "max_length": 128
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "kind": "array",
+       "max_items": 5
+      }
+     }
+    ],
+    "kind": "object"
+   }
+  },
+  "steps": [
+   {
+    "connector_ref": "erp",
+    "id": "order",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    },
+    "kind": "connector_read",
+    "operation": "get_purchase_order",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    },
+    "target": {
+     "fields": [
+      {
+       "name": "po_number",
+       "value": {
+        "kind": "ref",
+        "pointer": "/po_number",
+        "source": {
+         "kind": "package_input"
+        }
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "connector_ref": "carrier",
+    "id": "shipment",
+    "input": {
+     "kind": "literal",
+     "schema": {
+      "kind": "null"
+     },
+     "value": null
+    },
+    "kind": "connector_read",
+    "operation": "get_shipment",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    },
+    "target": {
+     "fields": [
+      {
+       "name": "po_number",
+       "value": {
+        "kind": "ref",
+        "pointer": "/po_number",
+        "source": {
+         "kind": "package_input"
+        }
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "condition": {
+     "args": [
+      {
+       "kind": "ref",
+       "pointer": "/shipped",
+       "source": {
+        "id": "shipment",
+        "kind": "step"
+       }
+      },
+      {
+       "args": [
+        {
+         "kind": "ref",
+         "pointer": "/estimated_day",
+         "source": {
+          "id": "shipment",
+          "kind": "step"
+         }
+        },
+        {
+         "kind": "ref",
+         "pointer": "/promised_day",
+         "source": {
+          "id": "order",
+          "kind": "step"
+         }
+        }
+       ],
+       "fn": "le",
+       "kind": "call"
+      }
+     ],
+     "fn": "and",
+     "kind": "call"
+    },
+    "else_body": {
+     "result": {
+      "kind": "ref",
+      "pointer": "",
+      "source": {
+       "id": "tell",
+       "kind": "step"
+      }
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "fields": [
+        {
+         "name": "status",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "new_promised_day",
+         "required": true,
+         "schema": {
+          "kind": "integer",
+          "max": 200000,
+          "min": 0
+         }
+        },
+        {
+         "name": "notify_customer",
+         "required": true,
+         "schema": {
+          "kind": "boolean"
+         }
+        },
+        {
+         "name": "reasons",
+         "required": true,
+         "schema": {
+          "items": {
+           "fields": [
+            {
+             "name": "text",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             }
+            },
+            {
+             "name": "tool",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 64
+             }
+            },
+            {
+             "name": "field",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 128
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "array",
+          "max_items": 5
+         }
+        }
+       ],
+       "kind": "object"
+      }
+     },
+     "steps": [
+      {
+       "id": "investigate",
+       "input": {
+        "fields": [
+         {
+          "name": "order",
+          "value": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "order",
+            "kind": "step"
+           }
+          }
+         },
+         {
+          "name": "shipment",
+          "value": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "shipment",
+            "kind": "step"
+           }
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "instructions": "You handle one late purchase order: the carrier's estimate is after the date promised to the business, or nothing has shipped. You are given the order (with the customer sales order it serves and the day the customer asked for) and the carrier's shipment. Days are whole days since 1970-01-01. You may read the supplier's messages about the order, the carrier's tracking events and the stock cover of each line with the tools provided. You cannot change anything; a person approves any action you propose.\n\nReturn:\n- new_promised_day: the earliest day the goods can realistically arrive, from the supplier's confirmed date or the carrier's events. Never earlier than the carrier's estimate when there is one.\n- notify_customer: true when new_promised_day is after the customer's requested day.\n- reasons: at most five short reasons. Each names the tool (or \"input\") and the field it relies on. Do not state anything a document does not show.",
+       "kind": "agent",
+       "limits": {
+        "max_cost_microusd": 20000,
+        "max_input_tokens": 60000,
+        "max_output_tokens": 16000,
+        "max_steps": 20,
+        "timeout_seconds": 600
+       },
+       "model_ref": "investigator",
+       "output_schema": {
+        "fields": [
+         {
+          "name": "new_promised_day",
+          "required": true,
+          "schema": {
+           "kind": "integer",
+           "max": 200000,
+           "min": 0
+          }
+         },
+         {
+          "name": "notify_customer",
+          "required": true,
+          "schema": {
+           "kind": "boolean"
+          }
+         },
+         {
+          "name": "reasons",
+          "required": true,
+          "schema": {
+           "items": {
+            "fields": [
+             {
+              "name": "text",
+              "required": true,
+              "schema": {
+               "kind": "string",
+               "max_length": 400
+              }
+             },
+             {
+              "name": "tool",
+              "required": true,
+              "schema": {
+               "kind": "string",
+               "max_length": 64
+              }
+             },
+             {
+              "name": "field",
+              "required": true,
+              "schema": {
+               "kind": "string",
+               "max_length": 128
+              }
+             }
+            ],
+            "kind": "object"
+           },
+           "kind": "array",
+           "max_items": 5
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "read_tools": [
+        {
+         "connector_ref": "inbox",
+         "operation": "list_supplier_messages",
+         "retry": {
+          "backoff_seconds": 5,
+          "max_attempts": 3,
+          "retry_codes": [
+           "unavailable"
+          ],
+          "timeout_seconds": 30
+         }
+        },
+        {
+         "connector_ref": "carrier",
+         "operation": "list_tracking_events",
+         "retry": {
+          "backoff_seconds": 5,
+          "max_attempts": 3,
+          "retry_codes": [
+           "unavailable"
+          ],
+          "timeout_seconds": 30
+         }
+        },
+        {
+         "connector_ref": "erp",
+         "operation": "get_stock_cover",
+         "retry": {
+          "backoff_seconds": 5,
+          "max_attempts": 3,
+          "retry_codes": [
+           "unavailable"
+          ],
+          "timeout_seconds": 30
+         }
+        }
+       ],
+       "retry": {
+        "backoff_seconds": 0,
+        "max_attempts": 1,
+        "retry_codes": [],
+        "timeout_seconds": 30
+       }
+      },
+      {
+       "approval": "human",
+       "connector_ref": "erp",
+       "expiry_seconds": 86400,
+       "id": "reschedule_intent",
+       "independent_review": false,
+       "input": {
+        "fields": [
+         {
+          "name": "promised_day",
+          "value": {
+           "kind": "ref",
+           "pointer": "/new_promised_day",
+           "source": {
+            "id": "investigate",
+            "kind": "step"
+           }
+          }
+         },
+         {
+          "name": "reason",
+          "value": {
+           "args": [
+            {
+             "kind": "ref",
+             "pointer": "/reasons/0/text",
+             "source": {
+              "id": "investigate",
+              "kind": "step"
+             }
+            },
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             },
+             "value": "No reason was given."
+            }
+           ],
+           "fn": "coalesce",
+           "kind": "call"
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "kind": "action_intent",
+       "operation": "set_promised_date",
+       "policy_ref": "planners",
+       "target": {
+        "fields": [
+         {
+          "name": "po_number",
+          "value": {
+           "kind": "ref",
+           "pointer": "/po_number",
+           "source": {
+            "id": "order",
+            "kind": "step"
+           }
+          }
+         }
+        ],
+        "kind": "object"
+       }
+      },
+      {
+       "assignment_policy_ref": "planners",
+       "id": "reschedule_review",
+       "intent": {
+        "kind": "ref",
+        "pointer": "",
+        "source": {
+         "id": "reschedule_intent",
+         "kind": "step"
+        }
+       },
+       "kind": "human_task",
+       "mode": "review",
+       "timeout_seconds": 86400
+      },
+      {
+       "decision": {
+        "kind": "ref",
+        "pointer": "",
+        "source": {
+         "id": "reschedule_review",
+         "kind": "step"
+        }
+       },
+       "id": "reschedule_dispatch",
+       "intent": {
+        "kind": "ref",
+        "pointer": "",
+        "source": {
+         "id": "reschedule_intent",
+         "kind": "step"
+        }
+       },
+       "kind": "action_dispatch",
+       "retry": {
+        "backoff_seconds": 0,
+        "max_attempts": 1,
+        "retry_codes": [],
+        "timeout_seconds": 30
+       }
+      },
+      {
+       "connector_ref": "erp",
+       "id": "reschedule_verify",
+       "input": {
+        "fields": [
+         {
+          "name": "promised_day",
+          "value": {
+           "kind": "ref",
+           "pointer": "/new_promised_day",
+           "source": {
+            "id": "investigate",
+            "kind": "step"
+           }
+          }
+         },
+         {
+          "name": "reason",
+          "value": {
+           "args": [
+            {
+             "kind": "ref",
+             "pointer": "/reasons/0/text",
+             "source": {
+              "id": "investigate",
+              "kind": "step"
+             }
+            },
+            {
+             "kind": "literal",
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             },
+             "value": "No reason was given."
+            }
+           ],
+           "fn": "coalesce",
+           "kind": "call"
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "kind": "outcome_verification",
+       "read_operation": "get_promised_date_change",
+       "receipt": {
+        "kind": "ref",
+        "pointer": "",
+        "source": {
+         "id": "reschedule_dispatch",
+         "kind": "step"
+        }
+       },
+       "rule_id": "reschedule-recorded",
+       "rules": [
+        {
+         "expected": {
+          "kind": "literal",
+          "schema": {
+           "kind": "boolean"
+          },
+          "value": true
+         },
+         "op": "eq",
+         "readback_pointer": "/exists"
+        },
+        {
+         "expected": {
+          "kind": "ref",
+          "pointer": "/new_promised_day",
+          "source": {
+           "id": "investigate",
+           "kind": "step"
+          }
+         },
+         "op": "eq",
+         "readback_pointer": "/promised_day"
+        }
+       ],
+       "target": {
+        "fields": [
+         {
+          "name": "po_number",
+          "value": {
+           "kind": "ref",
+           "pointer": "/po_number",
+           "source": {
+            "id": "order",
+            "kind": "step"
+           }
+          }
+         }
+        ],
+        "kind": "object"
+       },
+       "version": "1"
+      },
+      {
+       "condition": {
+        "kind": "ref",
+        "pointer": "/notify_customer",
+        "source": {
+         "id": "investigate",
+         "kind": "step"
+        }
+       },
+       "else_body": {
+        "result": {
+         "fields": [
+          {
+           "name": "status",
+           "value": {
+            "kind": "literal",
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            },
+            "value": "rescheduled"
+           }
+          },
+          {
+           "name": "new_promised_day",
+           "value": {
+            "kind": "ref",
+            "pointer": "/new_promised_day",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "notify_customer",
+           "value": {
+            "kind": "ref",
+            "pointer": "/notify_customer",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "reasons",
+           "value": {
+            "kind": "ref",
+            "pointer": "/reasons",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "fields": [
+           {
+            "name": "status",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "new_promised_day",
+            "required": true,
+            "schema": {
+             "kind": "integer",
+             "max": 200000,
+             "min": 0
+            }
+           },
+           {
+            "name": "notify_customer",
+            "required": true,
+            "schema": {
+             "kind": "boolean"
+            }
+           },
+           {
+            "name": "reasons",
+            "required": true,
+            "schema": {
+             "items": {
+              "fields": [
+               {
+                "name": "text",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                }
+               },
+               {
+                "name": "tool",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 64
+                }
+               },
+               {
+                "name": "field",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 128
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "kind": "array",
+             "max_items": 5
+            }
+           }
+          ],
+          "kind": "object"
+         }
+        },
+        "steps": []
+       },
+       "id": "tell",
+       "kind": "decision",
+       "then_body": {
+        "result": {
+         "fields": [
+          {
+           "name": "status",
+           "value": {
+            "kind": "literal",
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            },
+            "value": "rescheduled_and_notified"
+           }
+          },
+          {
+           "name": "new_promised_day",
+           "value": {
+            "kind": "ref",
+            "pointer": "/new_promised_day",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "notify_customer",
+           "value": {
+            "kind": "ref",
+            "pointer": "/notify_customer",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          },
+          {
+           "name": "reasons",
+           "value": {
+            "kind": "ref",
+            "pointer": "/reasons",
+            "source": {
+             "id": "investigate",
+             "kind": "step"
+            }
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "result_schema": {
+         "kind": "data",
+         "schema": {
+          "fields": [
+           {
+            "name": "status",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "new_promised_day",
+            "required": true,
+            "schema": {
+             "kind": "integer",
+             "max": 200000,
+             "min": 0
+            }
+           },
+           {
+            "name": "notify_customer",
+            "required": true,
+            "schema": {
+             "kind": "boolean"
+            }
+           },
+           {
+            "name": "reasons",
+            "required": true,
+            "schema": {
+             "items": {
+              "fields": [
+               {
+                "name": "text",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                }
+               },
+               {
+                "name": "tool",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 64
+                }
+               },
+               {
+                "name": "field",
+                "required": true,
+                "schema": {
+                 "kind": "string",
+                 "max_length": 128
+                }
+               }
+              ],
+              "kind": "object"
+             },
+             "kind": "array",
+             "max_items": 5
+            }
+           }
+          ],
+          "kind": "object"
+         }
+        },
+        "steps": [
+         {
+          "approval": "human",
+          "connector_ref": "inbox",
+          "expiry_seconds": 86400,
+          "id": "notify_intent",
+          "independent_review": true,
+          "input": {
+           "fields": [
+            {
+             "name": "promised_day",
+             "value": {
+              "kind": "ref",
+              "pointer": "/new_promised_day",
+              "source": {
+               "id": "investigate",
+               "kind": "step"
+              }
+             }
+            },
+            {
+             "name": "reason",
+             "value": {
+              "args": [
+               {
+                "kind": "ref",
+                "pointer": "/reasons/0/text",
+                "source": {
+                 "id": "investigate",
+                 "kind": "step"
+                }
+               },
+               {
+                "kind": "literal",
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                },
+                "value": "No reason was given."
+               }
+              ],
+              "fn": "coalesce",
+              "kind": "call"
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "action_intent",
+          "operation": "send_customer_update",
+          "policy_ref": "customer_messages",
+          "target": {
+           "fields": [
+            {
+             "name": "sales_order_id",
+             "value": {
+              "kind": "ref",
+              "pointer": "/sales_order_id",
+              "source": {
+               "id": "order",
+               "kind": "step"
+              }
+             }
+            }
+           ],
+           "kind": "object"
+          }
+         },
+         {
+          "assignment_policy_ref": "customer_messages",
+          "id": "notify_review",
+          "intent": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "notify_intent",
+            "kind": "step"
+           }
+          },
+          "kind": "human_task",
+          "mode": "review",
+          "timeout_seconds": 86400
+         },
+         {
+          "decision": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "notify_review",
+            "kind": "step"
+           }
+          },
+          "id": "notify_dispatch",
+          "intent": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "notify_intent",
+            "kind": "step"
+           }
+          },
+          "kind": "action_dispatch",
+          "retry": {
+           "backoff_seconds": 0,
+           "max_attempts": 1,
+           "retry_codes": [],
+           "timeout_seconds": 30
+          }
+         },
+         {
+          "connector_ref": "inbox",
+          "id": "notify_verify",
+          "input": {
+           "fields": [
+            {
+             "name": "promised_day",
+             "value": {
+              "kind": "ref",
+              "pointer": "/new_promised_day",
+              "source": {
+               "id": "investigate",
+               "kind": "step"
+              }
+             }
+            },
+            {
+             "name": "reason",
+             "value": {
+              "args": [
+               {
+                "kind": "ref",
+                "pointer": "/reasons/0/text",
+                "source": {
+                 "id": "investigate",
+                 "kind": "step"
+                }
+               },
+               {
+                "kind": "literal",
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                },
+                "value": "No reason was given."
+               }
+              ],
+              "fn": "coalesce",
+              "kind": "call"
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "outcome_verification",
+          "read_operation": "get_customer_update",
+          "receipt": {
+           "kind": "ref",
+           "pointer": "",
+           "source": {
+            "id": "notify_dispatch",
+            "kind": "step"
+           }
+          },
+          "rule_id": "notify-recorded",
+          "rules": [
+           {
+            "expected": {
+             "kind": "literal",
+             "schema": {
+              "kind": "boolean"
+             },
+             "value": true
+            },
+            "op": "eq",
+            "readback_pointer": "/exists"
+           },
+           {
+            "expected": {
+             "kind": "ref",
+             "pointer": "/new_promised_day",
+             "source": {
+              "id": "investigate",
+              "kind": "step"
+             }
+            },
+            "op": "eq",
+            "readback_pointer": "/promised_day"
+           }
+          ],
+          "target": {
+           "fields": [
+            {
+             "name": "sales_order_id",
+             "value": {
+              "kind": "ref",
+              "pointer": "/sales_order_id",
+              "source": {
+               "id": "order",
+               "kind": "step"
+              }
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "version": "1"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    "id": "on_time",
+    "kind": "decision",
+    "then_body": {
+     "result": {
+      "fields": [
+       {
+        "name": "status",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         },
+         "value": "on_time"
+        }
+       },
+       {
+        "name": "new_promised_day",
+        "value": {
+         "kind": "ref",
+         "pointer": "/promised_day",
+         "source": {
+          "id": "order",
+          "kind": "step"
+         }
+        }
+       },
+       {
+        "name": "notify_customer",
+        "value": {
+         "kind": "literal",
+         "schema": {
+          "kind": "boolean"
+         },
+         "value": false
+        }
+       },
+       {
+        "name": "reasons",
+        "value": {
+         "item_schema": {
+          "kind": "data",
+          "schema": {
+           "fields": [
+            {
+             "name": "text",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             }
+            },
+            {
+             "name": "tool",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 64
+             }
+            },
+            {
+             "name": "field",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 128
+             }
+            }
+           ],
+           "kind": "object"
+          }
+         },
+         "items": [],
+         "kind": "array"
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "result_schema": {
+      "kind": "data",
+      "schema": {
+       "fields": [
+        {
+         "name": "status",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 32
+         }
+        },
+        {
+         "name": "new_promised_day",
+         "required": true,
+         "schema": {
+          "kind": "integer",
+          "max": 200000,
+          "min": 0
+         }
+        },
+        {
+         "name": "notify_customer",
+         "required": true,
+         "schema": {
+          "kind": "boolean"
+         }
+        },
+        {
+         "name": "reasons",
+         "required": true,
+         "schema": {
+          "items": {
+           "fields": [
+            {
+             "name": "text",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 400
+             }
+            },
+            {
+             "name": "tool",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 64
+             }
+            },
+            {
+             "name": "field",
+             "required": true,
+             "schema": {
+              "kind": "string",
+              "max_length": 128
+             }
+            }
+           ],
+           "kind": "object"
+          },
+          "kind": "array",
+          "max_items": 5
+         }
+        }
+       ],
+       "kind": "object"
+      }
+     },
+     "steps": []
+    }
+   }
+  ]
+ },
+ "connectors": [
+  {
+   "credential_ref": "erp_token",
+   "id": "erp",
+   "ref": {
+    "kind": "connector",
+    "name": "erp-standin",
+    "sha256": "9b70b818f05fc92d701b356739ae263d7b26b4ae9364a3a64504da183dd95e7b",
+    "version": "0.1.0"
+   }
+  },
+  {
+   "credential_ref": "carrier_token",
+   "id": "carrier",
+   "ref": {
+    "kind": "connector",
+    "name": "carrier-standin",
+    "sha256": "0695ceeb751571991169703cb81be9b1809ae1d62b315be0f998d09f8938e9cb",
+    "version": "0.1.0"
+   }
+  },
+  {
+   "credential_ref": "inbox_token",
+   "id": "inbox",
+   "ref": {
+    "kind": "connector",
+    "name": "inbox-standin",
+    "sha256": "b69b97388f00b64766752a59f7758f847561963aa3b002326f7146ef7cdc40d0",
+    "version": "0.1.0"
+   }
+  }
+ ],
+ "environment": {
+  "destination_classes": [],
+  "operation_classes": [],
+  "platforms": [
+   {
+    "architecture": "amd64",
+    "os": "linux"
+   }
+  ],
+  "required_capabilities": [],
+  "runtime_contract": "lotuspond.runtime-contract.v1"
+ },
+ "evaluations": [],
+ "input_schema": {
+  "fields": [
+   {
+    "name": "po_number",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "knowledge": [],
+ "limits": {
+  "active_seconds": 900,
+  "elapsed_seconds": 259200,
+  "max_cost_microusd": 20000,
+  "max_input_tokens": 60000,
+  "max_output_tokens": 16000,
+  "max_steps": 200,
+  "retained_waits": 10
+ },
+ "models": [
+  {
+   "id": "investigator",
+   "ref": {
+    "kind": "model",
+    "name": "late-po-investigator-model",
+    "sha256": "c6c9f1533c7a987ba1df5bef25a30dd933623e67cdf844c0cb98ae5374186664",
+    "version": "0.1.0"
+   }
+  }
+ ],
+ "name": "Late purchase order recovery (synthetic reference)",
+ "output_schema": {
+  "fields": [
+   {
+    "name": "status",
+    "required": true,
+    "schema": {
+     "kind": "string",
+     "max_length": 32
+    }
+   },
+   {
+    "name": "new_promised_day",
+    "required": true,
+    "schema": {
+     "kind": "integer",
+     "max": 200000,
+     "min": 0
+    }
+   },
+   {
+    "name": "notify_customer",
+    "required": true,
+    "schema": {
+     "kind": "boolean"
+    }
+   },
+   {
+    "name": "reasons",
+    "required": true,
+    "schema": {
+     "items": {
+      "fields": [
+       {
+        "name": "text",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 400
+        }
+       },
+       {
+        "name": "tool",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 64
+        }
+       },
+       {
+        "name": "field",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 128
+        }
+       }
+      ],
+      "kind": "object"
+     },
+     "kind": "array",
+     "max_items": 5
+    }
+   }
+  ],
+  "kind": "object"
+ },
+ "package_id": "late-purchase-order-recovery",
+ "policies": [
+  {
+   "id": "planners",
+   "ref": {
+    "kind": "policy",
+    "name": "late-po-planners",
+    "sha256": "0778ab3830b4f82c47bd247adf54fe0726f104813c50ca09818842ef99aa438a",
+    "version": "0.1.0"
+   }
+  },
+  {
+   "id": "customer_messages",
+   "ref": {
+    "kind": "policy",
+    "name": "late-po-customer-messages",
+    "sha256": "96c162eb6b8b5783db81ae69810efd66b7af9288fe7b9b2c34f1b7565d218942",
+    "version": "0.1.0"
+   }
+  }
+ ],
+ "schema_version": "lotuspond.workflow-package.v2",
+ "schemas": [],
+ "secret_refs": [
+  "erp_token",
+  "carrier_token",
+  "inbox_token"
+ ],
+ "subworkflows": [],
+ "version": "0.1.0"
+}

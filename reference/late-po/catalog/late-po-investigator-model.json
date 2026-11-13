@@ -1,0 +1,257 @@
+{
+ "definition": {
+  "configuration_revision": "1",
+  "configuration_sha256": "7f19d5b1706e2e43a3d43b5487333e7fcf9789eb1eef53ef7ab7615066c81326",
+  "input_schema": {
+   "fields": [
+    {
+     "name": "order",
+     "required": true,
+     "schema": {
+      "fields": [
+       {
+        "name": "po_number",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "supplier_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "promised_day",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 200000,
+         "min": 0
+        }
+       },
+       {
+        "name": "sales_order_id",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "customer_requested_day",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 200000,
+         "min": 0
+        }
+       },
+       {
+        "name": "lines",
+        "required": true,
+        "schema": {
+         "items": {
+          "fields": [
+           {
+            "name": "sku",
+            "required": true,
+            "schema": {
+             "kind": "string",
+             "max_length": 32
+            }
+           },
+           {
+            "name": "quantity",
+            "required": true,
+            "schema": {
+             "kind": "integer",
+             "max": 1000000,
+             "min": 0
+            }
+           }
+          ],
+          "kind": "object"
+         },
+         "kind": "array",
+         "max_items": 50
+        }
+       }
+      ],
+      "kind": "object"
+     }
+    },
+    {
+     "name": "shipment",
+     "required": true,
+     "schema": {
+      "fields": [
+       {
+        "name": "po_number",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "shipped",
+        "required": true,
+        "schema": {
+         "kind": "boolean"
+        }
+       },
+       {
+        "name": "status",
+        "required": true,
+        "schema": {
+         "kind": "string",
+         "max_length": 32
+        }
+       },
+       {
+        "name": "estimated_day",
+        "required": true,
+        "schema": {
+         "kind": "integer",
+         "max": 200000,
+         "min": 0
+        }
+       }
+      ],
+      "kind": "object"
+     }
+    }
+   ],
+   "kind": "object"
+  },
+  "limits": {
+   "max_cost_microusd": 20000,
+   "max_input_tokens": 60000,
+   "max_output_tokens": 16000,
+   "max_steps": 20,
+   "timeout_seconds": 600
+  },
+  "output_schema": {
+   "fields": [
+    {
+     "name": "new_promised_day",
+     "required": true,
+     "schema": {
+      "kind": "integer",
+      "max": 200000,
+      "min": 0
+     }
+    },
+    {
+     "name": "notify_customer",
+     "required": true,
+     "schema": {
+      "kind": "boolean"
+     }
+    },
+    {
+     "name": "reasons",
+     "required": true,
+     "schema": {
+      "items": {
+       "fields": [
+        {
+         "name": "text",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 400
+         }
+        },
+        {
+         "name": "tool",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 64
+         }
+        },
+        {
+         "name": "field",
+         "required": true,
+         "schema": {
+          "kind": "string",
+          "max_length": 128
+         }
+        }
+       ],
+       "kind": "object"
+      },
+      "kind": "array",
+      "max_items": 5
+     }
+    }
+   ],
+   "kind": "object"
+  },
+  "profile": "anthropic-messages",
+  "read_tools": [
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "inbox-standin",
+     "sha256": "b69b97388f00b64766752a59f7758f847561963aa3b002326f7146ef7cdc40d0",
+     "version": "0.1.0"
+    },
+    "operation": "list_supplier_messages",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   },
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "carrier-standin",
+     "sha256": "0695ceeb751571991169703cb81be9b1809ae1d62b315be0f998d09f8938e9cb",
+     "version": "0.1.0"
+    },
+    "operation": "list_tracking_events",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   },
+   {
+    "connector_ref": {
+     "kind": "connector",
+     "name": "erp-standin",
+     "sha256": "9b70b818f05fc92d701b356739ae263d7b26b4ae9364a3a64504da183dd95e7b",
+     "version": "0.1.0"
+    },
+    "operation": "get_stock_cover",
+    "retry": {
+     "backoff_seconds": 5,
+     "max_attempts": 3,
+     "retry_codes": [
+      "unavailable"
+     ],
+     "timeout_seconds": 30
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "model",
+ "name": "late-po-investigator-model",
+ "schemas": [],
+ "version": "0.1.0"
+}

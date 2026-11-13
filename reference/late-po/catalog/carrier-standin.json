@@ -1,0 +1,140 @@
+{
+ "definition": {
+  "artifact_sha256": "f26c5122fb9b475cc2714e7320ffedf4f064fde5b09f1949ea1daa429de3ec8f",
+  "operations": [
+   {
+    "effect": "read",
+    "id": "get_shipment",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "shipped",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      },
+      {
+       "name": "status",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "estimated_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "list_tracking_events",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "events",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "day",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 200000,
+            "min": 0
+           }
+          },
+          {
+           "name": "code",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "text",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 200
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "connector",
+ "name": "carrier-standin",
+ "schemas": [],
+ "version": "0.1.0"
+}

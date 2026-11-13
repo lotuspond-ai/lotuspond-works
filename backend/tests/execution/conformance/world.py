@@ -274,32 +274,30 @@ def file_catalog(world: World):
     return catalog
 
 
-def actions_mode(world: World, connector: dict) -> dict:
+def actions_mode(world: World, connector: dict | list) -> dict:
     """Give a world E05's action authorities before any process starts.
 
-    A command signing key and its trust, and the synthetic connector installed in the
-    catalog. Composition then wires interpreter v2 and the action services; a world
-    without this keeps E04's exact v1 graph. Returns the connector pin.
+    A command signing key and its trust, and the connector (or each of several)
+    installed in the catalog. Composition then wires interpreter v2 and the action
+    services; a world without this keeps E04's exact v1 graph. Returns the (first)
+    connector pin.
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     keys = world.state("keys")
     if "command" not in keys:
         world.update("keys", command=Ed25519PrivateKey.generate().private_bytes_raw().hex())
-    pin = {
-        "name": connector["name"],
-        "version": connector["version"],
-        "artifact_sha256": connector["definition"]["artifact_sha256"],
-    }
-    operations = {op["id"]: op["effect"] for op in connector["definition"]["operations"]}
-    world.write(
-        "actions",
-        {
-            "command_key_available": True,
-            "connectors": [{"pin": pin, "operations": operations}],
-        },
-    )
-    return pin
+    installed = []
+    for document in connector if isinstance(connector, list) else [connector]:
+        pin = {
+            "name": document["name"],
+            "version": document["version"],
+            "artifact_sha256": document["definition"]["artifact_sha256"],
+        }
+        operations = {op["id"]: op["effect"] for op in document["definition"]["operations"]}
+        installed.append({"pin": pin, "operations": operations})
+    world.write("actions", {"command_key_available": True, "connectors": installed})
+    return installed[0]["pin"]
 
 
 def _wall_ms():

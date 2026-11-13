@@ -1,0 +1,314 @@
+{
+ "definition": {
+  "artifact_sha256": "26e738df654688a2f3748db37e36c94b6299577c5b0b9bc8642f711dfc037860",
+  "operations": [
+   {
+    "effect": "read",
+    "id": "get_purchase_order",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "sales_order_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "customer_requested_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "lines",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "sku",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "quantity",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 1000000,
+            "min": 0
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 50
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_stock_cover",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "sku",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "days_of_cover",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 10000,
+        "min": 0
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "sku",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_promised_date_change",
+    "idempotency": "none",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "exists",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      },
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "write",
+    "id": "set_promised_date",
+    "idempotency": "target_key",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "reference",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "absence_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": false
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "effect_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": true
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "mode": "read_back",
+     "read_operation": "get_promised_date_change"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "connector",
+ "name": "erp-standin",
+ "schemas": [],
+ "version": "0.1.0"
+}

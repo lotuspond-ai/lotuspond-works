@@ -1,0 +1,15 @@
+{
+ "definition": {
+  "allowed_capability_classes": [],
+  "allowed_operation_classes": [],
+  "approval": "human",
+  "assignment": "workspace_admins",
+  "escalation": null,
+  "independent_review": false
+ },
+ "format_version": 1,
+ "kind": "policy",
+ "name": "late-po-planners",
+ "schemas": [],
+ "version": "0.1.0"
+}

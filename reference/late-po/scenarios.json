@@ -1,0 +1,231 @@
+{
+ "_note": "Synthetic scenarios for the late purchase order reference workflow. model_rounds script the model double (test mode only); reviews are the reviewers' decisions.",
+ "scenarios": [
+  {
+   "description": "The carrier expects it a day early: no model, no person.",
+   "expected": {
+    "new_promised_day": 20775,
+    "notify_customer": false,
+    "status": "on_time"
+   },
+   "id": "on-time",
+   "input": {
+    "po_number": "PO-7001"
+   }
+  },
+  {
+   "description": "Late; the supplier confirmed the new date, still before the customer's day.",
+   "expected": {
+    "new_promised_day": 20779,
+    "notify_customer": false,
+    "status": "rescheduled"
+   },
+   "id": "supplier-confirmed",
+   "input": {
+    "po_number": "PO-7002"
+   },
+   "model_rounds": [
+    {
+     "tool_calls": [
+      {
+       "arguments": {
+        "input": null,
+        "target": {
+         "po_number": "PO-7002"
+        }
+       },
+       "name": "inbox-standin-list_supplier_messages"
+      }
+     ]
+    },
+    {
+     "output": {
+      "new_promised_day": 20779,
+      "notify_customer": false,
+      "reasons": [
+       {
+        "field": "messages/0/text",
+        "text": "The supplier confirms arrival on day 20779 after a two-day production slip.",
+        "tool": "inbox-standin-list_supplier_messages"
+       },
+       {
+        "field": "order/customer_requested_day",
+        "text": "Day 20779 is before the customer's requested day 20785.",
+        "tool": "input"
+       }
+      ]
+     }
+    }
+   ],
+   "reviews": {
+    "reschedule": "allow"
+   }
+  },
+  {
+   "description": "Late; only the carrier's customs hold explains it.",
+   "expected": {
+    "new_promised_day": 20781,
+    "notify_customer": false,
+    "status": "rescheduled"
+   },
+   "id": "carrier-only",
+   "input": {
+    "po_number": "PO-7003"
+   },
+   "model_rounds": [
+    {
+     "tool_calls": [
+      {
+       "arguments": {
+        "input": null,
+        "target": {
+         "po_number": "PO-7003"
+        }
+       },
+       "name": "carrier-standin-list_tracking_events"
+      }
+     ]
+    },
+    {
+     "output": {
+      "new_promised_day": 20781,
+      "notify_customer": false,
+      "reasons": [
+       {
+        "field": "events/1/text",
+        "text": "The shipment is held at customs, with release one day after the estimate of day 20780.",
+        "tool": "carrier-standin-list_tracking_events"
+       }
+      ]
+     }
+    }
+   ],
+   "reviews": {
+    "reschedule": "allow"
+   }
+  },
+  {
+   "description": "Late past the customer's requested day, with two days of stock left: notify.",
+   "expected": {
+    "new_promised_day": 20779,
+    "notify_customer": true,
+    "status": "rescheduled_and_notified"
+   },
+   "id": "past-customer-day",
+   "input": {
+    "po_number": "PO-7004"
+   },
+   "model_rounds": [
+    {
+     "tool_calls": [
+      {
+       "arguments": {
+        "input": null,
+        "target": {
+         "po_number": "PO-7004"
+        }
+       },
+       "name": "carrier-standin-list_tracking_events"
+      }
+     ]
+    },
+    {
+     "tool_calls": [
+      {
+       "arguments": {
+        "input": null,
+        "target": {
+         "sku": "TAPE-48"
+        }
+       },
+       "name": "erp-standin-get_stock_cover"
+      }
+     ]
+    },
+    {
+     "output": {
+      "new_promised_day": 20779,
+      "notify_customer": true,
+      "reasons": [
+       {
+        "field": "events/0/text",
+        "text": "The shipment missed its linehaul connection; the carrier now estimates day 20779.",
+        "tool": "carrier-standin-list_tracking_events"
+       },
+       {
+        "field": "days_of_cover",
+        "text": "TAPE-48 has two days of cover, so the customer's day 20776 cannot be met from stock.",
+        "tool": "erp-standin-get_stock_cover"
+       }
+      ]
+     }
+    }
+   ],
+   "reviews": {
+    "notify": "allow",
+    "reschedule": "allow"
+   }
+  },
+  {
+   "description": "A second start after the date was moved: on time, nothing written twice.",
+   "expected": {
+    "new_promised_day": 20782,
+    "notify_customer": false,
+    "status": "on_time"
+   },
+   "id": "already-rescheduled",
+   "input": {
+    "po_number": "PO-7005"
+   }
+  },
+  {
+   "description": "Nothing has shipped; the supplier's ship date puts arrival after the customer's day: notify.",
+   "expected": {
+    "new_promised_day": 20784,
+    "notify_customer": true,
+    "status": "rescheduled_and_notified"
+   },
+   "id": "not-shipped",
+   "input": {
+    "po_number": "PO-7006"
+   },
+   "model_rounds": [
+    {
+     "tool_calls": [
+      {
+       "arguments": {
+        "input": null,
+        "target": {
+         "po_number": "PO-7006"
+        }
+       },
+       "name": "inbox-standin-list_supplier_messages"
+      }
+     ]
+    },
+    {
+     "output": {
+      "new_promised_day": 20784,
+      "notify_customer": true,
+      "reasons": [
+       {
+        "field": "messages/0/text",
+        "text": "The supplier ships on 2026-11-24 with three days in transit, arriving day 20784.",
+        "tool": "inbox-standin-list_supplier_messages"
+       },
+       {
+        "field": "order/customer_requested_day",
+        "text": "Day 20784 is after the customer's requested day 20778.",
+        "tool": "input"
+       }
+      ]
+     }
+    }
+   ],
+   "reviews": {
+    "notify": "allow",
+    "reschedule": "allow"
+   }
+  }
+ ]
+}

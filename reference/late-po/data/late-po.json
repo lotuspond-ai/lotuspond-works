@@ -1,0 +1,172 @@
+{
+ "_note": "Synthetic stand-in ERP, carrier and inbox records. Not a customer system; no real suppliers, carriers, customers or people. Days are whole days since 1970-01-01 (20771 is 2026-11-14).",
+ "purchase_orders": {
+  "PO-7001": {
+   "customer_requested_day": 20780,
+   "lines": [
+    {
+     "quantity": 500,
+     "sku": "BOX-40"
+    }
+   ],
+   "po_number": "PO-7001",
+   "promised_day": 20775,
+   "sales_order_id": "SO-3001",
+   "supplier_id": "SUP-PACK"
+  },
+  "PO-7002": {
+   "customer_requested_day": 20785,
+   "lines": [
+    {
+     "quantity": 120,
+     "sku": "GEAR-12"
+    }
+   ],
+   "po_number": "PO-7002",
+   "promised_day": 20775,
+   "sales_order_id": "SO-3002",
+   "supplier_id": "SUP-GEAR"
+  },
+  "PO-7003": {
+   "customer_requested_day": 20790,
+   "lines": [
+    {
+     "quantity": 300,
+     "sku": "BOX-60"
+    }
+   ],
+   "po_number": "PO-7003",
+   "promised_day": 20776,
+   "sales_order_id": "SO-3003",
+   "supplier_id": "SUP-PACK"
+  },
+  "PO-7004": {
+   "customer_requested_day": 20776,
+   "lines": [
+    {
+     "quantity": 800,
+     "sku": "TAPE-48"
+    }
+   ],
+   "po_number": "PO-7004",
+   "promised_day": 20774,
+   "sales_order_id": "SO-3004",
+   "supplier_id": "SUP-PACK"
+  },
+  "PO-7005": {
+   "customer_requested_day": 20786,
+   "lines": [
+    {
+     "quantity": 200,
+     "sku": "BOX-40"
+    }
+   ],
+   "po_number": "PO-7005",
+   "promised_day": 20782,
+   "sales_order_id": "SO-3005",
+   "supplier_id": "SUP-PACK"
+  },
+  "PO-7006": {
+   "customer_requested_day": 20778,
+   "lines": [
+    {
+     "quantity": 60,
+     "sku": "GEAR-20"
+    }
+   ],
+   "po_number": "PO-7006",
+   "promised_day": 20775,
+   "sales_order_id": "SO-3006",
+   "supplier_id": "SUP-GEAR"
+  }
+ },
+ "shipments": {
+  "PO-7001": {
+   "estimated_day": 20774,
+   "po_number": "PO-7001",
+   "shipped": true,
+   "status": "in_transit"
+  },
+  "PO-7002": {
+   "estimated_day": 20779,
+   "po_number": "PO-7002",
+   "shipped": true,
+   "status": "in_transit"
+  },
+  "PO-7003": {
+   "estimated_day": 20780,
+   "po_number": "PO-7003",
+   "shipped": true,
+   "status": "exception"
+  },
+  "PO-7004": {
+   "estimated_day": 20779,
+   "po_number": "PO-7004",
+   "shipped": true,
+   "status": "in_transit"
+  },
+  "PO-7005": {
+   "estimated_day": 20782,
+   "po_number": "PO-7005",
+   "shipped": true,
+   "status": "in_transit"
+  },
+  "PO-7006": {
+   "estimated_day": 0,
+   "po_number": "PO-7006",
+   "shipped": false,
+   "status": "not_shipped"
+  }
+ },
+ "stock_cover": {
+  "BOX-40": 21,
+  "BOX-60": 30,
+  "GEAR-12": 9,
+  "GEAR-20": 4,
+  "TAPE-48": 2
+ },
+ "supplier_messages": {
+  "PO-7002": [
+   {
+    "day": 20771,
+    "message_id": "MSG-801",
+    "text": "Production slipped two days. The carrier confirms arrival on 2026-11-22 (day 20779)."
+   }
+  ],
+  "PO-7006": [
+   {
+    "day": 20771,
+    "message_id": "MSG-802",
+    "text": "The order ships on 2026-11-24; the carrier quotes three days in transit, arriving 2026-11-27 (day 20784)."
+   }
+  ]
+ },
+ "tracking_events": {
+  "PO-7002": [
+   {
+    "code": "picked_up",
+    "day": 20772,
+    "text": "Picked up at the supplier's dock."
+   }
+  ],
+  "PO-7003": [
+   {
+    "code": "picked_up",
+    "day": 20772,
+    "text": "Picked up at the supplier's dock."
+   },
+   {
+    "code": "customs_hold",
+    "day": 20777,
+    "text": "Held at customs for document review; release expected one day after the current estimate."
+   }
+  ],
+  "PO-7004": [
+   {
+    "code": "delayed",
+    "day": 20773,
+    "text": "Missed the linehaul connection; next departure adds five days."
+   }
+  ]
+ }
+}
