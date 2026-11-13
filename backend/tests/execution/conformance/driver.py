@@ -101,10 +101,28 @@ def _code(response):
 class Operator:
     """Sets up one world's tenant and drives it as its owner."""
 
-    def __init__(self, world, processes, *, contracts=CONTRACTS, flows=FLOWS):
+    def __init__(
+        self,
+        world,
+        processes,
+        *,
+        contracts=CONTRACTS,
+        flows=FLOWS,
+        connector=None,
+        destinations=(),
+        secret_binding=None,
+    ):
         self.world, self.processes = world, processes
         self.contracts, self.flows = contracts, flows
         self.documents = catalog_documents(contracts)
+        # The connector each pool's connection and each runtime serve; its read
+        # operations are the connection's. The catalog fixture connector by default.
+        self.connector = connector or self.documents[0]
+        self.read_operations = tuple(
+            op["id"] for op in self.connector["definition"]["operations"] if op["effect"] == "read"
+        )
+        # The connection's destinations and, when named, one bound secret reference.
+        self.destinations, self.secret_binding = tuple(destinations), secret_binding
         self.published = {}
         self.deployed = {}
 
@@ -194,7 +212,9 @@ class Operator:
             ConnectionConfig,
             ConnectorPin,
             DataHandling,
+            DestinationRule,
             PoolPolicy,
+            SecretPin,
             canonical_connection_json,
             canonical_pool_json,
             connection_digest,
@@ -204,7 +224,7 @@ class Operator:
 
         from lotuspond import models
 
-        connector = self.documents[0]
+        connector = self.connector
         pin = ConnectorPin(
             name=connector["name"],
             version=connector["version"],
@@ -215,12 +235,20 @@ class Operator:
             db.add(models.RuntimePool(**scope, id=pool_id, name="Conformance", status="active"))
             connection = models.Connection(**scope, name="read-only", status="active")
             db.add(connection)
+            secrets = ()
+            if self.secret_binding is not None:
+                secret = models.SecretReference(
+                    **scope, binding_id=self.secret_binding, version=1, status="active"
+                )
+                db.add(secret)
+                db.flush()
+                secrets = (SecretPin(reference_id=secret.id, version=1),)
             db.flush()
             config = ConnectionConfig(
                 connector=pin,
-                operations=("read",),
-                destinations=(),
-                secrets=(),
+                operations=self.read_operations,
+                destinations=tuple(DestinationRule.model_validate(d) for d in self.destinations),
+                secrets=secrets,
                 # The longest call a connection allows (E03's 30 s bound), so a
                 # lease renewal (every 20 s) happens inside one read.
                 data_handling=DataHandling(timeout_ms=30000),
@@ -234,6 +262,16 @@ class Operator:
                     config_digest=connection_digest(config),
                 )
             )
+            for secret_pin in secrets:
+                db.add(
+                    models.ConnectionVersionSecret(
+                        **scope,
+                        connection_id=connection.id,
+                        connection_version=1,
+                        secret_reference_id=secret_pin.reference_id,
+                        secret_version=secret_pin.version,
+                    )
+                )
             policy = PoolPolicy(
                 connectors=(pin,),
                 platforms=("linux",),
@@ -257,7 +295,11 @@ class Operator:
                 )
             )
             db.get(models.RuntimePool, pool_id).current_policy_version = 1
-            connection_view = {"id": connection.id, "version": 1}
+            connection_view = {
+                "id": connection.id,
+                "version": 1,
+                "secrets": [p.model_dump(mode="json") for p in secrets],
+            }
         return pool_id, connection_view
 
     def enrollment(self, customer) -> str:
@@ -268,11 +310,13 @@ class Operator:
         )
         return issued["token"]
 
-    def runtime(self, customer, name, *, model_document=None, start=True, **scripts):
-        connector, model = self.documents[0], model_document or self.model_document()
+    def runtime(self, customer, name, *, model_document=None, start=True, activity=None, **scripts):
+        connector, model = self.connector, model_document or self.model_document()
         return self.processes.start_runtime(
             name,
             self.enrollment(customer),
+            operations=list(self.read_operations),
+            activity=activity,
             dependencies={
                 "connector": catalog_ref(connector),
                 "installed": {

@@ -1461,3 +1461,65 @@ At the paced rate, server CPU is about 1.2–1.4 ms on both heads: it is dominat
 - Web: `tsc --noEmit`, 114 unit tests, `npm run build` and Prettier on every changed file passed. Protocol adapters (HTTP only): 17 passed. `deploy/checks`: 16 passed, with the local shim exposing Docker's Compose plugin. Strict MkDocs build passed.
 - Browser, Vite dev server against the disposable schema: Settings shows only the workspace name and identity card, Administration has Overview, Workspaces and Users, the policy form has no tool lists, retired routes return 405/404 on the live API, `/me` reports only the mail and registration capabilities, and the public deployment section describes the one service install and the execution image. No script errors.
 - **Not run:** `execution` (built image), `conformance`, `disruptive`, `load`, `restore` and `scripts/checks` against a built image.
+
+## Reference workflow, milestone 1: invoice exception triage on synthetic providers — 2026-11-11
+
+Local evidence only: no push of this code at the time of the runs, no hosted CI (GitHub Actions still refuses jobs over billing), no deployment, and no real model, connector or AP system. Specification: [reference workflow design](superpowers/specs/2026-11-11-reference-workflow-design.md). Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6), on battery power; no timing claim is made.
+
+- **Documents.** `reference/invoice-triage/generate.py` authors the full package (17 compiled steps: 3 reads, the tolerance decision, the tool-using investigation, payment-hold and credit-note actions behind review, dispatch and readback verification, and the clerk's form), a prefix package (11 steps, both action branches replaced by the form), the `ap-standin` connector, the investigator model and three policies. Both packages compile with the SDK. E04's publication guard refuses the full package (`unsupported_step`) and accepts the prefix.
+- **Mac, no database:** `backend/tests/test_reference_invoice_triage.py`, 19 passed. Covers committed documents equal to the generator's output, compilation, review and policy on each action, read-only agent tools, the package's own tolerance mappings evaluated by the engine's evaluator on every scenario's stand-in records, scripted proposals citing only tools they called, and the HTTPS stand-in (token refusal, routes, idempotent writes, a reused key with different content refused, a write that times out after committing visible on readback).
+- **Linux, real processes:** `tests/execution/conformance/test_reference_triage.py` runs the prefix on the API, orchestrator, sweeper and an enrolled runtime per scenario with test-mode synthetic providers scripted from the stand-in's records. All six scenarios end as specified: a clean match with 3 reads and no model or person; a contract-justified price rise, an overcharge, a short receipt, a missing receipt and a duplicate each reach the clerk's form with the scripted proposal, the exact read and model call counts, and the clerk's answer in the result.
+- **Regression:** full conformance tier 1 and installed acceptance, 49 passed in 31 min 48 s (48 before plus the new case); runtime job, ruff clean and 746 passed. Run before a final import-order-only lint fix in `driver.py`. `npm run lint:python` and `npm run check:contracts` pass on the Mac.
+- **Test-only changes:** the runtime's synthetic read fixture accepts per-operation scripts (`reads`), and the conformance driver takes a connector document whose read operations the pool connection and runtime serve. Defaults are unchanged.
+- **Finding:** an execution's active-time budget is the smallest declared `timeout_seconds` (the agent's 240 s), and each attempt is charged at least its reservation. 60 s per attempt failed with `budget_exceeded` on the agent's first tool call; 20 s fits. Recorded in the specification for milestone 2.
+- **Revision 3 (same day):** the model pin moved to `claude-haiku-5-5` at `medium` effort, the agent's limits to 600 s, 20 steps and a $0.02 cost cap. The reference case was rerun alone in the Linux container and passed (1 passed, 62 s). No real model was called: the pin is a catalog value, and the synthetic provider answers in test mode.
+- **Not covered:** the clerk's 3-day timeout, the action branches (E05), any real provider, and hosted CI.
+
+## Reference workflow, milestone 2: the runtime's real providers — 2026-11-11
+
+Local evidence only: no hosted CI (GitHub Actions refused every job for billing, 0 steps), no deployment, no live model call and no real AP system. Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6), on battery power; no timing claim is made.
+
+- **What shipped (runtime 0.2.0, unversioned change):**
+  - `https-json`, the generic connector's read side. Its installed artifact is a routes document whose canonical SHA-256 is the connector's pinned `artifact_sha256`. Reads go through `DestinationTransport` with the connection's one secret as a bearer token; `ConnectedDestination` now also accepts `Authorization: Bearer <token>`.
+  - `anthropic-messages`, one model round on the Anthropic Messages API through the official `anthropic` SDK 2.3.0, as an optional `anthropic` extra. It checks the pinned model document and configuration, uses strict tools and structured output, and sets no proxy from the environment, no redirects and no SDK retries.
+  - An opaque per-round `continuation`, so Claude's earlier turns and thinking blocks are replayed unchanged.
+  - An operator-form activity configuration (`provider_config.py`), which a test-mode runtime may also use against loopback stand-ins.
+  - The reference package now declares its `ap_token` secret, and the model configuration pins Anthropic's prices.
+- **Mac:** 22 reference tests passed, now including the pinned routes and the `https-json` connector reading the HTTPS stand-in. The runtime's new connector and model tests (16, against a local HTTPS server and a Messages API double) and the destination tests passed. `lint:python` passed.
+- **Linux, real processes:** `test_reference_triage.py` now runs the prefix on the API, orchestrator, sweeper and one enrolled runtime using the real providers. Reads go to the HTTPS stand-in with a mounted bearer token; model rounds go to a local Messages API double scripted from the scenarios, in the documented response shape. All six scenarios end as specified, with these checks:
+  - every read is an authorized GET;
+  - read and model call counts are exact;
+  - the requests name `claude-haiku-5-5` at `medium` effort with no sampling parameters and strict tools;
+  - the second round replays the model's thinking and tool-use turn unchanged.
+- **Regression:**
+  - Full conformance tier 1 and installed acceptance: 49 passed (33 min 26 s).
+  - Runtime job: 764 passed.
+  - `validate`: the backend check suite 1,079 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed. The required PostgreSQL suite had 1,220 passed and 1 failed. The failure, `test_artifacts.py::test_retention_inventory_is_bounded_dry_run`, has a 250 ms retention cutoff that two writes outlasted on the loaded host; it involves no code this change touched, and alone it passed 5 of 5.
+  - Three runtime expectations were updated for the new behaviour. Installed metadata now lists the optional extra, and a core install must not contain `anthropic` or `httpx2`. A synthetic configuration outside test mode is now refused as `invalid_input` rather than `unavailable`, so synthetic providers still run only in test mode.
+- **Not covered:** a live Anthropic call (no API key on this machine), a real AP system, writes (E05), and hosted CI.
+
+## Reference workflow, milestone 3: production execution authorities from an operator directory — 2026-11-11
+
+Local evidence only: no hosted CI (GitHub Actions refused every job for billing), no deployment, no live model call and no real AP system. Runs used a clone of `claude/reference-workflow` in the local Linux CI container (`lotuspond-ci-runner:local`, PostgreSQL 18.6). No timing claim is made.
+
+- **What shipped:**
+  - `lotuspond.execution.operator_authority` provides recovery, entitlement, tenant policy, demand, publisher trust and admitted catalog, artifact keys, knowledge-source access, and the activity signer and trust. All of these are read from one private operator directory outside the database and reread on every lookup. A missing, readable-by-others, foreign or linked file denies.
+  - `python -m lotuspond.authority` with `init`, `trust-publisher`, `admit`, `execution`, `release-required`, `new-epoch` and `show`. `init` starts with execution off and release decisions required.
+  - `lotuspond.execution.composition.compose()` is the one wiring that both the API (`LOTUSPOND_AUTHORITY_DIR`) and `execution-worker` (`..._AUTHORITY_DIR`, `..._INSTALLATION_ID`) use, and so does the conformance harness. Without the directory, behaviour is unchanged: no execution services, and the worker refuses with `engine_unavailable`.
+  - Runbook: `docs/operations/operator-authority.md`.
+- **Mac:** 10 operator authority tests passed. They cover private files, refusals, immediate revocation, a new epoch, and the API and worker built from settings. The 22 reference tests passed.
+- **Linux, real processes:** `test_reference_triage.py` now runs the API and workers with the operator directory and test mode off, as production builds them; only the runtime stays in test mode, to reach loopback stand-ins. All six scenarios end as specified (1 passed, 88 s).
+- **Regression:**
+  - Conformance tier 1 and installed acceptance: 49 passed (35 min 26 s).
+  - Disruptive: 6 passed.
+  - `execution` and `restore` jobs passed.
+  - `validate`:
+    - backend check suite 1,089 passed and 197 skipped; SDK 1,514; runtime 764; schema and deploy checks passed;
+    - the required PostgreSQL suite had 1,230 passed and 1 failed. The failure is the same 250 ms `test_retention_inventory_is_bounded_dry_run` timing case as in milestone 2. Rerun alone, it passed 5 of 5.
+  - `docs`: the local runner's `pip` put `mkdocs` outside `PATH` (exit 127, a container issue). With `~/.local/bin` on `PATH` the strict build passed.
+- **Not covered:**
+  - a live Anthropic call;
+  - a real AP system;
+  - writes (E05);
+  - the package release binding (milestone 5; until then the harness turns `release-required` off);
+  - hosted CI.

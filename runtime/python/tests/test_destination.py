@@ -173,7 +173,11 @@ def test_segment_prefix_positive(path):
     "header",
     [
         {"Host": "evil"},
-        {"Authorization": "Bearer secret"},
+        # Only a bearer token is accepted (the https-json connector's), never another
+        # scheme or a value that smuggles a second header.
+        {"Authorization": "Basic secret"},
+        {"Authorization": "Bearer secret\r\nHost: evil"},
+        {"Authorization": "Bearer "},
         {"Content-Length": "0"},
         {"X-Lotuspond-Fixture-Secret": "value\r\nHost: evil"},
     ],

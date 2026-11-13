@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -43,8 +44,11 @@ def _token(path):
     return validate_token(SecretStr(text.strip()), "lpe_")
 
 
-def _serve_activities(config, client, store, fixture, stop) -> int:
-    """Test mode only: the E03 session loop, plus one activity worker on its own transport.
+def _serve_activities(config, client, store, setup, stop) -> int:
+    """The E03 session loop, plus one activity worker on its own transport.
+
+    `setup` is test mode's synthetic fixture or an operator's real providers
+    (`provider_config`); nothing else differs between them.
 
     The worker polls with the supervisor's live credential and session: every request,
     including one from an invocation in flight across a rotation, carries the current
@@ -52,12 +56,11 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
     by every session and heartbeat response. A worker failure stops both.
     """
     from .activity_client import ActivityClient, ControlPlaneSources
-    from .activity_fixture import FixtureTrust
     from .activity_state import InvocationJournal
     from .activity_worker import ActivityDependencies, ActivityWorker, ServerClock
     from .providers import ProviderSet
 
-    trust_file, journal_directory, descriptors = fixture
+    journal_directory, descriptors = setup.journal_directory, setup.descriptors
     clock = ServerClock()
     supervisor = RuntimeSupervisor(
         client,
@@ -77,7 +80,7 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
         try:
             transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
             journal = InvocationJournal(journal_directory)
-            providers = ProviderSet(descriptors, test_mode=True)
+            providers = ProviderSet(descriptors, test_mode=setup.test_mode)
             worker = current = None
             idle = IDLE_MIN_S
             while not stop.is_set():
@@ -94,11 +97,12 @@ def _serve_activities(config, client, store, fixture, stop) -> int:
                         client=activity_client,
                         records=sources,
                         values=sources,
-                        trust=FixtureTrust(trust_file),
+                        trust=setup.trust,
                         providers=providers,
                         journal=journal,
                         clock=clock,
                         context=sources,
+                        secrets=setup.secrets,
                     )
                     if worker is None:
                         worker = ActivityWorker(deps)
@@ -162,18 +166,31 @@ def _execute(argv, clients) -> int:
         )
         fixture = None
         if args.command == "activity-worker":
-            if config.mode != "test" or args.activity_config is None:
-                # No real read or model provider is installed in this distribution.
-                # Report unavailable rather than claim work it cannot do; only test
-                # mode runs the packaged synthetic providers (Task 13).
+            if args.activity_config is None:
+                # Without an operator's provider configuration nothing can be served.
                 raise FleetError("authority_unavailable")
-            from .activity_fixture import worker_config
-
+            raw = read_private_file(Path(args.activity_config).absolute(), 1048576)
             try:
-                fixture = worker_config(
-                    read_private_file(Path(args.activity_config).absolute(), 262144)
-                )
-            except (ValueError, TypeError):
+                operator_format = "secrets" in json.loads(raw)
+                if config.mode == "test" and operator_format:
+                    # A test-mode runtime may run real providers against local stand-ins.
+                    from .provider_config import worker_config as operator_config
+
+                    fixture = operator_config(raw, test_mode=True)
+                elif config.mode == "test":
+                    # Otherwise test mode runs the packaged synthetic providers (Task 13).
+                    from .activity_fixture import FixtureTrust, worker_config
+                    from .provider_config import ActivitySetup
+
+                    trust_file, journal, descriptors = worker_config(raw)
+                    fixture = ActivitySetup(
+                        FixtureTrust(trust_file), journal, descriptors, None, True
+                    )
+                else:
+                    from .provider_config import worker_config as operator_config
+
+                    fixture = operator_config(raw)
+            except (ValueError, TypeError, KeyError):
                 raise FleetError("invalid_request") from None
         # No executable connector is registered in this foundation. Operator
         # declarations cannot invent installed capability; Task7 owns that catalog.
