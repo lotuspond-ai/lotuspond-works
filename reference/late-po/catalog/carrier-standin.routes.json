@@ -1,0 +1,17 @@
+{
+ "connector": {
+  "name": "carrier-standin",
+  "version": "0.1.0"
+ },
+ "format": "lotuspond.https-json.routes.v1",
+ "operations": {
+  "get_shipment": {
+   "method": "GET",
+   "path": "/carrier/shipments/{po_number}"
+  },
+  "list_tracking_events": {
+   "method": "GET",
+   "path": "/carrier/shipments/{po_number}/events"
+  }
+ }
+}

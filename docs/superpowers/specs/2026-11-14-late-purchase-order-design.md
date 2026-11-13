@@ -62,6 +62,12 @@ Each is its own PR. Milestones 1 to 3 reuse what the first workflow built (the `
 4. **Prove both packages.** Package evaluations and the release binding (the first workflow's milestone 5), run on both.
 5. **See them run.** The review inbox and Control Room read pages (the first workflow's milestone 6), shown on both.
 
+## Milestone 1 as built (14 November)
+
+- `reference/late-po/` holds the generator, the package, three connectors with their routes documents, the model, two policies, the data, six scenarios and the three-system stand-in. `backend/tests/test_reference_late_po.py` (24 tests) runs anywhere.
+- The conformance driver now binds several connectors to one package, each through its own connection and secret (`Operator(connections=...)`), and an action world can install several connectors (`actions_mode`). `test_reference_late_po.py` in the conformance suite runs all six scenarios on real processes in an E05 action world (test mode, because production composition still wires interpreter v1 only): on-time orders succeed with two reads and no model; late orders read across the three systems and stop at the planner's review of the exact date change, which the test denies (`approval_denied`, nothing written). It passed in the local Linux container.
+- **Finding for milestone 3.** E05 requires a write's read-back to accept the write's exact target and input (owner decision 18), so the read-backs here take the change as input. The `https-json` connector refuses any read with an input, and has no write side. Milestone 3 therefore starts with the `https-json` write side and read-backs that carry the write's input. The invoice workflow's full package has the same read-back shape problem (its read-backs take no input), which only its prefix being deployed has hidden.
+
 ## Out of scope
 
 A real ERP, carrier or mail system; the date trigger; free-text customer messages (the template is fixed); choosing another supplier or splitting an order (the agent may mention it as a reason, nothing acts on it); Studio authoring of this package; anything in GOAL.md's "Not part of the product".

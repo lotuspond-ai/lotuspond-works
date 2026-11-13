@@ -1,0 +1,234 @@
+{
+ "definition": {
+  "artifact_sha256": "931133b802242d0ce98c1cfc153f8c9e7099a26f9cf619a08f988cb117797d44",
+  "operations": [
+   {
+    "effect": "read",
+    "id": "list_supplier_messages",
+    "idempotency": "none",
+    "input_schema": {
+     "kind": "null"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "messages",
+       "required": true,
+       "schema": {
+        "items": {
+         "fields": [
+          {
+           "name": "message_id",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 32
+           }
+          },
+          {
+           "name": "day",
+           "required": true,
+           "schema": {
+            "kind": "integer",
+            "max": 200000,
+            "min": 0
+           }
+          },
+          {
+           "name": "text",
+           "required": true,
+           "schema": {
+            "kind": "string",
+            "max_length": 1000
+           }
+          }
+         ],
+         "kind": "object"
+        },
+        "kind": "array",
+        "max_items": 20
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "po_number",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "read",
+    "id": "get_customer_update",
+    "idempotency": "none",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "exists",
+       "required": true,
+       "schema": {
+        "kind": "boolean"
+       }
+      },
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "mode": "none"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "sales_order_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   },
+   {
+    "effect": "write",
+    "id": "send_customer_update",
+    "idempotency": "target_key",
+    "input_schema": {
+     "fields": [
+      {
+       "name": "promised_day",
+       "required": true,
+       "schema": {
+        "kind": "integer",
+        "max": 200000,
+        "min": 0
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "output_schema": {
+     "fields": [
+      {
+       "name": "reference",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    },
+    "reconciliation": {
+     "absence_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": false
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "effect_rules": [
+      {
+       "expected": {
+        "kind": "literal",
+        "schema": {
+         "kind": "boolean"
+        },
+        "value": true
+       },
+       "op": "eq",
+       "readback_pointer": "/exists"
+      }
+     ],
+     "mode": "read_back",
+     "read_operation": "get_customer_update"
+    },
+    "target_schema": {
+     "fields": [
+      {
+       "name": "sales_order_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      }
+     ],
+     "kind": "object"
+    }
+   }
+  ]
+ },
+ "format_version": 1,
+ "kind": "connector",
+ "name": "inbox-standin",
+ "schemas": [],
+ "version": "0.1.0"
+}

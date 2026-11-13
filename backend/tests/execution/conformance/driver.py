@@ -176,8 +176,15 @@ class Operator:
         destinations=(),
         secret_binding=None,
         actions=None,
+        connections=None,
     ):
         self.world, self.processes = world, processes
+        # Several connectors, each through its own connection and secret (a package that
+        # reads more than one system): a list of {"connector", "destinations",
+        # "secret_binding", "writes"}. The first is `connector` for everything else.
+        self.connections = list(connections or ())
+        if self.connections:
+            connector = self.connections[0]["connector"]
         self.contracts, self.flows = contracts, flows
         self.documents = catalog_documents(contracts)
         # The connector each pool's connection and each runtime serve; its read
@@ -299,58 +306,83 @@ class Operator:
 
         from lotuspond import models
 
-        connector = self.connector
-        pin = ConnectorPin(
-            name=connector["name"],
-            version=connector["version"],
-            artifact_sha256=connector["definition"]["artifact_sha256"],
-        )
+        entries = self.connections or [
+            {
+                "connector": self.connector,
+                "destinations": self.destinations,
+                "secret_binding": self.secret_binding,
+                "operations": self.operations,
+            }
+        ]
         pool_id = str(uuid4())
         with Session(engine) as db, db.begin():
             db.add(models.RuntimePool(**scope, id=pool_id, name="Conformance", status="active"))
-            connection = models.Connection(**scope, name="read-only", status="active")
-            db.add(connection)
-            secrets = ()
-            if self.secret_binding is not None:
-                secret = models.SecretReference(
-                    **scope, binding_id=self.secret_binding, version=1, status="active"
+            pins, views = [], {}
+            for entry in entries:
+                connector = entry["connector"]
+                pin = ConnectorPin(
+                    name=connector["name"],
+                    version=connector["version"],
+                    artifact_sha256=connector["definition"]["artifact_sha256"],
                 )
-                db.add(secret)
+                operations = entry.get("operations") or tuple(
+                    op["id"]
+                    for op in connector["definition"]["operations"]
+                    if op["effect"] == "read" or op["id"] in entry.get("writes", ())
+                )
+                connection = models.Connection(
+                    **scope, name=f"{connector['name']}-connection", status="active"
+                )
+                db.add(connection)
+                secrets = ()
+                if entry.get("secret_binding") is not None:
+                    secret = models.SecretReference(
+                        **scope, binding_id=entry["secret_binding"], version=1, status="active"
+                    )
+                    db.add(secret)
+                    db.flush()
+                    secrets = (SecretPin(reference_id=secret.id, version=1),)
                 db.flush()
-                secrets = (SecretPin(reference_id=secret.id, version=1),)
-            db.flush()
-            config = ConnectionConfig(
-                connector=pin,
-                operations=self.operations,
-                destinations=tuple(DestinationRule.model_validate(d) for d in self.destinations),
-                secrets=secrets,
-                # The longest call a connection allows (E03's 30 s bound), so a
-                # lease renewal (every 20 s) happens inside one read.
-                data_handling=DataHandling(timeout_ms=30000),
-            )
-            db.add(
-                models.ConnectionVersion(
-                    **scope,
-                    connection_id=connection.id,
-                    version=1,
-                    canonical_config=canonical_connection_json(config),
-                    config_digest=connection_digest(config),
+                config = ConnectionConfig(
+                    connector=pin,
+                    operations=tuple(operations),
+                    destinations=tuple(
+                        DestinationRule.model_validate(d) for d in entry.get("destinations", ())
+                    ),
+                    secrets=secrets,
+                    # The longest call a connection allows (E03's 30 s bound), so a
+                    # lease renewal (every 20 s) happens inside one read.
+                    data_handling=DataHandling(timeout_ms=30000),
                 )
-            )
-            for secret_pin in secrets:
                 db.add(
-                    models.ConnectionVersionSecret(
+                    models.ConnectionVersion(
                         **scope,
                         connection_id=connection.id,
-                        connection_version=1,
-                        secret_reference_id=secret_pin.reference_id,
-                        secret_version=secret_pin.version,
+                        version=1,
+                        canonical_config=canonical_connection_json(config),
+                        config_digest=connection_digest(config),
                     )
                 )
+                for secret_pin in secrets:
+                    db.add(
+                        models.ConnectionVersionSecret(
+                            **scope,
+                            connection_id=connection.id,
+                            connection_version=1,
+                            secret_reference_id=secret_pin.reference_id,
+                            secret_version=secret_pin.version,
+                        )
+                    )
+                pins.append(pin)
+                views[connector["name"]] = {
+                    "id": connection.id,
+                    "version": 1,
+                    "secrets": [p.model_dump(mode="json") for p in secrets],
+                }
             policy = PoolPolicy(
-                connectors=(pin,),
+                connectors=tuple(pins),
                 platforms=("linux",),
-                connection_ids=(connection.id,),
+                connection_ids=tuple(view["id"] for view in views.values()),
                 max_instances=16,
                 max_concurrent_invocations=concurrency,
             )
@@ -364,18 +396,16 @@ class Operator:
                 )
             )
             db.flush()
-            db.add(
-                models.RuntimePoolPolicyConnection(
-                    **scope, pool_id=pool_id, policy_version=1, connection_id=connection.id
+            for view in views.values():
+                db.add(
+                    models.RuntimePoolPolicyConnection(
+                        **scope, pool_id=pool_id, policy_version=1, connection_id=view["id"]
+                    )
                 )
-            )
             db.get(models.RuntimePool, pool_id).current_policy_version = 1
-            connection_view = {
-                "id": connection.id,
-                "version": 1,
-                "secrets": [p.model_dump(mode="json") for p in secrets],
-            }
-        return pool_id, connection_view
+        if self.connections:
+            return pool_id, {"by_connector": views, **next(iter(views.values()))}
+        return pool_id, next(iter(views.values()))
 
     def enrollment(self, customer) -> str:
         issued = customer.call(
@@ -571,9 +601,13 @@ class Operator:
         for ref in refs:
             binding = {"dependency": ref}
             if ref["kind"] == "connector":
+                # Each connector through its own connection when there are several.
+                connection = customer.connection.get("by_connector", {}).get(
+                    ref["name"], customer.connection
+                )
                 binding.update(
-                    connection_id=customer.connection["id"],
-                    connection_version=customer.connection["version"],
+                    connection_id=connection["id"],
+                    connection_version=connection["version"],
                 )
             bindings.append(binding)
         for entry in package.get("knowledge", ()):

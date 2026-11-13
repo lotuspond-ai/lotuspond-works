@@ -1,0 +1,21 @@
+{
+ "connector": {
+  "name": "erp-standin",
+  "version": "0.1.0"
+ },
+ "format": "lotuspond.https-json.routes.v1",
+ "operations": {
+  "get_promised_date_change": {
+   "method": "GET",
+   "path": "/erp/purchase-orders/{po_number}/promised-date"
+  },
+  "get_purchase_order": {
+   "method": "GET",
+   "path": "/erp/purchase-orders/{po_number}"
+  },
+  "get_stock_cover": {
+   "method": "GET",
+   "path": "/erp/stock/{sku}"
+  }
+ }
+}
