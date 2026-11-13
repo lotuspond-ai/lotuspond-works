@@ -293,6 +293,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.3.0",
+                    "id": "sage-design-system",
+                    "date": "2026-11-13",
+                    "title": "A new look for the console",
+                    "description": "The console now uses the LotusPond design system: a light sage frame, a white work panel, sage green for actions, rounded buttons and the LotusPond typefaces. Tomato red is kept for the wordmark and for places where a person has to decide. Layout, navigation, keyboard behaviour and stored data are unchanged. The signed-out introduction keeps its current look until it is redrawn.",
+                },
+                {
+                    "version": "0.3.0",
                     "id": "lotuspond-works-name",
                     "date": "2026-11-12",
                     "title": "The product is now LotusPond Works",

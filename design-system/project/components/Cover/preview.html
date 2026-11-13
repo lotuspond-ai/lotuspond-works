@@ -1,0 +1,64 @@
+<!-- @dsCard height=320 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LotusPond</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Platypi:wght@400..800&family=Atkinson+Hyperlegible+Next:wght@400..700&family=Atkinson+Hyperlegible+Mono:wght@400..600&display=swap">
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:var(--surface); color:var(--ink); font-family:var(--font-sans); overflow:hidden; }
+  .cover { position:relative; width:960px; height:320px; overflow:hidden; }
+  .art { position:absolute; inset:0; }
+  .art svg { display:block; width:960px; height:320px; }
+  .sage { fill:var(--sage-500); }
+  .pine { fill:var(--pine-900); }
+  .tomato { fill:var(--tomato-500); }
+  .tint { fill:var(--sage-100); }
+  .cream { fill:var(--off-white); }
+  .xl { rx:var(--radius-xl); }
+  .lg { rx:var(--radius-lg); }
+  .md { rx:var(--radius-md); }
+  /* a space-6-tall pill: rx is half its height */
+  .pill { rx:12px; }
+  .words { position:absolute; left:var(--space-6); bottom:var(--space-6); max-width:440px; }
+  .name { margin:0; font-family:var(--font-display); font-size:80px; line-height:.95; font-weight:700; letter-spacing:-.025em; color:var(--ink); }
+  .tag { margin:var(--space-2) 0 0 3px; font-size:14px; line-height:20px; color:var(--ink-muted); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 960 320" width="960" height="320">
+<!--
+  blocks      sage-500 440×288 slab bleeding off the right and bottom (the brand, largest) · pine-900 320×144 set into the slab, bleeding off the right and bottom · tomato-500 disc 128 across on an off-white disc 176 across (tomato never sits on sage), their lower halves behind the pine block · sage-100 144×64 card (the tint) · about 40% of 960×320
+  arrangement one tall slab cut by a waterline at y=176: pine sits below the line, the disc rises above it, the card floats beside it
+  pattern     pills, from "Roots are smooth curves from one node below the bloom down to Chips": space-6-tall pills at a space-12 pitch below the waterline, in off-white and sage-500
+  scales      slab corner radius-xl · pine corner radius-lg · card radius-md · pills rx 12 (half of space-6) · offsets in space-2 multiples
+-->
+<rect class="sage xl" x="520" y="32" width="480" height="328"/>
+<rect class="tint md" x="552" y="64" width="144" height="64"/>
+<circle class="cream" cx="776" cy="176" r="88"/>
+<circle class="tomato" cx="776" cy="176" r="64"/>
+<rect class="pine lg" x="640" y="176" width="360" height="184"/>
+<rect class="cream pill" x="672" y="208" width="72" height="24"/>
+<rect class="sage pill" x="760" y="208" width="104" height="24"/>
+<rect class="cream pill" x="880" y="208" width="56" height="24"/>
+<rect class="sage pill" x="952" y="208" width="64" height="24"/>
+<rect class="sage pill" x="688" y="256" width="88" height="24"/>
+<rect class="cream pill" x="792" y="256" width="56" height="24"/>
+<rect class="sage pill" x="864" y="256" width="72" height="24"/>
+<rect class="cream pill" x="952" y="256" width="40" height="24"/>
+<rect class="cream pill" x="672" y="304" width="56" height="24"/>
+<rect class="sage pill" x="744" y="304" width="96" height="24"/>
+<rect class="cream pill" x="856" y="304" width="72" height="24"/>
+<rect class="sage pill" x="944" y="304" width="48" height="24"/>
+</svg>
+</div>
+<div class="words">
+  <p class="name">LotusPond</p>
+  <p class="tag">AI agents that do the manual work between your systems.</p>
+</div>
+</div>
+</body>
+</html>

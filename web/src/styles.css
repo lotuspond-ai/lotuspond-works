@@ -1,4 +1,10 @@
-/* The console and the public introduction share one set of tokens, defined in console.css. */
+/* The console and the public introduction share one set of tokens, defined in console.css.
+   The brand typefaces ship with the application (OFL-1.1, from the Fontsource packages),
+   because the API's content security policy allows fonts only from the application's own
+   origin. Each package names its family with a "Variable" suffix. */
+@import '@fontsource-variable/platypi/wght.css';
+@import '@fontsource-variable/atkinson-hyperlegible-next/wght.css';
+@import '@fontsource-variable/atkinson-hyperlegible-mono/wght.css';
 @import './styles/console.css';
 @import './styles/studio.css';
 @import './styles/landing.css';

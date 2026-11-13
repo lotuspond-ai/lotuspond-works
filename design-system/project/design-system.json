@@ -1,0 +1,112 @@
+{
+  "v": 3,
+  "layout": "files",
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-12T21:37:40Z"
+  },
+  "title": "LotusPond",
+  "namespace": "LotusPond",
+  "libraries": [],
+  "sections": {},
+  "groups": [
+    "Illustrations"
+  ],
+  "assetGroups": {
+    "Illustrations": {
+      "name": "Illustrations",
+      "tile": "l",
+      "order": [
+        "hero-stage-wide.svg",
+        "hero-stage-narrow.svg",
+        "tangle-to-bloom.svg",
+        "a-person-decides.svg",
+        "on-the-record.svg",
+        "many-into-one.svg",
+        "where-records-live.svg",
+        "one-then-the-rest.svg",
+        "in-your-hands.svg",
+        "the-journey.svg",
+        "the-handoff.svg"
+      ],
+      "files": {
+        "hero-stage-wide.svg": {
+          "name": "hero-stage-wide.svg",
+          "blob": "6707ec77d7551cd9e560ebc6e94b56ca",
+          "size": 9237,
+          "type": "image/svg+xml"
+        },
+        "hero-stage-narrow.svg": {
+          "name": "hero-stage-narrow.svg",
+          "blob": "7d5d1686d53f0163fc19fa6ef2c51f26",
+          "size": 9111,
+          "type": "image/svg+xml"
+        },
+        "tangle-to-bloom.svg": {
+          "name": "tangle-to-bloom.svg",
+          "blob": "6abbcc39942aa006aeccebd3c9547ddd",
+          "size": 5942,
+          "type": "image/svg+xml"
+        },
+        "a-person-decides.svg": {
+          "name": "a-person-decides.svg",
+          "blob": "5b8b9783fa40ebec51e09cea85ca04c6",
+          "size": 2293,
+          "type": "image/svg+xml"
+        },
+        "on-the-record.svg": {
+          "name": "on-the-record.svg",
+          "blob": "bb7aae6c51babe17a2330c83037fad3a",
+          "size": 4809,
+          "type": "image/svg+xml"
+        },
+        "many-into-one.svg": {
+          "name": "many-into-one.svg",
+          "blob": "ba3772a59703e6626251033e619e242d",
+          "size": 3720,
+          "type": "image/svg+xml"
+        },
+        "where-records-live.svg": {
+          "name": "where-records-live.svg",
+          "blob": "68bb2733da4e4bfb81cd714753060460",
+          "size": 3254,
+          "type": "image/svg+xml"
+        },
+        "one-then-the-rest.svg": {
+          "name": "one-then-the-rest.svg",
+          "blob": "83bc496646ba44f9e5435cb4311df6fa",
+          "size": 3657,
+          "type": "image/svg+xml"
+        },
+        "in-your-hands.svg": {
+          "name": "in-your-hands.svg",
+          "blob": "e34156edfa981bf6bde3a4b50bf61d6a",
+          "size": 2198,
+          "type": "image/svg+xml"
+        },
+        "the-journey.svg": {
+          "name": "the-journey.svg",
+          "blob": "945d64c53dc0cc7f031c22bbbc6ef55d",
+          "size": 7903,
+          "type": "image/svg+xml"
+        },
+        "the-handoff.svg": {
+          "name": "the-handoff.svg",
+          "blob": "f8fa09b804b20a0c44427d25a1606cd8",
+          "size": 2538,
+          "type": "image/svg+xml"
+        }
+      }
+    }
+  },
+  "blobs": {},
+  "docs": {
+    "sections": []
+  },
+  "lastChange": {
+    "by": "Claude",
+    "at": "2026-11-13T08:59:31Z",
+    "via": "Claude Code",
+    "note": "Colour rule: tomato never sits on sage. On field the main action is the ink Button and the Underline is off-white. Every bloom sits on an off-white disc; nine pictures redrawn."
+  }
+}

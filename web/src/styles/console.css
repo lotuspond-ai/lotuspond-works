@@ -1,42 +1,56 @@
-/* LotusPond Works console. A calm daylight workspace: a soft grey frame with the navigation, an
-   inset white panel for the work, one green for action, and semantic colours that always
-   travel with a written label. The public pages use the same tokens but a warmer paper;
-   see landing.css. */
+/* LotusPond Works console, drawn with the LotusPond design system (DESIGN.md and
+   design-system/). A light sage frame holds the navigation, an inset white panel holds the
+   work, one sage green marks action, tomato appears only where a person has to decide, and
+   semantic colours always travel with a written label. The signed-out introduction still
+   overrides some of these on .landing until it is redrawn; see landing.css. */
 :root,
 .console-window {
-  --canvas: #f5f5f2;
+  --canvas: #eaf0e3;
   --paper: #ffffff;
-  --sunken: #efefeb;
-  --ink: #1b2420;
-  --ink-mark: #1c2520;
-  --muted: #636d67;
-  --line: #e6e5e0;
-  --line-strong: #d4d3cc;
+  --sunken: #f7f5ef;
+  --ink: #18211b;
+  --ink-mark: #18211b;
+  --muted: #4a564c;
+  --line: #dcd9ce;
+  --line-strong: #cbc8ba;
   /* Accessibility floors (WCAG 1.4.11, 3:1): a text field's edge is how it is found, so it is
-     darker than the structural lines, and the focus ring holds 3:1 on every light surface and
-     on the pond scene alike. contrast.test.ts checks both. */
-  --field-line: #858c87;
-  --focus: #3f7d66;
-  --accent: #204e3e;
-  --accent-hover: #173a2e;
-  --accent-soft: #e6efe9;
-  --success: #285e42;
-  --success-soft: #e5f0e7;
-  --warning: #7a5516;
-  --warning-soft: #f7eed9;
-  --danger: #983d34;
-  --danger-soft: #f8e6e2;
-  --neutral-soft: #f0f0ec;
-  --lotus: #c4864a;
-  /* The field record's graph paper, shared by the public glyph panels and the Studio surface. */
-  --grid: rgba(35, 49, 43, 0.06);
-  --grid-major: rgba(35, 49, 43, 0.11);
-  --shadow-sm: 0 1px 2px rgba(20, 28, 24, 0.06);
-  --shadow-md: 0 1px 2px rgba(20, 28, 24, 0.05), 0 12px 32px -12px rgba(20, 28, 24, 0.22);
+     darker than the structural lines, and the focus ring holds 3:1 on every light surface.
+     contrast.test.ts checks both. */
+  --field-line: #7c8672;
+  --focus: #18211b;
+  --accent: #55694a;
+  --accent-hover: #44563b;
+  --accent-soft: #e1e9d8;
+  --success: #2f5d3a;
+  --success-soft: #d5dfca;
+  --success-line: #b9c7a9;
+  --warning: #7a4f00;
+  --warning-soft: #f6ecd3;
+  --danger: #a82a18;
+  --danger-soft: #fbe5df;
+  --neutral-soft: #efede4;
+  /* Tomato. --lotus is the wordmark's dot; --decide marks the one place in a view where a
+     person has to decide (an approval, a review). It never means an error: that is --danger. */
+  --lotus: #e8412c;
+  --decide: #d4381f;
+  --decide-soft: #fce9e4;
+  /* Graph paper for the Studio surface. */
+  --grid: rgba(24, 33, 27, 0.06);
+  --grid-major: rgba(24, 33, 27, 0.11);
+  --shadow-sm: 0 1px 2px rgba(24, 33, 27, 0.06);
+  --shadow-md: 0 1px 2px rgba(24, 33, 27, 0.06), 0 14px 34px -14px rgba(24, 33, 27, 0.22);
+  /* The brand faces are bundled with the application (styles.css imports them). Each stack
+     falls back to a system face of the same kind if a file fails to load. --serif stays for
+     the introduction. */
+  --display: 'Platypi Variable', Platypi, Georgia, 'Times New Roman', serif;
   --serif: 'Iowan Old Style', Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
-  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
-  --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --radius: 8px;
+  --mono:
+    'Atkinson Hyperlegible Mono Variable', 'Atkinson Hyperlegible Mono', ui-monospace, 'SF Mono',
+    SFMono-Regular, Menlo, Consolas, monospace;
+  --sans:
+    'Atkinson Hyperlegible Next Variable', 'Atkinson Hyperlegible Next', ui-sans-serif,
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --radius: 10px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -101,9 +115,9 @@ button,
   justify-content: center;
   gap: 7px;
   min-height: 32px;
-  padding: 0 12px;
+  padding: 0 14px;
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--accent);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
@@ -132,8 +146,8 @@ button:disabled {
   color: var(--ink);
 }
 .secondary:hover:not(:disabled) {
-  border-color: #c3c2ba;
-  background: #fafaf8;
+  border-color: var(--field-line);
+  background: var(--sunken);
 }
 button kbd {
   margin-left: 4px;
@@ -187,9 +201,10 @@ button kbd {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  font-family: var(--display);
   font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.04em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--ink);
 }
 .wordmark-name {
@@ -305,7 +320,7 @@ legend {
   background: currentColor;
 }
 .badge-success {
-  border-color: #cfe2d3;
+  border-color: var(--success-line);
   background: var(--success-soft);
   color: var(--success);
 }
@@ -322,7 +337,7 @@ legend {
 .badge-neutral {
   border-color: var(--line);
   background: var(--neutral-soft);
-  color: #535c57;
+  color: var(--muted);
 }
 
 /* Frame ------------------------------------------------------------------------- */
@@ -465,6 +480,7 @@ legend {
 .switch-footer {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   width: 100%;
   min-height: 34px;
@@ -601,7 +617,7 @@ legend {
   height: 4px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--sunken);
+  background: var(--accent-soft);
 }
 .setup-meter span {
   display: block;
@@ -780,7 +796,7 @@ table {
 th {
   padding: 9px 14px;
   border-bottom: 1px solid var(--line);
-  background: #fafaf8;
+  background: var(--sunken);
   color: var(--muted);
   font-size: 12.5px;
   font-weight: 500;
@@ -798,7 +814,7 @@ tbody tr:first-child td {
   border-top: 0;
 }
 tbody tr:hover td {
-  background: #fafaf8;
+  background: var(--sunken);
 }
 .primary-cell {
   color: var(--ink);
@@ -834,7 +850,7 @@ tbody tr:hover td {
 }
 .actions button:hover:not(:disabled) {
   border-color: transparent;
-  background: var(--sunken);
+  background: var(--accent-soft);
 }
 .actions button.danger {
   color: var(--danger);
@@ -869,7 +885,7 @@ tbody tr:hover td {
   padding: 52px 24px 56px;
   border: 1px dashed var(--line-strong);
   border-radius: 12px;
-  background: #fcfcfb;
+  background: var(--sunken);
   text-align: center;
 }
 .empty .ink-glyph {
@@ -940,7 +956,7 @@ tbody tr:hover td {
   padding: 20px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fcfcfb;
+  background: var(--sunken);
 }
 .record-form h2 {
   margin-bottom: 16px;
@@ -980,7 +996,7 @@ tbody tr:hover td {
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fafaf8;
+  background: var(--sunken);
 }
 
 /* Details open in a drawer beside the list they came from. */
@@ -1104,7 +1120,7 @@ tbody tr:hover td {
   margin: 0;
   padding: 12px 14px;
   border-radius: 10px;
-  background: #fafaf8;
+  background: var(--sunken);
 }
 .decision-metrics dt {
   margin-bottom: 2px;
@@ -1204,7 +1220,7 @@ tbody tr:hover td {
   font-weight: 600;
 }
 .setup-steps li[data-state='done'] .setup-mark {
-  border-color: #bcd6c1;
+  border-color: var(--success-line);
   background: var(--success-soft);
   color: var(--success);
 }
@@ -1288,7 +1304,7 @@ tbody tr:hover td {
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fafaf8;
+  background: var(--sunken);
   font-family: var(--mono);
   font-size: 12.5px;
 }
@@ -1359,7 +1375,7 @@ tbody tr:hover td {
   color: var(--muted);
 }
 .palette-option[aria-selected='true'] {
-  background: var(--sunken);
+  background: var(--accent-soft);
 }
 .palette-option[aria-selected='true'] .icon {
   color: var(--accent);
@@ -1518,11 +1534,12 @@ summary:focus-visible,
 }
 .welcome .hero-title {
   color: var(--ink);
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: clamp(52px, 6.4vw, 88px);
+  font-family: var(--display);
+  font-weight: 600;
+  /* Platypi sets wider than the earlier serif, so the title is smaller to stay on two lines. */
+  font-size: clamp(40px, 4.2vw, 58px);
   line-height: 1.05;
-  letter-spacing: -4px;
+  letter-spacing: -0.025em;
   margin-top: 25px;
   margin-bottom: 28px;
 }
@@ -1627,7 +1644,7 @@ textarea {
     gap: 5vw;
   }
   .welcome .hero-title {
-    letter-spacing: -2px;
+    letter-spacing: -0.02em;
   }
 }
 @media (max-width: 720px) {
@@ -1640,7 +1657,7 @@ textarea {
     gap: 40px;
   }
   .welcome .hero-title {
-    font-size: 60px;
+    font-size: 44px;
   }
   .welcome footer {
     gap: 20px;
@@ -1680,7 +1697,7 @@ textarea {
 .success-notice {
   padding: 12px 16px;
   color: var(--success);
-  background: #e8f1e8;
+  background: var(--success-soft);
   border-left: 3px solid var(--success);
   border-radius: 8px;
 }
@@ -1906,12 +1923,12 @@ label:has(textarea:not(.code-input)) textarea {
   min-height: 72vh;
 }
 .welcome .hero-title {
-  font-size: clamp(50px, 5.8vw, 78px);
+  font-size: clamp(40px, 4.2vw, 58px);
 }
 .welcome .auth-panel h2,
 .auth-panel .auth-title {
-  font-family: var(--serif);
-  font-weight: 400;
+  font-family: var(--display);
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 .auth-panel {
@@ -2059,7 +2076,7 @@ label:has(textarea:not(.code-input)) textarea {
   padding: 10px 14px;
   border: 1px dashed var(--line-strong);
   border-radius: 8px;
-  background: #fcfcfb;
+  background: var(--sunken);
   font-size: 13.5px;
 }
 .planned-grid {

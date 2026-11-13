@@ -4,31 +4,32 @@ The console is a working environment for building agent workflows and deciding t
 
 ## Visual language
 
-The console is a calm daylight workspace: a soft grey frame holds the navigation, an inset white panel holds the work, one green marks action, and semantic colours always travel with a written label. The public pages share the ink, semantic colours and wordmark but read on warm archival paper. Avoid decorative gradients, invented charts, simulated activity, or arbitrary confidence percentages; the public introduction's drawn pond scene is the one illustrated exception. No external font is loaded: the console uses the system sans (`--sans`) throughout, the public pages add the local `--serif`, and identifiers and commands use `--mono`.
+The console is drawn with the LotusPond design system ([ADR-0016](architecture/0016-adopt-the-lotuspond-design-system.md); source in `design-system/project/`). A light sage frame holds the navigation, an inset white panel holds the work, one sage green marks action, tomato appears only where a person has to decide, and semantic colours always travel with a written label. The signed-out introduction still wears the earlier field-record theme on warm archival paper until it is redrawn. Avoid decorative gradients, invented charts, simulated activity, or arbitrary confidence percentages; the introduction's drawn pond scene is the one illustrated exception. The brand faces ship with the application: `web/src/styles.css` imports the Fontsource packages for Platypi (`--display`), Atkinson Hyperlegible Next (`--sans`) and Atkinson Hyperlegible Mono (`--mono`), so the build serves the font files from the application's own origin, which is all the API's content security policy allows. The packages name each family with a "Variable" suffix, and each stack falls back to a system face of the same kind. The introduction pins the earlier system sans and mono and adds the local `--serif`.
 
-Stylesheets live in `web/src/styles/`: `console.css` defines the tokens on `:root` and `.console-window` and holds the console system; `landing.css` holds the public introduction and overrides the surface tokens on `.landing`. `web/src/styles.css` only imports the two.
+Stylesheets live in `web/src/styles/`: `console.css` defines the tokens on `:root` and `.console-window` and holds the console system; `landing.css` holds the public introduction, overrides the surface tokens on `.landing` and pins that page's earlier action green and 8px buttons. `web/src/styles.css` only imports them. Each console token is a token of the design system under the console's own name; `web/src/lib/designTokens.test.ts` holds the two together.
 
-| Token           | Console                | Public pages           | Purpose                                    |
-| --------------- | ---------------------- | ---------------------- | ------------------------------------------ |
-| `--canvas`      | `#f5f5f2`              | `#f4f1e9`              | Frame and page background                  |
-| `--paper`       | `#ffffff`              | `#fdfcf8`              | Workspace panel, tables, forms, cards      |
-| `--sunken`      | `#efefeb`              | `#ece8de`              | Hover fills and inset areas                |
-| `--ink`         | `#1b2420`              | `#1f2a24`              | Primary text                               |
-| `--muted`       | `#636d67`              | `#5a6a61`              | Secondary text (about 5:1)                 |
-| `--line`        | `#e6e5e0`              | `#dcd8cc`              | Structural separation                      |
-| `--line-strong` | `#d4d3cc`              | `#c8c3b5`              | Secondary buttons and strong rules         |
-| `--field-line`  | `#858c87`              | same                   | Text-field edges (at least 3:1)            |
-| `--focus`       | `#3f7d66`              | `#86ad9d` on the scene | Focus ring (at least 3:1 on every surface) |
-| `--accent`      | `#204e3e`              | same                   | Primary actions, links, the active icon    |
-| `--success`     | `#285e42` on `#e5f0e7` | same                   | Explicit passing results                   |
-| `--warning`     | `#7a5516` on `#f7eed9` | same                   | Pending decisions and active work          |
-| `--danger`      | `#983d34` on `#f8e6e2` | same                   | Failures, blocked actions and suspension   |
-| `--lotus`       | `#c4864a`              | same                   | The wordmark's warm dot                    |
-| `--lotus-ink`   | —                      | `#a86b36`              | The warm note as large display type        |
+| Token           | Console                | Design system token                 | Introduction (earlier theme) | Purpose                                          |
+| --------------- | ---------------------- | ----------------------------------- | ---------------------------- | ------------------------------------------------ |
+| `--canvas`      | `#eaf0e3`              | `surface-tint`                      | `#f4f1e9`                    | Frame and page background                        |
+| `--paper`       | `#ffffff`              | `surface-raised`                    | `#fdfcf8`                    | Workspace panel, tables, forms, cards            |
+| `--sunken`      | `#f7f5ef`              | `surface`                           | `#ece8de`                    | Hover fills and inset areas                      |
+| `--ink`         | `#18211b`              | `ink`                               | `#1f2a24`                    | Primary text                                     |
+| `--muted`       | `#4a564c`              | `ink-muted`                         | `#5a6a61`                    | Secondary text (at least 6.6:1)                  |
+| `--line`        | `#dcd9ce`              | `line`                              | `#dcd8cc`                    | Structural separation                            |
+| `--line-strong` | `#cbc8ba`              | console only                        | `#c8c3b5`                    | Secondary buttons and strong rules               |
+| `--field-line`  | `#7c8672`              | `line-strong`                       | same                         | Text-field edges (at least 3:1)                  |
+| `--focus`       | `#18211b`              | `focus`                             | `#86ad9d` on the scene       | Focus ring (at least 3:1 on every surface)       |
+| `--accent`      | `#55694a`              | `brand-text` (`sage-700`)           | `#204e3e`, pinned            | Primary actions, links, the active icon          |
+| `--success`     | `#2f5d3a` on `#d5dfca` | `positive` on `positive-tint`       | same                         | Explicit passing results                         |
+| `--warning`     | `#7a4f00` on `#f6ecd3` | `caution`; the tint is console only | same                         | Pending decisions and active work                |
+| `--danger`      | `#a82a18` on `#fbe5df` | `danger`; the tint is console only  | same                         | Failures, blocked actions and suspension         |
+| `--decide`      | `#d4381f` on `#fce9e4` | `accent` on `accent-tint`           | —                            | The control and row where a person has to decide |
+| `--lotus`       | `#e8412c`              | `accent-mark` (`tomato-500`)        | `#c4864a`                    | The wordmark's dot                               |
+| `--lotus-ink`   | —                      | —                                   | `#a86b36`                    | The earlier warm note as large display type      |
 
 `web/src/lib/contrast.test.ts` reads these tokens from the stylesheets and fails when text drops below 4.5:1, large display type below 3:1, or a text-field edge or the focus ring below 3:1 on a surface it is drawn on.
 
-Spacing follows a 4px scale. Controls are 32–34px tall with 8px corners; cards and tables use 10–12px corners and a one-pixel line with a faint shadow. Console titles are 24px semibold sans, body text 13.5–14px, metadata 12–12.5px. Icons (`components/console/icons.tsx`) sit on a 16-unit grid with a 1.5 stroke and always accompany a written label.
+Spacing follows a 4px scale. Controls are 32–34px tall; buttons are pills, and fields and rows have 10px corners; cards and tables use 10–12px corners and a one-pixel line with a faint shadow. Console titles are 24px semibold sans, body text 13.5–14px, metadata 12–12.5px. Icons (`components/console/icons.tsx`) sit on a 16-unit grid with a 1.5 stroke and always accompany a written label.
 
 ## Console layout
 
@@ -64,7 +65,7 @@ Control Room, Connections and Human tasks render `pages/Planned.tsx` from `lib/r
 
 ## Public introduction
 
-`web/src/pages/Landing.tsx` renders the signed-out introduction; `Welcome` in `App.tsx` switches to the account form without changing the URL hash. The page opens on a scene and then reads as a document:
+The introduction still wears the earlier field-record theme; `DESIGN.md` says what may and may not be done to it before it is redrawn. `web/src/pages/Landing.tsx` renders it; `Welcome` in `App.tsx` switches to the account form without changing the URL hash. The page opens on a scene and then reads as a document:
 
 1. Pond hero (`web/src/components/Pond.tsx`): a canvas draws a dusk sky, water strokes in perspective, lily pads, and a column of warm glints. The headline ("Agents at work, people in charge") is real text; its baseline is measured from layout offsets and becomes the horizon, and the wordmark's warm dot is the sun at the end of the last word. An `aria-hidden` copy of the headline, mirrored about the baseline and displaced by an SVG turbulence filter, is the reflection. The water calms as the reader scrolls past. Below the waterline sit the lede, "Create account" and a "Contact us" link to hello@lotuspond.ai, and a status note listing what is available now and what is planned. Beside them on wide screens, `PondWorkflow` draws the synthetic `reviewed-action` package on the water (connector, agent, human review, connector) as an SVG `role="img"` with a written label; a warm light hops between pads, circles while the agent works, waits for an inked check at review, and lands at the write. It moves under the copy below 1080px and is hidden below 720px. "Pause motion" (`aria-pressed`) stops the canvas and the figure together, and is hidden under reduced motion, where the figure shows the finished path.
 2. Surfacing: the workflow package record rises out of the water beside the reading copy and a contents list with dot leaders. Its four nodes, the agent's quoted instruction and limits come from `contracts/examples/reviewed-action.v1.json`; the three rejections are quoted from `ERROR_MESSAGES` in `sdk/python/src/lotuspond_sdk/contract.py`. It carries a "Validated" stamp that lands when it is first read, and its caption says validation neither runs nor approves the workflow.
