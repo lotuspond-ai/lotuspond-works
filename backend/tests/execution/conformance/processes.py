@@ -21,6 +21,7 @@ from pathlib import Path
 import world as worlds
 
 HARNESS = Path(__file__).with_name("harness.py")
+TARGET = Path(__file__).with_name("actions") / "target.py"
 
 
 def _absent(pid) -> bool:
@@ -246,12 +247,18 @@ class Processes:
         start=True,
         operations=("read",),
         activity=None,
+        actions=None,
     ):
         """Enroll and start one installed runtime with synthetic providers.
 
         `dependencies` gives the catalog pins: `connector` (ArtifactRef), `installed`
         (ConnectorPin) and `model` (ArtifactRef). Its calls are counted in its own
         `provider-calls` file, outside every database.
+
+        `actions` (E05) makes it serve the synthetic target instead: it reports the
+        target connector, verifies commands against the world's command key, writes
+        through `synthetic-target-write` and reads back through `synthetic-target-read`,
+        each counted in its own `provider-calls` file.
         """
         home = worlds.private_directory(self.world.root / "runtimes" / name)
         state = worlds.private_directory(home / "state")
@@ -259,6 +266,7 @@ class Processes:
         counter = worlds.private_directory(home / "read") / "provider-calls"
         model_counter = worlds.private_directory(home / "model") / "provider-calls"
         config = home / "config.json"
+        observed = [actions["pin"]] if actions is not None else []
         worlds.write_private(
             config,
             {
@@ -266,12 +274,14 @@ class Processes:
                 "ca_file": str(self.ca),
                 "state_directory": str(state),
                 "installation_id": worlds.INSTALLATION,
-                "observation": {"platform": "linux", "connectors": []},
+                "observation": {"platform": "linux", "connectors": observed},
                 "mode": "test",
             },
         )
         trust = home / "trust.json"
         worlds.write_private(trust, self.world.state("activity-trust"))
+        if actions is not None:
+            activity = self._action_activity(home, actions)
         read_script = {**(read or {"read": {"value": None}}), "counter": str(counter)}
         model_script = {**(model or {"rounds": [{"output": None}]}), "counter": str(model_counter)}
         # `activity(trust, journal)` builds an operator-format configuration with real
@@ -328,6 +338,66 @@ class Processes:
                 "config": config,
             }
         return self.start_runtime_process(name)
+
+    def _action_activity(self, home, actions):
+        """The test-mode configuration of a runtime serving the synthetic target."""
+        command_trust = home / "command-trust.json"
+        worlds.write_private(command_trust, worlds.trust_set(self.world.state("keys")["command"]))
+        write_counter = worlds.private_directory(home / "write") / "provider-calls"
+        script = {
+            "ca_file": str(self.ca),
+            "egress": {"allowed_private_cidrs": ["127.0.0.0/8", "::1/128"]},
+            "loopback": True,
+        }
+
+        def configure(trust, journal):
+            return {
+                "trust_file": str(trust),
+                "journal_directory": str(journal),
+                "providers": [
+                    {
+                        "provider_id": "synthetic-target-read",
+                        "dependency": actions["connector_ref"],
+                        "operations": list(actions["read_operations"]),
+                        "connector": actions["pin"],
+                        "script": {**script, "counter": str(home / "read" / "provider-calls")},
+                    }
+                ],
+                "actions": {
+                    "trust_file": str(command_trust),
+                    "providers": [
+                        {
+                            "provider_id": "synthetic-target-write",
+                            "connector": actions["pin"],
+                            "operations": dict(actions["write_operations"]),
+                            "script": {**script, "counter": str(write_counter)},
+                        }
+                    ],
+                },
+            }
+
+        return configure
+
+    def start_target(self, name="target"):
+        """The synthetic target (E05) as one more owned process, its store outside
+        every database cluster and backup; returns its directory and port."""
+        directory = worlds.private_directory(self.world.root / name)
+        announce = directory / "target.json"
+        announce.unlink(missing_ok=True)
+        key = self.world.root / "synthetic-key.pem"
+        process = self._spawn(
+            name,
+            [self.python, "-I", str(TARGET), str(directory)]
+            + ["--cert", str(self.ca), "--key", str(key)],
+        )
+        state = wait_for(
+            lambda: (
+                process.poll() is None and announce.exists() and json.loads(announce.read_text())
+            )
+        )
+        if process.poll() is not None:
+            raise AssertionError("synthetic target ended during startup")
+        return {"directory": directory, "port": state["port"], "process": process}
 
     def start_runtime_process(self, name):
         """Start (or restart) the activity worker of an already enrolled runtime."""
@@ -473,6 +543,9 @@ class Hand:
         self.session, self.identity = acquired.secret, acquired.identity
         self.transport = ControlTransport(origin, ca, mode="test")
         self.activity = ActivityClient(self.transport, self.token, self.session)
+        from lotuspond_runtime.action_client import ActionClient
+
+        self.action = ActionClient(self.transport, self.token, self.session)  # E05
 
     def close(self):
         for item in (self.control, self.transport):

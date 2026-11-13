@@ -198,11 +198,14 @@ def _answer(request):
     descriptor = WriteDescriptor.from_json(request["descriptor"])
     secrets = tuple(bytes.fromhex(value) for value in request["secrets"])
     provider = _provider(descriptor, secrets, request.get("test_mode"))
+    script = {}
     if request.get("test_mode") is True:
         from . import action_fixture
 
         action_fixture.COUNTER_ID = request.get("counter_id")
+        script = descriptor.script_data() or {} if descriptor.test_only else {}
     if provider is None:
+        _note(script, "no_provider")
         return {"failure": "unavailable", "not_reached": True}
     try:
         result = provider.invoke(
@@ -220,7 +223,18 @@ def _answer(request):
             }
         }
     except ActivityFailure as failure:
+        _note(script, "refused_" + failure.code)
         return _failure(failure)
+
+
+def _note(script, code):
+    """Test mode: a synthetic provider's refusal code beside its call counter (no
+    values), so a test can tell why a write never reached the target."""
+    if script.get("counter") is None:
+        return
+    from . import action_fixture
+
+    action_fixture._failed(script, code, False)
 
 
 def main(argv):

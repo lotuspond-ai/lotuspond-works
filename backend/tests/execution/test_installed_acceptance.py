@@ -81,6 +81,9 @@ def test_installed_durable_execution_journey(tmp_path):
     observed_scenarios = [item for journey in report["journeys"] for item in journey["scenarios"]]
     decoded_events_and_errors = report.get("private_sentinels_found", PRIVATE_SENTINELS)
     max_provider_calls_per_attempt = report.get("max_provider_calls_per_attempt")
+    max_target_writes_per_intent = max(
+        (journey.get("max_target_writes_per_intent") or 0) for journey in report["journeys"]
+    )
     cleanup_receipt = report["cleanup_receipt"]
     assert required_integration_skips == 0
     assert all(item["passed"] for item in observed_scenarios), [
@@ -88,6 +91,7 @@ def test_installed_durable_execution_journey(tmp_path):
     ]
     assert all(sentinel not in decoded_events_and_errors for sentinel in PRIVATE_SENTINELS)
     assert max_provider_calls_per_attempt == 1
+    assert max_target_writes_per_intent == 1
     assert cleanup_receipt["confirmed"] is True
     assert smoke_module().verify_report(report) == []
     assert result.returncode == 0, (result.stdout + result.stderr).decode()[-2000:]

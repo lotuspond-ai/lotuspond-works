@@ -246,9 +246,14 @@ def precheck(delivery: CommandDelivery, deps: ActionDependencies):
 def _snapshot(deps, now):
     try:
         raw = deps.trust.current(deps.identity.installation_id)
-    except Exception:
+    except Exception as error:
+        _note(deps, "trust_" + type(error).__name__ + "_" + str(getattr(error, "code", "")))
         raise FleetError("trust_unavailable") from None
-    return validate_snapshot(raw, now_ms=now)
+    try:
+        return validate_snapshot(raw, now_ms=now)
+    except FleetError as error:
+        _note(deps, "snapshot_" + error.code)
+        raise
 
 
 def verify_records(delivery, records, deps: ActionDependencies):
@@ -313,6 +318,18 @@ def digest(delivery: CommandDelivery) -> str:
     return hashlib.sha256(delivery.command_bytes).hexdigest()
 
 
+def _note(deps, code):
+    """Test mode: why a write stopped before its provider ran, beside each synthetic
+    provider's call counter (a closed code, never a value)."""
+    if not deps.providers.test_mode:
+        return
+    from .action_fixture import _failed
+
+    for descriptor in deps.providers._found.values():
+        if descriptor.test_only:
+            _failed(descriptor.script_data() or {}, code, False)
+
+
 def run_action(delivery, lease, deps: ActionDependencies, *, command=None):
     """Run one claimed action to its report or stop.
 
@@ -358,12 +375,14 @@ def run_action(delivery, lease, deps: ActionDependencies, *, command=None):
     except FleetError as error:
         if error.code == "unsafe_storage":
             raise
+        _note(deps, "before_" + error.code)
         return stopped("not_started", nothing)  # refused before anything ran
     binding = records.intent.binding
     idempotency_key = (
         binding.action_id if descriptor.idempotency(binding.operation) == "target_key" else None
     )
     if fenced() or journal.fenced():
+        _note(deps, "fenced_in_process" if fenced() else "fenced_journal")
         return stopped("not_started", nothing)  # an unconfirmed cleanup stops new writes
     journal.advance(key, "started", kind=KIND)
     deps.at("started")

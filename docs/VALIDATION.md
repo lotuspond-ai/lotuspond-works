@@ -1523,3 +1523,15 @@ Local evidence only: no hosted CI (GitHub Actions refused every job for billing)
   - writes (E05);
   - the package release binding (milestone 5; until then the harness turns `release-required` off);
   - hosted CI.
+
+## Reviewed actions and human tasks, E05 Task 12: qualification — 2026-11-13
+
+Local evidence only: Linux containers on one Mac's Docker VM (`lotuspond-ci-runner:local`, PostgreSQL 18.6, 4 vCPUs), no hosted CI (GitHub Actions billing-blocked), no deployment, synthetic target and connector only. Full record: [actions and human tasks qualification](validation/2026-11-13-actions-human-tasks.md).
+
+- **Tier 1:** the 33 action cases passed (9 min 31 s). The full tier 1 run had 78 of 80 passing; its failures were the reference-triage prefix case, which fails identically at the branch's HEAD before Task 12, and the installed acceptance, fixed afterwards.
+- **Installed acceptance:** passed, including the reviewed write and its 14 rollbacks, with at most one target write per intent.
+- **Tier 2:** 13 passed (E04's disruptive cases and the seven action cases, including ENG-4 under the new grants).
+- **Tier 3 (planning target, `ci.yml`'s configuration, one in five admissions a reviewed write):** at most one target write per intent (877 writes) and at most one provider call per attempt held. Admission, queue age, backlog, burst recovery and revocation-wait criteria failed with the single API worker CPU-bound; E05's routes took about a quarter of its attributed CPU.
+- **Runtime:** 802 passed on Python 3.13 and on 3.14. **Backend action tests (macOS):** 154 passed.
+- **Product changes found by the cases:** a test-mode runtime may report the connector its action providers serve; the synthetic read provider is accepted; the runtime's test command trust no longer refuses itself under load; an unclaimed dispatch that timed out is rechecked (`approval_revoked`, `approval_expired`, or one retry under the same intent); a claimed write's receipt survives its initiator losing `execute`; composition wires interpreter v2 and the action services over a command key; the worker least-privilege grants include E05's tables.
+- **Open for the owner:** ACT-12's restatement, RESTORE-2 (present), and the lapsed-write slot.

@@ -137,6 +137,7 @@ FAILURES = frozenset(
         # E05 (interpreter v2).
         "binding_refused",
         "approval_denied",
+        "approval_revoked",
         "review_expired",
         "approval_expired",
         "not_applied",
@@ -237,6 +238,43 @@ class ActionRecord:
     # current recovery epoch (created before a restore its owner released).
     authorization: str = "proposed"
     restored: bool = False
+    # Task 12: the intent's expiry; whether its approving reviewer has since lost the
+    # eligible role (decision 7); and the write attempts a runtime ever claimed.
+    expires_at_ms: int | None = None
+    revoked: bool = False
+    claimed: frozenset = frozenset()
+
+
+def _reviewer_revoked(db, execution, intent) -> bool:
+    """Decision 7: the reviewer whose `allow` approved this intent no longer holds a
+    role the task's assignment admits. Read without locks; dispatch rechecks it under
+    fresh authority (`ExecutionPinnedRecordSource`)."""
+    from ..models import ExecutionActionDecision, ExecutionHumanTask, Membership
+    from .human_tasks import eligible
+
+    if intent.approval_mode != "human" or intent.authorization_state != "approved":
+        return False
+    decision = db.scalar(
+        _scoped(ExecutionActionDecision, execution)
+        .where(
+            ExecutionActionDecision.intent_id == intent.id,
+            ExecutionActionDecision.decision == "allow",
+        )
+        .order_by(ExecutionActionDecision.issued_at_ms.desc(), ExecutionActionDecision.id)
+        .limit(1)
+    )
+    if decision is None:
+        return False
+    task = db.scalar(
+        _scoped(ExecutionHumanTask, execution).where(ExecutionHumanTask.id == decision.task_id)
+    )
+    member = db.scalar(
+        select(Membership).where(
+            Membership.workspace_id == execution.workspace_id,
+            Membership.user_id == decision.actor_user_id,
+        )
+    )
+    return task is not None and (member is None or not eligible(task, member.role))
 
 
 @dataclass(frozen=True)
@@ -992,6 +1030,10 @@ class _RegionV2(_Region):
             resend = self.resend(step, path, last)
             if resend is not None:
                 return "pending", resend
+        if last.state == "failed" and last.failure == "timeout_before_dispatch":
+            unstarted = self.unstarted(step, path, last, attempts)
+            if unstarted is not None:
+                return "pending", unstarted
         if last.state in ("failed", "cancelled"):
             return "pending", Derivation(
                 actions=(RecordPure(path, step.id, failure=last.failure or "cancelled"),)
@@ -1000,6 +1042,49 @@ class _RegionV2(_Region):
             return self.settle(step, path, last)
         # Reserved, dispatched or claimed: the runtime decides.
         return "pending", Derivation()
+
+    def unstarted(self, step, path, last, attempts):
+        """A write attempt that ended before any runtime claimed it (its command expired
+        unclaimed, or none was ever admitted): nothing ran, so nothing is uncertain.
+
+        Its authority is re-checked as a new dispatch would be: a reviewer who lost the
+        eligible role fails it `approval_revoked` (decision 7), an expired intent
+        `approval_expired`. Otherwise the dispatch step's retry policy may send one more
+        command under the same intent and decision (ACT-11). None: the failure stands.
+        """
+        action = self.state.actions.get(path)
+        if action is None or last.id in action.claimed:
+            return None
+        if action.revoked:
+            return Derivation(actions=(RecordPure(path, step.id, failure="approval_revoked"),))
+        if action.expires_at_ms is not None and action.expires_at_ms <= self.now_ms:
+            return Derivation(actions=(RecordPure(path, step.id, failure="approval_expired"),))
+        retry = step.retry
+        paused = sum(1 for a in attempts if a.state == "cancelled" and a.failure == INTERRUPTED)
+        if (
+            "timeout_before_dispatch" not in retry.retry_codes
+            or last.ordinal - paused >= retry.max_attempts
+        ):
+            return None
+        due = (last.failed_at_ms or 0) + retry.backoff_seconds * 1000
+        if due > self.now_ms:
+            return Derivation(wake_at_ms=due)
+        try:
+            intent = self.evaluate(step.intent)
+            decision = self.evaluate(step.decision) if step.decision is not None else None
+        except ExpressionError as error:
+            return Derivation(actions=(RecordPure(path, step.id, failure=error.code),))
+        return Derivation(
+            actions=(
+                CreateDispatch(
+                    self.path(step.id + DISPATCH_SUFFIX),
+                    step.id,
+                    intent["id"],
+                    None if decision is None else decision["id"],
+                    last.ordinal + 1,
+                ),
+            )
+        )
 
     def derive(self):
         """v2: before anything else, read back each restored intent (Task 10)."""
@@ -3468,6 +3553,13 @@ class InterpreterV2(InterpreterV1):
                 program, dispatch_ref(program, base + DISPATCH_SUFFIX)
             ).target_key
             actions[base] = ActionRecord(
+                expires_at_ms=intent.expires_at_ms,
+                revoked=_reviewer_revoked(db, execution, intent),
+                claimed=frozenset(
+                    a.id
+                    for a in attempts
+                    if a.id in commands and commands[a.id].claimed_at_ms is not None
+                ),
                 intent_id=intent.id,
                 effect=intent.effect_state,
                 target_key=target_key,
@@ -3488,6 +3580,21 @@ class InterpreterV2(InterpreterV1):
                 and intent.recovery_epoch < execution.recovery_epoch,
             )
         return replace(state, actions=actions)
+
+    @staticmethod
+    def _unstarted(db, execution, attempt):
+        """A failed write attempt no runtime ever claimed: no command, or one that
+        expired unclaimed (E03 refuses its claim from then on)."""
+        from ..models import ExecutionActionCommand
+
+        if attempt.state != "failed":
+            return False
+        command = db.scalar(
+            _scoped(ExecutionActionCommand, execution).where(
+                ExecutionActionCommand.attempt_id == attempt.id
+            )
+        )
+        return command is None or (command.status == "expired" and command.claimed_at_ms is None)
 
     def _create_dispatch(self, db, execution, epoch, action):
         """The one command attempt of an intent, only once it may be dispatched.
@@ -3551,10 +3658,21 @@ class InterpreterV2(InterpreterV1):
                 refused = "approval_denied"
             elif intent.authorization_state != "approved":
                 refused = "binding_refused"
+            elif _reviewer_revoked(db, execution, intent):
+                refused = "approval_revoked"  # decision 7: the approval stops counting
         elif intent.authorization_state != "proposed" or action.decision_id is not None:
             refused = "binding_refused"
         if refused is None and resumed:
             if intent.effect_state not in ("not_dispatched", "absent"):
+                refused = "binding_refused"
+            elif decision is not None and decision.expires_at_ms <= database_now_ms(db):
+                refused = "approval_expired"
+        elif (
+            refused is None and action.ordinal > 1 and self._unstarted(db, execution, existing[-1])
+        ):
+            # Task 12: the previous attempt never reached a runtime's claim, so nothing
+            # ran: one more command under the same intent, within the retry policy.
+            if intent.effect_state != "not_dispatched":
                 refused = "binding_refused"
             elif decision is not None and decision.expires_at_ms <= database_now_ms(db):
                 refused = "approval_expired"

@@ -309,3 +309,30 @@ def test_an_unreported_outcome_is_reported_on_the_next_round(tmp_path, target):
     (report,) = env.plane.reports
     assert report.receipt.status == "accepted" and entry(env, action)["phase"] == "recorded"
     assert len(target.writes()) == 1
+
+
+def test_fixture_command_trust_validates_against_an_earlier_now(tmp_path):
+    """Task 12: a caller reads `now`, then asks for trust; a snapshot valid for the full
+    60 s from a later clock reading was refused as too long-lived (`trust_unavailable`)."""
+    import json as _json
+
+    from lotuspond_runtime.action_fixture import FixtureCommandTrust
+    from lotuspond_runtime.trust import validate_snapshot
+
+    path = tmp_path / "command-trust.json"
+    path.write_text(_json.dumps({"format_version": 1, "keys": []}))
+    path.chmod(0o600)
+
+    class Advancing:
+        def __init__(self):
+            self.ms = 1_800_000_000_000
+
+        def now_ms(self):
+            self.ms += 1500  # each reading 1.5 s later, as on a loaded host
+            return self.ms
+
+    clock = Advancing()
+    trust = FixtureCommandTrust(path, clock)
+    now = clock.now_ms()
+    snapshot = validate_snapshot(trust.current("test-install"), now_ms=now)
+    assert now < snapshot.valid_until_ms <= now + 60000

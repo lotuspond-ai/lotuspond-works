@@ -328,3 +328,67 @@ def test_a_cancelled_unclaimed_command_is_never_offered_again(actions):
     assert h.poll() is None  # not handed out again, nor anything else of it
     [command] = commands(h, execution_id)
     assert command.status != "claimed" and command.lease_token_digest is None
+
+
+def test_a_claimed_write_records_its_receipt_after_the_initiator_is_demoted(actions):
+    """Task 12 (REVA-5): a report of a write already claimed records what happened,
+    whatever authority changed since; fetching records to start a write does not."""
+    h = actions
+    target = Target()
+    package, documents = verification_package()
+    execution_id = h.reviewed("demoted-initiator", package, documents, active_ms=20000)
+    delivery = h.poll()
+    lease = h.claim(delivery)
+    write_at(h, target, delivery)  # the write ran while the initiator could still execute
+    with Session(h.engine) as db, db.begin():
+        db.scalar(
+            select(Membership).where(
+                Membership.user_id == execution(h, execution_id).initiating_user_id,
+                Membership.workspace_id == h.scope.workspace_id,
+            )
+        ).role = "viewer"
+    command = json.loads(delivery.command_bytes)
+    with pytest.raises(Exception) as refused:
+        with Session(h.engine) as db, db.begin():
+            h.dispatcher.records(
+                db, h.runtime, command["command_id"], sha256(delivery.command_bytes).hexdigest()
+            )
+    assert getattr(refused.value, "code", None) == "forbidden"
+    report(h, lease, "accepted")  # recorded, not refused
+    assert intent_row(h, execution_id).effect_state == "accepted"
+    assert target.writes == 1 and len(commands(h, execution_id)) == 1
+
+
+def test_an_unclaimed_command_that_expired_is_retried_once_within_policy(actions):
+    """Task 12 (ACT-11): nothing ran, so the dispatch step's retry policy may send one
+    more command under the same intent; the expired one can never be claimed."""
+    from sqlalchemy import update
+
+    from lotuspond.models import RuntimeCommandAdmission
+
+    h = actions
+    target = Target()
+    package, documents = verification_package()
+    retry = package["body"]["steps"][2]["retry"]
+    retry.update(max_attempts=2, retry_codes=["timeout_before_dispatch"])
+    execution_id = h.reviewed("retried-expiry", package, documents, active_ms=20000)
+    first = h.poll()
+    [command] = commands(h, execution_id)
+    with Session(h.engine) as db, db.begin():
+        db.execute(
+            update(RuntimeCommandAdmission)
+            .where(RuntimeCommandAdmission.id == command.admission_id)
+            .values(command_expires_at_ms=1)
+        )
+    h.sweep()
+    h.run2()
+    assert [c.status for c in commands(h, execution_id)] == ["expired"]
+    reserve(h, dispatch_attempt(h, execution_id, last=True))
+    second = h.poll()
+    assert second is not None and second.command_bytes != first.command_bytes
+    assert code_of(h.claim, first) in ("conflict", "forbidden", "not_found")
+    lease = h.claim(second)
+    write_at(h, target, second)
+    report(h, lease, "accepted")
+    assert intent_row(h, execution_id).effect_state == "accepted"
+    assert target.writes == 1 and len(commands(h, execution_id)) == 2

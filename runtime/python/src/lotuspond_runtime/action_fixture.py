@@ -49,9 +49,33 @@ def _count(script):
         raise ValueError("invalid counter")
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
-        os.write(fd, f"{COUNTER_ID or 'unknown'}\n".encode("ascii"))
+        # A write names its command; a read-back or verification read, run by the
+        # activity child, names its attempt.
+        from . import activity_fixture
+
+        named = COUNTER_ID or activity_fixture.ATTEMPT_ID
+        os.write(fd, f"{named or 'unknown'}\n".encode("ascii"))
     finally:
         os.close(fd)
+
+
+def _failed(script, code, sent):
+    """Beside the call counter: each failed request's closed code and whether it was
+    sent, so tests can tell a refused connection from a lost answer (no values)."""
+    path = script.get("counter")
+    if path is None:
+        return
+    failures = os.path.join(os.path.dirname(path), "provider-failures")
+    try:  # a diagnostic never changes what happens
+        fd = os.open(
+            failures, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600
+        )
+        try:
+            os.write(fd, f"{code} {'sent' if sent else 'unsent'}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, TypeError):
+        pass
 
 
 class _Target:
@@ -109,7 +133,8 @@ class _Target:
                     content = connected.send("POST", body, headers, limits.max_response_bytes)
                 finally:
                     sent = connected.sent
-        except FleetError:
+        except FleetError as error:
+            _failed(self._script, error.code, sent)
             return sent, None
         try:
             return True, json.loads(content)
@@ -172,8 +197,8 @@ READ_PROVIDERS = {"synthetic-target-read": SyntheticTargetReadProvider}
 class FixtureCommandTrust:
     """Test-only command trust: a private `TrustSet` file, reread on every call.
 
-    Each snapshot is valid for the 60 s E03 allows, on the worker's server-anchored
-    clock, so a test rotates or revokes the signer by rewriting the file.
+    Each snapshot is valid for 50 s, inside the 60 s E03 allows, on the worker's
+    server-anchored clock, so a test rotates or revokes the signer by rewriting the file.
     """
 
     def __init__(self, path, clock):
@@ -186,7 +211,10 @@ class FixtureCommandTrust:
         from .state import read_private_file
 
         trust = TrustSet.model_validate_json(read_private_file(self.path, 65536))
-        return CommandTrustSnapshot(1, trust, self.clock.now_ms() + 60000)
+        # Within E03's 60 s by a margin: a caller validates this against a `now` it
+        # read just before asking, so "now + 60 s" here would read as too long-lived
+        # whenever the clock moved in between (seen as `trust_unavailable` under load).
+        return CommandTrustSnapshot(1, trust, self.clock.now_ms() + 50000)
 
 
 def worker_config(raw) -> tuple:

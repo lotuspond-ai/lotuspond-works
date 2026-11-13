@@ -277,10 +277,18 @@ def _execute(argv, clients) -> int:
                     fixture = operator_config(raw)
             except (ValueError, TypeError, KeyError):
                 raise FleetError("invalid_request") from None
-        # No executable connector is registered in this foundation. Operator
-        # declarations cannot invent installed capability; Task7 owns that catalog.
+        # No executable connector is installed outside test mode: an operator's
+        # declaration cannot invent installed capability. A test-mode runtime may
+        # report the synthetic connectors its action providers serve (E05), and its
+        # worker refuses to start reporting any connector none of them serves; no
+        # other command reports one.
         if config.observation.connectors:
-            raise FleetError("invalid_request")
+            if config.mode != "test" or args.command not in ("enroll", "activity-worker"):
+                raise FleetError("invalid_request")
+            if args.command == "activity-worker":
+                served = {d.connector for d in actions[1]} if actions is not None else set()
+                if not set(config.observation.connectors) <= served:
+                    raise FleetError("invalid_request")
         client = RuntimeClient(
             ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
         )

@@ -137,6 +137,10 @@ def _attempt_input(artifacts, db, attempt):
 REVOKED = frozenset({"forbidden", "deployment_unavailable", "budget_exceeded", "invalid_request"})
 
 
+# Set on a transaction that only reports a claimed write's receipt or stop (Task 12).
+REPORTING = "lotuspond.action.reporting"
+
+
 class ExecutionPinnedRecordSource:
     """E03's `PinnedRecordSource`: a command's records, rebuilt under current authority."""
 
@@ -185,13 +189,6 @@ class ExecutionPinnedRecordSource:
         # action service): one gated late would invert the lock order, so refuse.
         if not authority_gate.held(db, authority_gate.USER, execution.initiating_user_id):
             raise FleetError("conflict")
-        # The initiator's current `execute` and a deployment revision that may still run.
-        actor = initiator(db, execution)
-        load_deployment(
-            db, actor, execution.deployment_revision_id, dependencies=self.budgets.deployments
-        )
-        revision = record(db, ExecutionDeploymentRevision, scope, execution.deployment_revision_id)
-        grant, tenant, recovery = self.budgets._grants(db, scope)
         # A claimed write finishes and records its status under a pause or a
         # cancellation (decision 12); nothing new is admitted or claimed then.
         claimed = db.scalar(
@@ -200,10 +197,29 @@ class ExecutionPinnedRecordSource:
                 ExecutionActionCommand.status.in_(("claimed", "stopped", "uncertain")),
             )
         )
-        finishing = claimed is not None and execution.requested_state != "running"
-        self.budgets._final(
-            db, actor, revision, grant, tenant, recovery, None if finishing else execution
-        )
+        # Task 12 (REVA-5): a report of a write already claimed records what happened,
+        # whatever the initiator's, deployment's and entitlement's authority since. Its
+        # integrity, epoch, recipient, expiry and connection still decide: E03 refuses
+        # any report of a command past its expiry, which an intent's expiry bounds, and
+        # the write then lapses to a read-back. Records, claims and renewals keep every
+        # check.
+        reporting = claimed is not None and db.info.get(REPORTING) is True
+        finishing = claimed is not None and (execution.requested_state != "running" or reporting)
+        if not reporting:
+            # The initiator's current `execute` and a deployment revision that may run.
+            actor = initiator(db, execution)
+            load_deployment(
+                db, actor, execution.deployment_revision_id, dependencies=self.budgets.deployments
+            )
+            revision = record(
+                db, ExecutionDeploymentRevision, scope, execution.deployment_revision_id
+            )
+            grant, tenant, recovery = self.budgets._grants(db, scope)
+            self.budgets._final(
+                db, actor, revision, grant, tenant, recovery, None if finishing else execution
+            )
+        else:
+            recovery = self.budgets._grants(db, scope)[2]
         if (
             (execution.requested_state != "running" and not finishing)
             # A pause observes `paused` at once; its claimed writes still finish.
@@ -235,7 +251,7 @@ class ExecutionPinnedRecordSource:
                     Membership.user_id == row.actor_user_id,
                 )
             )
-            if member is None or not eligible(task, member.role):
+            if not reporting and (member is None or not eligible(task, member.role)):
                 raise FleetError("forbidden")
             context = decision_context(verified.intent, now).model_copy(
                 update={"recovery_epoch": recovery.epoch}
@@ -821,6 +837,13 @@ class ActionDispatchService:
 
     def record_receipt(self, db, principal, report: ActionReport) -> None:
         report = ActionReport.model_validate(report)
+        db.info[REPORTING] = True
+        try:
+            self._record_receipt(db, principal, report)
+        finally:
+            db.info.pop(REPORTING, None)
+
+    def _record_receipt(self, db, principal, report) -> None:
         self._gates(db, principal, [report.attempt_id])
         rows = self._rows(db, principal, report.attempt_id)
         execution, attempt, intent = rows["execution"], rows["attempt"], rows["intent"]
@@ -1016,6 +1039,13 @@ class ActionDispatchService:
 
     def record_stop(self, db, principal, stop: ActionStop) -> None:
         stop = ActionStop.model_validate(stop)
+        db.info[REPORTING] = True
+        try:
+            self._record_stop(db, principal, stop)
+        finally:
+            db.info.pop(REPORTING, None)
+
+    def _record_stop(self, db, principal, stop) -> None:
         self._gates(db, principal, [stop.attempt_id])
         rows = self._rows(db, principal, stop.attempt_id)
         execution = rows["execution"]

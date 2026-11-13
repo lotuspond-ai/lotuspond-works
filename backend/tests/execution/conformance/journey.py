@@ -24,6 +24,10 @@ from processes import Processes, wait_for  # noqa: E402
 
 VERSIONS = {"lotuspond-api": "0.4.0", "lotuspond-runtime": "0.3.0", "lotuspond-sdk": "0.3.0"}
 POINTS = ("admission", "signal", "claim", "result", "transition", "projection")
+# E05: the reviewed write's commits, in the API (decision, dispatch, claim, receipt) and
+# in the orchestrator (intent, read-back, outcome).
+ACTION_POINTS = ("intent", "decision", "dispatch", "action_claim", "receipt", "readback", "outcome")
+ORCHESTRATOR_POINTS = ("intent", "readback", "outcome")
 
 
 class Journey:
@@ -31,6 +35,20 @@ class Journey:
         self.world, self.processes = world, processes
         self.scenarios = []
         self.counters = []  # every runtime's read and model call counters
+        self.target_writes = []  # writes per intent, from the synthetic target's log
+        self.orchestrators = ["orchestrator-a"]
+
+    def keep_orchestrator(self):
+        """A dead orchestrator is restarted, as its service manager would."""
+        alive = [
+            name
+            for name, process in self.processes.children.items()
+            if name.startswith("orchestrator") and process.poll() is None
+        ]
+        if not alive:
+            name = f"orchestrator-r{len(self.orchestrators)}"
+            self.orchestrators.append(name)
+            self.processes.start_worker("orchestrator", name)
 
     def runtime(self, operator, customer, name, **scripts):
         """A runtime for one scenario, counted for the whole journey."""
@@ -473,7 +491,178 @@ EXPECTED = (
     "reference_workflow_result_and_calls",
     "decoded_events_and_errors_exclude_payloads",
     *(f"rollback_{point}_{when}_commit" for point in POINTS for when in ("before", "after")),
+    "reviewed_write_result_and_counts",
+    *(
+        f"rollback_action_{point}_{when}_commit"
+        for point in ACTION_POINTS
+        for when in ("before", "after")
+    ),
 )
+
+
+# ------------------------------------------------------------------ E05 reviewed writes
+
+
+class Reviewed:
+    """One environment's reviewed writes through the public routes and the target."""
+
+    def __init__(self, journey, operator, customer, target):
+        self.journey, self.operator, self.customer, self.target = (
+            journey,
+            operator,
+            customer,
+            target,
+        )
+        self.world = journey.world
+
+    def deploy(self, record, max_attempts=1):
+        return self.operator.deploy(
+            self.customer,
+            f"reviewed-{record}",
+            package=drivers.reviewed_action(record, max_attempts=max_attempts),
+            dependencies=[self.operator.connector, drivers.action_document("reviewers")],
+        )
+
+    def writes(self, record):
+        log = self.target["directory"] / "writes.jsonl"
+        rows = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        return [r for r in rows if r["target"]["record_id"] == record]
+
+    def fault(self, *faults):
+        worlds.write_private(self.target["directory"] / "faults.json", list(faults))
+
+    def commands(self, execution_id):
+        from sqlalchemy import func, select
+        from sqlalchemy.orm import Session
+
+        from lotuspond.models import ExecutionActionCommand
+
+        with Session(self.world.engine) as db:
+            return db.scalar(
+                select(func.count())
+                .select_from(ExecutionActionCommand)
+                .where(ExecutionActionCommand.execution_id == execution_id)
+            )
+
+    def task(self, execution_id, person, seconds=60):
+        def found():
+            self.journey.keep_orchestrator()  # one that died after a commit restarts
+            items = person.call("GET", "/human-tasks")["items"]
+            return next((t for t in items if t["execution_id"] == execution_id), None)
+
+        return wait_for(found, seconds)
+
+    def approve(self, execution_id, person, *, retry=False):
+        """Claim and `allow`; `retry` repeats a refused or lost call with its own ID."""
+        task = self.task(execution_id, person)
+        path = f"/human-tasks/{task['id']}"
+        body = {
+            "decision_id": f"d-{uuid4().hex[:8]}",
+            "intent_sha256": task["intent_sha256"],
+            "decision": "allow",
+        }
+        person.call("POST", path + "/claim", {})
+        first = _attempt(lambda: person.call("POST", path + "/decision", body))
+        if first is None or retry:
+            person.call("POST", path + "/decision", body)
+
+    def reviewer(self):
+        """The journey's one reviewer (registered once: the API rate-limits sign-ups),
+        a member of the owner's workspace, acting in this scenario's environment."""
+        person = self.journey.reviewer
+        return drivers.Customer(
+            self.operator.base_url,
+            self.journey.processes.ca,
+            self.world.config["origin"],
+            person.headers["cookie"],
+            self.customer.workspace,
+            self.customer.prefix,
+        )
+
+    def gap_free(self, execution_id):
+        from sqlalchemy import select
+        from sqlalchemy.orm import Session
+
+        from lotuspond.models import ExecutionEvent
+
+        with Session(self.world.engine) as db:
+            sequences = list(
+                db.scalars(
+                    select(ExecutionEvent.sequence)
+                    .where(ExecutionEvent.execution_id == execution_id)
+                    .order_by(ExecutionEvent.sequence)
+                )
+            )
+        return sequences == list(range(1, len(sequences) + 1))
+
+
+def reviewed_write(journey, reviewed):
+    """The reviewed-write journey: one task, one decision, one command, one write and
+    one verification read, each measured."""
+    record = "R-journey"
+    revision = reviewed.deploy(record)
+    runtime = journey.runtime(reviewed.operator, reviewed.customer, "reviewed-write")
+    try:
+        execution_id = reviewed.operator.start(reviewed.customer, revision)["id"]
+        person = reviewed.reviewer()
+        try:
+            reviewed.approve(execution_id, person)
+        finally:
+            person.close()
+        view = reviewed.operator.settled(
+            reviewed.customer, execution_id, {"succeeded", "failed"}, 180
+        )
+    finally:
+        journey.stop(runtime)
+    writes, commands = len(reviewed.writes(record)), reviewed.commands(execution_id)
+    reads = Processes.calls(runtime["counter"])
+    journey.target_writes.append(writes)
+    passed = view["state"] == "succeeded" and (writes, commands, reads) == (1, 1, 1)
+    return passed, {"state": view["state"], "writes": writes, "commands": commands, "reads": reads}
+
+
+def action_rollback(journey, reviewed, point, when):
+    """One commit of a reviewed write fails before it, or is lost after it (an API's
+    answer dropped, or the orchestrator dying at once); the write still happens once."""
+    world = journey.world
+    record = f"R-{point}-{when}".replace("_", "-")
+    revision = reviewed.deploy(record)
+    runtime = journey.runtime(reviewed.operator, reviewed.customer, f"action-{point}-{when}")
+    person = reviewed.reviewer()
+    try:
+        if point == "readback":
+            reviewed.fault("lose_response")  # so a read-back runs and records
+        arm(world, point, when)
+        execution_id = reviewed.operator.start(reviewed.customer, revision)["id"]
+        reviewed.approve(execution_id, person, retry=point == "decision")
+
+        def settled():
+            if point in ORCHESTRATOR_POINTS and when == "after":
+                journey.keep_orchestrator()
+            view = reviewed.operator.execution(reviewed.customer, execution_id)
+            return view if view["state"] in ("succeeded", "failed") else None
+
+        view = wait_for(settled, 240, 0.5)
+    finally:
+        person.close()
+        journey.stop(runtime)
+    writes, commands = len(reviewed.writes(record)), reviewed.commands(execution_id)
+    journey.target_writes.append(writes)
+    gap_free = reviewed.gap_free(execution_id)
+    passed = (
+        fired(world) == 1
+        and view["state"] == "succeeded"
+        and writes == 1
+        and commands == 1
+        and gap_free
+    )
+    return passed, {
+        "fired": fired(world),
+        "state": view["state"],
+        "writes": writes,
+        "commands": commands,
+        "gap_free": gap_free,
+    }
 
 
 def _terminate(signum, frame):
@@ -497,6 +686,10 @@ def main():
         passed, origins = installed_origins()
         result["installed_origins"] = origins
         with worlds.owned(raw, case / "world") as world:
+            # E05: action authorities before any process starts (interpreter v2 then
+            # serves every execution of this world, v1 ones by v1's rules).
+            connector = drivers.decisive_connector()
+            pin = worlds.actions_mode(world, connector)
             processes = Processes(world, python=sys.executable, cwd=case)
             journey = Journey(world, processes)
             journey.sentinels_found = None
@@ -549,6 +742,49 @@ def main():
                             "orchestrator-restarted" not in processes.children
                         ):
                             processes.start_worker("orchestrator", "orchestrator-restarted")
+                target = processes.start_target()
+                operator.demand(60000)  # a write's lease ends with its reservation
+                actions = drivers.Operator(
+                    world,
+                    processes,
+                    connector=connector,
+                    destinations=[
+                        {"host": "localhost", "port": target["port"], "path_prefix": "/target"}
+                    ],
+                    actions={"pin": pin},
+                )
+
+                journey.reviewer = actions.member(owner, "admin")
+
+                def reviewed(check, label):
+                    def run():
+                        customer = actions.environment(world.engine, owner, label=label)
+                        try:
+                            return check(Reviewed(journey, actions, customer, target))
+                        finally:
+                            customer.close()
+
+                    return run
+
+                journey.scenario(
+                    "reviewed_write_result_and_counts",
+                    reviewed(lambda r: reviewed_write(journey, r), "Reviewed"),
+                )
+                for point in ACTION_POINTS:
+                    for when in ("before", "after"):
+                        journey.scenario(
+                            f"rollback_action_{point}_{when}_commit",
+                            reviewed(
+                                lambda r, point=point, when=when: action_rollback(
+                                    journey, r, point, when
+                                ),
+                                f"Action {point} {when}",
+                            ),
+                        )
+                        if world.path("faults.json").exists():
+                            world.path("faults.json").unlink()
+                        journey.keep_orchestrator()
+                journey.reviewer.close()
                 owner.close()
             finally:
                 receipt = processes.close()
@@ -557,6 +793,10 @@ def main():
             ran = {item["name"] for item in journey.scenarios}
             result["required_integration_skips"] = sum(name not in ran for name in EXPECTED)
             result["private_sentinels_found"] = journey.sentinels_found
+            # Measured at the target, never from receipts: at most one write per intent.
+            result["max_target_writes_per_intent"] = (
+                max(journey.target_writes) if journey.target_writes else None
+            )
             # Observed per attempt, over every runtime the journey started.
             per_attempt = Processes.calls_by_attempt(*journey.counters)
             result["provider_calls"] = sum(per_attempt.values())
