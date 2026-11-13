@@ -40,7 +40,7 @@ _KEY = re.compile(r"[\x21-\x7e]{1,4096}")
 
 
 def json_schema(schema, definitions=()) -> dict:
-    """A Lotuspond data schema as the JSON Schema subset strict tools and outputs accept.
+    """A LotusPond Works data schema as the JSON Schema subset strict tools and outputs accept.
 
     Only structure is expressed: bounds, lengths and decimal scale are checked by the
     runtime against the exact schema afterwards, so a looser JSON Schema never admits

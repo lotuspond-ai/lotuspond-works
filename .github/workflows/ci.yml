@@ -1,4 +1,4 @@
-name: Lotuspond validation
+name: LotusPond Works validation
 on:
   push:
     branches: [main]

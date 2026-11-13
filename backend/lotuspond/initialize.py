@@ -41,7 +41,7 @@ def initialize(settings: Settings):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Lotuspond local database tools")
+    parser = argparse.ArgumentParser(description="LotusPond Works local database tools")
     parser.add_argument("command", choices=["init", "grant-admin", "migrate"])
     parser.add_argument("--user-id")
     parser.add_argument("--confirm-email")
@@ -54,7 +54,7 @@ def main():
     if args.command == "init":
         initialize(settings)
         print(
-            "Created the new Lotuspond schema. No accounts, fixtures, or imported data were seeded."
+            "Created the new LotusPond Works schema. No accounts, fixtures, or imported data were seeded."
         )
         return
     url = make_url(settings.database_url.get_secret_value())

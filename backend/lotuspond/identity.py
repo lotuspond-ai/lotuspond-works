@@ -329,7 +329,7 @@ def add_member(
         fail(
             400,
             "account_required",
-            "The person must create a Lotuspond account before being added.",
+            "The person must create a LotusPond Works account before being added.",
         )
     if request.app.state.settings.env == "production" and not identity_verified(db, user):
         fail(

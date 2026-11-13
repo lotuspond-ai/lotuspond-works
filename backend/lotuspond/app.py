@@ -199,7 +199,7 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(
-        title="Lotuspond API", version="0.4.0", lifespan=lifespan, docs_url=None, redoc_url=None
+        title="LotusPond Works API", version="0.4.0", lifespan=lifespan, docs_url=None, redoc_url=None
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
@@ -312,6 +312,13 @@ def create_app(
                     "date": "2026-11-14",
                     "title": "A new signed-out introduction",
                     "description": "The page you see before signing in is drawn in the LotusPond design system and says who LotusPond Works is for: supply chain operations first, built to each customer's requirement. It shows the four steps of the product with what each can do today, the release rules in a labelled sample workspace, and the same account choices. Accounts, sign-in and stored data are unchanged.",
+                },
+                {
+                    "version": "0.4.0",
+                    "id": "lotuspond-works-messages",
+                    "date": "2026-11-14",
+                    "title": "Emails and messages say LotusPond Works",
+                    "description": "Email subjects and bodies, error messages, the API title and command-line text now use the name LotusPond Works. New authenticator setups are labelled LotusPond Works; authenticators added earlier keep the label Lotuspond and their codes still work. Header names, API fields and stored data are unchanged.",
                 },
                 {
                     "version": "0.4.0",
@@ -635,7 +642,7 @@ def create_app(
         if index.is_file():
             return FileResponse(index)
         return JSONResponse(
-            {"error": "frontend_unavailable", "message": "Build the Lotuspond web application."},
+            {"error": "frontend_unavailable", "message": "Build the LotusPond Works web application."},
             status_code=503,
         )
 

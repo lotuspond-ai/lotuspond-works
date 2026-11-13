@@ -366,7 +366,7 @@ def start_enrollment(
     db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
     issue_session(db, request, response, user)
     encoded = base64.b32encode(secret).decode().rstrip("=")
-    uri = _totp(secret).get_provisioning_uri(user.email, "Lotuspond")
+    uri = _totp(secret).get_provisioning_uri(user.email, "LotusPond Works")
     _audit_account(db, user, "account.mfa_enrollment_started", enrollment.id)
     return {"secret": encoded, "otpauth_uri": uri, "expires_at": enrollment.expires_at}
 

@@ -1,6 +1,6 @@
 export class ApiUrlError extends Error {
   constructor() {
-    super('Configure a permitted Lotuspond API URL.');
+    super('Configure a permitted LotusPond Works API URL.');
     this.name = 'ApiUrlError';
     this.code = 'invalid_configuration';
   }
