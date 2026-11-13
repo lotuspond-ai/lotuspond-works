@@ -199,7 +199,11 @@ def create_app(
             engine.dispose()
 
     app = FastAPI(
-        title="LotusPond Works API", version="0.4.0", lifespan=lifespan, docs_url=None, redoc_url=None
+        title="LotusPond Works API",
+        version="0.4.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
     )
     app.state.settings = settings
     app.state.fleet_dependencies = dependencies
@@ -642,7 +646,10 @@ def create_app(
         if index.is_file():
             return FileResponse(index)
         return JSONResponse(
-            {"error": "frontend_unavailable", "message": "Build the LotusPond Works web application."},
+            {
+                "error": "frontend_unavailable",
+                "message": "Build the LotusPond Works web application.",
+            },
             status_code=503,
         )
 
