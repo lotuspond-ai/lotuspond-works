@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300">
+<rect width="1200" height="300" fill="#9CAF88"/>
+<circle cx="600" cy="150" r="132" fill="#B9C7A9"/>
+<g transform="translate(372 240) rotate(-3) scale(1.7 1.7)"><rect x="-130" y="-21" width="134" height="44" rx="8" fill="#55694A"/><path d="M0 -15C20 -17 34 -13 46 -11L98 -7C109 -6 110 5 100 7L60 13C40 21 18 21 0 17Z" fill="#F7F5EF"/><path d="M12 -14C8 -31 20 -42 31 -38C38 -35 37 -25 30 -12Z" fill="#F7F5EF"/></g>
+<g transform="translate(868 256) rotate(3) scale(-1.7 1.7)"><rect x="-130" y="-21" width="134" height="44" rx="8" fill="#55694A"/><path d="M0 -15C20 -17 34 -13 46 -11L98 -7C109 -6 110 5 100 7L60 13C40 21 18 21 0 17Z" fill="#F7F5EF"/><path d="M12 -14C8 -31 20 -42 31 -38C38 -35 37 -25 30 -12Z" fill="#F7F5EF"/></g>
+<path d="M-6 90C150 40 320 170 520 116S760 150 900 190S1100 240 1206 170" fill="none" stroke="#18211B" stroke-opacity="0.9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<g transform="translate(520 170) rotate(-3) scale(1.0 1.0)"><rect x="-62.0" y="-46.0" width="124" height="92" rx="7" fill="#55694A"/><rect x="-12.4" y="-46.0" width="24.8" height="92" fill="#F7F5EF"/><path d="M-53.0 35.0h24.8" stroke="#18211B" stroke-opacity=".4" stroke-width="3" stroke-linecap="round"/></g>
+<g transform="translate(520 122) rotate(0) scale(1.05 1.05)"><path d="M0 0c-20 -24 -38 -2 0 0c20 -24 38 -2 0 0M0 0l-12 18M0 0l12 18" fill="none" stroke="#18211B" stroke-width="2.86" stroke-linecap="round" stroke-linejoin="round"/></g>
+<path d="M520 120V62" fill="none" stroke="#18211B" stroke-opacity="1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="520" cy="42.0" r="42.2" fill="#F7F5EF"/>
+<path d="M520 64v20.2" fill="none" stroke="#18211B" stroke-width="3"/>
+<g transform="translate(520 64) scale(0.44)" fill="#E8412C" stroke="#F7F5EF" stroke-width="6.82" stroke-linejoin="round"><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(-70) scale(0.76)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(70) scale(0.76)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(-36) scale(0.92)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(36) scale(0.92)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(0) scale(1)"/></g>
+</svg>

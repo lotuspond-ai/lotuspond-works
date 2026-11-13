@@ -1,0 +1,81 @@
+/* LotusPond components. Every colour, radius, space and font comes from tokens.json. */
+
+/* Button */
+.lp-btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);min-height:50px;padding:0 var(--space-6);border:0;border-radius:var(--radius-pill);font:600 16px/1 var(--font-sans);text-decoration:none;white-space:nowrap;cursor:pointer;transition:background .18s,transform .18s}
+.lp-btn:active{transform:translateY(1px)}
+.lp-btn:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.lp-btn--accent{background:var(--accent);color:var(--on-accent)}
+.lp-btn--accent:hover{background:var(--accent-hover)}
+.lp-btn--ink{background:var(--ink);color:var(--surface)}
+.lp-btn--ink:hover{background:var(--ink-muted)}
+.lp-btn--brand{background:var(--sage-700);color:var(--white)}
+.lp-btn--light{background:var(--off-white);color:var(--pine-900)}
+.lp-btn--outline{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--line-strong)}
+.lp-btn--sm{min-height:42px;padding:0 18px;font-size:15px}
+.lp-btn[disabled]{opacity:.45;cursor:not-allowed}
+
+/* Tag: a dot plus a word, never colour alone */
+.lp-tag{display:inline-flex;align-items:center;gap:var(--space-2);height:28px;padding:0 var(--space-3);border-radius:var(--radius-pill);font:600 13px/1 var(--font-sans);white-space:nowrap}
+.lp-tag::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.lp-tag--live{background:var(--positive-tint);color:var(--ink)}
+.lp-tag--live::before{background:var(--positive)}
+.lp-tag--soon{color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--line-strong)}
+.lp-tag--soon::before{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+.lp-tag--wait{background:var(--accent);color:var(--on-accent)}
+.lp-tag--failed{background:var(--danger-fill);color:var(--on-danger)}
+
+/* Tabs */
+.lp-tabs{display:inline-flex;gap:var(--space-1);padding:6px;border-radius:var(--radius-pill);background:var(--surface-tint)}
+.lp-tab{appearance:none;border:0;background:transparent;color:var(--ink-muted);font:600 14px/1 var(--font-sans);padding:10px var(--space-4);border-radius:var(--radius-pill);cursor:pointer}
+.lp-tab:hover{color:var(--ink)}
+.lp-tab:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.lp-tab[aria-selected=true]{background:var(--ink);color:var(--surface)}
+
+/* Sheet and card */
+.lp-sheet{background:var(--surface);color:var(--ink);border-radius:var(--radius-xl);padding:var(--space-12)}
+.lp-sheet--deep{background:var(--deep);color:var(--on-deep)}
+.lp-panel{background:var(--surface-tint);border-radius:var(--radius-lg);padding:var(--space-8)}
+.lp-card{background:var(--surface-raised);color:var(--ink);border-radius:var(--radius-md);box-shadow:var(--shadow-card);padding:var(--space-6)}
+
+/* Chip */
+.lp-chip{display:inline-flex;align-items:center;height:34px;padding:0 var(--space-4);border-radius:var(--radius-pill);background:var(--off-white);color:var(--pine-900);font:600 14px/1 var(--font-sans);white-space:nowrap}
+
+/* CodeBlock */
+.lp-code{background:var(--deep-raised);color:var(--on-deep);border:1px solid var(--deep-line);border-radius:var(--radius-lg);overflow:hidden}
+.lp-code pre{margin:0;padding:22px var(--space-6);font:13.5px/1.75 var(--font-mono);overflow-x:auto}
+.lp-code .c{color:var(--code-comment)}
+.lp-code .s{color:var(--sage-300)}
+.lp-code .k{color:var(--code-key)}
+.lp-code__note{margin:0;padding:14px var(--space-6);border-top:1px solid var(--deep-line);font:13.5px/1.4 var(--font-sans);color:var(--on-deep-muted)}
+
+/* Underline */
+.lp-underline{position:relative;display:inline-block;white-space:nowrap}
+.lp-underline svg{position:absolute;left:-2%;width:104%;bottom:-.1em;height:.22em;overflow:visible}
+.lp-underline path{fill:none;stroke:var(--accent-mark);stroke-width:.075em;stroke-linecap:round}
+/* Tomato never sits on sage: on field the stroke is off-white */
+.lp-underline--light path{stroke:var(--off-white)}
+
+/* Wordmark */
+.lp-wordmark{display:inline-flex;align-items:baseline;gap:.16em;font:700 24px/1 var(--font-display);letter-spacing:-.02em;color:inherit;text-decoration:none;white-space:nowrap}
+.lp-wordmark b{font-weight:400}
+.lp-wordmark i{width:.33em;height:.33em;border-radius:50%;background:var(--accent-mark)}
+
+/* Steps: a numbered sequence, only when the order is real */
+.lp-steps{list-style:none;margin:0;padding:0;counter-reset:lp-step}
+.lp-steps>li{counter-increment:lp-step;display:grid;grid-template-columns:44px minmax(0,1fr);gap:0 var(--space-3);padding:22px 0;border-top:1px solid var(--line)}
+.lp-steps>li:first-child{border-top:1.5px solid var(--ink)}
+.lp-steps>li::before{content:counter(lp-step);font:600 26px/1.18 var(--font-display);color:var(--brand-text)}
+.lp-steps h3{margin:0;font:600 26px/1.18 var(--font-display);letter-spacing:-.01em}
+.lp-steps p{grid-column:2;margin:var(--space-2) 0 0;color:var(--ink-muted)}
+
+/* Compare: before and after, side by side */
+.lp-compare{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-4)}
+.lp-compare>div{border-radius:var(--radius-lg);padding:var(--space-8)}
+.lp-compare__before{box-shadow:inset 0 0 0 1.5px var(--line-strong)}
+.lp-compare__after{background:var(--surface-tint)}
+.lp-compare h3{margin:0;font:600 26px/1.18 var(--font-display);letter-spacing:-.01em}
+.lp-compare ul{list-style:none;margin:var(--space-4) 0 0;padding:0}
+.lp-compare li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:var(--space-3);align-items:baseline;padding:14px 0;border-top:1px solid var(--line)}
+.lp-compare li::before{content:"";width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--line-strong)}
+.lp-compare__after li::before{background:var(--positive);box-shadow:none}
+@media (max-width:640px){.lp-compare{grid-template-columns:1fr}}

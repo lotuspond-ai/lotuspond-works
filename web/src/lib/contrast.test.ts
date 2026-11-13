@@ -37,9 +37,9 @@ function contrast(a: string, b: string): number {
 const app = tokens(consoleCss, ':root,\n.console-window');
 const paper = tokens(landingCss, '.landing');
 const scene = tokens(landingCss, ".landing-header[data-tone='pond'],\n.pond,\n.landing-footer");
-// Surfaces written as literals in console.css: table headers and the form panel.
-const tableHead = '#fafaf8';
-const formPanel = '#fcfcfb';
+// Table headers, wells and the form panel are drawn on --sunken (console.css).
+const tableHead = app['--sunken'];
+const formPanel = app['--sunken'];
 
 function atLeast(floor: number, pairs: [string, string, string][]) {
   for (const [label, foreground, background] of pairs) {
@@ -62,10 +62,16 @@ test('console text meets 4.5:1 on every surface it is set on', () => {
     ['muted on sunken', app['--muted'], app['--sunken']],
     ['muted on table header', app['--muted'], tableHead],
     ['accent link on paper', app['--accent'], app['--paper']],
+    ['accent link on canvas', app['--accent'], app['--canvas']],
+    ['accent link on sunken', app['--accent'], app['--sunken']],
+    ['selected item on accent-soft', app['--accent'], app['--accent-soft']],
+    ['decision label', '#ffffff', app['--decide']],
+    ['ink on a waiting row', app['--ink'], app['--decide-soft']],
     ['button text on accent', '#ffffff', app['--accent']],
     ['success badge', app['--success'], app['--success-soft']],
     ['warning badge', app['--warning'], app['--warning-soft']],
     ['danger badge', app['--danger'], app['--danger-soft']],
+    ['neutral badge', app['--muted'], app['--neutral-soft']],
   ]);
 });
 
@@ -91,9 +97,22 @@ test('public page text meets its floor on paper and on the scene', () => {
     ['muted on public paper', paper['--muted'], paper['--paper']],
     ['scene text on the pond', paper['--pond-paper'], paper['--pond-deep']],
   ]);
+  // The introduction pins its own action green until it is redrawn (ADR-0016).
+  atLeast(4.5, [
+    ['public link on paper', paper['--accent'], paper['--paper']],
+    ['public button text', '#ffffff', paper['--accent']],
+  ]);
   // The warm note is only ever set as large display type (the charter numerals).
   atLeast(3, [
     ['warm numerals on public canvas', paper['--lotus-ink'], paper['--canvas']],
     ['warm numerals on public paper', paper['--lotus-ink'], paper['--paper']],
+  ]);
+});
+
+test('tomato is a mark, not text: it holds 3:1 where the wordmark dot is drawn', () => {
+  atLeast(3, [
+    ['dot on paper', app['--lotus'], app['--paper']],
+    ['dot on sunken', app['--lotus'], app['--sunken']],
+    ['dot on canvas', app['--lotus'], app['--canvas']],
   ]);
 });
