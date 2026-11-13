@@ -1,6 +1,8 @@
-# Lotuspond
+# LotusPond Works
 
-Lotuspond runs AI-agent workflows inside a company's real processes: each version is proven before it is released, each consequential action waits for a person's decision, and every outcome is recorded. [What Lotuspond is for](docs/GOAL.md) states the problem, the core loop (Build, Prove, Run, Control, on a shared foundation) and what is out of scope; [capabilities](docs/CAPABILITIES.md) records what each step can do today.
+LotusPond Works runs AI-agent workflows inside a company's real processes: each version is proven before it is released, each consequential action waits for a person's decision, and every outcome is recorded. [What LotusPond Works is for](docs/GOAL.md) states the problem, the core loop (Build, Prove, Run, Control, on a shared foundation) and what is out of scope; [capabilities](docs/CAPABILITIES.md) records what each step can do today.
+
+LotusPond Works is one LotusPond product; LotusPond Health is a separate product outside this repository. Code, packages, commands, headers, environment variables and databases keep the `lotuspond` identifier ([ADR-0015](docs/architecture/0015-name-the-product-lotuspond-works.md)).
 
 Today the product proves agents before release (scenarios, evaluation runs, policies, releases and independent approval) and runs admitted executable packages on a durable PostgreSQL engine with customer-enrolled runtimes. The Studio composes workflow-package v1 drafts, and the standalone SDK authors, signs and compiles executable-v2 packages. The primary API is Python/FastAPI with a fresh PostgreSQL model; the console is React. Node tooling runs customer-controlled evaluation runners and release gates.
 
@@ -75,7 +77,7 @@ The validator checks the local declaration and emits a canonical content digest.
 
 ## Product and delivery
 
-Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and [what Lotuspond is for](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
+Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and [what LotusPond Works is for](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
 
 The canonical private repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Repository publication and hosted deployment are separate milestones. Production readiness requires the remaining identity, provider, deployment, and operational evidence listed in the capability register, and the runtime capabilities still to build. The separate local recovery archive is outside this project.
 

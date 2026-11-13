@@ -1,4 +1,4 @@
-# Lotuspond design
+# LotusPond Works design
 
 One product identity, one application. Public copy describes what the user can do and what evidence supports a decision. The application has four workflow groups and a small workspace utility area.
 
@@ -25,7 +25,7 @@ The public platform preview must be built from the console's own classes and com
 
 ## Brand theme: the field record
 
-Lotuspond keeps a scientific record of something alive. A pond is observed, its specimens are labelled, and what is written down cannot be changed. The company now puts AI agents to work in business processes with people in charge, and the record is how that stays accountable: what an automation may touch is declared in advance, every decision keeps its reasons, and evidence carries its provenance. The pond is the signature scene, not the whole brand; the field record is the vocabulary around it.
+LotusPond keeps a scientific record of something alive. A pond is observed, its specimens are labelled, and what is written down cannot be changed. The company now puts AI agents to work in business processes with people in charge, and the record is how that stays accountable: what an automation may touch is declared in advance, every decision keeps its reasons, and evidence carries its provenance. The pond is the signature scene, not the whole brand; the field record is the vocabulary around it.
 
 | Layer           | Where                                          | What it looks like                                                                                                                                                                                                                                                  |
 | --------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -36,6 +36,8 @@ Lotuspond keeps a scientific record of something alive. A pond is observed, its 
 | Register        | Anything that is partly built                  | A status tag — Available, In progress or Planned — that matches `docs/CAPABILITIES.md`, so a planned capability is never shown as shipped                                                                                                                           |
 
 Palette: warm archival paper below the scene (`--canvas` #f4f1e9, `--paper` #fdfcf8, `--line` #dcd8cc), near-black ink (`--ink-mark` #1c2520), the console's accent green and semantic colours, and `--lotus` (#c4864a) used sparingly as the one warm note, darkened to `--lotus-ink` (#a86b36) when it is set as display type. Type: `--serif` for display, system sans for reading, `--mono` for labels, commands and field names.
+
+Wordmark: the lockup **LotusPond Works** (`components/Wordmark.tsx`), the company name in the heavier weight, the product name lighter, then the warm dot. Use the component rather than retyping the lockup. Company-level pages that name no product, such as the early-access page in `deploy/interest/`, keep the company wordmark alone.
 
 Extend the vocabulary before inventing a new motif. A new glyph uses the same nib, grid and stroke order; a new mark states only what is true; a register row moves only when the capability register does.
 

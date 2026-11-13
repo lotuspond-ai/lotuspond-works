@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
+import { Wordmark } from '../Wordmark.js';
 import { useArrival } from '../../lib/useArrival.js';
 import { Icon } from '../console/icons.js';
 import { NavList } from '../console/navigation.js';
@@ -108,10 +109,7 @@ export function ConsolePreview() {
         <div className="console-body">
           <div className="console-side" aria-hidden="true">
             <div className="sidebar-brand">
-              <span className="wordmark">
-                Lotuspond
-                <span className="wordmark-dot" />
-              </span>
+              <Wordmark />
             </div>
             <div className="workspace-switch">
               <span className="workspace-avatar">E</span>

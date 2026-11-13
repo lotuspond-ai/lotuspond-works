@@ -1,6 +1,6 @@
 # Repository governance
 
-Lotuspond uses one private product repository, [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Existing source paths remain in place. Create new components only when they contain reviewed implementation; empty runtime, SDK, or industry repositories would imply ownership and readiness that do not yet exist.
+LotusPond Works uses one private product repository, [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Existing source paths remain in place. Create new components only when they contain reviewed implementation; empty runtime, SDK, or industry repositories would imply ownership and readiness that do not yet exist.
 
 The initial accountable maintainer is `@srujanpapaiah`, recorded in `.github/CODEOWNERS`. Add backend, runtime, integration, and release owners when those roles are staffed. A sole maintainer cannot independently approve their own PR: the initial protection policy requires pull requests and checks, with zero required approvals. Raise that to at least one independent approval and enable code-owner enforcement when another authorized reviewer is available. Customer acceptance remains a separate responsibility.
 

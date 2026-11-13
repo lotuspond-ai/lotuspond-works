@@ -1,4 +1,4 @@
-# Lotuspond console design system
+# LotusPond Works console design system
 
 The console is a working environment for building agent workflows and deciding their releases. Studio authors workflow packages; the assurance workflows are Releases, Scenarios and Governance, whose release decisions deployment admission requires. Planned platform areas have honest pages of their own. Workspace and platform administration are separate supporting surfaces.
 
@@ -85,7 +85,7 @@ Forms use explicit labels, native inputs, visible focus, and disabled pending ac
 
 The console and public pages are reviewed against WCAG 2.2 AA:
 
-- **Titles and announcements.** Every view sets the browser title, most specific first ("Releases · Example organization · Lotuspond"; `lib/title.ts`), and a polite status announces the page when the reader moves to it, since focus stays on the link that was followed. An unknown route renders "Page not found" with an `h1`.
+- **Titles and announcements.** Every view sets the browser title, most specific first ("Releases · Example organization · LotusPond Works"; `lib/title.ts`), and a polite status announces the page when the reader moves to it, since focus stays on the link that was followed. An unknown route renders "Page not found" with an `h1`.
 - **Focus.** The ring is 2px of `--focus`, offset 2px; rows inside scrolling lists (navigation, switcher options) draw it inset so the list cannot clip it, and the scene overrides the token with a light green. Disclosures (workspace switcher, account menu) close on Escape with focus back on their button, on an outside click, and when focus moves elsewhere, so an open panel never covers the next element Tab reaches. On narrow screens Escape closes the menu and returns to Menu; choosing a page from the menu continues reading at the new page.
 - **Loading and status.** A loading list announces "Loading releases…" rather than an unlabelled skeleton; counts, saved states and route changes are `role="status"`; failures are `role="alert"`.
 - **Reflow and targets.** Nothing scrolls the page sideways at 320px (single-column grids use `minmax(0, 1fr)`; wide commands and tables scroll inside their own focusable region). Standalone links keep a 24px target clear of neighbouring controls. On narrow screens the icon-only "What's new" link is removed rather than left unnamed; it stays in the account menu and the palette.

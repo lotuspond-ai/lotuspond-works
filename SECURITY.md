@@ -1,4 +1,4 @@
-# Lotuspond security boundaries
+# LotusPond Works security boundaries
 
 - Authenticate before accessing workspace data. Verify human membership or key scopes on every request and include workspace predicates in every query.
 - Use composite workspace foreign keys to reject cross-workspace references. Never rely on opaque identifiers as authorization.
@@ -24,7 +24,7 @@
 - Worker execution occurs in a separately managed process. The API does not execute arbitrary uploaded code.
 - Customer-side runners execute only operator-selected adapters in bounded subprocesses. Keep control-plane keys and lease tokens out of adapter environments and payloads; renew leases independently, stop on lost authority, and submit only complete evidence after process cleanup. Process groups do not contain hostile code or prove external-resource teardown. Unconfirmed cleanup must stop further execution. The packaged HTTP runner and gate commands must not receive a Docker socket. `LOTUSPOND_API_URL` may be an origin or the `/api/v1` base. The API client uses direct transports, ignore ambient proxies, and keep TLS verification enabled.
 - An organization owner or administrator may clear a member's authenticator when that member lost every factor. It must be a different person, it requires the administrator's own password, it never touches a platform operator's factor, and it only removes: no session, factor or password is issued, so it cannot be used to take over the account. The member is notified out of band and re-enrols themselves.
-- A process group bounds an adapter's lifetime and resources, not its privilege. The supervised runner executes the operator's own code on the operator's own host; code Lotuspond supplies runs in a container with no network instead. `LOTUSPOND_ADAPTER_ROOT` optionally confines which directory may supply an adapter, resolving symlinks first. Never promote a process group into the isolation boundary for hosted multi-tenant execution.
+- A process group bounds an adapter's lifetime and resources, not its privilege. The supervised runner executes the operator's own code on the operator's own host; code LotusPond Works supplies runs in a container with no network instead. `LOTUSPOND_ADAPTER_ROOT` optionally confines which directory may supply an adapter, resolving symlinks first. Never promote a process group into the isolation boundary for hosted multi-tenant execution.
 - Enforce budgets transactionally. Missing provider configuration, incomplete evidence, and missing authorization must fail closed.
 - Local trust-authenticated PostgreSQL is a development convenience only. Production requires reviewed database roles, TLS, retention, backups, distributed quotas, verified identity flows, monitoring, and operational validation.
 - Never infer readiness from a green build. Document unresolved integration and operational work in `docs/CAPABILITIES.md`.

@@ -1,6 +1,6 @@
 # Authenticator and recovery codes
 
-Lotuspond supports an authenticator app as a second factor for browser sign-in. After enabling it, enter your password and then either the current six-digit authenticator code or one unused recovery code. Production platform operators must enable MFA before opening operator controls. Workspace roles do not by themselves impose an organization-wide MFA policy.
+LotusPond Works supports an authenticator app as a second factor for browser sign-in. After enabling it, enter your password and then either the current six-digit authenticator code or one unused recovery code. Production platform operators must enable MFA before opening operator controls. Workspace roles do not by themselves impose an organization-wide MFA policy.
 
 ## Enable an authenticator
 

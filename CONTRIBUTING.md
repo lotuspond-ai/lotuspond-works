@@ -1,4 +1,4 @@
-# Contributing to Lotuspond
+# Contributing to LotusPond Works
 
 The canonical private product repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Begin with [README.md](README.md), [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and the [capability register](docs/CAPABILITIES.md). The [platform plan](docs/plans/2026-10-13-platform-master-plan.md) describes the approved direction; planned features are not shipped functionality.
 

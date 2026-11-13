@@ -47,7 +47,7 @@ Redirects, compressed bodies, invalid JSON/UTF-8, truncated responses, missing o
 | `LOTUSPOND_RUNNER_ONCE`                | `true` performs one claim cycle and exits; an empty queue is permitted                 |
 | `LOTUSPOND_RUNNER_ADAPTER_ENV`         | Comma-separated additional environment names explicitly permitted for a custom adapter |
 
-The child receives a small system environment and the reviewed HTTP settings. Other credentials are absent unless explicitly selected as custom adapter configuration. Reserved Lotuspond control-plane and loader variables cannot be opted in. This filters environment inheritance; it does not prevent trusted code from reading files accessible to its operating-system account.
+The child receives a small system environment and the reviewed HTTP settings. Other credentials are absent unless explicitly selected as custom adapter configuration. Reserved LotusPond Works control-plane and loader variables cannot be opted in. This filters environment inheritance; it does not prevent trusted code from reading files accessible to its operating-system account.
 
 The API grants a 15-minute lease. The runner renews while a scenario executes. If renewal fails, authorization is revoked or the lease is cancelled, it stops active work and discards the unfinished batch. Cancellation is detected at the next renewal request; it is not an immediate remote signal. SIGTERM/SIGINT also abort active work. Cooperative cleanup receives up to five seconds before forced process-group termination; external resources need adapter-specific cleanup. An uncertain teardown stops the runner rather than starting more work.
 

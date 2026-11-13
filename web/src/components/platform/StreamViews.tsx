@@ -83,7 +83,7 @@ export function RunView({ running }: { running: boolean }) {
 const pipeline = [
   ['Build', 'passed'],
   ['Unit tests', 'passed'],
-  ['Lotuspond release gate', 'failed'],
+  ['LotusPond Works release gate', 'failed'],
   ['Deploy to production', 'skipped'],
 ] as const;
 

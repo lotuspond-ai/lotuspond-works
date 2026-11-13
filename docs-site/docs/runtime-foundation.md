@@ -1,6 +1,6 @@
 # Runtime identity foundation
 
-Lotuspond has a separately installable Linux runtime identity client, scoped
+LotusPond Works has a separately installable Linux runtime identity client, scoped
 connection metadata and process-session contracts. The opt-in API is for customer
 owners and administrators. The current CLI registers no production connector; its
 durable-execution activity worker runs an operator's configured read and model

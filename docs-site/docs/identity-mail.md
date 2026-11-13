@@ -1,6 +1,6 @@
 # Identity mail
 
-Lotuspond uses email to verify mailbox ownership, recover passwords, and invite organization members. The API queues encrypted messages in PostgreSQL. A separate mail worker submits them to the operator's SMTP server. An accepted API request is not proof of delivery, and SMTP acceptance does not prove inbox placement.
+LotusPond Works uses email to verify mailbox ownership, recover passwords, and invite organization members. The API queues encrypted messages in PostgreSQL. A separate mail worker submits them to the operator's SMTP server. An accepted API request is not proof of delivery, and SMTP acceptance does not prove inbox placement.
 
 ## Configure a connected installation
 

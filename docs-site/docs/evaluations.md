@@ -13,5 +13,5 @@ Use an [evaluation runner](runners.md) to execute a reviewed custom adapter or a
 5. Compare the candidate with a compatible baseline.
 6. Require an independent human decision when policy calls for approval.
 
-Lotuspond must fail closed when required evidence is missing, a critical scenario fails, a comparison is incompatible, or the approver is not independent. A retry is a new attempt with its own identifier and evidence.
+LotusPond Works must fail closed when required evidence is missing, a critical scenario fails, a comparison is incompatible, or the approver is not independent. A retry is a new attempt with its own identifier and evidence.
 

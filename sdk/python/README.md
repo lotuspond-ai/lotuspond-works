@@ -1,4 +1,4 @@
-# Lotuspond Python SDK
+# LotusPond Works Python SDK
 
 Independent local tooling for workflow-package v1 and executable-v2 definitions;
 Python 3.13 or later. Runtime

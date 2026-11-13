@@ -308,6 +308,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "lotuspond-works-name",
+                    "date": "2026-11-12",
+                    "title": "The product is now LotusPond Works",
+                    "description": "The platform is now called LotusPond Works, the LotusPond product for running AI-agent workflows in real business processes. The console, the signed-out page and the documentation use the new name. Accounts, workspaces, keys, the API, commands and stored data are unchanged. Email messages and the authenticator account label still say Lotuspond for now.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "human-task-action-apis",
                     "date": "2026-11-12",
                     "title": "Human task and action APIs",

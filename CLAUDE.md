@@ -1,6 +1,6 @@
-# Lotuspond engineering guide
+# LotusPond Works engineering guide
 
-Lotuspond runs AI-agent workflows inside a company's real processes: each version is proven before release, each consequential action waits for a person's decision, and every outcome is recorded. `docs/GOAL.md` is the single statement of the problem, the core loop (Build, Prove, Run, Control, on a shared foundation) and what is out of scope; build nothing that serves no step of that loop ([ADR-0014](docs/architecture/0014-focus-on-the-core-loop.md)). Follow `AGENTS.md` for ownership, authorization, and database safety. `docs/CAPABILITIES.md` distinguishes implemented from planned capability.
+LotusPond Works runs AI-agent workflows inside a company's real processes: each version is proven before release, each consequential action waits for a person's decision, and every outcome is recorded. `docs/GOAL.md` is the single statement of the problem, the core loop (Build, Prove, Run, Control, on a shared foundation) and what is out of scope; build nothing that serves no step of that loop ([ADR-0014](docs/architecture/0014-focus-on-the-core-loop.md)). Follow `AGENTS.md` for ownership, authorization, and database safety. `docs/CAPABILITIES.md` distinguishes implemented from planned capability. The product's name is LotusPond Works; code, packages, commands, headers, environment variables and databases keep the `lotuspond` identifier, and dated plans, ADRs and validation records keep the name they were written with ([ADR-0015](docs/architecture/0015-name-the-product-lotuspond-works.md)).
 
 ## Structure
 
