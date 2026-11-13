@@ -1,10 +1,22 @@
 # What LotusPond Works is for
 
-Status: the product's direction, set on 2026-11-11 by [ADR-0014](architecture/0014-focus-on-the-core-loop.md); the product's name, LotusPond Works, was set on 2026-11-12 by [ADR-0015](architecture/0015-name-the-product-lotuspond-works.md). Every feature must serve one step of the core loop below, or the foundation beneath it. Anything else is removed or not built. [CAPABILITIES.md](CAPABILITIES.md) records what each step can do today, and [VALIDATION.md](VALIDATION.md) the evidence for it.
+Status: the product's direction, set on 2026-11-11 by [ADR-0014](architecture/0014-focus-on-the-core-loop.md); the product's name, LotusPond Works, was set on 2026-11-12 by [ADR-0015](architecture/0015-name-the-product-lotuspond-works.md); who the product is for, supply chain operations, was set on 2026-11-13 by [ADR-0017](architecture/0017-position-works-for-supply-chain-operations.md). Every feature must serve one step of the core loop below, or the foundation beneath it. Anything else is removed or not built. [CAPABILITIES.md](CAPABILITIES.md) records what each step can do today, and [VALIDATION.md](VALIDATION.md) the evidence for it.
+
+## Who it is for
+
+LotusPond Works is for supply chain operations: the day-to-day work of buying, storing, moving and delivering goods.
+
+It is built to each customer's requirement. Inside the product, a customer's own systems are connected, agents are built, and the processes that customer chooses are automated. The systems are whatever the customer's operations already run on. These documents name them by kind and never by vendor: for example an ERP (the system that holds a company's orders, stock and accounts), a warehouse system, or a carrier portal (a transport company's site for booking and tracking shipments).
+
+It is not for a single process or a single function, such as invoices or accounts payable (the team that pays suppliers). One customer may automate many processes, and two customers may automate different ones.
+
+This says who the core loop below is for. It does not change the loop, and it adds no capability: what is built is still what [CAPABILITIES.md](CAPABILITIES.md) records. [ADR-0017](architecture/0017-position-works-for-supply-chain-operations.md) keeps the owner's own words, and lists the points where they differ from earlier decisions and the owner has still to choose.
+
+LotusPond, the company, has two products. LotusPond Works is the one in this repository. LotusPond Health is the other and is not built here: its direction is one API and MCP server for health records, so that a company or an AI agent does not have to connect to each records system itself. (MCP, the Model Context Protocol, is a standard way for an AI agent to reach outside data and tools.)
 
 ## The problem
 
-Companies can build an AI agent in an afternoon. They cannot yet trust one inside a real business process, such as matching invoices, approving refunds or updating customer records, for four reasons:
+Companies can build an AI agent in an afternoon. They cannot yet trust one inside a real supply chain process, such as matching a supplier's invoice, changing an order or updating a stock record, for four reasons:
 
 1. **It does not run reliably.** An agent stops halfway, retries blindly, and leaves half-done work in the systems it touched.
 2. **Nobody can prove a change is safe.** A new prompt, model or tool silently breaks a process that worked yesterday.
@@ -42,6 +54,12 @@ Everything in the product belongs to one of four steps, in this order, or to the
 | Run        | Durable execution engine: deployments, executions, waits, signals, pause, resume, cancel, reconciliation and restore holds; runtime enrollment and activities; connection and secret-reference APIs | Control Room pages for deployments, executions and workers; providers proven against live systems (the runtime ships `https-json` and `anthropic-messages`, tested only against local stand-ins); engine throughput beyond a few admissions a second (finding 11) |
 | Control    | Release approvals by a different administrator                                                                                                                                                      | Human tasks and exact-action approvals (E05, plan in PR #16); cases and verified outcomes (E06)                                                                                                                                                                   |
 | Foundation | All of the foundation above                                                                                                                                                                         | A first hosted installation; working CI (GitHub Actions refuses jobs over billing)                                                                                                                                                                                |
+
+## The reference workflow
+
+A reference workflow is one worked example, built end to end, that shows the core loop on a real kind of process. The first is invoice exception triage. A supplier's invoice is compared with the purchase order (what the company ordered) and the goods receipt (what arrived). When they do not match, an agent investigates and proposes what to do, and a person approves that exact action before it is sent. As of 2026-11-13 it is specified and partly built in draft PR #28, against a synthetic stand-in system and not a customer's.
+
+It is an example, not the product. LotusPond Works is not an invoice tool or an accounts-payable tool. The example was chosen because it tests every promise this document makes, and its specification says the first customer's own process replaces it or joins it.
 
 ## Not part of the product
 
