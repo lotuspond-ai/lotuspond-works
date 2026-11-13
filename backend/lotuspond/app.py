@@ -308,17 +308,17 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
-                    "id": "human-task-action-apis",
-                    "date": "2026-11-12",
-                    "title": "Human task and action APIs",
-                    "description": "The opt-in fleet API adds human task routes (list, read, proposal, claim, release, decision and submission), action routes for a production execution (list, read and an owner's or admin's resolution) and runtime action routes (poll, records, claim, renew, receipts, stops and values). Claims, decisions, submissions and resolutions need a person's session; API keys are refused. Proposal values are served only by the proposal route, never cached, and their reads are audited without the values. A wait is listed only once it is retained, and a signal to one not yet retained is refused with 409 conflict. Production installations do not compose the action services yet, so these routes answer 503 there.",
-                },
-                {
-                    "version": "0.3.0",
                     "id": "lotuspond-works-name",
                     "date": "2026-11-12",
                     "title": "The product is now LotusPond Works",
                     "description": "The platform is now called LotusPond Works, the LotusPond product for running AI-agent workflows in real business processes. The console, the signed-out page and the documentation use the new name. Accounts, workspaces, keys, the API, commands and stored data are unchanged. Email messages and the authenticator account label still say Lotuspond for now.",
+                },
+                {
+                    "version": "0.4.0",
+                    "id": "human-task-action-apis",
+                    "date": "2026-11-12",
+                    "title": "Human task and action APIs",
+                    "description": "The opt-in fleet API adds human task routes (list, read, proposal, claim, release, decision and submission), action routes for a production execution (list, read and an owner's or admin's resolution) and runtime action routes (poll, records, claim, renew, receipts, stops and values). Claims, decisions, submissions and resolutions need a person's session; API keys are refused. Proposal values are served only by the proposal route, never cached, and their reads are audited without the values. A wait is listed only once it is retained, and a signal to one not yet retained is refused with 409 conflict. Production installations do not compose the action services yet, so these routes answer 503 there.",
                 },
                 {
                     "version": "0.3.0",
