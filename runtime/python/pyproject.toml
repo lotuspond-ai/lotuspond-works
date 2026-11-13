@@ -1,7 +1,7 @@
 [project]
 name = "lotuspond-runtime"
 version = "0.3.0"
-description = "Strict fleet identity and connection contracts for the Lotuspond Linux runtime"
+description = "Strict fleet identity and connection contracts for the LotusPond Works Linux runtime"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["lotuspond-sdk==0.3.0", "pydantic>=2.12,<3", "rfc8785==0.1.4"]

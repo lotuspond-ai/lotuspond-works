@@ -31,7 +31,7 @@ MAX_MAIL_PLAINTEXT_BYTES = 64 * 1024
 MAX_ATTEMPTS = 5
 CLOSING_SECONDS = 2
 SECURITY_NOTICE_KIND = "security_notice"
-SECURITY_NOTICE_SUBJECT = "Your Lotuspond sign-in settings changed"
+SECURITY_NOTICE_SUBJECT = "Your LotusPond Works sign-in settings changed"
 SECURITY_NOTICE_CHANGES = {
     "mfa_enabled": "An authenticator was added to your account.",
     "mfa_disabled": "The authenticator on your account was removed.",
@@ -179,8 +179,8 @@ def security_notice_body(change: str, occurred_at) -> str:
         f"{SECURITY_NOTICE_CHANGES[change]}\n\n"
         f"Recorded at {utc(occurred_at).strftime('%Y-%m-%d %H:%M:%S')} UTC. "
         "Your other sessions were signed out.\n\n"
-        "If you did not make this change, reset your password and tell your Lotuspond operator. "
-        "This notification contains no links and no codes; Lotuspond will never ask you to send "
+        "If you did not make this change, reset your password and tell your LotusPond Works operator. "
+        "This notification contains no links and no codes; LotusPond Works will never ask you to send "
         "a code or password in a reply."
     )
 

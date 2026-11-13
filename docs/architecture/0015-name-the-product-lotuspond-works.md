@@ -40,6 +40,8 @@ Unchanged, on purpose:
 
 Not yet renamed: text the server and command-line clients produce, such as mail subjects and bodies, the authenticator account label, error messages, the OpenAPI title and the CI workflow names. The console and the documentation quote the authenticator label ("Lotuspond") exactly until it changes. Changing that label affects new enrollments only; existing authenticators keep their label and their codes still verify.
 
+Renamed on 2026-11-14: mail subjects and bodies, the authenticator account label (now "LotusPond Works"), error messages, the OpenAPI title, command-line text and the CI workflow names now say LotusPond Works. Header names (`X-Lotuspond-*`), the `"product"` field and earlier changelog entries keep the old spelling on purpose.
+
 ## Consequences
 
 New public copy, pages and documentation use "LotusPond Works" for the product and "LotusPond" for the company. Code keeps the `lotuspond` identifier.

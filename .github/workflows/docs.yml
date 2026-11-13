@@ -1,4 +1,4 @@
-name: Lotuspond documentation
+name: LotusPond Works documentation
 on:
   workflow_dispatch:
   push:

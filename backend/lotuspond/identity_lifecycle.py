@@ -166,7 +166,7 @@ def request_verification(request: Request, db: Session = DB):
         settings,
         kind="email_verification",
         recipient=user.email,
-        subject="Verify your Lotuspond mailbox",
+        subject="Verify your LotusPond Works mailbox",
         body=f"Verify your mailbox: {settings.origin}/#verify-email?token={raw}",
         actor_id=user.id,
         workspace_id=personal.id if personal else None,
@@ -218,7 +218,7 @@ def request_password_reset(body: s.PasswordResetRequest, request: Request, db: S
         encrypt_payload(
             settings,
             new_id(),
-            {"to": email, "subject": "Reset your Lotuspond password", "body": f"Reset: {link}"},
+            {"to": email, "subject": "Reset your LotusPond Works password", "body": f"Reset: {link}"},
         )
     # The user's fair gate first, exclusive, before any row lock (`authority_gate`),
     # found by a plain read. Only that user is locked, and checked again under the lock;
@@ -248,7 +248,7 @@ def request_password_reset(body: s.PasswordResetRequest, request: Request, db: S
             settings,
             kind="password_reset",
             recipient=user.email,
-            subject="Reset your Lotuspond password",
+            subject="Reset your LotusPond Works password",
             body=f"Reset your password: {link}",
             actor_id=user.id,
             workspace_id=personal.id if personal else None,
@@ -260,7 +260,7 @@ def request_password_reset(body: s.PasswordResetRequest, request: Request, db: S
         encrypt_payload(
             settings,
             new_id(),
-            {"to": email, "subject": "Reset your Lotuspond password", "body": f"Reset: {link}"},
+            {"to": email, "subject": "Reset your LotusPond Works password", "body": f"Reset: {link}"},
         )
     return {"status": "accepted"}
 
@@ -401,7 +401,7 @@ def create_invitation(
         settings,
         kind="invitation",
         recipient=email,
-        subject=f"Invitation to {workspace.name} on Lotuspond",
+        subject=f"Invitation to {workspace.name} on LotusPond Works",
         body=f"Accept your invitation: {settings.origin}/#accept-invitation?token={raw}",
         actor_id=p.user_id,
         workspace_id=workspace.id,

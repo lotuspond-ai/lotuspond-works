@@ -228,7 +228,7 @@ def _serve_activities(config, client, store, setup, stop, actions=None) -> int:
 
 def _execute(argv, clients) -> int:
     try:
-        parser = _Parser(prog="lotuspond-runtime", description="Private Lotuspond Linux runtime")
+        parser = _Parser(prog="lotuspond-runtime", description="Private LotusPond Works Linux runtime")
         commands = parser.add_subparsers(dest="command", required=True)
         enroll = commands.add_parser("enroll")
         enroll.add_argument("--config", required=True)

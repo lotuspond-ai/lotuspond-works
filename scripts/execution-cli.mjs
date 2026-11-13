@@ -19,7 +19,7 @@ export const COMMANDS = {
 
 export function usage() {
   return [
-    'Lotuspond execution commands',
+    'LotusPond Works execution commands',
     '',
     'LOTUSPOND_API_URL may be an origin (http://127.0.0.1:8000) or the API base ending in /api/v1.',
     'Remote URLs must use HTTPS. This image has no Docker socket, Python runtime, or baked credentials.',
