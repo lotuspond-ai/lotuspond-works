@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 360" width="480" height="360">
+<rect width="480" height="360" fill="#18211B"/>
+<circle cx="262" cy="168" r="126" fill="#55694A"/>
+<g transform="translate(150 268) rotate(-4) scale(1.5 1.5)"><rect x="-130" y="-21" width="134" height="44" rx="8" fill="#55694A"/><path d="M0 -15C20 -17 34 -13 46 -11L98 -7C109 -6 110 5 100 7L60 13C40 21 18 21 0 17Z" fill="#F7F5EF"/><path d="M12 -14C8 -31 20 -42 31 -38C38 -35 37 -25 30 -12Z" fill="#F7F5EF"/></g>
+<g transform="translate(262 208) rotate(-4) scale(1.0 1.0)"><rect x="-56.0" y="-41.0" width="112" height="82" rx="7" fill="#B9C7A9"/><rect x="-11.200000000000001" y="-41.0" width="22.400000000000002" height="82" fill="#F7F5EF"/><path d="M-47.0 30.0h22.400000000000002" stroke="#18211B" stroke-opacity=".4" stroke-width="3" stroke-linecap="round"/></g>
+<path d="M206 212L318 204" fill="none" stroke="#F7F5EF" stroke-opacity="0.9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<g transform="translate(262 166) rotate(0) scale(1.0 1.0)"><path d="M0 0c-20 -24 -38 -2 0 0c20 -24 38 -2 0 0M0 0l-12 18M0 0l12 18" fill="none" stroke="#F7F5EF" stroke-width="3.00" stroke-linecap="round" stroke-linejoin="round"/></g>
+<path d="M262 164V108" fill="none" stroke="#F7F5EF" stroke-opacity="1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="262" cy="85.0" r="48.0" fill="#F7F5EF"/>
+<path d="M262 110v23.0" fill="none" stroke="#18211B" stroke-width="3"/>
+<g transform="translate(262 110) scale(0.5)" fill="#E8412C" stroke="#F7F5EF" stroke-width="6.00" stroke-linejoin="round"><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(-70) scale(0.76)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(70) scale(0.76)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(-36) scale(0.92)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(36) scale(0.92)"/><path d="M0 0C-32 -28 -32 -76 0 -114c32 38 32 86 0 114Z" transform="rotate(0) scale(1)"/></g>
+</svg>

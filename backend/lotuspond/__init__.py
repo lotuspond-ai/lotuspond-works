@@ -1,1 +1,1 @@
-"""Lotuspond's primary Python application."""
+"""The primary Python application of LotusPond Works."""
