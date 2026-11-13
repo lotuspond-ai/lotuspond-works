@@ -101,7 +101,7 @@ export async function run({ environment = process.env, argv = process.argv } = {
   };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);
-  console.log('Lotuspond runner started. Waiting for queued evaluations.');
+  console.log('LotusPond Works runner started. Waiting for queued evaluations.');
   try {
     while (!stopping) {
       let renewal;

@@ -17,7 +17,7 @@ def run(settings: Settings, factory, *, once: bool, poll_seconds: float):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deliver encrypted Lotuspond mail outbox entries")
+    parser = argparse.ArgumentParser(description="Deliver encrypted LotusPond Works mail outbox entries")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--poll-seconds", type=float, default=2)
     args = parser.parse_args()

@@ -5,7 +5,7 @@ LotusPond Works supports an authenticator app as a second factor for browser sig
 ## Enable an authenticator
 
 1. Open **Account security** and start authenticator setup. Enter your current password. Starting setup signs out other sessions and rotates this browser's session.
-2. Add the displayed setup key to your authenticator app as a time-based account named Lotuspond. Keep the setup key private. Setup expires if you do not finish it promptly.
+2. Add the displayed setup key to your authenticator app as a time-based account named LotusPond Works. Keep the setup key private. Setup expires if you do not finish it promptly.
 3. Enter a code from the app to confirm possession. Setup is not enabled until confirmation succeeds.
 4. Save the recovery codes in your password manager or another secure place separate from your authenticator. They are displayed once. Confirm that you have saved them before leaving the screen.
 

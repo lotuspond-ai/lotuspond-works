@@ -1,1 +1,1 @@
-"""Lotuspond runtime distribution. Importing this package is inert."""
+"""LotusPond Works runtime distribution. Importing this package is inert."""

@@ -186,7 +186,7 @@ def authenticate(db: Session, request: Request, scope: str = "read") -> Principa
     authorization = request.headers.get("authorization")
     if authorization:
         if not authorization.startswith("Bearer lp_"):
-            fail(401, "unauthenticated", "A valid Lotuspond API key is required.")
+            fail(401, "unauthenticated", "A valid LotusPond Works API key is required.")
         key = db.scalar(
             select(ApiKey).where(
                 ApiKey.token_hash == digest(authorization[7:]),

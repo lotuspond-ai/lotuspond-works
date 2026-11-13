@@ -6,17 +6,17 @@ import { directFetch } from './direct-transport.mjs';
 const maxRequestBytes = 2 * 1024 * 1024;
 const maxResponseBytes = 8 * 1024 * 1024;
 const messages = {
-  invalid_configuration: 'Configure a scoped Lotuspond key and a permitted API URL.',
-  invalid_path: 'The Lotuspond request path is not permitted.',
-  request_too_large: 'The Lotuspond request exceeds the 2 MiB limit.',
-  response_too_large: 'The Lotuspond response exceeds the 8 MiB limit.',
-  invalid_response: 'The Lotuspond API returned an invalid JSON response.',
-  request_failed: 'The Lotuspond request failed.',
-  unauthorized: 'The Lotuspond API key is missing, expired or revoked.',
-  forbidden: 'The Lotuspond API denied this operation.',
-  conflict: 'The Lotuspond operation conflicts with its current state.',
-  aborted: 'The Lotuspond request was cancelled.',
-  timeout: 'The Lotuspond request exceeded its deadline.',
+  invalid_configuration: 'Configure a scoped LotusPond Works key and a permitted API URL.',
+  invalid_path: 'The LotusPond Works request path is not permitted.',
+  request_too_large: 'The LotusPond Works request exceeds the 2 MiB limit.',
+  response_too_large: 'The LotusPond Works response exceeds the 8 MiB limit.',
+  invalid_response: 'The LotusPond Works API returned an invalid JSON response.',
+  request_failed: 'The LotusPond Works request failed.',
+  unauthorized: 'The LotusPond Works API key is missing, expired or revoked.',
+  forbidden: 'The LotusPond Works API denied this operation.',
+  conflict: 'The LotusPond Works operation conflicts with its current state.',
+  aborted: 'The LotusPond Works request was cancelled.',
+  timeout: 'The LotusPond Works request exceeded its deadline.',
 };
 
 export class ClientError extends Error {

@@ -254,7 +254,7 @@ export function Authenticator({
             {setup && action === 'confirm' ? (
               <>
                 <p>
-                  In your authenticator app, add a time-based account named Lotuspond using this
+                  In your authenticator app, add a time-based account named LotusPond Works using this
                   setup key. Use six digits, a 30-second period, and SHA-1 if your app asks for
                   these settings.
                 </p>
