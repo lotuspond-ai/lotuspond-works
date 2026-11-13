@@ -38,6 +38,7 @@ from lotuspond.database import sessions_for
 from lotuspond.fleet.authority import FleetDependencies, RecoverySnapshot
 from lotuspond.fleet.catalog import InstalledCatalog
 from lotuspond.fleet.commands import CommandDependencies, CommandService
+from lotuspond.schema_version import SCHEMA_VERSION
 
 
 def wait_for(probe, seconds=12):
@@ -231,7 +232,7 @@ def main():
         with engine.connect() as db:
             after = legacy.rows(db)
             assert all(after[key] == value for key, value in before.items())
-            assert db.scalar(select(models.SchemaVersion.version)) == 15
+            assert db.scalar(select(models.SchemaVersion.version)) == SCHEMA_VERSION
         cases["v12_upgrade_preserves_environment_evaluation_registry_mfa"] = "passed"
         recovery, records, dispatch, trust = (
             Recovery(),

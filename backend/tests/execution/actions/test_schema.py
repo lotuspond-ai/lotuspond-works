@@ -1,5 +1,7 @@
 """E05 Task 2: the v16 action, task and outcome records keep full scope and their bounds."""
 
+from copy import deepcopy
+
 import pytest
 from sqlalchemy.exc import IntegrityError
 
@@ -20,7 +22,9 @@ from tests.fleet.test_schema import load
 @pytest.fixture
 def engine(execution_database):
     engine = execution_database()
-    Base.metadata.create_all(engine)
+    # A copy: PostgreSQL DDL marks use_alter foreign keys on the shared metadata,
+    # and SQLite then omits them from later in-process schemas.
+    deepcopy(Base.metadata).create_all(engine)
     return engine
 
 
