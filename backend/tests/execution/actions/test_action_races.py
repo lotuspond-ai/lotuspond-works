@@ -86,3 +86,100 @@ def test_action_paths_keep_the_cursor_a_leaf(actions):
     without_cursor(h.engine, lambda: report(h, receipt_for(h, execution_id, lease)))
     with Session(h.engine) as db:
         assert db.scalar(select(ExecutionActionCommand)).status == "stopped"
+
+
+# Task 10's lock orders: the restore hold, the owner's release and the cancellation
+# each lock the execution before its attempts, intents, tasks and commands.
+
+
+def _decide(h, execution_id, key):
+    from lotuspond.execution.action_contracts import DecisionRequest
+
+    from .dispatch_fixtures import intent_row, task_id
+
+    task = h.call("get", h.actor, task_id(h, execution_id))
+    reviewer = h.reviewer()
+    h.call("claim", reviewer, task.id)
+    sha = intent_row(h, execution_id).intent_sha256
+
+    def decide():
+        return h.call(
+            "decide",
+            reviewer,
+            task.id,
+            DecisionRequest(decision_id="d-" + key, intent_sha256=sha, decision="allow"),
+        )
+
+    return decide
+
+
+def test_the_restore_hold_races_a_task_decision(actions):
+    """The sweeper holds a restored execution while a reviewer decides its task:
+    never a deadlock, and nothing is dispatched under the new epoch either way."""
+    from .test_action_recovery import commands, restored
+
+    h = actions
+    execution_id = h.reviewed("hold-decide", decide=False)
+    decide = _decide(h, execution_id, "hold-decide")
+    restored(h)
+    no_deadlock(race(h.sweep, decide))
+    h.run2()
+    assert h.poll() is None and commands(h, execution_id) == []
+
+
+def test_the_release_races_a_cancellation(actions):
+    """An owner releases a held execution while another owner cancels it."""
+    from .readback_fixtures import Target, execution
+    from .test_action_recovery import accepted_before_verification, release, restored
+
+    h = actions
+    execution_id = accepted_before_verification(h, "release-cancel", Target())
+    restored(h)
+    h.sweep()
+    h.run2()
+    no_deadlock(race(lambda: release(h, execution_id), lambda: h.control(execution_id, "cancel")))
+    h.run2()
+    assert execution(h, execution_id).recovery_epoch in (None, 2)
+
+
+def test_the_release_races_a_runtime_poll(actions):
+    """The release reloads the execution under lock while a runtime polls for
+    commands: never a deadlock, and no old-epoch command is offered."""
+    from .readback_fixtures import Target
+    from .test_action_recovery import accepted_before_verification, release, restored
+
+    h = actions
+    execution_id = accepted_before_verification(h, "release-poll", Target())
+    restored(h)
+    h.sweep()
+    h.run2()
+    results = race(lambda: release(h, execution_id), h.poll)
+    no_deadlock(results)
+    assert results[1] is None or isinstance(results[1], Exception)
+
+
+def test_cancel_containment_races_a_readback_report(actions):
+    """A restored intent's read-back reports while the cancellation's containment
+    derives over the same execution: never a deadlock, and it ends cancelled."""
+    from .readback_fixtures import Target, execution, pending_readback, read
+    from .test_action_recovery import (
+        accepted_before_verification,
+        present_for,
+        release,
+        restored,
+    )
+
+    h = actions
+    target = Target()
+    execution_id = accepted_before_verification(h, "contain-report", target)
+    restored(h)
+    h.sweep()
+    h.run2()
+    release(h, execution_id)
+    h.control(execution_id, "cancel")
+    h.run2()
+    attempt = pending_readback(h, execution_id)
+    no_deadlock(race(lambda: read(h, attempt.id, present_for(target, h, attempt.id)), h.run2))
+    for _ in range(3):
+        h.run2()
+    assert execution(h, execution_id).state == "cancelled"

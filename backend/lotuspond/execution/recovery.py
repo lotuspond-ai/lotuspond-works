@@ -27,6 +27,7 @@ from ..models import (
     ExecutionActivityDelivery,
     ExecutionAttempt,
     ExecutionLease,
+    ExecutionStepInstance,
     ExecutionUsageReservation,
 )
 from .activity_records import scope_of
@@ -127,7 +128,8 @@ def hold_restored(db, execution, epoch: int, event) -> bool:
     its state and admission slot and derives no work while held. `recovery_epoch` is
     cleared until an owner releases it. Lock order: the execution, then its attempts,
     their reservations, deliveries and leases, each by ID; no counter changes.
-    `event(code, attempt_id)` appends an event (detail `restored`). True when held.
+    `event(code, attempt_id, path=None)` appends an event (detail `restored`). True
+    when held.
     """
     if execution.state in TERMINAL or execution.recovery_epoch is None:
         return False
@@ -188,7 +190,8 @@ def hold_old_epoch_intents(db, execution, *, epoch: int, event) -> int:
     The caller holds the execution row and is holding it (`hold_restored`): this runs
     in that transaction, after its attempts. Every intent created under an older
     epoch whose effect is not settled and whose authorization is still open is held:
-    one `intent_held` event each, by ID (`execution_action_hold_idx`). Nothing is
+    one `intent_held` event each, by ID (`execution_action_hold_idx`), naming the
+    intent by its intent step's occurrence path (the event has no intent column). Nothing is
     scheduled: no intent of a held execution is dispatched, read back or decided
     into a dispatch until its owner releases the execution, and then each is read
     back under the new epoch (`InterpreterV2`), never re-delivered. Returns the count.
@@ -206,6 +209,14 @@ def hold_old_epoch_intents(db, execution, *, epoch: int, event) -> int:
             .with_for_update()
         )
     )
-    for _ in intents:
-        event("intent_held", None)
+    paths = {
+        row.id: row.occurrence_path
+        for row in db.scalars(
+            scoped(ExecutionStepInstance, scope_of(execution)).where(
+                ExecutionStepInstance.id.in_([intent.step_instance_id for intent in intents])
+            )
+        )
+    }
+    for intent in intents:
+        event("intent_held", None, path=paths[intent.step_instance_id])
     return len(intents)
