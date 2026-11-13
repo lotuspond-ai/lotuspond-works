@@ -180,6 +180,7 @@ def complete_report(smoke_module):
         ],
         "private_sentinels_found": [],
         "max_provider_calls_per_attempt": 1,
+        "max_target_writes_per_intent": 1,
         "cleanup_confirmed": True,
     }
     return {
@@ -198,6 +199,10 @@ def test_required_acceptance_cannot_skip(tmp_path):
     smoke_module = smoke()
     report = complete_report(smoke_module)
     assert smoke_module.require_report(report) is report  # positive control
+    twice = copy.deepcopy(report)  # E05: a second write for one intent disqualifies it
+    twice["journeys"][1]["max_target_writes_per_intent"] = 2
+    with pytest.raises(smoke_module.EvidenceError):
+        smoke_module.require_report(twice)
     for scenario in smoke_module.REQUIRED_SCENARIOS:
         missing = copy.deepcopy(report)
         missing["journeys"][0]["scenarios"] = [

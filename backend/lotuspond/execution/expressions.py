@@ -132,7 +132,18 @@ def _export(value, export):
         if type(value) is not list or len(value) > export.max_items:
             raise ExpressionError("type_mismatch")
         return [_export(item, export.items) for item in value]
-    # Handles (effect nodes) are refused at E04 deployment admission.
+    if export.kind == "handle":
+        # E05 (interpreter v2): an opaque handle naming a record; mappings never read
+        # inside it (the compiler refuses that), so only its exact shape is checked.
+        if (
+            type(value) is not dict
+            or value.keys() != {"handle_kind", "id"}
+            or value["handle_kind"] != export.handle_kind
+            or type(value["id"]) is not str
+        ):
+            raise ExpressionError("type_mismatch")
+        return dict(value)
+    # Handles appear only in interpreter-v2 plans.
     raise ExpressionError("type_mismatch")
 
 

@@ -1263,6 +1263,83 @@ def execution_artifact(prefix):
     )
 
 
+# Closed execution reasons and control event codes. The v15 lists are frozen; v16
+# (E05) adds supersets, which `lotuspond.execution.action_contracts` also defines.
+EXECUTION_REASONS_V15 = (
+    "capacity",
+    "budget",
+    "entitlement_unavailable",
+    "authority_revoked",
+    "deadline_exceeded",
+    "signal",
+    "control",
+    "provider_unavailable",
+    "uncertain",
+    "completed",
+    "invalid_result",
+)
+EXECUTION_REASONS = (
+    *EXECUTION_REASONS_V15,
+    "review",
+    "action_uncertain",
+    "containment",
+    "approval_denied",
+    "review_expired",
+    "approval_expired",
+    "approval_revoked",
+    "binding_refused",
+    "not_applied",
+    "outcome_not_verified",
+    "outcome_unknown",
+    "recovery_epoch_changed",
+)
+EXECUTION_CONTROL_CODES_V15 = (
+    "admitted",
+    "started",
+    "attempt_reserved",
+    "attempt_dispatched",
+    "attempt_claimed",
+    "attempt_succeeded",
+    "attempt_failed",
+    "attempt_uncertain",
+    "waiting",
+    "signal_received",
+    "signal_conflict",
+    "paused",
+    "resumed",
+    "cancelled",
+    "succeeded",
+    "failed",
+    "reconciliation_required",
+    "capacity_refused",
+    "budget_refused",
+    "authority_revoked",
+    "deadline_exceeded",
+    "reconciled",
+)
+EXECUTION_CONTROL_CODES = (
+    *EXECUTION_CONTROL_CODES_V15,
+    "task_opened",
+    "task_claimed",
+    "task_released",
+    "task_escalated",
+    "task_expired",
+    "task_decided",
+    "task_submitted",
+    "intent_held",
+    "intent_superseded",
+    "action_resolved",
+)
+
+
+def sql_values(values) -> str:
+    return ",".join(f"'{value}'" for value in values)
+
+
+EXECUTION_REASONS_SQL = sql_values(EXECUTION_REASONS)
+EXECUTION_CONTROL_CODES_SQL = sql_values(EXECUTION_CONTROL_CODES)
+
+
 class ExecutablePublication(FleetScoped, Base):
     """Admitted v2 package or immutable admitted catalog record; no v1 conversion."""
 
@@ -1577,8 +1654,10 @@ class Execution(FleetScoped, Base):
             "state IN ('pending','running','waiting','paused','cancelled','succeeded','failed','reconciliation_required')"
         ),
         CheckConstraint("requested_state IN ('running','paused','cancelled')"),
+        # Named as PostgreSQL named it in v15, so v16 can replace it with a superset.
         CheckConstraint(
-            "reason IN ('capacity','budget','entitlement_unavailable','authority_revoked','deadline_exceeded','signal','control','provider_unavailable','uncertain','completed','invalid_result')"
+            "reason IN (" + EXECUTION_REASONS_SQL + ")",
+            name="executions_reason_check",
         ),
         CheckConstraint("deadline_ms > admitted_at_ms"),
         CheckConstraint("next_event_sequence BETWEEN 1 AND 9007199254740991"),
@@ -1800,9 +1879,11 @@ class ExecutionEvent(FleetScoped, Base):
         CheckConstraint("application_state IN ('pending','applied','conflict')"),
         CheckConstraint("gap_slot BETWEEN 1 AND 100"),
         CheckConstraint("(application_state = 'pending') = (gap_slot IS NOT NULL)"),
+        # Named as PostgreSQL named it in v15, so v16 can replace it with a superset.
         CheckConstraint(
             "(family = 'sdk_runtime_event' AND code IN ('admission','step_started','step_result','step_failed','wait_started','signal_received','timer_elapsed','intent_created','decision_recorded','action_dispatched','action_receipt','dispatch_timeout','reconciliation_observed','outcome_recorded','execution_completed','cancellation_requested','execution_failed')) OR "
-            "(family = 'execution_control' AND code IN ('admitted','started','attempt_reserved','attempt_dispatched','attempt_claimed','attempt_succeeded','attempt_failed','attempt_uncertain','waiting','signal_received','signal_conflict','paused','resumed','cancelled','succeeded','failed','reconciliation_required','capacity_refused','budget_refused','authority_revoked','deadline_exceeded','reconciled'))"
+            "(family = 'execution_control' AND code IN (" + EXECUTION_CONTROL_CODES_SQL + "))",
+            name="execution_events_check1",
         ),
         *execution_safe("recovery_epoch", "source_generation", "source_sequence", "occurred_at_ms"),
         *execution_hashes("digest"),
@@ -1999,6 +2080,335 @@ class ExecutionReconciliationObservation(FleetScoped, Base):
     )
 
 
+# Schema v16 (E05): actions, human tasks and outcomes. Rows hold digests, IDs and
+# canonical SDK records; proposal values live only in encrypted execution artifacts.
+SAFE = "BETWEEN 0 AND 9007199254740991"
+
+
+def execution_optional_artifact(prefix):
+    return (
+        execution_artifact(prefix),
+        execution_pair(f"{prefix}_artifact_id", f"{prefix}_artifact_version"),
+        execution_pair(f"{prefix}_artifact_id", f"{prefix}_sha256"),
+    )
+
+
+class ExecutionActionIntent(FleetScoped, Base):
+    __tablename__ = "execution_action_intents"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    step_instance_id: Mapped[str] = mapped_column(String(36))
+    action_id: Mapped[str] = mapped_column(String(36))
+    binding_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    intent_sha256: Mapped[str] = mapped_column(String(64))
+    recovery_epoch: Mapped[int] = mapped_column(BigInteger)
+    connection_id: Mapped[str] = mapped_column(String(36))
+    connection_version: Mapped[int] = mapped_column(Integer)
+    target_artifact_id: Mapped[str] = mapped_column(String(36))
+    target_artifact_version: Mapped[int] = mapped_column(Integer)
+    target_sha256: Mapped[str] = mapped_column(String(64))
+    input_artifact_id: Mapped[str] = mapped_column(String(36))
+    input_artifact_version: Mapped[int] = mapped_column(Integer)
+    input_sha256: Mapped[str] = mapped_column(String(64))
+    approval_mode: Mapped[str] = mapped_column(String(8))
+    independent_approval: Mapped[bool] = mapped_column(Boolean)
+    requester_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    issued_at_ms: Mapped[int] = mapped_column(BigInteger)
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    authorization_state: Mapped[str] = mapped_column(String(20), default="proposed")
+    effect_state: Mapped[str] = mapped_column(String(20), default="not_dispatched")
+    outcome_state: Mapped[str] = mapped_column(String(20), default="unknown")
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_step_instances", "step_instance_id"),
+        fleet_fk(
+            "connection_versions",
+            (*FLEET_SCOPE, "connection_id", "connection_version"),
+            (*FLEET_SCOPE, "connection_id", "version"),
+        ),
+        execution_artifact("target"),
+        execution_artifact("input"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id", "expires_at_ms"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "step_instance_id"),
+        UniqueConstraint(*FLEET_SCOPE, "action_id"),
+        UniqueConstraint(*FLEET_SCOPE, "intent_sha256"),
+        CheckConstraint("length(binding_bytes) BETWEEN 1 AND 65536"),
+        CheckConstraint("approval_mode IN ('none','human')"),
+        CheckConstraint(
+            "authorization_state IN ('proposed','awaiting_review','approved','denied','review_expired','expired','withdrawn','superseded')"
+        ),
+        CheckConstraint(
+            "effect_state IN ('not_dispatched','dispatching','accepted','observed','unknown','absent')"
+        ),
+        CheckConstraint("outcome_state IN ('unknown','verified','not_verified')"),
+        CheckConstraint("expires_at_ms > issued_at_ms"),
+        fleet_positive("connection_version"),
+        *execution_hashes("intent_sha256", "target_sha256", "input_sha256"),
+        *execution_safe("recovery_epoch", "issued_at_ms", "expires_at_ms"),
+        Index(
+            "execution_action_hold_idx",
+            "recovery_epoch",
+            "id",
+            postgresql_where=text(
+                "effect_state IN ('not_dispatched','dispatching','accepted','unknown') AND authorization_state NOT IN ('denied','review_expired','expired','withdrawn','superseded')"
+            ),
+        ),
+    )
+
+
+class ExecutionHumanTask(FleetScoped, Base):
+    __tablename__ = "execution_human_tasks"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    step_instance_id: Mapped[str] = mapped_column(String(36))
+    wait_id: Mapped[str] = mapped_column(String(36))
+    kind: Mapped[str] = mapped_column(String(10))
+    intent_id: Mapped[str | None] = mapped_column(String(36))
+    assignment: Mapped[str] = mapped_column(String(32))
+    escalation_assignment: Mapped[str | None] = mapped_column(String(32))
+    escalate_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    escalated_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    deadline_ms: Mapped[int] = mapped_column(BigInteger)
+    state: Mapped[str] = mapped_column(String(20), default="open")
+    claim_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    claim_expires_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    claim_revision: Mapped[int | None] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_step_instances", "step_instance_id"),
+        execution_parent("execution_waits", "wait_id"),
+        execution_parent("execution_action_intents", "intent_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "wait_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "step_instance_id"),
+        CheckConstraint("kind IN ('review','form')"),
+        CheckConstraint("(kind = 'review') = (intent_id IS NOT NULL)"),
+        CheckConstraint("state IN ('open','decided','submitted','expired','cancelled')"),
+        CheckConstraint(
+            "assignment IN ('workspace_owners','workspace_admins','workspace_editors')"
+        ),
+        CheckConstraint(
+            "escalation_assignment IS NULL OR escalation_assignment IN ('workspace_owners','workspace_admins','workspace_editors')"
+        ),
+        CheckConstraint("(escalation_assignment IS NULL) = (escalate_at_ms IS NULL)"),
+        CheckConstraint("escalated_at_ms IS NULL OR escalate_at_ms IS NOT NULL"),
+        CheckConstraint(
+            "(claim_user_id IS NULL) = (claim_expires_at_ms IS NULL) AND (claim_user_id IS NULL) = (claim_revision IS NULL)"
+        ),
+        CheckConstraint("claim_expires_at_ms IS NULL OR claim_expires_at_ms <= deadline_ms"),
+        CheckConstraint("escalate_at_ms IS NULL OR escalate_at_ms < deadline_ms"),
+        CheckConstraint(f"escalate_at_ms IS NULL OR escalate_at_ms {SAFE}"),
+        CheckConstraint(f"escalated_at_ms IS NULL OR escalated_at_ms {SAFE}"),
+        CheckConstraint(f"claim_expires_at_ms IS NULL OR claim_expires_at_ms {SAFE}"),
+        CheckConstraint("claim_revision IS NULL OR claim_revision BETWEEN 1 AND 9007199254740991"),
+        *execution_safe("deadline_ms"),
+        Index("execution_task_due_idx", "deadline_ms", "id", postgresql_where=text("state = 'open'")),
+        Index(
+            "execution_task_escalation_idx",
+            "escalate_at_ms",
+            "id",
+            postgresql_where=text(
+                "state = 'open' AND escalated_at_ms IS NULL AND escalate_at_ms IS NOT NULL"
+            ),
+        ),
+        Index(
+            "execution_task_claim_idx",
+            "claim_expires_at_ms",
+            "id",
+            postgresql_where=text("claim_user_id IS NOT NULL"),
+        ),
+    )
+
+
+class ExecutionActionDecision(FleetScoped, Base):
+    __tablename__ = "execution_action_decisions"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    task_id: Mapped[str] = mapped_column(String(36))
+    intent_id: Mapped[str] = mapped_column(String(36))
+    intent_expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    decision_id: Mapped[str] = mapped_column(String(128))
+    decision_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    decision_sha256: Mapped[str] = mapped_column(String(64))
+    decision: Mapped[str] = mapped_column(String(5))
+    actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    issued_at_ms: Mapped[int] = mapped_column(BigInteger)
+    expires_at_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_human_tasks", "task_id"),
+        # The decision's expiry is bounded by its intent's, enforced against the intent row.
+        fleet_fk(
+            "execution_action_intents",
+            (*FLEET_SCOPE, "execution_id", "intent_id", "intent_expires_at_ms"),
+            (*FLEET_SCOPE, "execution_id", "id", "expires_at_ms"),
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "task_id"),
+        UniqueConstraint(*FLEET_SCOPE, "task_id", "decision_id"),
+        CheckConstraint("length(decision_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(decision_bytes) BETWEEN 1 AND 65536"),
+        CheckConstraint("decision IN ('allow','deny')"),
+        CheckConstraint("expires_at_ms > issued_at_ms AND expires_at_ms <= intent_expires_at_ms"),
+        *execution_hashes("decision_sha256"),
+        *execution_safe("intent_expires_at_ms", "issued_at_ms", "expires_at_ms"),
+    )
+
+
+class ExecutionActionCommand(FleetScoped, Base):
+    """The E05 side of one E03 command admission: its attempt, intent and action lease."""
+
+    __tablename__ = "execution_action_commands"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    intent_id: Mapped[str] = mapped_column(String(36))
+    decision_row_id: Mapped[str | None] = mapped_column(String(36))
+    installation_id: Mapped[str] = mapped_column(String(128))
+    recovery_epoch: Mapped[int] = mapped_column(BigInteger)
+    admission_id: Mapped[str] = mapped_column(String(36))
+    command_id: Mapped[str] = mapped_column(String(128))
+    command_digest: Mapped[str] = mapped_column(String(64))
+    lease_token_digest: Mapped[str | None] = mapped_column(String(64))
+    lease_revision: Mapped[int | None] = mapped_column(BigInteger)
+    claimed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    renewed_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    lease_expires_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(20), default="admitted")
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_attempts", "attempt_id"),
+        execution_parent("execution_action_intents", "intent_id"),
+        execution_parent("execution_action_decisions", "decision_row_id"),
+        fleet_parent("runtime_command_admissions", "admission_id"),
+        # The same admission, by its E03 identity: never another workspace or epoch's.
+        ForeignKeyConstraint(
+            ("installation_id", "recovery_epoch", "workspace_id", "command_id"),
+            [
+                f"runtime_command_admissions.{field}"
+                for field in ("installation_id", "recovery_epoch", "workspace_id", "command_id")
+            ],
+        ),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "attempt_id"),
+        UniqueConstraint(*FLEET_SCOPE, "admission_id"),
+        fleet_status("'admitted','claimed','stopped','uncertain','expired'"),
+        CheckConstraint("length(installation_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(command_id) BETWEEN 1 AND 128"),
+        CheckConstraint(
+            "(lease_token_digest IS NULL) = (claimed_at_ms IS NULL) AND (claimed_at_ms IS NULL) = (renewed_at_ms IS NULL) AND (claimed_at_ms IS NULL) = (lease_expires_at_ms IS NULL) AND (claimed_at_ms IS NULL) = (lease_revision IS NULL)"
+        ),
+        CheckConstraint(
+            "claimed_at_ms IS NULL OR (renewed_at_ms >= claimed_at_ms AND lease_expires_at_ms > renewed_at_ms AND lease_expires_at_ms <= renewed_at_ms + 60000)"
+        ),
+        CheckConstraint("status <> 'claimed' OR claimed_at_ms IS NOT NULL"),
+        CheckConstraint(f"claimed_at_ms IS NULL OR claimed_at_ms {SAFE}"),
+        CheckConstraint(f"renewed_at_ms IS NULL OR renewed_at_ms {SAFE}"),
+        CheckConstraint(f"lease_expires_at_ms IS NULL OR lease_expires_at_ms {SAFE}"),
+        CheckConstraint("lease_revision IS NULL OR lease_revision BETWEEN 1 AND 9007199254740991"),
+        *execution_hashes("command_digest", "lease_token_digest"),
+        *execution_safe("recovery_epoch"),
+        Index(
+            "execution_action_lease_due_idx",
+            "lease_expires_at_ms",
+            "id",
+            postgresql_where=text("status = 'claimed'"),
+        ),
+    )
+
+
+class ExecutionActionReceipt(FleetScoped, Base):
+    __tablename__ = "execution_action_receipts"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str] = mapped_column(String(36))
+    intent_id: Mapped[str] = mapped_column(String(36))
+    receipt_id: Mapped[str] = mapped_column(String(128))
+    receipt_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    receipt_sha256: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20))
+    response_artifact_id: Mapped[str | None] = mapped_column(String(36))
+    response_artifact_version: Mapped[int | None] = mapped_column(Integer)
+    response_sha256: Mapped[str | None] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(12))
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_attempts", "attempt_id"),
+        execution_parent("execution_action_intents", "intent_id"),
+        *execution_optional_artifact("response"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "intent_id", "receipt_id"),
+        fleet_status("'accepted','observed_effect','unknown'"),
+        CheckConstraint("source IN ('live','historical')"),
+        CheckConstraint("length(receipt_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(receipt_bytes) BETWEEN 1 AND 65536"),
+        *execution_hashes("receipt_sha256", "response_sha256"),
+    )
+
+
+class ExecutionActionObservation(FleetScoped, Base):
+    __tablename__ = "execution_action_observations"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    intent_id: Mapped[str] = mapped_column(String(36))
+    attempt_id: Mapped[str | None] = mapped_column(String(36))
+    observation_id: Mapped[str] = mapped_column(String(128))
+    payload_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    payload_sha256: Mapped[str] = mapped_column(String(64))
+    result: Mapped[str] = mapped_column(String(20))
+    qualified: Mapped[bool] = mapped_column(Boolean)
+    rule_id: Mapped[str] = mapped_column(String(128))
+    rule_version: Mapped[str] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(20))
+    actor_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_action_intents", "intent_id"),
+        execution_parent("execution_attempts", "attempt_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id", "id"),
+        UniqueConstraint(*FLEET_SCOPE, "intent_id", "observation_id"),
+        CheckConstraint("result IN ('effect_present','effect_absent','unknown')"),
+        CheckConstraint("NOT qualified OR result = 'effect_absent'"),
+        CheckConstraint("source IN ('readback','restore_readback','historical','resolution')"),
+        CheckConstraint("(source = 'resolution') = (actor_user_id IS NOT NULL)"),
+        CheckConstraint("length(observation_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(rule_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(rule_version) BETWEEN 1 AND 128"),
+        CheckConstraint("length(payload_bytes) BETWEEN 1 AND 65536"),
+        *execution_hashes("payload_sha256"),
+    )
+
+
+class ExecutionActionOutcome(FleetScoped, Base):
+    __tablename__ = "execution_action_outcomes"
+    execution_id: Mapped[str] = mapped_column(String(36))
+    intent_id: Mapped[str] = mapped_column(String(36))
+    # The receipt it verifies, or (a write settled by read-back with no receipt row)
+    # the effect-present observation acting as receipt evidence: exactly one.
+    receipt_row_id: Mapped[str | None] = mapped_column(String(36))
+    observation_row_id: Mapped[str | None] = mapped_column(String(36))
+    outcome_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    outcome_sha256: Mapped[str] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(String(20))
+    rule_id: Mapped[str] = mapped_column(String(128))
+    rule_version: Mapped[str] = mapped_column(String(128))
+    observed_at_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        execution_parent("execution_action_intents", "intent_id"),
+        execution_parent("execution_action_receipts", "receipt_row_id"),
+        execution_parent("execution_action_observations", "observation_row_id"),
+        UniqueConstraint(*FLEET_SCOPE, "intent_id"),
+        CheckConstraint("(receipt_row_id IS NULL) <> (observation_row_id IS NULL)"),
+        CheckConstraint("state IN ('verified','not_verified','unknown')"),
+        CheckConstraint("length(rule_id) BETWEEN 1 AND 128"),
+        CheckConstraint("length(rule_version) BETWEEN 1 AND 128"),
+        CheckConstraint("length(outcome_bytes) BETWEEN 1 AND 65536"),
+        *execution_hashes("outcome_sha256"),
+        *execution_safe("observed_at_ms"),
+    )
+
+
+V16_TABLES = frozenset(
+    {
+        "execution_action_intents",
+        "execution_human_tasks",
+        "execution_action_decisions",
+        "execution_action_commands",
+        "execution_action_receipts",
+        "execution_action_observations",
+        "execution_action_outcomes",
+    }
+)
+
+
 EXECUTION_TABLES = frozenset(
     {
         "executable_publications",
@@ -2027,3 +2437,4 @@ EXECUTION_TABLES = frozenset(
         "execution_reconciliation_observations",
     }
 )
+EXECUTION_TABLES = EXECUTION_TABLES | V16_TABLES

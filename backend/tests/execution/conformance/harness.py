@@ -95,6 +95,11 @@ def build(world, engine=None):
         artifact_key_id="conformance",
         retain_until_ms=worlds.MAX_MS,
     )
+    if world.path("actions.json").exists():
+        # E05: the world's command key and synthetic catalog; composition adds
+        # interpreter v2 and the action services over them.
+        authorities.commands = worlds.FileCommandKey(world)
+        authorities.catalog = worlds.file_catalog(world)
     return compose(
         authorities,
         engine=engine,
@@ -157,8 +162,22 @@ POINTS = (
     ("POST", "/signals", "signal"),
     ("POST", "/runtime/activities/claim", "claim"),
     ("POST", "/runtime/activities/results", "result"),
+    # E05: a decision, the poll that admits an action command, its claim and receipt.
+    ("POST", "/decision", "decision"),
+    ("POST", "/runtime/actions/poll", "dispatch"),
+    ("POST", "/runtime/actions/claim", "action_claim"),
+    ("POST", "/runtime/actions/receipts", "receipt"),
+)
+# E05: orchestrator commits by the action rows they insert; `transition` is any other
+# commit that writes execution events.
+ROW_POINTS = (
+    ("ExecutionActionIntent", "intent"),
+    ("ExecutionActionObservation", "readback"),
+    ("ExecutionActionOutcome", "outcome"),
 )
 _point = contextvars.ContextVar("fault_point", default=None)
+# Tier 3: the service call a provider lookup waits under (`record_service_calls`).
+_call = contextvars.ContextVar("service_call", default=None)
 _lost = contextvars.ContextVar("fault_lost", default=None)
 
 
@@ -173,7 +192,9 @@ def install_faults(world, role):
     """Test-only: one armed commit of one kind fails before it, or is lost after it.
 
     `faults.json` in the world names the point (`admission`, `signal`, `claim`,
-    `result` in the API; `transition` in an orchestrator), `before` or `after`, and how
+    `result`, and E05's `decision`, `dispatch`, `action_claim` and `receipt` in the API;
+    `transition`, and E05's `intent`, `readback` and `outcome` by the rows a commit
+    inserts, in an orchestrator), `before` or `after`, and how
     many commits remain armed. Before: the commit raises, so the transaction rolls
     back, as a database failure would. After: the commit holds, but the API drops its
     answer (503), or the orchestrator process dies at once, as a crash would.
@@ -197,14 +218,17 @@ def install_faults(world, role):
             isinstance(item, ExecutionEvent) for item in session.new
         )
 
-    def armed(when, session):
+    def points(session):
         if role == "api":
-            point = _point.get()
-        elif role == "orchestrator" and writes_events(session):
-            point = "transition"
-        else:
-            point = None
-        if point is None or not path.exists():
+            return {_point.get()} - {None}
+        if role != "orchestrator" or not writes_events(session):
+            return set()
+        written = session.info.get("wrote_rows", set())
+        return {"transition"} | {point for name, point in ROW_POINTS if name in written}
+
+    def armed(when, session):
+        candidates = points(session)
+        if not candidates or not path.exists():
             return False
         with os.fdopen(os.open(guard, os.O_RDWR | os.O_CREAT, 0o600), "r+") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -213,7 +237,7 @@ def install_faults(world, role):
             except (OSError, ValueError):  # disarmed meanwhile
                 return False
             if (
-                spec.get("point") != point
+                spec.get("point") not in candidates
                 or spec.get("when") != when
                 or spec.get("remaining", 0) < 1
             ):
@@ -228,17 +252,22 @@ def install_faults(world, role):
     def flushed(session, context):
         if any(isinstance(item, ExecutionEvent) for item in session.new):
             session.info["wrote_events"] = True
+        session.info.setdefault("wrote_rows", set()).update(
+            type(item).__name__ for item in session.new
+        )
 
     @event.listens_for(Session, "before_commit")
     def before(session):
         if armed("before", session):
             session.info.pop("wrote_events", None)
+            session.info.pop("wrote_rows", None)
             raise OperationalError("injected rollback before commit", None, Exception())
 
     @event.listens_for(Session, "after_commit")
     def after(session):
         fire = armed("after", session)
         session.info.pop("wrote_events", None)
+        session.info.pop("wrote_rows", None)
         if fire:
             if role == "orchestrator":
                 os._exit(9)  # a crash right after the commit
@@ -249,6 +278,7 @@ def install_faults(world, role):
     @event.listens_for(Session, "after_rollback")
     def rolled_back(session):
         session.info.pop("wrote_events", None)
+        session.info.pop("wrote_rows", None)
 
 
 class AccessLog:
@@ -542,7 +572,17 @@ def record_lookup_waits(role, path: Path):
             began = time.monotonic()
             acquired = wait(self, timeout)
             elapsed = round((time.monotonic() - began) * 1000, 2)
-            _append(path, {"role": role, "slot": kind, "ms": elapsed, "acquired": acquired})
+            _append(
+                path,
+                {
+                    "role": role,
+                    "slot": kind,
+                    "call": _call.get(),
+                    "ms": elapsed,
+                    "acquired": acquired,
+                    "at": int(time.time() * 1000),
+                },
+            )
             return acquired
 
         return waiting
@@ -558,19 +598,23 @@ def record_service_calls(role, path: Path):
     `cpu_ms` is the calling thread's CPU in that time; provider lookups run in their
     own threads and are not in it (`PROFILE_DIRECTORY` covers every thread).
     """
+    from lotuspond.execution.action_dispatch import ActionDispatchService
     from lotuspond.execution.admission import AdmissionService
     from lotuspond.execution.dispatch import ActivityService
+    from lotuspond.execution.human_tasks import HumanTaskService
     from lotuspond.execution.inbox import InboxService
     from lotuspond.execution.leases import LeaseService
 
     def timed(name, method):
         def call(*args, **kwargs):
             wall, cpu, failed = time.monotonic(), time.thread_time(), True
+            token = _call.set(name)
             try:
                 result = method(*args, **kwargs)
                 failed = False
                 return result
             finally:
+                _call.reset(token)
                 _append(
                     path,
                     {
@@ -599,9 +643,17 @@ def record_service_calls(role, path: Path):
             ),
         ),
         (LeaseService, ("renew_activity", "decline_activity")),
+        # E05: decisions, claims, renewals, dispatches (polls) and receipts.
+        (HumanTaskService, ("claim", "decide")),
+        (
+            ActionDispatchService,
+            ("poll", "records", "claim", "renew", "record_receipt", "record_stop"),
+        ),
     ):
         for name in names:
-            setattr(owner, name, timed(name, getattr(owner, name)))
+            # Each E05 call is labelled by its service, so the two claims stay apart.
+            label = {HumanTaskService: "task_", ActionDispatchService: "action_"}.get(owner, "")
+            setattr(owner, name, timed(label + name, getattr(owner, name)))
 
 
 def profile_process(role, directory: Path):
@@ -718,6 +770,8 @@ def serve_worker(world, role, worker_id, interpreters, timeout_ms, user=None) ->
     if os.environ.get(PROFILE_DIRECTORY):
         profile_process(role, Path(os.environ[PROFILE_DIRECTORY]))
     graph = build(world)
+    # By default every version this world composes (E05 worlds add v2).
+    interpreters = interpreters or graph.interpreter_ids
     url = scoped_url(world)
     if user is not None:  # ENG-4: a least-privilege worker role on the disposable cluster
         url = make_url(url).set(username=user).render_as_string(hide_password=False)
@@ -764,7 +818,7 @@ def main(argv=None) -> int:
         world,
         args.role,
         args.worker_id,
-        args.interpreter or [INTERPRETER],
+        args.interpreter,
         args.timeout_ms,
         args.database_user,
     )

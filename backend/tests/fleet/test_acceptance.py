@@ -66,7 +66,7 @@ def test_migration_then_installed_journey(tmp_path):
     assert required_postgres_skips == 0
     assert data["cleanup_confirmed"] is True
     for journey in data["journeys"]:
-        assert journey["installed_runtime_version"] == "0.2.0"
+        assert journey["installed_runtime_version"] == "0.3.0"
         assert journey["installed_sdk_version"] == "0.3.0"
         assert journey["restored_state_new_effect_count"] == 0
         assert all(value == "passed" for value in journey["cases"].values())

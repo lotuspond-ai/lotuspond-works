@@ -456,14 +456,39 @@ class CommandService:
         return row, now
 
     def claim(
-        self, db: Session, principal: RuntimePrincipal, command_id: str, command_sha256: str
+        self,
+        db: Session,
+        principal: RuntimePrincipal,
+        command_id: str,
+        command_sha256: str,
+        *,
+        claim_hook=None,
     ) -> AdmissionView:
+        """Claim once. `claim_hook(row, now)` (E05's action lease) runs in this transaction
+        after every check; a command an execution action references is claimed only
+        through it."""
         TypeAdapter(Digest).validate_python(command_sha256, strict=True)
+        if claim_hook is None:
+            # E05: an action command is never claimed through the generic route.
+            # Authentication first (no replay query before it), then a plain read,
+            # before the admission lock and any authority lookup.
+            TypeAdapter(OpaqueId).validate_python(command_id, strict=True)
+            self._current(db, principal)
+            hint = db.scalar(
+                select(RuntimeCommandAdmission).where(
+                    RuntimeCommandAdmission.instance_id == principal.identity.instance_id,
+                    RuntimeCommandAdmission.command_id == command_id,
+                )
+            )
+            if hint is not None and _action_command(db, hint):
+                raise FleetError("conflict")
         row, now = self._status_row(db, principal, command_id)
         if row.command_digest != command_sha256 or row.status != "admitted":
             raise FleetError("conflict")
         row.status, row.claimed_at_ms = "claimed", now
         db.flush()
+        if claim_hook is not None:
+            claim_hook(row, now)
         return view(row)
 
     def record_status(
@@ -485,3 +510,20 @@ class CommandService:
                 row.retain_until_ms = max(now + 86400000, row.command_expires_at_ms + 30000)
             db.flush()
         return view(row)
+
+
+def _action_command(db, row) -> bool:
+    """Whether an E05 action command references this admission."""
+    from ..models import ExecutionActionCommand
+
+    return (
+        db.scalar(
+            select(ExecutionActionCommand.id).where(
+                ExecutionActionCommand.workspace_id == row.workspace_id,
+                ExecutionActionCommand.project_id == row.project_id,
+                ExecutionActionCommand.environment_id == row.environment_id,
+                ExecutionActionCommand.admission_id == row.id,
+            )
+        )
+        is not None
+    )

@@ -81,6 +81,11 @@ def _provider(descriptor, secrets, test_mode):
         from . import activity_fixture
 
         implementation = activity_fixture.PROVIDERS.get(descriptor.provider_id)
+        if implementation is None and descriptor.effect == "read":
+            # The synthetic target's read operation (E05 read-back and verification).
+            from . import action_fixture
+
+            implementation = action_fixture.READ_PROVIDERS.get(descriptor.provider_id)
         if implementation is not None:
             return implementation(descriptor, secrets)
         return None

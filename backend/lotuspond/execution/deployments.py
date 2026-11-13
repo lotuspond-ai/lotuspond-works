@@ -1,5 +1,6 @@
 """Immutable deployment revisions and separate current enablement authority."""
 
+import json
 from collections import defaultdict
 from hashlib import sha256
 from typing import Literal
@@ -32,6 +33,12 @@ from ..models import (
     SecretReference,
 )
 from . import memo
+from .action_policies import (
+    Closure,
+    check_write_bindings,
+    unreviewed_operations,
+    write_operations,
+)
 from .assurance import release_binding, validated_release_binding
 from .authorization import SHARED_OPERATIONS, checked, keep, reauthorize, record, scoped
 from .contracts import (
@@ -44,6 +51,7 @@ from .contracts import (
 from .errors import ExecutionError, execution_service
 from .publication import (
     DEFAULT_DEPENDENCIES,
+    closure_of,
     current_snapshot,
     load_publication,
     mutation_replay,
@@ -52,13 +60,24 @@ from .publication import (
 )
 
 
-def _view(deployment, revision):
+def _view(deployment, revision, unreviewed=()):
     status = revision.status if revision else deployment.status
     return DeploymentView(
         id=deployment.id,
         revision_id=revision.id if revision else deployment.active_revision_id,
         status="enabled" if status == "active" else status,
+        unreviewed_operations=tuple(unreviewed),
     )
+
+
+def stored_unreviewed(db, scope, revision_id) -> tuple[str, ...]:
+    """The unreviewed writes of a stored revision, from its pinned bytes; grants nothing."""
+    from .program import stored_closure
+
+    if revision_id is None:
+        return ()
+    revision = record(db, ExecutionDeploymentRevision, scope, revision_id)
+    return unreviewed_operations(stored_closure(db, scope, revision.publication_id))
 
 
 def gates(db, scope, revision_id, operation="execute", users=()):
@@ -190,6 +209,16 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
         {"documents": [sources[row.id] for row in rows if row.kind != "workflow"]}
     )
     required_operations = _required_operations(workflow_packages, catalog)
+    closure = Closure(
+        packages=tuple(workflow_packages),
+        catalog={
+            row.package_sha256: memo.catalog({"documents": [sources[row.id]]}).documents[0]
+            for row in rows
+            if row.kind != "workflow"
+        },
+    )
+    write_required = write_operations(closure)
+    connections = {}
     packages = [source.model_dump(mode="json") for source in workflow_packages]
     for source in packages:
         environment = source["environment"]
@@ -231,11 +260,15 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
                     version=row.version,
                     artifact_sha256=definition["artifact_sha256"],
                 )
-                read_ops = {op["id"] for op in definition["operations"] if op["effect"] == "read"}
+                # Reads always; a write only when an effect step needs it (checked below).
+                declared = {op["id"]: op["effect"] for op in definition["operations"]}
+                writes = write_required.get(row.package_sha256, set())
                 if (
                     config.connector != pin
                     or pin not in policy.connectors
-                    or not set(config.operations) <= read_ops
+                    or not all(
+                        declared.get(op) == "read" or op in writes for op in config.operations
+                    )
                 ):
                     raise ValueError
                 secrets = set()
@@ -256,6 +289,7 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
                 # Every actual connector-read/tool operation must be permitted by this connection.
                 if not required_operations[row.package_sha256] <= set(config.operations):
                     raise ValueError
+                connections[row.package_sha256] = (config.connector, frozenset(config.operations))
             except Exception:
                 raise ExecutionError("dependency_unavailable") from None
         elif row.kind in {"knowledge", "artifact"}:
@@ -298,6 +332,10 @@ def _configuration(db, scope, configuration, package, links, rows, sources, poli
         normalized.append((link, binding))
     if found_secrets != all_secret_names:
         raise ExecutionError("dependency_unavailable")
+    # E05: each write is bound to a connection pinning its connector and allowing the
+    # write, its read-back and any verification read (dependency_unavailable), and the
+    # read-back accepts the write's target and input (unsupported_operation).
+    check_write_bindings(closure, connections)
     return normalized
 
 
@@ -383,6 +421,7 @@ def create_deployment(
     if deployment and deployment.status == "revoked":
         raise ExecutionError("deployment_unavailable")
     current_snapshot(db, snapshot)
+    unreviewed = unreviewed_operations(closure_of(json.loads(publication.canonical_package), rows, sources))
     digest, replay = mutation_replay(
         db,
         actor,
@@ -400,7 +439,7 @@ def create_deployment(
             require_enabled=False,
             dependencies=dependencies,
         )
-        return _view(current, revision)
+        return _view(current, revision, unreviewed)
     if deployment is None:
         deployment = ExecutionDeployment(**actor.scope.model_dump(), status="disabled")
         db.add(deployment)
@@ -451,7 +490,12 @@ def create_deployment(
             )
         )
     return remember(
-        db, actor, "execution.deployment.create", request_key, digest, _view(deployment, revision)
+        db,
+        actor,
+        "execution.deployment.create",
+        request_key,
+        digest,
+        _view(deployment, revision, unreviewed),
     )
 
 

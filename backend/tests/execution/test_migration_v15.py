@@ -12,7 +12,7 @@ from sqlalchemy import inspect, select, text
 
 from lotuspond import initialize
 from lotuspond.config import Settings
-from lotuspond.models import EXECUTION_TABLES, Base, SchemaVersion, new_id
+from lotuspond.models import EXECUTION_TABLES, V16_TABLES, Base, SchemaVersion, new_id
 from tests.fleet.test_migration import rows, signature
 from tests.fleet.test_schema import load
 
@@ -136,7 +136,7 @@ def test_v14_upgrade_preserves_rows_and_marks_pending_work(execution_database, m
         epochs = connection.execute(text("SELECT DISTINCT recovery_epoch FROM executions"))
         assert list(epochs.scalars()) == [0]
         assert connection.scalar(select(SchemaVersion.installed_at)) == installed_at
-        assert connection.scalar(select(SchemaVersion.version)) == 15
+        assert connection.scalar(select(SchemaVersion.version)) == 16  # the chain continues
 
 
 def test_fresh_upgrade_signature_equal(execution_database, monkeypatch):
@@ -377,4 +377,4 @@ def test_final_v15_ledger_postcondition_rolls_back_all_ddl(
         assert write_hooks(connection) == before_hooks
         assert connection.scalar(select(SchemaVersion.version)) == 14
         assert not set(inspect(connection).get_table_names()) - set(Base.metadata.tables)
-        assert set(inspect(connection).get_table_names()) >= EXECUTION_TABLES
+        assert set(inspect(connection).get_table_names()) >= EXECUTION_TABLES - V16_TABLES

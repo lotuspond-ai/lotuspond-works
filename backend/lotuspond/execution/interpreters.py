@@ -19,12 +19,17 @@ pins it, and new work needs a new interpreter version that pins the new compiler
 from lotuspond_sdk.executable.metadata import COMPILER_REVISION
 from sqlalchemy import select, tuple_
 
+from .action_contracts import INTERPRETER_V2
 from .engine_contracts import INTERPRETER_V1
 from .errors import ExecutionError
 from .orchestrator import TERMINAL
 
 # Interpreter version -> the compiler revision whose plans it interprets.
-COMPILERS = {INTERPRETER_V1: "lotuspond.workflow-compiler.v2.1"}
+COMPILERS = {
+    INTERPRETER_V1: "lotuspond.workflow-compiler.v2.1",
+    # E05: plans with effect steps, review tasks or E05 forms (owner decision 15).
+    INTERPRETER_V2: "lotuspond.workflow-compiler.v2.1",
+}
 REGISTERED = frozenset(
     version for version, compiler in COMPILERS.items() if compiler == COMPILER_REVISION
 )
@@ -56,7 +61,7 @@ def unsupported_pins(db, *, limit: int = 16) -> tuple[str, ...]:
         )
     )
     pinned = tuple_(Execution.interpreter_id, ExecutablePublication.compiler_id).in_(
-        [(version, COMPILERS[version]) for version in sorted(REGISTERED)]
+        [(version, COMPILERS[version]) for version in sorted(REGISTERED) if version in COMPILERS]
     )
     compilers = set(
         db.scalars(

@@ -126,6 +126,12 @@ class FileEntitlement:
             raise RuntimeError("PRIVATE_PRICE_EXPIRED")
         return demand
 
+    def bound_action(self, binding):
+        """E05: an action's dispatch is bounded by the same price authority."""
+        if self.world.state("entitlement")["price_expires_at_ms"] <= _wall_ms():
+            raise RuntimeError("PRIVATE_PRICE_EXPIRED")
+        return True
+
 
 class FileTenant:
     test_only = True
@@ -211,6 +217,89 @@ class Demand:
         from lotuspond.execution.budgets import BudgetDemand
 
         return BudgetDemand(**self.world.state("entitlement")["demand"])
+
+
+class FileCommandKey:
+    """E05: the operator's command signing key and its verification trust (E03).
+
+    Both are files outside the database. `available: false` makes the trust lookup
+    fail, as an unprovisioned or unreachable key provider does."""
+
+    test_only = True
+
+    def __init__(self, world: World):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+        self.world = world
+        raw = bytes.fromhex(world.state("keys")["command"])
+        self.key = Ed25519PrivateKey.from_private_bytes(raw)
+
+    def current(self, installation_id):
+        from lotuspond_runtime.errors import FleetError
+        from lotuspond_runtime.protocol import CommandTrustSnapshot
+        from lotuspond_sdk.trust import TrustSet
+
+        state = self.world.state("actions")
+        if not state["command_key_available"]:
+            raise FleetError("trust_unavailable")
+        trust = TrustSet.model_validate(trust_set(self.world.state("keys")["command"]))
+        # Inside E03's 60 s by a margin: it is checked against a `now` read earlier.
+        return CommandTrustSnapshot(1, trust, _wall_ms() + 50000)
+
+    def sign(self, command, snapshot):
+        from lotuspond_sdk.executable.signing import sign_runtime_command
+
+        return sign_runtime_command(command, self.key)
+
+
+def file_catalog(world: World):
+    """The installed descriptors of the world's synthetic connectors (test only)."""
+    from types import MappingProxyType
+
+    from lotuspond_runtime.protocol import ConnectorPin
+
+    from lotuspond.fleet.catalog import ConnectorDescriptor, InstalledCatalog, OperationDescriptor
+
+    connectors = {}
+    for item in world.state("actions")["connectors"]:
+        pin = ConnectorPin.model_validate(item["pin"])
+        operations = {
+            name: OperationDescriptor(effect, False, False)
+            for name, effect in item["operations"].items()
+        }
+        connectors[pin] = ConnectorDescriptor(pin, operations)
+    catalog = InstalledCatalog()
+    object.__setattr__(catalog, "_connectors", MappingProxyType(connectors))
+    object.__setattr__(catalog, "test_only", True)
+    return catalog
+
+
+def actions_mode(world: World, connector: dict) -> dict:
+    """Give a world E05's action authorities before any process starts.
+
+    A command signing key and its trust, and the synthetic connector installed in the
+    catalog. Composition then wires interpreter v2 and the action services; a world
+    without this keeps E04's exact v1 graph. Returns the connector pin.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    keys = world.state("keys")
+    if "command" not in keys:
+        world.update("keys", command=Ed25519PrivateKey.generate().private_bytes_raw().hex())
+    pin = {
+        "name": connector["name"],
+        "version": connector["version"],
+        "artifact_sha256": connector["definition"]["artifact_sha256"],
+    }
+    operations = {op["id"]: op["effect"] for op in connector["definition"]["operations"]}
+    world.write(
+        "actions",
+        {
+            "command_key_available": True,
+            "connectors": [{"pin": pin, "operations": operations}],
+        },
+    )
+    return pin
 
 
 def _wall_ms():

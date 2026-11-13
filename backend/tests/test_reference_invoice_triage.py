@@ -20,9 +20,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from lotuspond_sdk.executable import compile_package
 
-from lotuspond.execution.errors import ExecutionError
+from lotuspond.execution.action_policies import Closure, admit_closure, classify_plan
 from lotuspond.execution.expressions import ValueEnvironment, evaluate_mapping, typed_schema
-from lotuspond.execution.publication import _unsupported
 
 ROOT = Path(__file__).resolve().parents[2] / "reference" / "invoice-triage"
 
@@ -88,11 +87,26 @@ def test_the_agent_reads_only_and_never_writes():
     assert {effects[tool["operation"]] for tool in agent["read_tools"]} == {"read"}
 
 
-def test_e04_refuses_the_full_package_and_admits_the_prefix_shape():
-    with pytest.raises(ExecutionError) as refused:
-        _unsupported(gen.full)
-    assert refused.value.code == "unsupported_step"
-    _unsupported(gen.prefix)  # no refusal
+def closure_of(package):
+    from lotuspond_sdk.executable import validate_executable_package
+    from lotuspond_sdk.executable.catalog import catalog_document_digest, validate_catalog
+
+    documents = [gen.connector, gen.model, gen.clerks, gen.hold_policy, gen.credit_policy]
+    return Closure(
+        packages=(validate_executable_package(package),),
+        catalog={
+            catalog_document_digest(raw): validate_catalog({"documents": [raw]}).documents[0]
+            for raw in documents
+        },
+    )
+
+
+def test_the_full_package_pins_v2_and_the_prefix_keeps_v1():
+    """E05: the action branches make the full package an interpreter-v2 plan."""
+    full = closure_of(gen.full)
+    assert classify_plan(full).effects
+    assert admit_closure(full) == "lotuspond.execution-interpreter.v2"
+    assert admit_closure(closure_of(gen.prefix)) == "lotuspond.execution-interpreter.v1"
 
 
 # ------------------------------------------------------------------ the deterministic match

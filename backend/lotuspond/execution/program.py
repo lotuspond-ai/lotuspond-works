@@ -8,7 +8,7 @@ step or region occurrence:
     path    := segment ("/" segment)*
     segment := step_id | step_id ":" selector | step_id "#" record
     selector:= "then" | "else" | branch_id | item_index | "call"
-    record  := "select" | "items" | "input"
+    record  := "select" | "items" | "input" | "dispatch"
 
 A segment with a selector opens a region (decision branch, parallel branch,
 iteration item or subworkflow call). A final `#` segment names a composite's
@@ -29,8 +29,10 @@ from lotuspond_sdk.executable import (
 )
 from lotuspond_sdk.executable.catalog import validate_catalog
 from lotuspond_sdk.executable.package import (
+    ActionDispatchStep,
     DecisionStep,
     IterationStep,
+    OutcomeVerificationStep,
     ParallelStep,
     SubworkflowStep,
 )
@@ -38,11 +40,15 @@ from lotuspond_sdk.executable.plan import CompiledPlan, canonical_plan_json
 
 from ..models import ExecutableDependency, ExecutablePublication, ExecutionDeploymentRevision
 from . import memo
+from .action_policies import Closure, admit_closure
 from .authorization import record, scoped
 from .interpreters import COMPILERS
 
 MAX_PATH = 1024
-RECORDS = frozenset({"#select", "#items", "#input"})
+# E05 adds `#dispatch` (an action dispatch step's command attempts) and `#reconcile`
+# (its read-back attempts, Task 8), and `#outcome` (an outcome verification step's
+# evaluated outcome, Task 9; its read attempts are the step's own record).
+RECORDS = frozenset({"#select", "#items", "#input", "#dispatch", "#reconcile", "#outcome"})
 _INDEX = re.compile(r"0|[1-9][0-9]{0,3}")
 
 
@@ -141,7 +147,10 @@ def load_program(db, scope: Scope, execution) -> Program:
     key = sha256(b"\x00".join(sha256(c).digest() for c in contents)).hexdigest()
     cached = _CACHE.get(key)
     if cached is not None:
-        return cached
+        program, pinned = cached
+        if pinned != execution.interpreter_id:
+            raise ProgramError("integrity")
+        return program
     try:
         raw = json.loads(publication.canonical_package)
         root = validate_executable_package(raw)
@@ -166,10 +175,49 @@ def load_program(db, scope: Scope, execution) -> Program:
     if plan.package_sha256 != publication.package_sha256:
         raise ProgramError("integrity")
     program = Program(publication.package_sha256, plan, packages, catalog)
+    # E05: a stored package never bypasses the effect rules, and it runs only under
+    # the interpreter those rules select (owner decision 15).
+    try:
+        pinned = admit_closure(program_closure(program))
+    except Exception:
+        raise ProgramError("integrity") from None
     if len(_CACHE) > 64:
         _CACHE.clear()
-    _CACHE[key] = program
+    _CACHE[key] = (program, pinned)
+    if pinned != execution.interpreter_id:
+        raise ProgramError("integrity")
     return program
+
+
+def program_closure(program) -> Closure:
+    others = tuple(p for sha, p in program.packages.items() if sha != program.root_sha256)
+    root = program.root
+    return Closure(packages=(root, *others), catalog=dict(program.catalog))
+
+
+def stored_closure(db, scope: Scope, publication_id) -> Closure:
+    """A publication's closure from its stored canonical bytes, digest-checked; no trust."""
+    publication = record(db, ExecutablePublication, scope, publication_id)
+    links = list(
+        db.scalars(
+            scoped(ExecutableDependency, scope)
+            .where(ExecutableDependency.publication_id == publication.id)
+            .order_by(ExecutableDependency.id)
+            .limit(512)
+        )
+    )
+    packages, catalog = [validate_executable_package(json.loads(publication.canonical_package))], {}
+    for link in links:
+        row = record(db, ExecutablePublication, scope, link.dependency_publication_id)
+        digest = sha256(row.canonical_package).hexdigest()
+        if digest != row.package_sha256 or digest != link.dependency_sha256:
+            raise ProgramError("integrity")
+        source = json.loads(row.canonical_package)
+        if row.kind == "workflow":
+            packages.append(validate_executable_package(source))
+        else:
+            catalog[row.package_sha256] = validate_catalog({"documents": [source]}).documents[0]
+    return Closure(packages=tuple(packages), catalog=catalog)
 
 
 def _segments(path):
@@ -226,6 +274,11 @@ def resolve_occurrence(plan: Program, occurrence_path: str) -> StepRef:
                     (selector == "#select" and isinstance(step, DecisionStep))
                     or (selector == "#items" and isinstance(step, IterationStep))
                     or (selector == "#input" and isinstance(step, SubworkflowStep))
+                    or (
+                        selector in ("#dispatch", "#reconcile")
+                        and isinstance(step, ActionDispatchStep)
+                    )
+                    or (selector == "#outcome" and isinstance(step, OutcomeVerificationStep))
                 )
                 if not valid:
                     raise ProgramError("occurrence_unresolved")

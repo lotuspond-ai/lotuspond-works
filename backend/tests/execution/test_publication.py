@@ -16,6 +16,7 @@ from lotuspond_sdk.executable.signing import sign_executable_package
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lotuspond.execution.action_policies import admit_closure, classify_plan
 from lotuspond.execution.authorization import authorize_execution
 from lotuspond.execution.contracts import PublicationRequest
 from lotuspond.execution.errors import ExecutionError
@@ -191,8 +192,8 @@ def test_published_bytes_and_closure_are_exact(harness):
 @pytest.mark.parametrize(
     "kind", ["action_intent", "action_dispatch", "outcome_verification", "review"]
 )
-def test_effect_nodes_refused(harness, kind):
-    # Unsupported nodes are refused before compiler graph errors can obscure the boundary.
+def test_malformed_effect_nodes_are_invalid(harness, kind):
+    # E05 admits effect nodes; one missing its required fields is invalid SDK input.
     raw = example("minimal")
     raw["body"]["steps"] = [
         {"kind": "human_task" if kind == "review" else kind, "mode": "review", "id": "unsupported"}
@@ -207,7 +208,7 @@ def test_effect_nodes_refused(harness, kind):
             dependencies=harness.dependencies,
         )
     effect_node_error = error.value
-    assert effect_node_error.code == "unsupported_step"
+    assert effect_node_error.code == "invalid_request"
 
 
 def test_missing_provider_and_unknown_fields_deny(harness):
@@ -503,19 +504,26 @@ def reviewed_conditional(branch, nested):
 
 @pytest.mark.parametrize("branch", ["then_body", "else_body"])
 @pytest.mark.parametrize("nested", [False, True])
-def test_compiled_conditional_effects_refused(harness, branch, nested):
+def test_compiled_conditional_effects_publish(harness, branch, nested):
+    """E05: effects at any nesting level publish; admission pins them to v2."""
+    from lotuspond.execution.action_contracts import INTERPRETER_V2
+    from lotuspond.execution.program import stored_closure
+
     raw, documents = reviewed_conditional(branch, nested)
     with Session(harness.engine) as db, db.begin():
         ids = tuple(
             harness.publish(db, doc, request_key=f"catalog-{i}").id
             for i, doc in enumerate(documents)
         )
-        with pytest.raises(ExecutionError, match="unsupported_step"):
-            harness.publish(db, raw, ids)
+        view = harness.publish(db, raw, ids)
+        assert admit_closure(stored_closure(db, harness.scope, view.id)) == INTERPRETER_V2
 
 
 @pytest.mark.parametrize("branch", ["then_body", "else_body"])
-def test_stored_dependency_conditional_effects_refused(harness, monkeypatch, branch):
+def test_stored_dependency_conditional_effects_publish(harness, branch):
+    from lotuspond.execution.action_contracts import INTERPRETER_V2
+    from lotuspond.execution.program import stored_closure
+
     raw, documents = reviewed_conditional(branch, True)
     parent = example("subworkflow")
     parent["subworkflows"][0]["ref"].update(
@@ -527,10 +535,8 @@ def test_stored_dependency_conditional_effects_refused(harness, monkeypatch, bra
             harness.publish(db, doc, request_key=f"catalog-{i}").id
             for i, doc in enumerate(documents)
         )
-        # Model an already persisted package admitted by the old scanner. All bytes,
-        # signatures, exact closure and plan still pass the real publication service.
-        with monkeypatch.context() as setup:
-            setup.setattr("lotuspond.execution.publication._unsupported", lambda raw: None)
-            child = harness.publish(db, raw, ids, request_key="historical-child")
-        with pytest.raises(ExecutionError, match="unsupported_step"):
-            harness.publish(db, parent, (*ids, child.id))
+        child = harness.publish(db, raw, ids, request_key="child")
+        parent_view = harness.publish(db, parent, (*ids, child.id))
+        # A subworkflow's effects make the parent's closure an E05 plan too.
+        closure = stored_closure(db, harness.scope, parent_view.id)
+        assert classify_plan(closure).effects and admit_closure(closure) == INTERPRETER_V2

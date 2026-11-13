@@ -86,7 +86,7 @@ from .contracts import canonical_value
 from .deployments import load_deployment
 from .errors import ExecutionError
 from .expressions import ExpressionError, typed_schema
-from .orchestrator import mark_runnable
+from .orchestrator import mark_runnable, may_run, runs_clause
 from .progression import INTERRUPTED, record_event
 from .publication import _Lookup
 
@@ -619,7 +619,7 @@ class ActivityService:
                 or existing.generation != identity.generation
             ):
                 raise ExecutionError("conflict")
-            if execution.requested_state != "running" or execution.state != "running":
+            if not may_run(execution, rows["step"].occurrence_path) or execution.state != "running":
                 raise ExecutionError("forbidden")
             now = self._finish(db, rows["locked"])
             if now >= existing.expires_at_ms:
@@ -631,7 +631,7 @@ class ActivityService:
                 signature=bytes(existing.canonical_signature).decode("utf-8"),
             )
         reservation = rows["reservations"].get(attempt.id)
-        if execution.requested_state != "running" or execution.state != "running":
+        if not may_run(execution, rows["step"].occurrence_path) or execution.state != "running":
             raise ExecutionError("forbidden")
         if (
             attempt.state != "reserved"
@@ -642,7 +642,16 @@ class ActivityService:
             raise ExecutionError("conflict")
         pins = self.records.pins(db, execution, rows["step"], attempt)
         grant, tenant, recovery = self.budgets._grants(db, identity.scope)
-        self.budgets._final(db, rows["actor"], rows["revision"], grant, tenant, recovery, execution)
+        self.budgets._final(
+            db,
+            rows["actor"],
+            rows["revision"],
+            grant,
+            tenant,
+            recovery,
+            execution,
+            rows["step"].occurrence_path,
+        )
         if recovery.epoch != identity.recovery_epoch:
             raise ExecutionError("recovery_unavailable")
         if execution.recovery_epoch != recovery.epoch:
@@ -795,7 +804,7 @@ class ActivityService:
                     ExecutionActivityDelivery.generation == identity.generation,
                     ExecutionActivityDelivery.status == "pending",
                     ExecutionActivityDelivery.expires_at_ms > now,
-                    Execution.requested_state == "running",
+                    runs_clause(ExecutionActivityDelivery.attempt_id),
                     Execution.state == "running",
                     *targeted,
                 )
@@ -827,7 +836,7 @@ class ActivityService:
                 ExecutionAttempt.project_id == identity.scope.project_id,
                 ExecutionAttempt.environment_id == identity.scope.environment_id,
                 ExecutionDeploymentRevision.pool_id == identity.pool_id,
-                Execution.requested_state == "running",
+                runs_clause(ExecutionAttempt.id),
                 Execution.state == "running",
                 Execution.recovery_epoch == identity.recovery_epoch,
                 ExecutionAttempt.state == "reserved",
@@ -835,6 +844,13 @@ class ActivityService:
                 ExecutionUsageReservation.compute_stopped_at_ms.is_(None),
                 ~select(ExecutionActivityDelivery.id)
                 .where(ExecutionActivityDelivery.attempt_id == ExecutionAttempt.id)
+                .exists(),
+                # E05: an action's command attempts go only to the action poll.
+                ~select(ExecutionStepInstance.id)
+                .where(
+                    ExecutionStepInstance.id == ExecutionAttempt.step_instance_id,
+                    ExecutionStepInstance.occurrence_path.like("%#dispatch"),
+                )
                 .exists(),
             )
             .order_by(Execution.admission_sequence, ExecutionAttempt.ordinal, ExecutionAttempt.id)
@@ -897,7 +913,7 @@ class ActivityService:
             ):
                 raise ExecutionError("conflict")
             return lease_view(lease, delivery, records.deadline_ms)
-        if execution.requested_state != "running" or execution.state != "running":
+        if not may_run(execution, rows["step"].occurrence_path) or execution.state != "running":
             raise ExecutionError("forbidden")
         if (
             delivery.status != "pending"

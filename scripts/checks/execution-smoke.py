@@ -44,11 +44,27 @@ REQUIRED_SCENARIOS = (
         )
         for when in ("before", "after")
     ),
+    # E05: the reviewed write, and each of its commits rolled back or lost.
+    "reviewed_write_result_and_counts",
+    *(
+        f"rollback_action_{point}_{when}_commit"
+        for point in (
+            "intent",
+            "decision",
+            "dispatch",
+            "action_claim",
+            "receipt",
+            "readback",
+            "outcome",
+        )
+        for when in ("before", "after")
+    ),
 )
 SOURCE_DIRECTORIES = (
     "backend/lotuspond",
     "backend/tests/execution/conformance",
     "backend/tests/execution/fixtures/control-flow",
+    "backend/tests/execution/fixtures/actions",
     "runtime/python",
     "sdk/python",
     "scripts/checks",
@@ -97,6 +113,10 @@ def verify_report(report: dict) -> list[str]:
         if item.get("max_provider_calls_per_attempt") != 1:
             problems.append(
                 f"{item.get('artifact_variant')}: max_provider_calls_per_attempt"
+            )
+        if item.get("max_target_writes_per_intent") != 1:
+            problems.append(
+                f"{item.get('artifact_variant')}: max_target_writes_per_intent"
             )
         # Each journey's own receipt, not only the outer summary of them.
         if item.get("cleanup_confirmed") is not True:
@@ -256,6 +276,17 @@ def main():
             shutil.copyfile(CONFORMANCE / name, fixture / name)
         for path in (CONFORMANCE.parent / "fixtures/control-flow").glob("*.json"):
             shutil.copyfile(path, fixture / "fixtures/control-flow" / path.name)
+        # E05: the synthetic target process and the reviewed-action fixtures.
+        (fixture / "fixtures/actions").mkdir(mode=0o700)
+        for name in ("connector", "reviewers", "reviewed_action"):
+            shutil.copyfile(
+                CONFORMANCE.parent / "fixtures/actions" / f"{name}.json",
+                fixture / "fixtures/actions" / f"{name}.json",
+            )
+        (fixture / "actions").mkdir(mode=0o700)
+        shutil.copyfile(
+            CONFORMANCE / "actions/target.py", fixture / "actions/target.py"
+        )
         shutil.copyfile(
             ROOT / "contracts/examples/executable-v2/catalog.json",
             fixture / "fixtures/catalog.json",

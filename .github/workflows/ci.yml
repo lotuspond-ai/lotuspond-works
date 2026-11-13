@@ -160,9 +160,9 @@ jobs:
           docker run --rm --network none --entrypoint python lotuspond-api:e03-ci -c
           'import importlib.metadata as m, json, pathlib, sys;
           import lotuspond.app, lotuspond_sdk, lotuspond_runtime.protocol;
-          assert m.version("lotuspond-api") == "0.3.0";
+          assert m.version("lotuspond-api") == "0.4.0";
           assert m.version("lotuspond-sdk") == "0.3.0";
-          assert m.version("lotuspond-runtime") == "0.2.0";
+          assert m.version("lotuspond-runtime") == "0.3.0";
           assert all(not json.loads(m.distribution(n).read_text("direct_url.json") or "{}").get("dir_info", {}).get("editable", False) for n in ("lotuspond-api", "lotuspond-sdk", "lotuspond-runtime"));
           assert pathlib.Path(lotuspond_sdk.__file__).is_relative_to(pathlib.Path(sys.prefix));
           assert pathlib.Path(lotuspond_runtime.__file__).is_relative_to(pathlib.Path(sys.prefix))'
