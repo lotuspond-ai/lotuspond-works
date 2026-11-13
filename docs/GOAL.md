@@ -59,7 +59,9 @@ Everything in the product belongs to one of four steps, in this order, or to the
 
 A reference workflow is one worked example, built end to end, that shows the core loop on a real kind of process. The first is invoice exception triage. A supplier's invoice is compared with the purchase order (what the company ordered) and the goods receipt (what arrived). When they do not match, an agent investigates and proposes what to do, and a person approves that exact action before it is sent. Its package, runtime providers, server seams and reviewed actions were merged on 2026-11-13 (PR #28 and PR #30), against a synthetic stand-in system and not a customer's. Proving the package and its review and Control Room pages remain.
 
-It is an example, not the product. LotusPond Works is not an invoice tool or an accounts-payable tool. The example was chosen because it tests every promise this document makes, and its specification says the first customer's own process replaces it or joins it.
+A second, late purchase order recovery, is specified ([specification](superpowers/specs/2026-11-14-late-purchase-order-design.md)): it spans an ERP, a carrier and a customer inbox, and asks two people to approve two actions. The owner chose on 2026-11-14 to build it before a customer brings a process ([ADR-0017](architecture/0017-position-works-for-supply-chain-operations.md)).
+
+Each is an example, not the product. LotusPond Works is not an invoice tool or an accounts-payable tool. The example was chosen because it tests every promise this document makes, and its specification says the first customer's own process replaces it or joins it.
 
 ## Not part of the product
 
