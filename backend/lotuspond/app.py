@@ -308,6 +308,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "signed-out-redraw",
+                    "date": "2026-11-14",
+                    "title": "A new signed-out introduction",
+                    "description": "The page you see before signing in is drawn in the LotusPond design system and says who LotusPond Works is for: supply chain operations first, built to each customer's requirement. It shows the four steps of the product with what each can do today, the release rules in a labelled sample workspace, and the same account choices. Accounts, sign-in and stored data are unchanged.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "sage-design-system",
                     "date": "2026-11-13",
                     "title": "A new look for the console",

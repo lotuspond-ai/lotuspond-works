@@ -55,15 +55,12 @@ These rules apply to every public surface, in either theme:
 
 A new public page follows the system's layout: a sage field with off-white sheets, one idea and one visual per sheet, the headline on the left seven columns and its supporting text on the right five, one main action per view (pine on the sage field, tomato on a sheet), and one "one thread" illustration (the work as one line from a tangle of systems to a bloom held by a hand) on a company page or one raised product card on a product page.
 
-### The signed-out introduction, until it is redrawn
+### The signed-out introduction
 
-`web/src/pages/Landing.tsx` still wears the earlier theme, the field record: a dusk pond scene with the headline on the waterline, warm archival paper (`--canvas` #f4f1e9 on `.landing`), a reading serif for display type, ink glyphs, a stamp and a platform register. `landing.css` pins that page's action green and its 8px buttons so they do not change underneath it, and the console preview inside it already shows the new console. `docs/design-system.md` describes how the page is built.
-
-Do not extend the field record. Fix what is broken on that page, keep its claims true, and build anything new in the system above. Redrawing it is the next step in ADR-0016.
+`web/src/pages/Landing.tsx` is drawn in the system (`web/src/styles/home.css`, scoped to `.home`): the sage field, off-white sheets, one pine chapter, and the one-thread illustrations from `design-system/project/assets/`, copied into `web/src/assets/illustrations/`. On the field the main action is the ink Button and the Underline is off-white; tomato appears only on a sheet or the pine chapter, as the Underline there and the sample tour's progress line, besides the wordmark dot. Who the product is for follows ADR-0017, and every status it shows traces to `docs/CAPABILITIES.md`. The sample console window inside it keeps the console's own tokens.
 
 ## Open work
 
 - **Account screens.** The small labels above the sign-in and registration titles are still uppercase monospace, which the system does not allow.
-- **The signed-out introduction** is redrawn in the system.
 - **The company site** at lotuspond.ai (`deploy/interest/`) still shows the early-access page. Replacing it is a hosted change with its own scope.
 - **Icons and a logo file.** The system has neither yet. The wordmark is the logo, and a word or a dot plus a word comes before an icon.
