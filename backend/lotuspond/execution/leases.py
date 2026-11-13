@@ -74,7 +74,9 @@ class LeaseService:
         except Exception:
             raise ExecutionError("recovery_unavailable") from None
 
-    def _event(self, db, execution, epoch, code, attempt_id, detail=None, origin="sweeper"):
+    def _event(
+        self, db, execution, epoch, code, attempt_id, detail=None, origin="sweeper", path=None
+    ):
         a = self.activities
         record_event(
             db,
@@ -84,7 +86,7 @@ class LeaseService:
             execution,
             epoch,
             code,
-            path=None,
+            path=path,
             attempt_id=attempt_id,
             detail=detail,
             origin=origin,

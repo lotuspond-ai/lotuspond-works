@@ -312,6 +312,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "restored-action-readbacks",
+                    "date": "2026-11-14",
+                    "title": "Restored actions are read back in every case",
+                    "description": "After a database restore, every held action of an execution is read back once its owner releases it, also when the execution is cancelled after the release, and all held actions of a step group are read back together before any of them ends the execution. The hold event names each held action. An action reviewed in one part of a workflow can now be sent from a branch nested inside it. Stored data is unchanged.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "signed-out-redraw",
                     "date": "2026-11-14",
                     "title": "A new signed-out introduction",

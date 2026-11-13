@@ -29,7 +29,7 @@ from ..test_budgets import budget_harness as budget_harness  # noqa: F401
 from ..test_progression import flows as flows  # noqa: F401
 from ..test_publication import harness as harness  # noqa: F401
 from ..test_recovery import restore
-from .dispatch_fixtures import action_runtime, dispatch_attempt, intent_row
+from .dispatch_fixtures import action_runtime, dispatch_attempt, intent_row, reserve
 from .dispatch_fixtures import actions as actions  # noqa: F401
 from .readback_fixtures import (
     Target,
@@ -242,3 +242,278 @@ def _scope_of(h, execution_id):
     from lotuspond.execution.progression import _scope
 
     return _scope(execution(h, execution_id))
+
+
+def held_paths(h, execution_id):
+    """The occurrence path each `intent_held` event names, in event order."""
+    from lotuspond_sdk.activity import ArtifactHandle
+
+    with Session(h.engine) as db:
+        paths = []
+        for row in sorted(held_events(h, execution_id), key=lambda e: e.sequence):
+            content = h.store._get_internal(
+                db,
+                _scope_of(h, execution_id),
+                ArtifactHandle(
+                    id=row.event_artifact_id,
+                    version=row.event_artifact_version,
+                    sha256=row.digest,
+                ),
+            )
+            paths.append(json.loads(content)["occurrence_path"])
+        return paths
+
+
+def test_each_intent_held_event_names_its_intent(actions):
+    """The hold names each held intent by its intent step's occurrence, so an owner
+    can tell which actions a restore held without reading the intents table."""
+    h = actions
+    accepted = accepted_before_verification(h, "held-named", Target())
+    restored(h)
+    h.sweep()
+    h.run2()
+    assert held_paths(h, accepted) == ["intent"]
+
+
+def test_cancel_after_the_release_still_reads_back_an_accepted_intent(actions):
+    """Decision 12 under decision 13: a held intent whose write was accepted holds an
+    existing effect, so a cancellation requested after the owner's release still
+    reads it back. The execution ends cancelled only once the read-back settles, and
+    the write is never resent or verified."""
+    h = actions
+    target = Target()
+    execution_id = accepted_before_verification(h, "release-then-cancel", target)
+    restored(h)
+    h.sweep()
+    h.run2()
+    release(h, execution_id)
+    h.control(execution_id, "cancel")
+    h.run2()
+    assert execution(h, execution_id).state not in ("cancelled", "failed", "succeeded")
+    attempt = pending_readback(h, execution_id)
+    read(h, attempt.id, present_for(target, h, attempt.id))
+    h.run2()
+    assert intent_row(h, execution_id).effect_state == "observed"
+    assert execution(h, execution_id).state == "cancelled"
+    assert all(a.state != "reserved" for a in verification_reads(h, execution_id))
+    assert target.writes == 1 and len(commands(h, execution_id)) == 1
+
+
+def two_intents_package():
+    """Two reviewed actions in one region; both intents exist before either review."""
+    from copy import deepcopy
+
+    from .readback_fixtures import readback_package
+
+    package, documents = readback_package()
+    intent, review, dispatch, pause, verify = package["body"]["steps"]
+    intent2 = deepcopy(intent)
+    intent2["id"] = "intent2"
+    intent2["target"]["value"]["record_id"] = "R-200"
+    review2, dispatch2, verify2 = deepcopy(review), deepcopy(dispatch), deepcopy(verify)
+    review2["id"], dispatch2["id"], verify2["id"] = "review2", "dispatch2", "verify2"
+    review2["intent"]["source"]["id"] = dispatch2["intent"]["source"]["id"] = "intent2"
+    dispatch2["decision"]["source"]["id"] = "review2"
+    verify2["receipt"]["source"]["id"] = "dispatch2"
+    verify2["target"]["value"]["record_id"] = "R-200"
+    package["body"]["steps"] = [
+        intent,
+        intent2,
+        review,
+        dispatch,
+        review2,
+        dispatch2,
+        pause,
+        verify,
+        verify2,
+    ]
+    return package, documents
+
+
+def test_every_held_intent_of_a_region_is_read_back_before_any_settles(actions):
+    """Both held intents are read back at the release, together; the first one's
+    qualified absence does not end the execution before the second is read back."""
+    h = actions
+    package, documents = two_intents_package()
+    execution_id = h.reviewed("two-held", package, documents, decide=False)
+    restored(h)
+    h.sweep()
+    h.run2()
+    assert sorted(held_paths(h, execution_id)) == ["intent", "intent2"]
+    release(h, execution_id)
+    h.run2()
+    pending = [a for a in readbacks(h, execution_id) if a.state == "reserved"]
+    assert len(pending) == 2
+    read(h, pending[0].id, {"present": False})
+    h.run2()
+    row = execution(h, execution_id)
+    assert row.state not in ("failed", "cancelled", "succeeded")
+    read(h, pending[1].id, {"present": False})
+    h.run2()
+    from lotuspond.models import ExecutionActionIntent
+
+    with Session(h.engine) as db:
+        states = {
+            (i.authorization_state, i.effect_state)
+            for i in db.scalars(
+                select(ExecutionActionIntent).where(
+                    ExecutionActionIntent.execution_id == execution_id
+                )
+            )
+        }
+    assert states == {("superseded", "absent")}
+    row = execution(h, execution_id)
+    assert (row.state, row.reason) == ("failed", "recovery_epoch_changed")
+    assert commands(h, execution_id) == []
+
+
+def nested_dispatch_package(pause=True):
+    """The intent and its review in the root region; the dispatch and its
+    verification inside a parallel branch, which names them across regions."""
+    from .readback_fixtures import readback_package
+
+    package, documents = readback_package()
+    intent, review, dispatch, timer, verify = package["body"]["steps"]
+    branch = {
+        "id": "act",
+        "body": {
+            "steps": [dispatch, timer, verify] if pause else [dispatch, verify],
+            "result": {"kind": "literal", "schema": {"kind": "null"}, "value": None},
+            "result_schema": {"kind": "data", "schema": {"kind": "null"}},
+        },
+    }
+    parallel = {"id": "apply", "kind": "parallel", "join": "all", "branches": [branch]}
+    package["body"]["steps"] = [intent, review, parallel]
+    return package, documents
+
+
+def approve(h, execution_id, key, run=True):
+    from lotuspond.execution.action_contracts import DecisionRequest
+
+    from .dispatch_fixtures import task_id
+
+    task = h.call("get", h.actor, task_id(h, execution_id))
+    reviewer = h.reviewer()
+    h.call("claim", reviewer, task.id)
+    h.call(
+        "decide",
+        reviewer,
+        task.id,
+        DecisionRequest(
+            decision_id="d-" + key,
+            intent_sha256=intent_row(h, execution_id).intent_sha256,
+            decision="allow",
+        ),
+    )
+    if run:
+        h.run2()
+
+
+def test_a_held_intent_dispatched_from_another_region_is_read_back(actions):
+    """The dispatch names an intent created in an enclosing region: its restored
+    write is read back at the release like any other, never resent, and its
+    qualified absence supersedes the intent."""
+    h = actions
+    execution_id = nested_reviewed(h, "nested-held")
+    restored(h)
+    h.sweep()
+    h.run2()
+    assert held_paths(h, execution_id) == ["intent"]
+    release(h, execution_id)
+    h.run2()
+    assert h.poll() is None and commands(h, execution_id) == []
+    read_back = pending_readback(h, execution_id)
+    read(h, read_back.id, {"present": False})
+    h.run2()
+    intent = intent_row(h, execution_id)
+    assert (intent.authorization_state, intent.effect_state) == ("superseded", "absent")
+    row = execution(h, execution_id)
+    assert (row.state, row.reason) == ("failed", "recovery_epoch_changed")
+    assert commands(h, execution_id) == []
+
+
+def nested_reviewed(h, key, pause=True):
+    package, documents = nested_dispatch_package(pause)
+    execution_id = h.reviewed(key, package, documents, decide=False)
+    approve(h, execution_id, key)
+    for _ in range(3):  # the root records the decision, then the branch region starts
+        if dispatch_attempt(h, execution_id) is not None:
+            break
+        h.run2()
+    attempt = dispatch_attempt(h, execution_id)
+    assert attempt is not None
+    reserve(h, attempt, 20000)
+    return execution_id
+
+
+def test_a_dispatch_in_a_nested_region_runs_its_reviewed_action(actions):
+    """The branch reads the intent and decision handles of its enclosing region: the
+    approved write is sent once, accepted and verified."""
+    h = actions
+    target = Target()
+    execution_id = nested_reviewed(h, "nested-run", pause=False)
+    delivery = h.poll()
+    lease = h.claim(delivery)
+    write_at(h, target, delivery)
+    report(h, lease, "accepted")
+    h.run2()
+    read(h, pending_read(h, execution_id, "apply:act/verify").id, {"present": True})
+    for _ in range(3):
+        h.run2()
+    assert intent_row(h, execution_id).effect_state == "observed"
+    assert execution(h, execution_id).state == "succeeded"
+    assert target.writes == 1 and len(commands(h, execution_id)) == 1
+
+
+def test_a_cancel_finds_a_nested_read_back_of_an_intent_that_never_wrote(actions):
+    """The decision is recorded and the database restored before the branch dispatched:
+    the release reads the held intent back from the branch, and a cancellation then
+    waits for that read-back, though no write of the branch exists to point at it."""
+    h = actions
+    package, documents = nested_dispatch_package(pause=False)
+    execution_id = h.reviewed("nested-cancel", package, documents, decide=False)
+    approve(h, execution_id, "nested-cancel", run=False)
+    restored(h)
+    h.sweep()
+    h.run2()
+    release(h, execution_id)
+    h.run2()
+    assert dispatch_attempt(h, execution_id) is None
+    attempt = pending_readback(h, execution_id)
+    h.control(execution_id, "cancel")
+    h.run2()
+    assert execution(h, execution_id).state not in ("cancelled", "failed", "succeeded")
+    read(h, attempt.id, {"present": False})
+    h.run2()
+    intent = intent_row(h, execution_id)
+    assert (intent.authorization_state, intent.effect_state) == ("superseded", "absent")
+    assert execution(h, execution_id).state == "cancelled"
+    assert commands(h, execution_id) == []
+
+
+def test_a_cancel_while_an_owner_decides_waits_for_them(actions):
+    """Unknown read-backs of a held intent bring an owner in; a cancellation requested
+    then waits for the owner instead of asking again (a round that changes nothing)."""
+    from lotuspond.execution.action_contracts import MAX_READBACKS
+
+    from .test_tasks import ORCHESTRATOR
+
+    h = actions
+    execution_id = accepted_before_verification(h, "owner-cancel", Target())
+    restored(h)
+    h.sweep()
+    h.run2()
+    release(h, execution_id)
+    h.run2()
+    for _ in range(MAX_READBACKS + 1):
+        found = [a for a in readbacks(h, execution_id) if a.state == "reserved"]
+        if not found:
+            break
+        read(h, found[0].id, {"unrelated": True})
+        h.run2()
+    assert execution(h, execution_id).state == "reconciliation_required"
+    h.control(execution_id, "cancel")
+    h.run2()
+    assert h.engine_v2.progress(h.sessions, ORCHESTRATOR, limit=10).claimed == 0
+    row = execution(h, execution_id)
+    assert (row.state, row.requested_state) == ("reconciliation_required", "cancelled")

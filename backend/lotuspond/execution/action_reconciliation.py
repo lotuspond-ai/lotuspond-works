@@ -46,6 +46,7 @@ from lotuspond_sdk.executable.package import (
     DecisionStep,
     IterationStep,
     ParallelStep,
+    SubworkflowStep,
 )
 from lotuspond_sdk.executable.wire import ReconciliationObservedPayload
 from pydantic import TypeAdapter
@@ -92,7 +93,7 @@ from .deployments import execution_gates, gates
 from .errors import ExecutionError
 from .expressions import ExpressionError, ValueEnvironment, typed_schema
 from .orchestrator import TERMINAL, mark_runnable
-from .program import ProgramError, load_program, resolve_occurrence
+from .program import ProgramError, load_program, region_body, resolve_occurrence
 
 EVIDENCE_PREFIX = "action-evidence:"
 RECONCILIATION_RULE = "reconciliation"
@@ -300,16 +301,31 @@ def _intent_of(db, artifacts, scope, attempt, keys=None):
     return value["intent_id"]
 
 
+def _intent_step_path(program, region, step_id):
+    """Occurrence path of intent step `step_id` as region `region` sees it: its own
+    step, else the nearest enclosing region's (as `_outer` reads outer values), never
+    across a subworkflow call."""
+    segments = region.split("/") if region else []
+    for depth in range(len(segments), -1, -1):
+        candidate = "/".join(segments[:depth])
+        if any(step.id == step_id for step in region_body(program, candidate)[2].steps):
+            return (candidate + "/" if candidate else "") + step_id
+        if depth:
+            owner = resolve_occurrence(program, "/".join(segments[:depth]))
+            if isinstance(owner.step, SubworkflowStep) and owner.selector == "call":
+                break
+    raise ProgramError("integrity")
+
+
 def _restored_intent(db, scope, execution, program, step):
     """The intent a `#reconcile` record's dispatch step names, restored and never
     dispatched in these rows (read-back ordinal 0)."""
     ref = dispatch_ref(program, step.occurrence_path)
     source = getattr(ref.step.intent, "source", None)
-    if getattr(source, "kind", None) != "step":
+    if getattr(source, "kind", None) != "step" or ref.step.intent.pointer != "":
         raise ProgramError("integrity")
     base = step.occurrence_path[: -len(READBACK_SUFFIX)]
-    region = base.rpartition("/")[0]
-    path = (region + "/" if region else "") + source.id
+    path = _intent_step_path(program, base.rpartition("/")[0], source.id)
     intent = db.scalar(
         scoped(ExecutionActionIntent, scope)
         .join(

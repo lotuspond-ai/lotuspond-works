@@ -515,8 +515,8 @@ class ExecutionSweeper:
             db,
             execution,
             epoch,
-            lambda code, attempt_id: self.leases._event(
-                db, execution, epoch, code, attempt_id, "restored"
+            lambda code, attempt_id, path=None: self.leases._event(
+                db, execution, epoch, code, attempt_id, "restored", path=path
             ),
         )
         return "restored_executions" if held else None

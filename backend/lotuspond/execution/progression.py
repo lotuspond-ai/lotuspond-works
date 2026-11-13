@@ -446,6 +446,14 @@ class SupersedeIntent:
     intent_id: str
 
 
+# What a restored intent's read-back derives, and how it closes the intent, before
+# anything settles its region (Task 10).
+READBACK_ACTIONS = (CreateReadback, RecordReadback, SupersedeIntent)
+# What a cancellation still runs for a restored intent: its read-back, and what
+# records it (decision 12 under decision 13).
+CONTAINED_ACTIONS = (CreateReadback, RecordReadback, SupersedeIntent, RequireResolution)
+
+
 @dataclass(frozen=True)
 class Complete:
     value: object
@@ -1087,16 +1095,48 @@ class _RegionV2(_Region):
         )
 
     def derive(self):
-        """v2: before anything else, read back each restored intent (Task 10)."""
+        """v2: before anything else, read back each restored intent (Task 10).
+
+        Every restored intent of this region is read back at once, and none of them
+        settles the region (a failure or an owner) until all of their read-backs are
+        recorded and each qualified absence has closed its intent: one intent's
+        outcome never leaves another held intent unread or open. While any read-back
+        runs, nothing else here moves.
+        """
         state = self.state
         if state.requested_state == "running" and not (
             state.region_path == "" and self.now_ms >= state.deadline_ms
         ):
+            reading, settling, waiting, wake = [], [], False, None
             for step in self.body.steps:
-                if isinstance(step, ActionDispatchStep):
-                    held = self.restored(step)
-                    if held is not None:
-                        return held
+                if not isinstance(step, ActionDispatchStep):
+                    continue
+                held = self.restored(step)
+                if held is None:
+                    continue
+                if held.actions and all(isinstance(a, READBACK_ACTIONS) for a in held.actions):
+                    reading.extend(held.actions)
+                elif held.actions:
+                    settling.append(held)
+                else:
+                    waiting = True
+                    if held.wake_at_ms is not None:
+                        wake = held.wake_at_ms if wake is None else min(wake, held.wake_at_ms)
+            if reading:
+                return Derivation(actions=tuple(reading))
+            if waiting:
+                return Derivation(wake_at_ms=wake)
+            if settling:
+                # An unqualified absence goes to an owner before any step's failure ends
+                # the region, so it is never lost behind another intent's outcome.
+                return next(
+                    (
+                        d
+                        for d in settling
+                        if any(isinstance(a, RequireResolution) for a in d.actions)
+                    ),
+                    settling[0],
+                )
         return super().derive()
 
     def superseded(self, step, path):
@@ -1668,7 +1708,18 @@ def _refs(mapping):
 def _body_refs(body):
     found = set(_refs(body.result))
     for step in body.steps:
-        for name in ("mapping", "condition", "input", "target", "correlation"):
+        # E05's handle references (`intent`, `decision`, `receipt`) may name a step of
+        # an enclosing region too, as any mapping may.
+        for name in (
+            "mapping",
+            "condition",
+            "input",
+            "target",
+            "correlation",
+            "intent",
+            "decision",
+            "receipt",
+        ):
             mapping = getattr(step, name, None)
             if mapping is not None and hasattr(mapping, "kind"):
                 found |= _refs(mapping)
@@ -2708,8 +2759,8 @@ class InterpreterV1:
                 db,
                 execution,
                 epoch,
-                lambda code, attempt_id: self._event(
-                    db, execution, epoch, code, attempt_id=attempt_id, detail="restored"
+                lambda code, attempt_id, path=None: self._event(
+                    db, execution, epoch, code, attempt_id=attempt_id, detail="restored", path=path
                 ),
             )
         from .control import observe_control
@@ -3148,6 +3199,17 @@ class InterpreterV2(InterpreterV1):
         if execution.interpreter_id != INTERPRETER_V2 or past_deadline(execution, now):
             return base
         actions, waiting, wake = self._contain(db, execution, now)
+        held, held_waiting, held_wake = self._contain_restored(db, execution, now)
+        actions, waiting = (*actions, *held), waiting or held_waiting
+        if held_wake is not None:
+            wake = held_wake if wake is None else min(wake, held_wake)
+        if execution.state == "reconciliation_required" and any(
+            isinstance(a, RequireResolution) for a in actions
+        ):
+            # An owner already decides: asking again changes nothing, and a round that
+            # changes nothing reads as a race (`_round`). The cancellation waits for them.
+            actions = tuple(a for a in actions if not isinstance(a, RequireResolution))
+            waiting = True
         if actions:
             return Derivation(actions=(CancelUndispatched(""), *actions))
         if waiting:
@@ -3197,6 +3259,64 @@ class InterpreterV2(InterpreterV1):
             waiting = True
             if derivation.wake_at_ms is not None:
                 wake = derivation.wake_at_ms if wake is None else min(wake, derivation.wake_at_ms)
+        return tuple(actions), waiting, wake
+
+    def _contain_restored(self, db, execution, now):
+        """Decision 12 under decision 13: an intent held by a restore holds, or may
+        hold, an effect, so a cancellation requested after its owner's release still
+        reads it back (`restored`). Only the read-back and what records it run: a
+        restored step's failure, verification or resend never does, and the
+        cancellation stands. An undecided held intent is read back too: the
+        cancellation withdraws it (`_cancel`), and its read-back still settles whether a
+        write from the lost timeline exists. Every region of the execution that exists
+        is searched, so a dispatch nested below its intent is found whether or not it
+        has written. Returns (actions, waiting, wake-up)."""
+        from ..models import ExecutionActionIntent
+
+        if execution.recovery_epoch is None:
+            return (), False, None
+        restored = (
+            _scoped(ExecutionActionIntent, execution)
+            .where(
+                ExecutionActionIntent.execution_id == execution.id,
+                ExecutionActionIntent.recovery_epoch < execution.recovery_epoch,
+            )
+            .with_only_columns(ExecutionActionIntent.step_instance_id)
+        )
+        if db.scalar(restored.limit(1)) is None:
+            return (), False, None
+        paths = db.scalars(
+            _scoped(ExecutionStepInstance, execution)
+            .where(ExecutionStepInstance.execution_id == execution.id)
+            .with_only_columns(ExecutionStepInstance.occurrence_path)
+        ).all()
+        program = load_program(db, _scope(execution), execution)
+        regions = []
+        for candidate in sorted({""} | set(paths) | {path.rpartition("/")[0] for path in paths}):
+            try:
+                body = region_body(program, candidate)[2]
+            except ProgramError:
+                continue  # a step's own record, not a region
+            if any(isinstance(step, ActionDispatchStep) for step in body.steps):
+                regions.append(candidate)
+        actions, waiting, wake = [], False, None
+        for region_path in regions:
+            state = self.load_progression(db, execution, region_path, program=program)
+            region = self.region_for(execution)(program, state, now)
+            for step in region.body.steps:
+                if not isinstance(step, ActionDispatchStep):
+                    continue
+                derivation = region.restored(step)
+                if derivation is None:
+                    continue
+                kept = tuple(a for a in derivation.actions if isinstance(a, CONTAINED_ACTIONS))
+                if kept:
+                    actions.extend(kept)
+                elif not derivation.actions:
+                    waiting = True
+                    if derivation.wake_at_ms is not None:
+                        due = derivation.wake_at_ms
+                        wake = due if wake is None else min(wake, due)
         return tuple(actions), waiting, wake
 
     def _released(self, db, execution, attempts):
@@ -3432,7 +3552,9 @@ class InterpreterV2(InterpreterV1):
         """Each dispatch occurrence's intent, observations, receipts and confirmed stops.
 
         A record exists for every dispatch step of the region whose intent exists, its
-        commands or not, so a restored intent never dispatched is read back too."""
+        commands or not, so a restored intent never dispatched is read back too. An
+        intent step of an enclosing region is found through its handle, which this
+        region reads as an outer value."""
         from ..models import (
             ExecutionActionCommand,
             ExecutionActionIntent,
@@ -3443,14 +3565,31 @@ class InterpreterV2(InterpreterV1):
 
         program = program or load_program(db, _scope(execution), execution)
         _, _, body = region_body(program, state.region_path)
-        bases = {}
+        bases, outer = {}, {}
+        own = {step.id for step in body.steps}
         for step in body.steps:
-            source = getattr(getattr(step, "intent", None), "source", None)
-            if isinstance(step, ActionDispatchStep) and getattr(source, "kind", None) == "step":
-                bases[child_path(state.region_path, step.id)] = child_path(
-                    state.region_path, source.id
-                )
-        if not bases:
+            if not isinstance(step, ActionDispatchStep):
+                continue
+            source = getattr(step.intent, "source", None)
+            base = child_path(state.region_path, step.id)
+            if getattr(source, "kind", None) == "step" and source.id in own:
+                bases[base] = child_path(state.region_path, source.id)
+                continue
+            # An intent step of an enclosing region is read as an outer value, its
+            # handle whole (the recording side finds the same step: `_restored_intent`).
+            # Any other way in (a field of a value, an input, an item) is found through
+            # its commands only.
+            handle = (
+                state.outer.get(source.id)
+                if getattr(source, "kind", None) == "step" and step.intent.pointer == ""
+                else None
+            )
+            outer[base] = (
+                handle.get("id")
+                if type(handle) is dict and handle.get("handle_kind") == "action_intent"
+                else None
+            )
+        if not bases and not outer:
             return state
         intents = {
             path: intent
@@ -3469,11 +3608,20 @@ class InterpreterV2(InterpreterV1):
                 )
             )
         }
+        enclosing = {
+            row.id: row
+            for row in db.scalars(
+                _scoped(ExecutionActionIntent, execution).where(
+                    ExecutionActionIntent.execution_id == execution.id,
+                    ExecutionActionIntent.id.in_(sorted(i for i in outer.values() if i)),
+                )
+            )
+        }
         writes = {
             base: state.occurrences[base + DISPATCH_SUFFIX].attempts
             if base + DISPATCH_SUFFIX in state.occurrences
             else ()
-            for base in bases
+            for base in (*bases, *outer)
         }
         ids = [a.id for attempts in writes.values() for a in attempts]
         commands = {
@@ -3486,7 +3634,7 @@ class InterpreterV2(InterpreterV1):
         }
         reads = {
             base: state.occurrences[base + READBACK_SUFFIX].attempts
-            for base in bases
+            for base in writes
             if base + READBACK_SUFFIX in state.occurrences
         }
         reservations = {
@@ -3501,7 +3649,7 @@ class InterpreterV2(InterpreterV1):
         }
         actions = {}
         for base, attempts in writes.items():
-            intent = intents.get(bases[base])
+            intent = intents.get(bases[base]) if base in bases else enclosing.get(outer[base])
             commanded = {commands[a.id].intent_id for a in attempts if a.id in commands}
             if len(commanded) > 1:
                 raise ProgramError("integrity")
