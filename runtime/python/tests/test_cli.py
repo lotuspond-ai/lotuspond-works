@@ -383,10 +383,39 @@ def test_test_mode_reports_only_the_connectors_its_action_providers_serve(tmp_pa
     assert (code, capsys.readouterr().err.strip()) != (2, "invalid_input")
     # No other command reports one, even in test mode.
     assert module.main(["run", "--config", str(config)]) == 2
-    # Production mode never reports one at all.
+    # Production mode's other commands report none either.
     value["mode"] = "production"
     config.write_text(json.dumps(value))
     assert module.main(["run", "--config", str(config)]) == 2
+
+
+def test_a_production_worker_reports_the_connectors_its_write_providers_serve(tmp_path, capsys):
+    """E05 outside test mode: an operator's `https-json` write providers let the worker
+    report their connector; one they do not serve is refused before any transport."""
+    from test_https_json import write_routes
+    from test_operator_actions import operator_config
+
+    from lotuspond_runtime.https_json import routes_digest
+
+    module = cli_module()
+    served = dict(name="ap-standin", version="0.1.0", artifact_sha256=routes_digest(write_routes()))
+    config = config_file(tmp_path, mode="production")
+    value = json.loads(config.read_bytes())
+    activity = tmp_path / "operator-activity.json"
+    for raw, connector, refused in (
+        (operator_config(tmp_path, actions=False), served, True),
+        (operator_config(tmp_path, actions=True), {**served, "version": "9.9.9"}, True),
+        (operator_config(tmp_path, actions=True), served, False),
+    ):
+        value["observation"]["connectors"] = [connector]
+        config.write_text(json.dumps(value))
+        activity.write_bytes(raw)
+        activity.chmod(0o600)
+        code = module.main(
+            ["activity-worker", "--config", str(config), "--activity-config", str(activity)]
+        )
+        outcome = (code, capsys.readouterr().err.strip())
+        assert (outcome == (2, "invalid_input")) is refused, outcome
 
 
 def test_synthetic_target_read_provider_is_a_declared_read(tmp_path):

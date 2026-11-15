@@ -10,10 +10,11 @@ Strict, closed data, read from one private file. It names:
 - `providers`: each real provider by fixed identifier (`https-json` or
   `anthropic-messages`), pinned to its catalog dependency, with its settings.
 
-A test-mode runtime may add `actions`: `{"trust_file", "providers": [{"provider_id":
-"https-json", "connector", "operations": {write: idempotency}, "settings"}]}`, the
-`https-json` write side for its reviewed actions (E05). Its command trust is a test
-file; production command trust is not provided by this configuration.
+It may add `actions`: `{"trust_file", "providers": [{"provider_id": "https-json",
+"connector", "operations": {write: idempotency}, "settings"}]}`, the `https-json` write
+side for its reviewed actions (E05). Outside test mode `trust_file` is the operator's
+command trust, `{"revision", "trust"}` as the control plane's `authority command-trust`
+prints it (`trust.OperatorCommandTrust`); a test-mode runtime's is a bare `TrustSet`.
 
 Each provider's settings are checked here against its pins before the worker starts,
 so a mismatched routes document or model configuration never reaches a delivery.
@@ -120,8 +121,6 @@ def worker_config(raw: bytes, *, test_mode: bool = False) -> ActivitySetup:
         raise ValueError("Invalid activity worker configuration")
     actions = None
     if "actions" in data:
-        if test_mode is not True:
-            raise ValueError("Write providers need command trust this configuration lacks")
         actions = _actions(data["actions"])
     trust = _operator_path(data["trust_file"])
     journal = _operator_path(data["journal_directory"])

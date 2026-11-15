@@ -6,7 +6,8 @@ The durable execution engine needs authorities that live outside its database, s
 - whether this installation may execute, and its limits;
 - which package publishers it trusts and which catalog documents it has admitted;
 - the key that signs activity deliveries to runtimes;
-- the artifact encryption key.
+- the artifact encryption key;
+- optionally, the key that signs runtime write commands, and the connectors and secret bindings installed for them (reviewed actions, below).
 
 On a single installation they come from one private directory on the host that runs the API and the execution workers. Without it the API builds no execution services, and `execution-worker` refuses to start (`engine_unavailable`). That is the behaviour before this directory existed.
 
@@ -49,7 +50,45 @@ python -m lotuspond.authority execution /etc/lotuspond/authority on
 Each command prints a summary and never prints key material. The API and workers reread the files on every lookup, so a change takes effect on the next request with no restart:
 
 - removing a publisher or switching execution off stops new work at once;
-- `release-required off` lets a deployment be admitted without a release decision. Leave it on. It exists only until the package release binding (reference workflow milestone 5) ships, and turning it off is a deliberate operator decision.
+- `release-required off` lets a deployment be admitted without a release decision. Leave it on: a release of a package evaluation run binds exactly that package version (`docs/superpowers/specs/2026-11-15-package-proof-design.md`). Turning it off is a deliberate operator decision.
+
+## Reviewed actions
+
+Writes to a business system (E05) are off until you provision a command key. Without one, only interpreter v1 runs, and the action and human task routes answer 503.
+
+1. Install each connector a workflow writes through, and each secret binding its connections reference:
+
+   ```bash
+   python -m lotuspond.authority install-connector /etc/lotuspond/authority connector.json
+   python -m lotuspond.authority secret-binding /etc/lotuspond/authority erp_token 1
+   ```
+
+   `connector.json` describes one connector:
+
+   ```json
+   {
+     "pin": {"name": "erp", "version": "1.0.0", "artifact_sha256": "<routes document sha256>"},
+     "operations": {
+       "get_order": {"effect": "read", "requires_destination": true, "requires_secret": true},
+       "update_order": {"effect": "write", "requires_destination": true, "requires_secret": true}
+     }
+   }
+   ```
+
+   An identical description again is a no-op, and a different one under the same pin is refused. The catalog (`catalog.json`) is read when the API and workers start, so restart them after changing it. Without it nothing is installed: no connection to a connector can be configured and no write can be admitted.
+
+2. Provision the command key, then give each runtime its trust:
+
+   ```bash
+   python -m lotuspond.authority command-key /etc/lotuspond/authority
+   python -m lotuspond.authority command-trust /etc/lotuspond/authority > command-trust.json
+   ```
+
+   Install `command-trust.json` on each runtime host as a private file (owner-only, in a private directory). Name it as `actions.trust_file` in the runtime's provider configuration, beside its `https-json` write providers (see the runtime README). The runtime verifies every command against this file, which it rereads on each command. It refuses a command issued under a newer trust revision than its own.
+
+3. Restart the API and the execution workers. With the key present they compose interpreter v2 and the action and task services. List both `lotuspond.execution-interpreter.v1` and `lotuspond.execution-interpreter.v2` in each worker's interpreter IDs.
+
+To switch actions off, remove `command-signing.key` and restart. Each signature rereads the key and its trust, so a key removed from `command-trust.json`'s trust stops signing on the next command. Rotating the key without downtime is not built yet. To rotate, add the new key to every runtime's trust first, then replace `command-signing.key` and `command-trust.json` together and restart.
 
 ## After a database restore
 

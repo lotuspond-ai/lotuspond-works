@@ -47,14 +47,16 @@ def _token(path):
 def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, failed):
     """One action worker on its own transport, beside the activity worker (E05).
 
-    Test mode only: `actions` is the configuration's write providers (the synthetic
-    target's, or `https-json`'s) and their command trust. It shares the activity worker's journal (one holder per
+    `actions` is the configuration's write providers (the synthetic target's in test
+    mode, or `https-json`'s) and their command trust: the operator's
+    (`OperatorCommandTrust`) outside test mode, a test file inside it. It shares the activity worker's journal (one holder per
     process) and server-anchored clock, and the supervisor's live session.
     """
     from .action_client import ActionClient
     from .action_fixture import FixtureCommandTrust
     from .action_invocation import WriteProviderSet
     from .action_worker import ActionDependencies, ActionWorker
+    from .trust import OperatorCommandTrust
 
     trust_file, descriptors = actions
     # A real write provider's connection secrets resolve through the mounted resolver
@@ -74,7 +76,11 @@ def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, fai
         try:
             transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
             providers = WriteProviderSet(descriptors, test_mode=setup.test_mode)
-            trust = FixtureCommandTrust(trust_file, clock)
+            trust = (
+                FixtureCommandTrust(trust_file, clock)
+                if setup.test_mode
+                else OperatorCommandTrust(trust_file, clock)
+            )
             worker = current = None
             idle = IDLE_MIN_S
             while not stop.is_set():
@@ -286,15 +292,16 @@ def _execute(argv, clients) -> int:
                     from .provider_config import worker_config as operator_config
 
                     fixture = operator_config(raw)
+                    actions = fixture.actions
             except (ValueError, TypeError, KeyError):
                 raise FleetError("invalid_request") from None
-        # No executable connector is installed outside test mode: an operator's
-        # declaration cannot invent installed capability. A test-mode runtime may
-        # report the synthetic connectors its action providers serve (E05), and its
-        # worker refuses to start reporting any connector none of them serves; no
-        # other command reports one.
+        # A runtime reports the connectors its write providers serve (E05), and its
+        # worker refuses to start reporting any connector none of them serves: a
+        # declaration cannot invent installed capability, and the control plane admits
+        # only connectors its operator installed. Only enrollment and the worker report
+        # them, in either mode.
         if config.observation.connectors:
-            if config.mode != "test" or args.command not in ("enroll", "activity-worker"):
+            if args.command not in ("enroll", "activity-worker"):
                 raise FleetError("invalid_request")
             if args.command == "activity-worker":
                 served = {d.connector for d in actions[1]} if actions is not None else set()
