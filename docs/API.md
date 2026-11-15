@@ -171,4 +171,16 @@ API keys, runtimes, viewers and platform administrators never claim, decide or s
 
 The business `outcome.state` is, in order: `in_progress` (not finished); `unknown` (a write's occurrence or outcome is uncertain, or the execution awaits reconciliation); `not_verified` (a write was made and its verification failed); `verified` (succeeded, every write verified); `completed` (succeeded, no write); `partial` (failed or cancelled after verified writes); `no_effect` (failed or cancelled, nothing written). `unknown`, `not_verified`, `partial` and a failed `no_effect` are exceptions.
 
+**Cases** (E06, second part; schema v17; `docs/superpowers/specs/2026-11-15-cases-design.md`). A case is a business item named by its key. The key is stored encrypted as an execution artifact; `key_sha256` is its digest. The routes need execution services (503 `authority_unavailable` without them).
+
+| Route | Who | Notes |
+| --- | --- | --- |
+| `POST /cases` | `execute` | `{key}` (1–200 characters). Returns the case with that key, created if new |
+| `GET /cases`, `GET /cases/{id}` | `read` | `id`, `key`, `key_sha256`, `outcome` (the latest execution's business outcome, or `empty`), `needs_person`, `owner`, `resolution`, `execution_count`; one case also lists `executions` (newest first, at most 100, each with its `outcome` and `exception`) |
+| `POST /cases/{id}/executions` | `execute` | `{execution_id}`. An execution belongs to one case: linking it again is a no-op, to another case 409 |
+| `POST /cases/{id}/owner` | a person, `review` | `{request_id, action: "take" \| "release"}`. Taking a case someone else holds is 409; an owner or admin may release anyone's |
+| `POST /cases/{id}/resolution` | the case's owner | `{request_id, kind}`, `kind` one of `corrected_by_hand`, `handled_by_retry`, `no_action_needed`, `handled_elsewhere`; no free text. Refused (409) when nothing needs a person. It covers every execution admitted so far; a later exception reopens the case. It changes no execution and sends nothing |
+
+An equal retry of an ownership change or resolution is replayed and not audited again; each first change is audited with identifiers only.
+
 **Runtime action routes** (`/api/v1/runtime/actions/…`: `poll`, `records`, `claim`, `renew`, `receipts`, `stops`, `{attempt_id}/values`) serve only an enrolled runtime's own session, under E03's command trust. A receipt or stop of a write already claimed is recorded even if its initiator has since lost `execute`; integrity, epoch, recipient, expiry and connection still decide. Operations: `docs/operations/actions-human-tasks.md`.

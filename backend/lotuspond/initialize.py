@@ -10,6 +10,7 @@ from .execution.migration import (
     migrate_execution_v14,
     migrate_execution_v15,
     migrate_execution_v16,
+    migrate_execution_v17,
 )
 from .fleet.migration import migrate_fleet_v13
 from .models import AuditEvent, Base, SchemaVersion, User
@@ -87,7 +88,7 @@ def main():
 
 
 def migrate(settings: Settings):
-    """Apply the reviewed additive v2 through v15 chain; never drop/import records."""
+    """Apply the reviewed additive v2 through v17 chain; never drop/import records."""
     url = make_url(settings.database_url.get_secret_value())
     if (
         settings.env == "production"
@@ -111,7 +112,7 @@ def migrate(settings: Settings):
                 raise ValueError("Unexpected schema state; no changes made")
             if versions == [SCHEMA_VERSION]:
                 raise ValueError("Database is already at the current version; no changes made")
-            if versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}:
+            if versions[0] not in {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
                 raise ValueError("Unexpected schema state; no changes made")
             current = versions[0]
             inspector = inspect(connection)
@@ -445,6 +446,10 @@ def migrate(settings: Settings):
                 connection.execute(SchemaVersion.__table__.update().values(version=15))
                 migrate_execution_v16(connection)
                 current = 16
+            if current == 16:
+                connection.execute(SchemaVersion.__table__.update().values(version=16))
+                migrate_execution_v17(connection)
+                current = 17
             connection.execute(SchemaVersion.__table__.update().values(version=current))
     finally:
         engine.dispose()

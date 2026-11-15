@@ -34,6 +34,7 @@ export const navigation: readonly NavSection[] = [
     items: [
       { id: 'control-room', label: 'Control Room', icon: 'control' },
       { id: 'human-tasks', label: 'Human tasks', icon: 'tasks' },
+      { id: 'cases', label: 'Cases', icon: 'cases' },
     ],
   },
   {

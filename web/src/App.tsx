@@ -33,6 +33,7 @@ import { Home } from './pages/Home.js';
 import { Planned } from './pages/Planned.js';
 import { HumanTasks } from './pages/HumanTasks.js';
 import { ControlRoom } from './pages/ControlRoom.js';
+import { Cases } from './pages/Cases.js';
 import { plannedArea } from './lib/roadmap.js';
 
 // The Studio carries the canvas and the contract validator, so it loads when first opened.
@@ -199,6 +200,7 @@ const projectScoped = [
   'releases',
   'control-room',
   'human-tasks',
+  'cases',
 ];
 // Records a reader can create from the command palette, with the verb the page uses.
 const creatable: Record<string, string> = {
@@ -607,6 +609,13 @@ export function App({
               key={`${workspace}-${projectId}`}
               workspace={workspace}
               projectId={projectId}
+            />
+          ) : page === 'cases' ? (
+            <Cases
+              key={`${workspace}-${projectId}`}
+              workspace={workspace}
+              projectId={projectId}
+              role={role}
             />
           ) : page === 'control-room' ? (
             <ControlRoom

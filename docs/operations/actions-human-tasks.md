@@ -93,7 +93,7 @@ Each must be qualified before production use:
 - a real system of record: the `https-json` write side and the operator command key and catalog are built and tested locally, against stand-ins, but nothing has written to a customer's system; command key rotation without a restart;
 - notification delivery for tasks and escalations;
 - compensation (plan decision 14): reversing an applied write stays refused;
-- E06 cases and exception ownership (each execution's trace and business outcome exist since 2026-11-15: `GET …/executions/{id}/trace`, `…/outcomes`);
+- notifications and deadlines for cases (E06 is built: traces, business outcomes and cases with exception ownership, schema v17);
 - the rest of E07's operations UI (the console's Human tasks inbox and Control Room exist since 2026-11-15; workers, queues and deployment changes do not);
 - E08 signed entitlements;
 - E09 operations: hosted CI, capacity at the planning target (tier 3 failed its throughput criteria on a 4-vCPU VM), HA and service levels;

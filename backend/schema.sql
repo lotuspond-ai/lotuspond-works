@@ -1279,6 +1279,45 @@ CREATE TABLE alert_deliveries (
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
+CREATE TABLE execution_cases (
+	key_artifact_id VARCHAR(36) NOT NULL,
+	key_artifact_version INTEGER NOT NULL,
+	key_sha256 VARCHAR(64) NOT NULL,
+	created_by_user_id VARCHAR(36) NOT NULL,
+	owner_user_id VARCHAR(36),
+	owner_since_ms BIGINT,
+	owner_request_id VARCHAR(128),
+	resolution VARCHAR(24),
+	resolution_request_id VARCHAR(128),
+	resolved_by_user_id VARCHAR(36),
+	resolved_at_ms BIGINT,
+	resolved_through_ms BIGINT,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, key_artifact_id, key_artifact_version, key_sha256) REFERENCES execution_artifacts (workspace_id, project_id, environment_id, id, version, sha256),
+	UNIQUE (workspace_id, project_id, environment_id, key_sha256),
+	CHECK ((owner_user_id IS NULL) = (owner_since_ms IS NULL)),
+	CHECK (owner_request_id IS NULL OR length(owner_request_id) BETWEEN 1 AND 128),
+	CHECK (resolution IS NULL OR resolution IN ('corrected_by_hand','handled_by_retry','no_action_needed','handled_elsewhere')),
+	CHECK ((resolution IS NULL) = (resolution_request_id IS NULL) AND (resolution IS NULL) = (resolved_by_user_id IS NULL) AND (resolution IS NULL) = (resolved_at_ms IS NULL) AND (resolution IS NULL) = (resolved_through_ms IS NULL)),
+	CHECK (resolution_request_id IS NULL OR length(resolution_request_id) BETWEEN 1 AND 128),
+	CHECK (owner_since_ms IS NULL OR owner_since_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (resolved_at_ms IS NULL OR resolved_at_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (resolved_through_ms IS NULL OR resolved_through_ms BETWEEN 0 AND 9007199254740991),
+	CHECK (length(key_sha256) = 64),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(created_by_user_id) REFERENCES users (id),
+	FOREIGN KEY(owner_user_id) REFERENCES users (id),
+	FOREIGN KEY(resolved_by_user_id) REFERENCES users (id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
 CREATE TABLE executions (
 	admission_sequence BIGINT NOT NULL,
 	deployment_revision_id VARCHAR(36) NOT NULL,
@@ -1429,6 +1468,29 @@ CREATE TABLE runtime_credentials (
 	UNIQUE (workspace_id, project_id, environment_id, id),
 	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
 	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
+);
+
+CREATE TABLE execution_case_links (
+	case_id VARCHAR(36) NOT NULL,
+	execution_id VARCHAR(36) NOT NULL,
+	linked_by_user_id VARCHAR(36) NOT NULL,
+	linked_at_ms BIGINT NOT NULL,
+	project_id VARCHAR(36) NOT NULL,
+	environment_id VARCHAR(36) NOT NULL,
+	workspace_id VARCHAR(36) NOT NULL,
+	id VARCHAR(36) NOT NULL,
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, case_id) REFERENCES execution_cases (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id, execution_id) REFERENCES executions (workspace_id, project_id, environment_id, id),
+	UNIQUE (workspace_id, project_id, environment_id, execution_id),
+	UNIQUE (workspace_id, project_id, environment_id, case_id, execution_id),
+	CHECK (linked_at_ms BETWEEN 0 AND 9007199254740991),
+	UNIQUE (workspace_id, project_id, environment_id, id),
+	FOREIGN KEY(workspace_id, project_id) REFERENCES projects (workspace_id, id),
+	FOREIGN KEY(workspace_id, project_id, environment_id) REFERENCES environments (workspace_id, project_id, id),
+	FOREIGN KEY(linked_by_user_id) REFERENCES users (id),
 	FOREIGN KEY(workspace_id) REFERENCES workspaces (id)
 );
 
@@ -2243,6 +2305,10 @@ CREATE INDEX ix_execution_attempts_workspace_id ON execution_attempts (workspace
 
 CREATE INDEX ix_execution_capacities_workspace_id ON execution_capacities (workspace_id);
 
+CREATE INDEX ix_execution_case_links_workspace_id ON execution_case_links (workspace_id);
+
+CREATE INDEX ix_execution_cases_workspace_id ON execution_cases (workspace_id);
+
 CREATE INDEX ix_execution_context_sources_workspace_id ON execution_context_sources (workspace_id);
 
 CREATE INDEX ix_execution_context_versions_workspace_id ON execution_context_versions (workspace_id);
@@ -2401,6 +2467,6 @@ CREATE INDEX runtime_pool_policies_inventory_idx ON runtime_pool_policies (works
 
 CREATE INDEX sessions_mfa_factor_idx ON sessions (user_id, mfa_factor_id, mfa_factor_version);
 
-INSERT INTO schema_version (version, installed_at) VALUES (16, CURRENT_TIMESTAMP);
+INSERT INTO schema_version (version, installed_at) VALUES (17, CURRENT_TIMESTAMP);
 
 COMMIT;

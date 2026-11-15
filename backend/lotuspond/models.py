@@ -2409,6 +2409,78 @@ V16_TABLES = frozenset(
 )
 
 
+# Schema v17 (E06, second part; docs/superpowers/specs/2026-11-15-cases-design.md).
+CASE_RESOLUTIONS = (
+    "corrected_by_hand",
+    "handled_by_retry",
+    "no_action_needed",
+    "handled_elsewhere",
+)
+
+
+class ExecutionCase(FleetScoped, Base):
+    """A business item in one environment, named by its key, held encrypted.
+
+    `key_sha256` is the key artifact's own digest (the canonical `{"key": …}`), so it
+    names the case uniquely without keeping the key in plain text.
+    """
+
+    __tablename__ = "execution_cases"
+    key_artifact_id: Mapped[str] = mapped_column(String(36))
+    key_artifact_version: Mapped[int] = mapped_column(Integer)
+    key_sha256: Mapped[str] = mapped_column(String(64))
+    created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    owner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    owner_since_ms: Mapped[int | None] = mapped_column(BigInteger)
+    owner_request_id: Mapped[str | None] = mapped_column(String(128))
+    resolution: Mapped[str | None] = mapped_column(String(24))
+    resolution_request_id: Mapped[str | None] = mapped_column(String(128))
+    resolved_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    resolved_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    # Executions admitted at or before this time are covered by the resolution.
+    resolved_through_ms: Mapped[int | None] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        execution_artifact("key"),
+        UniqueConstraint(*FLEET_SCOPE, "key_sha256"),
+        CheckConstraint("(owner_user_id IS NULL) = (owner_since_ms IS NULL)"),
+        CheckConstraint("owner_request_id IS NULL OR length(owner_request_id) BETWEEN 1 AND 128"),
+        CheckConstraint(f"resolution IS NULL OR resolution IN ({sql_values(CASE_RESOLUTIONS)})"),
+        CheckConstraint(
+            "(resolution IS NULL) = (resolution_request_id IS NULL) AND "
+            "(resolution IS NULL) = (resolved_by_user_id IS NULL) AND "
+            "(resolution IS NULL) = (resolved_at_ms IS NULL) AND "
+            "(resolution IS NULL) = (resolved_through_ms IS NULL)"
+        ),
+        CheckConstraint(
+            "resolution_request_id IS NULL OR length(resolution_request_id) BETWEEN 1 AND 128"
+        ),
+        CheckConstraint(f"owner_since_ms IS NULL OR owner_since_ms {SAFE}"),
+        CheckConstraint(f"resolved_at_ms IS NULL OR resolved_at_ms {SAFE}"),
+        CheckConstraint(f"resolved_through_ms IS NULL OR resolved_through_ms {SAFE}"),
+        *execution_hashes("key_sha256"),
+    )
+
+
+class ExecutionCaseLink(FleetScoped, Base):
+    """One execution of a case; an execution belongs to at most one case."""
+
+    __tablename__ = "execution_case_links"
+    case_id: Mapped[str] = mapped_column(String(36))
+    execution_id: Mapped[str] = mapped_column(String(36))
+    linked_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    linked_at_ms: Mapped[int] = mapped_column(BigInteger)
+    __table_args__ = fleet_scoped(
+        fleet_parent("execution_cases", "case_id"),
+        fleet_parent("executions", "execution_id"),
+        UniqueConstraint(*FLEET_SCOPE, "execution_id"),
+        UniqueConstraint(*FLEET_SCOPE, "case_id", "execution_id"),
+        *execution_safe("linked_at_ms"),
+    )
+
+
+V17_TABLES = frozenset({"execution_cases", "execution_case_links"})
+
+
 EXECUTION_TABLES = frozenset(
     {
         "executable_publications",
@@ -2437,4 +2509,4 @@ EXECUTION_TABLES = frozenset(
         "execution_reconciliation_observations",
     }
 )
-EXECUTION_TABLES = EXECUTION_TABLES | V16_TABLES
+EXECUTION_TABLES = EXECUTION_TABLES | V16_TABLES | V17_TABLES

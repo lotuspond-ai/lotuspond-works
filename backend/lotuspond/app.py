@@ -14,6 +14,7 @@ from .database import engine_for, sessions_for
 from .execution.action_routes import router as execution_action_router
 from .execution.action_runtime_routes import router as execution_action_runtime_router
 from .execution.boundary import ExecutionRequestBoundary, ExecutionServices
+from .execution.case_routes import router as execution_case_router
 from .execution.outcome_routes import router as execution_outcome_router
 from .execution.routes import router as execution_router
 from .execution.runtime_routes import router as execution_runtime_router
@@ -311,6 +312,13 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.4.0",
+                    "id": "cases",
+                    "date": "2026-11-15",
+                    "title": "Cases: one place per business item",
+                    "description": "A case collects the runs that handled one business item, such as a purchase order, under its key, which is stored encrypted. Its outcome is its latest run's. When a run needs a person, someone takes the case and marks how it was dealt with, from a fixed list; a later problem reopens it. The new Cases page lists them with the ones that need a person first. This adds database schema version 17 (two new tables; nothing existing changes).",
+                },
                 {
                     "version": "0.4.0",
                     "id": "verified-outcomes",
@@ -660,6 +668,7 @@ def create_app(
     app.include_router(execution_task_router)
     app.include_router(execution_action_router)
     app.include_router(execution_outcome_router)
+    app.include_router(execution_case_router)
     app.include_router(execution_runtime_router)
     app.include_router(execution_action_runtime_router)
     app.include_router(workflow_router)

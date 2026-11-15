@@ -216,3 +216,45 @@ const effects: Record<string, string> = {
 export function effectWords(state: string) {
   return effects[state] ?? 'Unknown';
 }
+
+// E06, second part (docs/superpowers/specs/2026-11-15-cases-design.md): business cases.
+export type CaseResolution =
+  'corrected_by_hand' | 'handled_by_retry' | 'no_action_needed' | 'handled_elsewhere';
+
+export const resolutionWords: Record<CaseResolution, string> = {
+  corrected_by_hand: 'Corrected by hand in the business system',
+  handled_by_retry: 'Handled by a later run',
+  no_action_needed: 'No action needed',
+  handled_elsewhere: 'Handled outside LotusPond',
+};
+
+export type CaseExecution = {
+  id: string;
+  state: string;
+  admitted_at_ms: number;
+  outcome: BusinessOutcome;
+  exception: boolean;
+};
+
+export type BusinessCase = {
+  id: string;
+  key: string | null;
+  key_sha256: string;
+  created_at: string;
+  outcome: BusinessOutcome | 'empty';
+  needs_person: boolean;
+  owner: (NonNullable<TracePerson> & { since_ms: number }) | null;
+  resolution: {
+    kind: CaseResolution;
+    resolved_by: TracePerson;
+    resolved_at_ms: number;
+  } | null;
+  execution_count: number;
+  executions?: CaseExecution[];
+};
+
+// Cases that need a person first, unowned before owned, then the rest in their order.
+export function caseOrder(cases: readonly BusinessCase[]) {
+  const rank = (item: BusinessCase) => (item.needs_person ? (item.owner ? 1 : 0) : 2);
+  return [...cases].sort((a, b) => rank(a) - rank(b));
+}
