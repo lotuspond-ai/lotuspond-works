@@ -342,6 +342,23 @@ function execution(path: string, method: string, body: Record<string, unknown>) 
   if (path === 'human-tasks') return page(tasks.filter((task) => task.state === 'open'));
   if (path === 'deployments') return page(deployments);
   if (path === 'executions') return page(executions);
+  if (path.startsWith('outcomes'))
+    return json({
+      since_ms: 0,
+      deployment_id: null,
+      total: executions.length,
+      truncated: false,
+      outcomes: {
+        in_progress: 4,
+        unknown: 0,
+        not_verified: 0,
+        verified: 1,
+        completed: 0,
+        partial: 0,
+        no_effect: 1,
+      },
+      exceptions: 1,
+    });
   const task = /^human-tasks\/([^/]+)(?:\/(\w+))?$/.exec(path);
   if (task) {
     const found = tasks.find((item) => item.id === task[1]);
@@ -359,10 +376,63 @@ function execution(path: string, method: string, body: Record<string, unknown>) 
     if (task[2] === 'submission') found.state = 'submitted';
     return json(found);
   }
-  const run = /^executions\/([^/]+)(?:\/(\w+))?$/.exec(path);
+  const run = /^executions\/([^/]+)(?:\/(\w+))?(?:\/export)?$/.exec(path);
   const found = run && executions.find((item) => item.id === run[1]);
   if (!run || !found) return json({ detail: { error: 'not_found', message: 'not_found' } }, 404);
   if (!run[2]) return json(found);
+  if (run[2] === 'trace') {
+    const done = found.state === 'succeeded';
+    const refund = refundRuns.has(found.id);
+    const state =
+      found.state === 'succeeded'
+        ? 'verified'
+        : found.state === 'failed'
+          ? 'no_effect'
+          : 'in_progress';
+    return json({
+      format: 'lotuspond.execution-trace.v1',
+      execution: { id: found.id, state: found.state },
+      version: {
+        deployment_id: '0193a6f0-12ab-7c4d-8e5f-6a7b8c9d0e1f',
+        deployment_revision_id: '0193a6f1-7c2e-7a1b-9c8d-e7f6a5b4c3d2',
+        revision: 3,
+        package: 'refund-assistant',
+        package_version: '1.4.0',
+        package_sha256: digest('c4'),
+        release_id: 'release-fixture',
+      },
+      actions: refund
+        ? [
+            {
+              action_id: `a-${found.id}`,
+              step_id: 'issue_refund',
+              connector: { name: 'payments', version: '2.1.0' },
+              operation: 'issue_refund',
+              approval_mode: 'human',
+              authorization: done ? 'approved' : 'awaiting_review',
+              effect: done ? 'observed' : 'not_dispatched',
+              outcome: done ? 'verified' : 'unknown',
+              review: {
+                task_id: 't-refund',
+                state: done ? 'decided' : 'open',
+                decision: done
+                  ? {
+                      decision: 'allow',
+                      decided_by: { user_id: 'u2', name: 'Asha Rao' },
+                      issued_at_ms: at(-90),
+                    }
+                  : null,
+              },
+              verification: done
+                ? { state: 'verified', rule_id: 'refund_recorded', observed_at_ms: at(-89) }
+                : null,
+            },
+          ]
+        : [],
+      outcome: { state, exception: found.state === 'failed' },
+      trace_sha256: digest('d5'),
+    });
+  }
   if (run[2] === 'events') return json({ items: events(found.id), next_after_sequence: null });
   if (run[2] === 'waits')
     return page(

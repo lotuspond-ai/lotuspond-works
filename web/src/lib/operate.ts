@@ -102,3 +102,117 @@ export function inboxOrder(tasks: readonly HumanTask[]) {
     (a, b) => Number(b.escalated) - Number(a.escalated) || a.deadline_ms - b.deadline_ms,
   );
 }
+
+// E06 (docs/superpowers/specs/2026-11-15-verified-outcomes-design.md): an execution's business
+// outcome, as the server's one rule decides it. The console never recomputes it.
+export type BusinessOutcome =
+  'in_progress' | 'unknown' | 'not_verified' | 'verified' | 'completed' | 'partial' | 'no_effect';
+
+export const outcomeWords: Record<BusinessOutcome, { label: string; tone: string; text: string }> =
+  {
+    in_progress: {
+      label: 'In progress',
+      tone: 'warning',
+      text: 'It has not finished, so nothing is settled yet.',
+    },
+    unknown: {
+      label: 'Unknown',
+      tone: 'warning',
+      text: 'Whether a write happened, or what it did, is not known. A person must settle it.',
+    },
+    not_verified: {
+      label: 'Not verified',
+      tone: 'danger',
+      text: 'A write was made, and reading the system back did not confirm it.',
+    },
+    verified: {
+      label: 'Verified',
+      tone: 'success',
+      text: 'It finished, and every write it made was read back and verified.',
+    },
+    completed: {
+      label: 'Completed',
+      tone: 'success',
+      text: 'It finished without writing to any system.',
+    },
+    partial: {
+      label: 'Partial',
+      tone: 'warning',
+      text: 'It stopped after some verified writes; the rest were not made.',
+    },
+    no_effect: {
+      label: 'No effect',
+      tone: 'neutral',
+      text: 'It stopped before writing anything.',
+    },
+  };
+
+export function outcomeOf(value: unknown) {
+  return outcomeWords[value as BusinessOutcome] ?? outcomeWords.unknown;
+}
+
+export type TracePerson = { user_id: string; name: string | null } | null;
+
+export type TraceAction = {
+  action_id: string;
+  step_id: string;
+  connector: { name: string | null; version: string | null };
+  operation: string | null;
+  approval_mode: 'none' | 'human';
+  authorization: string;
+  effect: string;
+  outcome: string;
+  review: {
+    task_id: string;
+    state: string;
+    decision: {
+      decision: 'allow' | 'deny';
+      decided_by: TracePerson;
+      issued_at_ms: number;
+    } | null;
+  } | null;
+  verification: { state: string; rule_id: string; observed_at_ms: number } | null;
+};
+
+export type Trace = {
+  version: {
+    package: string;
+    package_version: string;
+    package_sha256: string;
+    revision: number;
+    release_id: string | null;
+  };
+  actions: TraceAction[];
+  outcome: { state: BusinessOutcome; exception: boolean };
+  trace_sha256: string;
+};
+
+export type OutcomeSummary = {
+  total: number;
+  truncated: boolean;
+  outcomes: Record<BusinessOutcome, number>;
+  exceptions: number;
+};
+
+// Who allowed an action, in words: a decision names its person; no review is said plainly.
+export function allowedBy(action: TraceAction) {
+  if (action.approval_mode === 'none') return 'Allowed by its policy without review';
+  const decision = action.review?.decision;
+  if (!decision) return 'Waiting for a review';
+  const who = decision.decided_by?.name || 'a reviewer';
+  return `${decision.decision === 'allow' ? 'Allowed' : 'Denied'} by ${who}`;
+}
+
+// An action's effect state in words (E05's `effect_state`).
+const effects: Record<string, string> = {
+  not_dispatched: 'Not sent',
+  dispatching: 'Being sent',
+  accepted: 'Sent, and accepted by the system',
+  observed: 'Sent, and seen in the system',
+  unknown: 'Sent, with no certain answer',
+  absent: 'Not made: reading the system back found no change',
+};
+
+export function effectWords(state: string) {
+  return effects[state] ?? 'Unknown';
+}

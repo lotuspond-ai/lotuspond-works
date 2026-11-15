@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  allowedBy,
   allowedControls,
+  effectWords,
   fromMs,
   inboxOrder,
   opaqueId,
   operateMessage,
+  outcomeOf,
   scopedPath,
   taskActions,
   type HumanTask,
@@ -106,4 +109,59 @@ test('the inbox puts escalated tasks first, then the nearest deadline', () => {
     ordered.map((item) => item.id),
     ['escalated', 'soon', 'late'],
   );
+});
+
+test('every business outcome has words, and an unexpected one reads as unknown', () => {
+  for (const state of [
+    'in_progress',
+    'unknown',
+    'not_verified',
+    'verified',
+    'completed',
+    'partial',
+    'no_effect',
+  ])
+    assert.ok(outcomeOf(state).label && outcomeOf(state).text, state);
+  assert.equal(outcomeOf('new_state').label, 'Unknown');
+});
+
+test('who allowed an action is named, never assumed', () => {
+  const base = {
+    action_id: 'a',
+    step_id: 's',
+    connector: { name: 'erp', version: '1' },
+    operation: 'update',
+    authorization: 'approved',
+    effect: 'observed',
+    outcome: 'verified',
+    verification: null,
+  };
+  assert.equal(
+    allowedBy({ ...base, approval_mode: 'none', review: null }),
+    'Allowed by its policy without review',
+  );
+  assert.equal(
+    allowedBy({
+      ...base,
+      approval_mode: 'human',
+      review: { task_id: 't', state: 'open', decision: null },
+    }),
+    'Waiting for a review',
+  );
+  const decided = (decision: 'allow' | 'deny', name: string | null) => ({
+    ...base,
+    approval_mode: 'human' as const,
+    review: {
+      task_id: 't',
+      state: 'decided',
+      decision: { decision, decided_by: { user_id: 'u', name }, issued_at_ms: 1 },
+    },
+  });
+  assert.equal(allowedBy(decided('allow', 'Asha')), 'Allowed by Asha');
+  assert.equal(allowedBy(decided('deny', null)), 'Denied by a reviewer');
+});
+
+test('effect states read as words, and an unexpected one as unknown', () => {
+  assert.equal(effectWords('observed'), 'Sent, and seen in the system');
+  assert.equal(effectWords('something'), 'Unknown');
 });

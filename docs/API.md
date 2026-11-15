@@ -161,4 +161,14 @@ API keys, runtimes, viewers and platform administrators never claim, decide or s
 
 `authorization` is one of `proposed`, `awaiting_review`, `approved`, `denied`, `review_expired`, `expired`, `withdrawn`, `superseded`; `effect` one of `not_dispatched`, `dispatching`, `accepted`, `observed`, `unknown`, `absent`; `outcome` one of `unknown`, `verified`, `not_verified`. An execution that fails on an action names the cause in its `reason`: `approval_denied`, `review_expired`, `approval_expired`, `approval_revoked`, `binding_refused`, `not_applied`, `outcome_not_verified`, `outcome_unknown` or `recovery_epoch_changed`.
 
+**Verified outcomes** (E06, first part; `docs/superpowers/specs/2026-11-15-verified-outcomes-design.md`). Read models over committed rows, digests and identifiers only. They need no action services.
+
+| Route | Who | Notes |
+| --- | --- | --- |
+| `GET /executions/{id}/trace` | `read` | `format` (`lotuspond.execution-trace.v1`); `execution` (states, input/result digests, initiator); `version` (deployment, revision, package name/version/digest, plan and configuration digests, `release_id`); `actions` (each with connector, operation, intent/target/input/policy digests, `review` and its `decision` with `decided_by`, `dispatches`, `receipts`, `readbacks`, `verification`); `outcome` `{state, exception}`; `trace_sha256` over the canonical JSON without it |
+| `GET /executions/{id}/trace/export` | `read` | The same document as a download (`Cache-Control: no-store`), audited as `executions.trace_exported` |
+| `GET /outcomes?since_ms=&deployment_id=` | `read` | Executions admitted since `since_ms` (optionally one deployment): `total`, `truncated` (only the newest 10,000 are counted), `outcomes` by state, `exceptions` |
+
+The business `outcome.state` is, in order: `in_progress` (not finished); `unknown` (a write's occurrence or outcome is uncertain, or the execution awaits reconciliation); `not_verified` (a write was made and its verification failed); `verified` (succeeded, every write verified); `completed` (succeeded, no write); `partial` (failed or cancelled after verified writes); `no_effect` (failed or cancelled, nothing written). `unknown`, `not_verified`, `partial` and a failed `no_effect` are exceptions.
+
 **Runtime action routes** (`/api/v1/runtime/actions/…`: `poll`, `records`, `claim`, `renew`, `receipts`, `stops`, `{attempt_id}/values`) serve only an enrolled runtime's own session, under E03's command trust. A receipt or stop of a write already claimed is recorded even if its initiator has since lost `execute`; integrity, epoch, recipient, expiry and connection still decide. Operations: `docs/operations/actions-human-tasks.md`.
