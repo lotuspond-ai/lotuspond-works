@@ -123,9 +123,15 @@ class ExecutionServices:
     reconciliation: object
     context: object
     actions: ActionServices | None = None
+    # Package evaluation runs (proving a package before release); optional for callers
+    # that build services by hand.
+    evaluations: object | None = None
 
     def __post_init__(self):
-        if any(getattr(self, item.name) is None for item in fields(self) if item.name != "actions"):
+        optional = {"actions", "evaluations"}
+        if any(
+            getattr(self, item.name) is None for item in fields(self) if item.name not in optional
+        ):
             raise ValueError("Every execution service is required")
         if self.actions is not None and type(self.actions) is not ActionServices:
             raise ValueError("Invalid action services")

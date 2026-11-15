@@ -306,6 +306,35 @@ def start_production_execution(
     return _json(view)
 
 
+@router.post("/package-evaluations", status_code=201, tags=["package evaluations"])
+def start_package_evaluation(
+    project_id: str, environment_id: str, request: Request, raw=BODY, db=DB
+):
+    """Run the package of an evaluation deployment once per named scenario."""
+    current = actor(db, request, project_id, environment_id, "execute")
+    view = _evaluations(request).start(db, current, raw)
+    audit(db, current, "package_evaluations.started", view["id"], request_key(request))
+    return view
+
+
+@router.post("/package-evaluations/{run_id}/advance", tags=["package evaluations"])
+def advance_package_evaluation(
+    project_id: str, environment_id: str, run_id: str, request: Request, db=DB
+):
+    """Record finished and reviewing executions; complete the run when all have results."""
+    current = actor(db, request, project_id, environment_id, "execute")
+    view = _evaluations(request).advance(db, current, _id(run_id))
+    audit(db, current, "package_evaluations.advanced", view["id"], request_key(request))
+    return view
+
+
+def _evaluations(request):
+    found = services(request).evaluations
+    if found is None:
+        raise ExecutionError("authority_unavailable")
+    return found
+
+
 @router.get("/executions", tags=["production executions"])
 def list_production_executions(project_id: str, environment_id: str, request: Request, db=DB):
     current = actor(db, request, project_id, environment_id, "read")

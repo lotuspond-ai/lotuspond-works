@@ -52,6 +52,9 @@ def reply_for(rounds, request_body, model):
 class ModelDouble:
     def __init__(self, cert, key, *, host="127.0.0.1", token="double-key"):
         self.rounds, self.requests, self.token = [{"output": None}], [], token
+        # Optional: rounds per key, chosen when the key appears in the request's first
+        # message (several executions at once, each with its own script).
+        self.by_key = {}
         double = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -72,10 +75,16 @@ class ModelDouble:
                 headers = {k.lower(): v for k, v in self.headers.items()}
                 double.requests.append({"path": self.path, "headers": headers, "body": body})
                 if headers.get("authorization") != f"Bearer {double.token}":
-                    return self._send(401, {"type": "error", "error": {"type": "authentication_error"}})
+                    return self._send(
+                        401, {"type": "error", "error": {"type": "authentication_error"}}
+                    )
                 if self.path != "/v1/messages":
                     return self._send(404, {"type": "error", "error": {"type": "not_found_error"}})
-                return self._send(200, reply_for(double.rounds, body, body.get("model", "")))
+                first = json.dumps(body.get("messages", [])[:1])
+                rounds = next(
+                    (r for key, r in double.by_key.items() if key in first), double.rounds
+                )
+                return self._send(200, reply_for(rounds, body, body.get("model", "")))
 
         self.server = ThreadingHTTPServer((host, 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

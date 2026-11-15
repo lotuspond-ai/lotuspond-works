@@ -312,6 +312,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "package-evaluations",
+                    "date": "2026-11-15",
+                    "title": "Prove a workflow package before release",
+                    "description": "A package evaluation runs one version of a workflow package once per scenario through an evaluation deployment and records each outcome: the finished result, or the exact action proposed for a person's review, which is never approved, so evaluating writes nothing. A release of that run, under a policy and with a second administrator's approval, then admits exactly that package version to production; a release of any other version admits nothing. The API routes are POST package-evaluations and POST package-evaluations/{run_id}/advance.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "restored-action-readbacks",
                     "date": "2026-11-14",
                     "title": "Restored actions are read back in every case",
