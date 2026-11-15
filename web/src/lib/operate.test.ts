@@ -3,6 +3,11 @@ import test from 'node:test';
 import {
   allowedBy,
   allowedControls,
+  bindingTemplate,
+  deploymentChanges,
+  enrollCommand,
+  fill,
+  seenRecently,
   caseOrder,
   effectWords,
   fromMs,
@@ -189,4 +194,36 @@ test('cases that need a person come first, unowned before owned', () => {
     ordered.map((c) => c.id),
     ['open', 'owned', 'fine'],
   );
+});
+
+test('a worker is marked when not seen for two minutes', () => {
+  assert.equal(seenRecently(1_000, 1_000 + 120_000), true);
+  assert.equal(seenRecently(1_000, 1_000 + 120_001), false);
+  assert.equal(seenRecently(null, 0), false);
+});
+
+test('deployments change status, and revoked is final', () => {
+  assert.deepEqual(deploymentChanges('enabled'), ['disabled', 'revoked']);
+  assert.deepEqual(deploymentChanges('disabled'), ['enabled', 'revoked']);
+  assert.deepEqual(deploymentChanges('revoked'), []);
+});
+
+test('queue meters stay within bounds', () => {
+  assert.equal(fill(3, 5), 0.6);
+  assert.equal(fill(9, 5), 1);
+  assert.equal(fill(1, 0), 0);
+});
+
+test('every pin gets a binding; connectors and knowledge name what they bind to', () => {
+  const ref = (kind: string) => ({ kind, name: kind, version: '1.0.0', sha256: 'a'.repeat(64) });
+  const template = bindingTemplate([ref('connector'), ref('model'), ref('knowledge')]);
+  assert.deepEqual(
+    template.map((item) => Object.keys(item).sort().join(',')),
+    [
+      'connection_id,connection_version,dependency',
+      'dependency',
+      'dependency,source_id,source_version',
+    ],
+  );
+  assert.equal(enrollCommand().startsWith('lotuspond-runtime enroll --config'), true);
 });

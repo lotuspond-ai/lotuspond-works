@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api.js';
+import { DeploymentPanel } from '../components/operate/DeploymentPanel.js';
 import { EnvironmentScope } from '../components/operate/EnvironmentScope.js';
+import { QueuePanel } from '../components/operate/QueuePanel.js';
+import { Workers } from '../components/operate/Workers.js';
 import {
   Alert,
   EmptyState,
@@ -57,6 +60,24 @@ function problem(reason: unknown) {
 // so the random tail tells them apart.
 const short = (id: string) => `…${id.slice(-8)}`;
 
+type Tab = 'runs' | 'deployments' | 'workers' | 'queue';
+const TABS: readonly (readonly [Tab, string])[] = [
+  ['runs', 'Runs'],
+  ['deployments', 'Deployments'],
+  ['workers', 'Workers'],
+  ['queue', 'Queue'],
+];
+const TAB_KEY = 'lotuspond.control-room.tab';
+
+function recallTab(): Tab {
+  try {
+    const value = sessionStorage.getItem(TAB_KEY);
+    return TABS.some(([id]) => id === value) ? (value as Tab) : 'runs';
+  } catch {
+    return 'runs';
+  }
+}
+
 // Control Room (docs/superpowers/specs/2026-11-15-review-inbox-control-room-design.md): the
 // deployments and executions of one environment, with the controls an operator may use.
 export function ControlRoom({
@@ -78,6 +99,7 @@ export function ControlRoom({
             scope={scope}
             picker={picker}
             canControl={role !== 'viewer'}
+            canManage={role === 'owner' || role === 'admin'}
           />
         )}
       </EnvironmentScope>
@@ -115,12 +137,23 @@ function Room({
   scope,
   picker,
   canControl,
+  canManage,
 }: {
   workspace: string;
   scope: Scope;
   picker: React.ReactNode;
   canControl: boolean;
+  canManage: boolean;
 }) {
+  const [tab, setTab] = useState<Tab>(recallTab);
+  function choose(next: Tab) {
+    setTab(next);
+    try {
+      sessionStorage.setItem(TAB_KEY, next);
+    } catch {
+      /* Private browsers can refuse storage. */
+    }
+  }
   const deployments = usePaged<Deployment>(workspace, scope, 'deployments');
   const executions = usePaged<Execution>(workspace, scope, 'executions');
   const [openId, setOpenId] = useState('');
@@ -151,7 +184,7 @@ function Room({
       <SectionHeader
         eyebrow="Operate"
         title="Control Room"
-        description="What is deployed in this environment, what is running and what each run achieved, with the controls to pause, resume or cancel it."
+        description="What runs in this environment: its runs and what each achieved, its deployments, the workers that run them, and its queue."
         actions={
           <>
             {picker}
@@ -161,186 +194,157 @@ function Room({
           </>
         }
       />
-      {sameError ? (
-        <div className="notice operate-unavailable" role="status">
-          <p>{executions.error}</p>
-          <button className="secondary" onClick={retry}>
-            Try again
+      <div className="studio-mode control-tabs" role="tablist" aria-label="Control Room">
+        {TABS.map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? undefined : 'secondary'}
+            onClick={() => choose(id)}
+          >
+            {label}
           </button>
-        </div>
-      ) : (
-        <>
-          {summary && summary.total > 0 && (
-            <section className="panel outcome-summary" aria-labelledby="summary-heading">
-              <h2 id="summary-heading">Last 7 days</h2>
-              <p>
-                {summary.total.toLocaleString()} execution{summary.total === 1 ? '' : 's'}
-                {summary.truncated ? ' (the newest 10,000)' : ''},{' '}
-                <strong>
-                  {summary.exceptions.toLocaleString()} need
-                  {summary.exceptions === 1 ? 's' : ''} a person
-                </strong>
-                .
-              </p>
-              <ul>
-                {Object.entries(summary.outcomes)
-                  .filter(([, count]) => count > 0)
-                  .map(([state, count]) => (
-                    <li key={state}>
-                      <span className={`badge badge-${outcomeOf(state).tone}`}>
-                        <span aria-hidden="true" />
-                        {outcomeOf(state).label}
-                      </span>{' '}
-                      {count.toLocaleString()}
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          )}
-          <section className="panel" aria-labelledby="deployments-heading">
-            <h2 id="deployments-heading">Deployments</h2>
-            {!sameError && deployments.error && (
-              <Alert onRetry={() => void deployments.load()}>{deployments.error}</Alert>
-            )}
-            {deployments.items === null ? (
-              <p className="loading-state" role="status">
-                Loading deployments…
-              </p>
-            ) : !deployments.items.length ? (
-              !deployments.error && (
-                <p className="hint">
-                  Nothing is deployed here yet. A deployment admits one published package version to
-                  this environment.
+        ))}
+      </div>
+      {tab === 'workers' && <Workers workspace={workspace} scope={scope} canManage={canManage} />}
+      {tab === 'queue' && <QueuePanel workspace={workspace} scope={scope} />}
+      {(tab === 'runs' || tab === 'deployments') &&
+        (sameError ? (
+          <div className="notice operate-unavailable" role="status">
+            <p>{executions.error}</p>
+            <button className="secondary" onClick={retry}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          <>
+            {tab === 'runs' && summary && summary.total > 0 && (
+              <section className="panel outcome-summary" aria-labelledby="summary-heading">
+                <h2 id="summary-heading">Last 7 days</h2>
+                <p>
+                  {summary.total.toLocaleString()} execution{summary.total === 1 ? '' : 's'}
+                  {summary.truncated ? ' (the newest 10,000)' : ''},{' '}
+                  <strong>
+                    {summary.exceptions.toLocaleString()} need
+                    {summary.exceptions === 1 ? 's' : ''} a person
+                  </strong>
+                  .
                 </p>
-              )
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <caption className="sr-only">Deployments</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Deployment</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Active revision</th>
-                      <th scope="col">Writes sent without review</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {deployments.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="primary-cell cell-mono" title={item.id}>
-                          {short(item.id)}
-                        </td>
-                        <td>
-                          <StatusBadge value={item.status} />
-                        </td>
-                        <td className="cell-mono" title={item.revision_id ?? undefined}>
-                          {item.revision_id ? short(item.revision_id) : 'None'}
-                        </td>
-                        <td>
-                          {item.unreviewed_operations?.length
-                            ? item.unreviewed_operations.join(', ')
-                            : 'None'}
-                        </td>
-                      </tr>
+                <ul>
+                  {Object.entries(summary.outcomes)
+                    .filter(([, count]) => count > 0)
+                    .map(([state, count]) => (
+                      <li key={state}>
+                        <span className={`badge badge-${outcomeOf(state).tone}`}>
+                          <span aria-hidden="true" />
+                          {outcomeOf(state).label}
+                        </span>{' '}
+                        {count.toLocaleString()}
+                      </li>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                </ul>
+              </section>
             )}
-            {deployments.next && (
-              <button
-                className="secondary"
-                onClick={() => void deployments.load(deployments.next!)}
-              >
-                Load more
-              </button>
+            {tab === 'deployments' && (
+              <DeploymentPanel
+                workspace={workspace}
+                scope={scope}
+                items={deployments.items}
+                canManage={canManage}
+                onChanged={() => void deployments.load()}
+              />
             )}
-          </section>
-
-          <section className="panel" aria-labelledby="executions-heading">
-            <h2 id="executions-heading">Executions</h2>
-            {!sameError && executions.error && (
-              <Alert onRetry={() => void executions.load()}>{executions.error}</Alert>
-            )}
-            {executions.items === null ? (
-              <p className="loading-state" role="status">
-                Loading executions…
-              </p>
-            ) : !executions.items.length ? (
-              !executions.error && (
-                <EmptyState
-                  glyph="enclosure"
-                  title="No executions yet"
-                  description="Each run of a deployed workflow appears here with its observed state and any control requested."
-                />
-              )
-            ) : (
-              <div className="operate-split operate-split-even">
-                <div className="table-wrap">
-                  <table>
-                    <caption className="sr-only">Executions</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">Execution</th>
-                        <th scope="col">State</th>
-                        <th scope="col">Control requested</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {executions.items.map((item) => (
-                        <tr key={item.id} className={item.id === openId ? 'selected' : undefined}>
-                          <td className="primary-cell">
-                            <button
-                              className="text-button cell-mono"
-                              aria-current={item.id === openId ? 'true' : undefined}
-                              onClick={() => setOpenId(item.id)}
-                              title={item.id}
-                            >
-                              {short(item.id)}
-                            </button>
-                          </td>
-                          <td>
-                            <StatusBadge value={item.state} />
-                          </td>
-                          <td>
-                            {item.requested_state !== 'running' &&
-                            item.requested_state !== item.state
-                              ? humanize(item.requested_state)
-                              : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {executions.next && (
-                    <button
-                      className="secondary"
-                      onClick={() => void executions.load(executions.next!)}
-                    >
-                      Load more
-                    </button>
-                  )}
-                </div>
-                {opened ? (
-                  <ExecutionDetail
-                    key={opened.id}
-                    workspace={workspace}
-                    scope={scope}
-                    execution={opened}
-                    canControl={canControl}
-                    onChanged={() => void executions.load()}
-                  />
+            {tab === 'runs' && (
+              <section className="panel" aria-labelledby="executions-heading">
+                <h2 id="executions-heading">Executions</h2>
+                {!sameError && executions.error && (
+                  <Alert onRetry={() => void executions.load()}>{executions.error}</Alert>
+                )}
+                {executions.items === null ? (
+                  <p className="loading-state" role="status">
+                    Loading executions…
+                  </p>
+                ) : !executions.items.length ? (
+                  !executions.error && (
+                    <EmptyState
+                      glyph="enclosure"
+                      title="No executions yet"
+                      description="Each run of a deployed workflow appears here with its observed state and any control requested."
+                    />
+                  )
                 ) : (
-                  <div className="operate-detail operate-placeholder">
-                    <p>Choose an execution to see its outcome, its writes and who allowed them.</p>
+                  <div className="operate-split operate-split-even">
+                    <div className="table-wrap">
+                      <table>
+                        <caption className="sr-only">Executions</caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Execution</th>
+                            <th scope="col">State</th>
+                            <th scope="col">Control requested</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {executions.items.map((item) => (
+                            <tr
+                              key={item.id}
+                              className={item.id === openId ? 'selected' : undefined}
+                            >
+                              <td className="primary-cell">
+                                <button
+                                  className="text-button cell-mono"
+                                  aria-current={item.id === openId ? 'true' : undefined}
+                                  onClick={() => setOpenId(item.id)}
+                                  title={item.id}
+                                >
+                                  {short(item.id)}
+                                </button>
+                              </td>
+                              <td>
+                                <StatusBadge value={item.state} />
+                              </td>
+                              <td>
+                                {item.requested_state !== 'running' &&
+                                item.requested_state !== item.state
+                                  ? humanize(item.requested_state)
+                                  : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {executions.next && (
+                        <button
+                          className="secondary"
+                          onClick={() => void executions.load(executions.next!)}
+                        >
+                          Load more
+                        </button>
+                      )}
+                    </div>
+                    {opened ? (
+                      <ExecutionDetail
+                        key={opened.id}
+                        workspace={workspace}
+                        scope={scope}
+                        execution={opened}
+                        canControl={canControl}
+                        onChanged={() => void executions.load()}
+                      />
+                    ) : (
+                      <div className="operate-detail operate-placeholder">
+                        <p>
+                          Choose an execution to see its outcome, its writes and who allowed them.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
+              </section>
             )}
-          </section>
-        </>
-      )}
+          </>
+        ))}
     </>
   );
 }

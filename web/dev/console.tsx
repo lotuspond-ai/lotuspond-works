@@ -9,6 +9,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '../src/App.js';
+import reviewedActionPattern from '../../contracts/examples/executable-v2/patterns/reviewed-action.json';
 import { createIdentityLinks } from '../src/lib/identityLinks.js';
 import { sampleDecision } from '../src/components/platform/sample.js';
 import '../src/styles.css';
@@ -362,6 +363,51 @@ const caseView = (item: (typeof cases)[number], full = true) => {
   };
 };
 
+type FixturePool = { id: string; name: string; status: string; current_version: number | null };
+const pools: FixturePool[] = [
+  {
+    id: '0193ab00-0001-7000-8000-000000000001',
+    name: 'plant-a-linux',
+    status: 'active',
+    current_version: 2,
+  },
+  {
+    id: '0193ab00-0002-7000-8000-000000000002',
+    name: 'staging-linux',
+    status: 'active',
+    current_version: null,
+  },
+];
+const enrollments: Record<string, { id: string; status: string; [key: string]: unknown }[]> = {
+  '0193ab00-0001-7000-8000-000000000001': [
+    {
+      id: '0193ac00-0001-7000-8000-000000000001',
+      pool_id: '0193ab00-0001-7000-8000-000000000001',
+      status: 'consumed',
+      expires_at_ms: at(-1000),
+      consumed_at_ms: at(-1400),
+    },
+  ],
+};
+const instances = [
+  {
+    id: '0193ad00-0001-7000-8000-000000000001',
+    pool_id: '0193ab00-0001-7000-8000-000000000001',
+    status: 'active',
+    generation: 3,
+    current_policy_version: 2,
+    last_seen_at_ms: at(-0.3),
+  },
+  {
+    id: '0193ad00-0002-7000-8000-000000000002',
+    pool_id: '0193ab00-0001-7000-8000-000000000001',
+    status: 'active',
+    generation: 1,
+    current_policy_version: 2,
+    last_seen_at_ms: at(-45),
+  },
+];
+
 function execution(path: string, method: string, body: Record<string, unknown>) {
   if (mode.has('unwired'))
     return json(
@@ -371,11 +417,116 @@ function execution(path: string, method: string, body: Record<string, unknown>) 
   const page = <T,>(items: T[]) =>
     json({ items: mode.has('empty') ? [] : items, next_after_id: null });
   if (path === 'human-tasks') return page(tasks.filter((task) => task.state === 'open'));
-  if (path === 'deployments') return page(deployments);
+  if (path === 'deployments' && method === 'GET') return page(deployments);
+  // Control Room operations: a queue, pools with tokens, enrolled runtimes and deployment
+  // changes, answered as the API does (owners and admins for every change).
+  if (path === 'execution-queue')
+    return json({
+      capacity: {
+        active: 1,
+        active_limit: 5,
+        pending: 4,
+        pending_limit: 1000,
+        retained_waits: 3,
+        wait_limit: 10000,
+      },
+      states: {
+        pending: 4,
+        running: 1,
+        waiting: 3,
+        paused: 0,
+        reconciliation_required: 0,
+        succeeded: 1,
+        failed: 1,
+        cancelled: 0,
+      },
+      oldest_pending_admitted_at_ms: at(-6),
+    });
+  if (method === 'POST' && role === 'viewer' && /^(deployments|runtime-)/.test(path))
+    return json({ error: 'forbidden', message: 'forbidden' }, 403);
+  if (path === 'deployments' && method === 'POST') {
+    const created = {
+      id: `0193aa00-0000-7000-8000-00000000000${deployments.length + 1}`,
+      revision_id: `0193aa01-0000-7000-8000-00000000000${deployments.length + 1}`,
+      status: 'disabled',
+      unreviewed_operations: [],
+    };
+    deployments.push(created);
+    return json(created, 201);
+  }
+  const status = /^deployments\/([^/]+)\/status$/.exec(path);
+  if (status && method === 'POST') {
+    const found = deployments.find((item) => item.id === status[1]);
+    if (!found) return json({ error: 'not_found', message: 'not_found' }, 404);
+    found.status = String(body.status);
+    return json(found);
+  }
+  if (path === 'runtime-pools' && method === 'GET') return page(pools);
+  if (path === 'runtime-pools' && method === 'POST') {
+    const created = {
+      id: `0193ab00-0000-7000-8000-00000000000${pools.length + 1}`,
+      name: String(body.name),
+      status: 'active',
+      current_version: null,
+    };
+    pools.push(created);
+    return json(created, 201);
+  }
+  const pool = /^runtime-pools\/([^/]+)\/(status|enrollments)(?:\/([^/]+)\/revoke)?$/.exec(path);
+  if (pool) {
+    const found = pools.find((item) => item.id === pool[1]);
+    if (!found) return json({ error: 'not_found', message: 'not_found' }, 404);
+    if (pool[2] === 'status') {
+      found.status = String(body.status);
+      return json(found);
+    }
+    const tokens = (enrollments[found.id] ??= []);
+    if (pool[3]) {
+      const token = tokens.find((item) => item.id === pool[3]);
+      if (token) token.status = 'revoked';
+      return json(token ?? {});
+    }
+    if (method === 'GET') return page(tokens);
+    const issued = {
+      id: `0193ac00-0000-7000-8000-0000000000${10 + tokens.length}`,
+      pool_id: found.id,
+      status: 'issued',
+      expires_at_ms: at(60),
+      consumed_at_ms: null,
+    };
+    tokens.push(issued);
+    return json(
+      {
+        enrollment_id: issued.id,
+        token: 'lpe_FIXTUREONLYxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+        expires_at_ms: issued.expires_at_ms,
+      },
+      201,
+    );
+  }
+  if (path === 'runtime-instances' && method === 'GET') return page(instances);
+  const revoke = /^runtime-instances\/([^/]+)\/revoke$/.exec(path);
+  if (revoke) {
+    const found = instances.find((item) => item.id === revoke[1]);
+    if (found) found.status = 'revoked';
+    return json(found ?? {});
+  }
+  const content = /^executable-packages\/([^/]+)\/content$/.exec(path);
+  if (content) return json(reviewedActionPattern);
   if (path === 'executions') return page(executions);
   // Studio v2: the reviewed-action pattern's connector is published here; its policy is not.
   if (path.startsWith('executable-packages') && method === 'GET' && !path.includes('/'))
     return page([
+      {
+        id: '0193a900-0002-7000-8000-000000000002',
+        kind: 'workflow',
+        name: 'reviewed-action',
+        version: '1.0.0',
+        package_sha256: digest('5a'),
+        plan_sha256: digest('5b'),
+        validator_id: 'fixture',
+        compiler_id: 'fixture',
+      },
       {
         id: '0193a900-0001-7000-8000-000000000001',
         kind: 'connector',

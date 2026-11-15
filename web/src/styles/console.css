@@ -2495,3 +2495,89 @@ button.decide:hover:not(:disabled) {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Control Room operations: tabs, queue, workers, deployment changes ------------------ */
+.control-tabs {
+  flex-wrap: wrap;
+}
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.panel-head h2 {
+  margin: 0;
+}
+.queue-meters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 12px 0 16px;
+}
+.queue-meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.queue-meter-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  overflow: hidden;
+}
+.queue-meter-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.queue-meter-bar span.high {
+  background: var(--warning);
+}
+.queue-meter-bar span.full {
+  background: var(--danger);
+}
+.queue-states {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.queue-states li {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.queue-states li.zero {
+  color: var(--muted);
+}
+.worker-token h2 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+.worker-token p {
+  margin: 0 0 8px;
+}
+.deployment-actions {
+  margin: 0;
+  flex-wrap: nowrap;
+}
+.new-deployment h3 {
+  margin: 0 0 12px;
+}
+.operate-trace .operate-facts li {
+  padding: 6px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+}

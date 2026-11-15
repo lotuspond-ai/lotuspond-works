@@ -160,6 +160,8 @@ API keys, runtimes, viewers and platform administrators never claim, decide or s
 
 `authorization` is one of `proposed`, `awaiting_review`, `approved`, `denied`, `review_expired`, `expired`, `withdrawn`, `superseded`; `effect` one of `not_dispatched`, `dispatching`, `accepted`, `observed`, `unknown`, `absent`; `outcome` one of `unknown`, `verified`, `not_verified`. An execution that fails on an action names the cause in its `reason`: `approval_denied`, `review_expired`, `approval_expired`, `approval_revoked`, `binding_refused`, `not_applied`, `outcome_not_verified`, `outcome_unknown` or `recovery_epoch_changed`.
 
+**Execution queue.** `GET /execution-queue` (`read`, no query) answers `{capacity, states, oldest_pending_admitted_at_ms}`: the environment's capacity row (`active`, `pending` and `retained_waits` with `active_limit`, `pending_limit` and `wait_limit`), or `null` before any admission; the number of executions in each state; and the oldest pending execution's admission time, or `null`. Read without locks. Control Room's Queue tab shows it.
+
 **Verified outcomes** (E06, first part; `docs/superpowers/specs/2026-11-15-verified-outcomes-design.md`). Read models over committed rows, digests and identifiers only. They need no action services.
 
 | Route | Who | Notes |

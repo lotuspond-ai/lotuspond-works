@@ -258,3 +258,47 @@ export function caseOrder(cases: readonly BusinessCase[]) {
   const rank = (item: BusinessCase) => (item.needs_person ? (item.owner ? 1 : 0) : 2);
   return [...cases].sort((a, b) => rank(a) - rank(b));
 }
+
+// Control Room operations (docs/superpowers/specs/2026-11-16-control-room-operations-design.md).
+
+// A worker not seen for two minutes is marked, never assumed gone: the server decides that.
+export const SEEN_RECENTLY_MS = 120_000;
+
+export function seenRecently(lastSeenMs: number | null, now = Date.now()) {
+  return lastSeenMs !== null && now - lastSeenMs <= SEEN_RECENTLY_MS;
+}
+
+export type DeploymentStatus = 'enabled' | 'disabled' | 'revoked';
+
+// The status changes a deployment offers. Revoked is final: nothing reopens it.
+export function deploymentChanges(status: string): DeploymentStatus[] {
+  if (status === 'enabled') return ['disabled', 'revoked'];
+  if (status === 'disabled') return ['enabled', 'revoked'];
+  return [];
+}
+
+// The command a runtime host runs with an issued enrollment token, saved to a private file.
+export function enrollCommand(tokenFile = '/private/enrollment') {
+  return `lotuspond-runtime enroll --config /private/runtime.json --token-file ${tokenFile}`;
+}
+
+// How full a queue limit is, for the meter: 0..1, and 0 when there is no limit.
+export function fill(count: number, limit: number) {
+  return limit > 0 ? Math.min(1, Math.max(0, count / limit)) : 0;
+}
+
+export type DependencyRef = { kind: string; name: string; version: string; sha256: string };
+
+// A deployment's bindings: one per pinned dependency, as the server requires. A connector
+// binds to a connection and a knowledge source to a source version; every other kind binds by
+// its pin alone. A dependency reached only through another (an agent's model) is added by the
+// author, as the server's answer names it.
+export function bindingTemplate(refs: readonly DependencyRef[]) {
+  return refs.map((ref) =>
+    ref.kind === 'connector'
+      ? { dependency: ref, connection_id: '<connection id>', connection_version: 1 }
+      : ref.kind === 'knowledge'
+        ? { dependency: ref, source_id: '<source id>', source_version: 1 }
+        : { dependency: ref },
+  );
+}
