@@ -134,6 +134,19 @@ Current admission identifiers are `lotuspond.workflow-package.validator.v1.1` an
 
 Pagination orders by descending `(created_at,id)`, so equal timestamps retain stable identity ordering. Cursors bind workspace and project; they confer no authority. New publications do not change the older rows reached by an existing cursor.
 
+## Executable packages (v2)
+
+Under `/api/v1/projects/{project_id}/environments/{environment_id}`, with E04's execution conventions. Only executable-v2 packages are deployable; the v1 registry above stays until its retirement (ADR-0013).
+
+| Route | Who | Notes |
+| --- | --- | --- |
+| `POST /executable-packages` | `publish` | `{package, dependency_ids, signature}` with an `Idempotency-Key`. A workflow needs a signature from a publisher the operator trusts, and every pinned catalog document published in this environment and named in `dependency_ids`; a catalog document needs the operator's admission of its digest and no signature |
+| `POST /executable-packages/check` | `publish` | `{package, dependency_ids}`: the same validator, compiler and closure rules without trust or storage. Answers `{valid, package_sha256, plan_sha256, canonical, problems}`; `canonical` is the exact text to sign, and each problem is the SDK's `{path, code, message}` (a JSON pointer whose inner names are masked, a closed code, a fixed message). Records nothing |
+| `GET /executable-packages`, `GET /executable-packages/{id}` | `read` | `id`, `kind` (`workflow` or a catalog family), `name`, `version`, `package_sha256`, `plan_sha256`, `validator_id`, `compiler_id` |
+| `GET /executable-packages/{id}/content` | `read` | The exact canonical bytes admitted, after their digest is checked |
+
+The console's Studio authors executable-v2 through these routes: it checks every change, matches pinned references to publications exactly, and publishes with a signature made outside the browser by `lotuspond-package v2 sign`.
+
 ## Reviewed actions and human tasks (E05)
 
 Every route is under `/api/v1/projects/{project_id}/environments/{environment_id}`, with E04's execution conventions: strict JSON bodies, keyset pages (`limit`, `after_id`; the response carries `next_after_id`), browser origin and MFA checks, and errors as `{error, message}` with fixed codes. Without a command key provider every route below answers 503 `authority_unavailable`, and only interpreter v1 runs.

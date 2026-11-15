@@ -449,3 +449,23 @@ def test_waits_listing_shows_open_waits_once_retained(api):
             )
         )
     assert set(listed()) == {retained, unretained[1]}
+
+
+def test_a_package_check_needs_publish_and_stores_nothing(api):
+    """Studio v2: the check route answers problems or digests, records nothing."""
+    h = api
+    body = {"package": package_body(h, 7)["package"], "dependency_ids": []}
+    checked = post(h, "/executable-packages/check", body, h.owner)
+    assert checked.status_code == 200, checked.text
+    answer = checked.json()
+    assert answer["valid"] is True and len(answer["package_sha256"]) == 64
+    listed = get(h, "/executable-packages", h.owner).json()["items"]
+    assert answer["package_sha256"] not in {item["package_sha256"] for item in listed}
+    broken = {"package": {**body["package"], "limits": "none"}, "dependency_ids": []}
+    refused = post(h, "/executable-packages/check", broken, h.owner).json()
+    assert refused["valid"] is False and refused["problems"]
+    viewer = login(h, member(h, "viewer"))
+    assert post(h, "/executable-packages/check", body, viewer).status_code == 403
+    assert (
+        post(h, "/executable-packages/check", {"package": {}, "x": 1}, h.owner).status_code == 400
+    )

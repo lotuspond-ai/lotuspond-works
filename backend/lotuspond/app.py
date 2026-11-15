@@ -314,6 +314,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "studio-v2",
+                    "date": "2026-11-15",
+                    "title": "Author deployable workflows in the Studio",
+                    "description": "The Studio now authors executable-v2 workflows, the format the engine runs. Start from a pattern such as a reviewed action, edit the package, its limits and each step, and the server checks every change with the same validator and compiler publishing uses, showing each problem on its step. The Studio matches the documents a package pins to the ones published in the environment, then you sign the downloaded package with your publisher key outside the browser and publish it. The older v1 graph stays, labelled legacy, until it is retired.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "cases",
                     "date": "2026-11-15",
                     "title": "Cases: one place per business item",

@@ -60,7 +60,7 @@ from .deployments import _view as deployment_view
 from .deployments import create_deployment, set_deployment_status, stored_unreviewed
 from .errors import ExecutionError
 from .projections import project_execution
-from .publication import mutation_replay, publication_view, publish_v2, remember
+from .publication import check_v2, mutation_replay, publication_view, publish_v2, remember
 
 router = APIRouter(
     prefix="/api/v1/projects/{project_id}/environments/{environment_id}",
@@ -154,6 +154,15 @@ def publish_executable_package(
     )
     audit(db, current, "executions.packages.published", view.id, key)
     return _json(view)
+
+
+@router.post("/executable-packages/check", tags=["executable packages"])
+def check_executable_package(
+    project_id: str, environment_id: str, request: Request, raw=BODY, db=DB
+):
+    """The publication path without trust or storage: every problem before signing."""
+    current = actor(db, request, project_id, environment_id, "publish")
+    return check_v2(db, current, raw, dependencies=services(request).dependencies)
 
 
 @router.get("/executable-packages", tags=["executable packages"])

@@ -25,7 +25,14 @@ from ..models import ExecutableDependency, ExecutablePublication, FleetMutationR
 from . import memo
 from .action_policies import Closure, admit_closure, check_catalog_policy
 from .authorization import mark_replay, reauthorize, record, scoped
-from .contracts import Contract, PublicationRequest, PublicationView, array, canonical_value
+from .contracts import (
+    Contract,
+    PackageCheckRequest,
+    PublicationRequest,
+    PublicationView,
+    array,
+    canonical_value,
+)
 from .errors import ExecutionError, execution_service
 
 
@@ -352,6 +359,9 @@ def remember(db, actor, operation, key, digest, result):
 def publication_view(row):
     return PublicationView(
         id=row.id,
+        kind=row.kind,
+        name=row.name,
+        version=row.version,
         package_sha256=row.package_sha256,
         plan_sha256=row.plan_sha256,
         validator_id=row.validator_id,
@@ -510,3 +520,72 @@ def publish_v2(
         raise
     except (ValueError, TypeError, AttributeError):
         raise ExecutionError("invalid_request") from None
+
+
+def _problems(error) -> list[dict]:
+    """The SDK's own bounded diagnostics: closed codes and pointers, never values."""
+    from lotuspond_sdk.executable.errors import ERROR_MESSAGES, ExecutableError
+
+    if isinstance(error, ExecutableError):
+        issues = [
+            {"path": issue.pointer, "code": issue.code, "message": issue.message}
+            for issue in error.issues
+        ]
+        return issues or [{"path": "", "code": error.code, "message": ERROR_MESSAGES[error.code]}]
+    return [{"path": "", "code": "invalid_package", "message": ERROR_MESSAGES["invalid_package"]}]
+
+
+@execution_service
+def check_v2(db, actor, request, *, dependencies=DEFAULT_DEPENDENCIES) -> dict:
+    """Validate, canonicalize, resolve and compile a workflow package without trust or storage.
+
+    The Studio's check (docs/superpowers/specs/2026-11-15-studio-v2-authoring-design.md):
+    the same validator, compiler and closure rules as `publish_v2`, but it neither verifies
+    a signature nor records anything, so an author sees every problem before signing.
+    """
+    from lotuspond_sdk.executable import executable_digest
+    from lotuspond_sdk.executable.errors import ExecutableError
+
+    actor = reauthorize(db, actor, "publish")
+    request = PackageCheckRequest.model_validate(request)
+    root = request.package
+    answer = {
+        "valid": False,
+        "package_sha256": None,
+        "plan_sha256": None,
+        "canonical": None,
+        "problems": [],
+    }
+    if not isinstance(root, dict) or root.get("schema_version") != "lotuspond.workflow-package.v2":
+        answer["problems"] = _problems(None)
+        return answer
+    try:
+        package = validate_executable_package(root)
+    except ExecutableError as error:
+        answer["problems"] = _problems(error)
+        return answer
+    answer["canonical"] = canonical_executable_json(package).decode()
+    answer["package_sha256"] = executable_digest(package)
+    rows = [
+        record(db, ExecutablePublication, actor.scope, identifier)
+        for identifier in sorted(request.dependency_ids)
+    ]
+    try:
+        snapshot = dependencies.current(db, actor.scope)
+        sources = {row.id: _read_publication(row, snapshot) for row in rows}
+        _, content = memo.plan(
+            root,
+            [sources[row.id] for row in rows if row.kind == "workflow"],
+            [sources[row.id] for row in rows if row.kind != "workflow"],
+        )
+        _check_dependency_links(db, actor.scope, rows, sources)
+        admit_closure(closure_of(root, rows, sources))
+    except ExecutableError as error:
+        answer["problems"] = _problems(error)
+        return answer
+    except ExecutionError as error:
+        answer["problems"] = [{"path": "", "code": error.code, "message": error.code}]
+        return answer
+    answer["plan_sha256"] = sha256(content).hexdigest()
+    answer["valid"] = True
+    return answer
