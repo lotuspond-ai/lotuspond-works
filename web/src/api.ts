@@ -73,6 +73,12 @@ export async function api<T>(
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
+    // Execution routes answer `{"detail": {"error", "message"}}`, a closed code in both fields,
+    // so the code is kept and the page words the message (lib/operate.ts).
+    const closed =
+      data?.detail && typeof data.detail === 'object' && typeof data.detail.error === 'string'
+        ? (data.detail.error as string)
+        : undefined;
     const message =
       typeof data?.message === 'string'
         ? data.message
@@ -86,7 +92,7 @@ export async function api<T>(
     throw new ApiError(
       message,
       response.status,
-      typeof data?.error === 'string' ? data.error : undefined,
+      typeof data?.error === 'string' ? data.error : closed,
       fieldProblems(data?.errors),
     );
   }

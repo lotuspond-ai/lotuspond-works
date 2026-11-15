@@ -31,6 +31,8 @@ import { allPages, navigation, pageLabel } from './components/console/navigation
 import { Sidebar } from './components/console/Sidebar.js';
 import { Home } from './pages/Home.js';
 import { Planned } from './pages/Planned.js';
+import { HumanTasks } from './pages/HumanTasks.js';
+import { ControlRoom } from './pages/ControlRoom.js';
 import { plannedArea } from './lib/roadmap.js';
 
 // The Studio carries the canvas and the contract validator, so it loads when first opened.
@@ -188,7 +190,16 @@ const label = (key: string) =>
   ({ admin: 'Administration' } as Record<string, string>)[key] ||
   'Page not found';
 // Pages whose records belong to a project, so the project filter applies to them.
-const projectScoped = ['projects', 'studio', 'scenarios', 'environments', 'runs', 'releases'];
+const projectScoped = [
+  'projects',
+  'studio',
+  'scenarios',
+  'environments',
+  'runs',
+  'releases',
+  'control-room',
+  'human-tasks',
+];
 // Records a reader can create from the command palette, with the verb the page uses.
 const creatable: Record<string, string> = {
   projects: 'Create project',
@@ -591,6 +602,19 @@ export function App({
             />
           ) : page === 'changelog' ? (
             <Changelog />
+          ) : page === 'human-tasks' ? (
+            <HumanTasks
+              key={`${workspace}-${projectId}`}
+              workspace={workspace}
+              projectId={projectId}
+            />
+          ) : page === 'control-room' ? (
+            <ControlRoom
+              key={`${workspace}-${projectId}`}
+              workspace={workspace}
+              projectId={projectId}
+              role={role}
+            />
           ) : plannedArea(page) ? (
             <Planned area={plannedArea(page)!} />
           ) : definitions[page] ? (

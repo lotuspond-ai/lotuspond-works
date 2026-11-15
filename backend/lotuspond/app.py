@@ -312,6 +312,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "review-inbox-control-room",
+                    "date": "2026-11-15",
+                    "title": "Review inbox and Control Room",
+                    "description": "Human tasks is now a working inbox: open a review to see the exact action a workflow proposes, with its target, input, policy and expiry, claim it, and allow or deny it. A decision is bound to the proposal it shows, so a changed proposal cannot be approved from a stale screen. Control Room lists an environment's deployments and executions, shows an execution's waits, actions and events, and lets an operator pause, resume or cancel it. Until a server switches on production execution, both pages say so instead of showing empty lists.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "package-evaluations",
                     "date": "2026-11-15",
                     "title": "Prove a workflow package before release",

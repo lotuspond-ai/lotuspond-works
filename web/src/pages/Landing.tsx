@@ -86,7 +86,7 @@ const loop = [
     'Control',
     'in-progress',
     'A consequential action waits until a named person approves exactly that action, and its outcome is verified against the system it changed.',
-    'Today review tasks and exact-action approval are tested in the engine. The review inbox is planned.',
+    'Today review tasks and exact-action approval are tested in the engine, and the console has a review inbox. Production use waits on the command key provider.',
   ],
 ] as const satisfies readonly (readonly [string, Readiness, string, string])[];
 

@@ -129,7 +129,8 @@ export function ConsolePreview() {
                 active={current.nav}
                 interactive={false}
                 // The preview shows the assurance workflows it demonstrates and the Studio beside
-                // them. Planned areas stay out, so the sample never suggests they work today.
+                // them. Planned areas, and Operate pages that need a server with production
+                // execution switched on, stay out, so the sample never overstates what works.
                 hidden={[
                   'connections',
                   'control-room',
