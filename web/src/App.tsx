@@ -34,12 +34,11 @@ import { Planned } from './pages/Planned.js';
 import { HumanTasks } from './pages/HumanTasks.js';
 import { ControlRoom } from './pages/ControlRoom.js';
 import { Cases } from './pages/Cases.js';
-import { StudioHome } from './pages/StudioHome.js';
 import { plannedArea } from './lib/roadmap.js';
 
-// The Studio carries the canvas and the contract validator, so it loads when first opened.
-const Studio = lazy(() =>
-  import('./pages/Studio.js').then((module) => ({ default: module.Studio })),
+// The Studio carries its bundled patterns, so it loads when first opened.
+const StudioHome = lazy(() =>
+  import('./pages/StudioHome.js').then((module) => ({ default: module.StudioHome })),
 );
 import { requestCreate, takeCreateRequest, useSetupProgress } from './lib/setup.js';
 import { fieldLabel, formatLatency } from './lib/format.js';
@@ -593,14 +592,6 @@ export function App({
                 workspace={workspace}
                 projectId={projectId}
                 role={currentWorkspace?.role || 'viewer'}
-                legacy={
-                  <Studio
-                    workspace={workspace}
-                    projectId={projectId}
-                    projectName={String(projects.find((item) => item.id === projectId)?.name ?? '')}
-                    role={currentWorkspace?.role || 'viewer'}
-                  />
-                }
               />
             </Suspense>
           ) : page === 'settings' ? (

@@ -230,19 +230,30 @@ function Editor({
         <section className="panel" aria-labelledby="v2-start">
           <h2 id="v2-start">Start a deployable workflow</h2>
           <p>
-            Executable packages run on the durable engine. Start from one of these synthetic
-            examples, or open a package file.
+            Workflows run on the durable engine. Start from a synthetic pattern or structure, or
+            open a package file. A pattern pins synthetic documents: publish real ones in this
+            environment, or replace the pins, before it can be published.
           </p>
-          <ul className="studio-v2-patterns">
-            {V2_PATTERNS.map((pattern) => (
-              <li key={pattern.id}>
-                <button className="operate-row" onClick={() => start(pattern.package)}>
-                  <span className="operate-row-title">{pattern.title}</span>
-                  <span className="operate-row-meta">{pattern.text}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+          {(
+            [
+              ['domain', 'Patterns'],
+              ['structure', 'Structures'],
+            ] as const
+          ).map(([family, heading]) => (
+            <div key={family}>
+              <h3>{heading}</h3>
+              <ul className="studio-v2-patterns">
+                {V2_PATTERNS.filter((pattern) => pattern.family === family).map((pattern) => (
+                  <li key={pattern.id}>
+                    <button className="operate-row" onClick={() => start(pattern.package)}>
+                      <span className="operate-row-title">{pattern.title}</span>
+                      <span className="operate-row-meta">{pattern.text}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
           <label className="studio-v2-file">
             Open a package file
             <input type="file" accept="application/json,.json" onChange={(e) => void open(e)} />

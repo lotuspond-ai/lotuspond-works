@@ -1,8 +1,10 @@
-# Declarative workflow package contract
+# Declarative workflow package contract (v1)
+
+> Workflow-package v1 is retired for authoring and publishing (ADR-0013 step 3). Workflows are executable-v2 (`workflow-package.v2.schema.json`, `examples/executable-v2/`). The v1 contract stays in the SDK, and stored v1 versions stay readable.
 
 This is the first E02 contract foundation. It validates a bounded declaration; it does **not** execute a workflow, contact a model or connector, resolve credentials, enforce approval, qualify an integration, or authorize a deployment.
 
-Every package in `examples/` is synthetic: `reviewed-action` (quoted on the public introduction), `document-intake`, `case-approval`, `knowledge-answer` and `record-reconciliation`. They are process shapes shared across industries, with placeholder `synthetic-*` connectors, not qualified integrations. They are also the Studio's starting patterns. `backend/tests/test_package_contract.py` validates each one, and `web/src/lib/studioPatterns.test.ts` requires the console to offer every one with the CLI's digest.
+Every package in `examples/` is synthetic: `reviewed-action` (quoted on the public introduction), `document-intake`, `case-approval`, `knowledge-answer` and `record-reconciliation`. They are process shapes shared across industries, with placeholder `synthetic-*` connectors, not qualified integrations. They were the v1 Studio's starting patterns; v1 authoring and publishing are retired (ADR-0013 step 3), and the SDK's tests keep validating these files. Their executable-v2 versions, the Studio's patterns now, are in `examples/executable-v2/patterns/`.
 
 This pre-runtime topology is not yet a stable executable SDK contract. Consumers must pin the schema/model revision. Contract changes require explicit compatibility review; future data mapping, approval bindings and execution semantics cannot be silently added to strict version one.
 
@@ -12,7 +14,7 @@ From the repository root, with the existing backend environment installed:
 
 ```sh
 cd backend
-.venv/bin/python -m lotuspond.package_cli validate ../contracts/examples/reviewed-action.v1.json
+.venv/bin/lotuspond-package validate ../contracts/examples/reviewed-action.v1.json
 .venv/bin/python export_package_schema.py --check
 ```
 

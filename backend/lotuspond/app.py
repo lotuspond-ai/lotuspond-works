@@ -1,5 +1,4 @@
 import logging
-import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
 
@@ -28,7 +27,6 @@ from .identity import router as identity_router
 from .identity_lifecycle import router as identity_lifecycle_router
 from .mfa import router as mfa_router
 from .models import SchemaVersion
-from .package_contract import MAX_PACKAGE_BYTES
 from .packages import router as packages_router
 from .schema_version import SCHEMA_VERSION
 from .security import RateLimiter
@@ -60,27 +58,7 @@ class RequestBoundary:
                 scope, receive, send
             )
 
-        package_publication = (
-            scope["method"] == "POST"
-            and re.fullmatch(r"/api/v1/projects/[^/]+/packages/?", scope["path"]) is not None
-        )
-        budget = (
-            min(self.settings.max_request_bytes, MAX_PACKAGE_BYTES)
-            if package_publication
-            else self.settings.max_request_bytes
-        )
-        if package_publication:
-            if headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
-                await error(415, "unsupported_media_type", "Use an application/json request body.")
-                return
-            encodings = [
-                value.decode("latin-1").lower()
-                for key, value in scope["headers"]
-                if key.lower() == b"content-encoding"
-            ]
-            if len(encodings) > 1 or (encodings and encodings[0] != "identity"):
-                await error(415, "unsupported_encoding", "Use an uncompressed package body.")
-                return
+        budget = self.settings.max_request_bytes
         method = scope["method"]
         if method not in {"GET", "HEAD", "OPTIONS"}:
             # Authorization-bearing API calls still must not smuggle a browser session.
@@ -312,6 +290,13 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.4.0",
+                    "id": "retire-package-v1",
+                    "date": "2026-11-16",
+                    "title": "One workflow format",
+                    "description": "The Studio now authors only deployable workflows, and its five patterns (reviewed action, document intake, case approval, knowledge answer and record reconciliation) are deployable workflows too: each write is a reviewed action that a person allows and that is read back and verified. The older workflow-package v1 graph editor and v1 publishing are retired: POST /projects/{id}/packages now answers 405 and GET /package-contracts 404. Packages already published in v1 stay readable, byte for byte, through GET /packages.",
+                },
                 {
                     "version": "0.4.0",
                     "id": "studio-v2",

@@ -1,0 +1,133 @@
+{
+  "documents": [
+    {
+      "format_version": 1,
+      "kind": "model",
+      "name": "synthetic-reasoner",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "profile": "synthetic",
+        "configuration_revision": "1",
+        "configuration_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "input_schema": {
+          "kind": "null"
+        },
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "limits": {
+          "max_steps": 10,
+          "timeout_seconds": 120,
+          "max_input_tokens": 8000,
+          "max_output_tokens": 2000,
+          "max_cost_microusd": 200000
+        }
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "connector",
+      "name": "synthetic-document-source",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "operations": [
+          {
+            "id": "read-document",
+            "target_schema": {
+              "kind": "null"
+            },
+            "input_schema": {
+              "kind": "null"
+            },
+            "output_schema": {
+              "kind": "null"
+            },
+            "effect": "read",
+            "idempotency": "none",
+            "reconciliation": {
+              "mode": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "connector",
+      "name": "synthetic-records-system",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "operations": [
+          {
+            "id": "read-record",
+            "target_schema": {
+              "kind": "null"
+            },
+            "input_schema": {
+              "kind": "null"
+            },
+            "output_schema": {
+              "kind": "null"
+            },
+            "effect": "read",
+            "idempotency": "none",
+            "reconciliation": {
+              "mode": "none"
+            }
+          },
+          {
+            "id": "create-record",
+            "target_schema": {
+              "kind": "null"
+            },
+            "input_schema": {
+              "kind": "null"
+            },
+            "output_schema": {
+              "kind": "null"
+            },
+            "effect": "write",
+            "idempotency": "none",
+            "reconciliation": {
+              "mode": "read_back",
+              "read_operation": "read-record",
+              "absence_rules": [
+                {
+                  "op": "present",
+                  "readback_pointer": ""
+                }
+              ],
+              "effect_rules": [
+                {
+                  "op": "present",
+                  "readback_pointer": ""
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "format_version": 1,
+      "kind": "policy",
+      "name": "synthetic-reviewers",
+      "version": "1.0.0",
+      "schemas": [],
+      "definition": {
+        "approval": "human",
+        "independent_review": true,
+        "assignment": "workspace_editors",
+        "escalation": null,
+        "allowed_operation_classes": [],
+        "allowed_capability_classes": []
+      }
+    }
+  ]
+}

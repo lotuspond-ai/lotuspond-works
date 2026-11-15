@@ -45,51 +45,6 @@ export const plannedAreas: readonly PlannedArea[] = [
   },
 ];
 
-export type StudioStage = {
-  name: string;
-  state: 'available' | 'planned';
-  text: string;
-  link?: { href: string; label: string };
-};
-
-// Where a Studio package goes after the canvas. Each state traces to docs/CAPABILITIES.md; a
-// planned stage links to its Planned page above, and moves only when that register does.
-export const studioStages: readonly StudioStage[] = [
-  {
-    name: 'Compose',
-    state: 'available',
-    text: 'Draw the workflow on the canvas from a pattern, a file or a blank start. Drafts stay in this browser.',
-  },
-  {
-    name: 'Check',
-    state: 'available',
-    text: 'The admission check mirrors the registry’s v1 validator as you work and shows the content digest.',
-  },
-  {
-    name: 'Publish',
-    state: 'available',
-    text: 'Store an immutable version in the project’s registry. Publishing does not approve, sign or run it.',
-  },
-  {
-    name: 'Evaluate agents',
-    state: 'available',
-    text: 'Test an agent you run against frozen scenarios and gate its release. An evaluation run does not run the package.',
-    link: { href: '#runs', label: 'Evaluation runs' },
-  },
-  {
-    name: 'Deploy and run',
-    state: 'available',
-    text: 'Watch what is deployed and running in an environment, and pause, resume or cancel an execution.',
-    link: { href: '#control-room', label: 'Control Room' },
-  },
-  {
-    name: 'Operate',
-    state: 'available',
-    text: 'Work the reviews and forms a running workflow waits on, each holding the exact action you allow.',
-    link: { href: '#human-tasks', label: 'Human tasks' },
-  },
-];
-
 export function plannedArea(id: string) {
   return plannedAreas.find((area) => area.id === id);
 }

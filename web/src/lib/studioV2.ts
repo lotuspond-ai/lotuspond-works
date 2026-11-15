@@ -5,7 +5,11 @@ import decision from '../../../contracts/examples/executable-v2/decision.json';
 import iteration from '../../../contracts/examples/executable-v2/iteration.json';
 import minimal from '../../../contracts/examples/executable-v2/minimal.json';
 import parallel from '../../../contracts/examples/executable-v2/parallel.json';
-import reviewedAction from '../../../contracts/examples/executable-v2/reviewed_action.json';
+import caseApproval from '../../../contracts/examples/executable-v2/patterns/case-approval.json';
+import documentIntake from '../../../contracts/examples/executable-v2/patterns/document-intake.json';
+import knowledgeAnswer from '../../../contracts/examples/executable-v2/patterns/knowledge-answer.json';
+import recordReconciliation from '../../../contracts/examples/executable-v2/patterns/record-reconciliation.json';
+import reviewedAction from '../../../contracts/examples/executable-v2/patterns/reviewed-action.json';
 
 export const SCHEMA_V2 = 'lotuspond.workflow-package.v2';
 
@@ -21,38 +25,79 @@ export type V2Package = JsonObject & {
   limits: JsonObject;
 };
 
-export type Pattern = { id: string; title: string; text: string; package: V2Package };
+export type Pattern = {
+  id: string;
+  title: string;
+  text: string;
+  family: 'domain' | 'structure';
+  package: V2Package;
+};
 
-// The synthetic examples the SDK's own tests pin (contracts/examples/executable-v2/).
+// The five domain patterns (contracts/examples/executable-v2/patterns/, generated and checked
+// by the server's own rules in tests/execution/test_pattern_examples.py), then the SDK's
+// structural examples. Each is synthetic: a shape to start from, not a configured integration.
 export const V2_PATTERNS: readonly Pattern[] = [
   {
-    id: 'reviewed_action',
+    id: 'reviewed-action',
     title: 'Reviewed action',
-    text: 'Propose a write, wait for a person to allow it, send it, then read it back and verify.',
+    text: 'Read a case, let an agent propose an update, have a person allow it, then write it and verify it.',
+    family: 'domain',
     package: reviewedAction as unknown as V2Package,
+  },
+  {
+    id: 'document-intake',
+    title: 'Document intake',
+    text: 'Read a document, extract and check its fields, have a person review, then create the record.',
+    family: 'domain',
+    package: documentIntake as unknown as V2Package,
+  },
+  {
+    id: 'case-approval',
+    title: 'Case approval',
+    text: 'Recommend a decision, have a person make it, record it, then notify without another review.',
+    family: 'domain',
+    package: caseApproval as unknown as V2Package,
+  },
+  {
+    id: 'knowledge-answer',
+    title: 'Knowledge answer',
+    text: 'Read a request, search the knowledge base, draft a cited reply, and post it once reviewed.',
+    family: 'domain',
+    package: knowledgeAnswer as unknown as V2Package,
+  },
+  {
+    id: 'record-reconciliation',
+    title: 'Record reconciliation',
+    text: 'Read two systems, match their records, and post the adjustment a person approves.',
+    family: 'domain',
+    package: recordReconciliation as unknown as V2Package,
   },
   {
     id: 'decision',
     title: 'Decision',
     text: 'Two branches chosen by a condition.',
+    family: 'structure',
     package: decision as unknown as V2Package,
   },
   {
     id: 'parallel',
     title: 'Parallel',
     text: 'Two named branches that run together and join.',
+    family: 'structure',
     package: parallel as unknown as V2Package,
   },
   {
     id: 'iteration',
     title: 'Iteration',
     text: 'One bounded step for each item of a list.',
+    family: 'structure',
     package: iteration as unknown as V2Package,
   },
   {
     id: 'minimal',
     title: 'Blank',
     text: 'An empty body, to build from.',
+    family: 'structure',
     package: minimal as unknown as V2Package,
   },
 ];

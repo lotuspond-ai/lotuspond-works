@@ -1,0 +1,253 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "reviewed-action",
+  "version": "1.0.0",
+  "name": "Reviewed action",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "connector_read",
+        "id": "read",
+        "connector_ref": "case-system",
+        "operation": "read-case",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "agent",
+        "id": "propose",
+        "model_ref": "reasoner",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "instructions": "Propose a case update for a person to review.",
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "knowledge_refs": [],
+        "limits": {
+          "max_steps": 5,
+          "timeout_seconds": 60,
+          "max_input_tokens": 4000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "action_intent",
+        "id": "write-intent",
+        "connector_ref": "case-system",
+        "operation": "write-case",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "policy_ref": "reviewers",
+        "approval": "human",
+        "independent_review": true,
+        "expiry_seconds": 3600
+      },
+      {
+        "kind": "human_task",
+        "id": "write-review",
+        "assignment_policy_ref": "reviewers",
+        "timeout_seconds": 86400,
+        "mode": "review",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "write-intent"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "action_dispatch",
+        "id": "write-send",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "write-intent"
+          },
+          "pointer": ""
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        },
+        "decision": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "write-review"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "outcome_verification",
+        "id": "write-verify",
+        "receipt": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "write-send"
+          },
+          "pointer": ""
+        },
+        "connector_ref": "case-system",
+        "read_operation": "read-case",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "rule_id": "write-applied",
+        "version": "1",
+        "rules": [
+          {
+            "op": "present",
+            "readback_pointer": ""
+          }
+        ]
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 200,
+    "active_seconds": 3600,
+    "elapsed_seconds": 604800,
+    "retained_waits": 20,
+    "max_input_tokens": 50000,
+    "max_output_tokens": 10000,
+    "max_cost_microusd": 2000000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [
+    {
+      "id": "reasoner",
+      "ref": {
+        "kind": "model",
+        "name": "synthetic-reasoner",
+        "version": "1.0.0",
+        "sha256": "a004792214219bbe4d610c042fec2b2b83563b47aef759e3cfe2817fcf37ce80"
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "id": "case-system",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-case-system",
+        "version": "1.0.0",
+        "sha256": "bb01b71d6395aa9ef6b1c4f4c951143ade89f863d758fcfad3ea4d7d1ab7ef6b"
+      }
+    }
+  ],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [
+    {
+      "id": "reviewers",
+      "ref": {
+        "kind": "policy",
+        "name": "synthetic-reviewers",
+        "version": "1.0.0",
+        "sha256": "9284072453d45107016c0ffd9578603e499229d76c6f1ced1dc267d1ca689157"
+      }
+    }
+  ],
+  "knowledge": [],
+  "artifacts": []
+}
