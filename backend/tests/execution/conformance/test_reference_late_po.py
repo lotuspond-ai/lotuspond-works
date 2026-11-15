@@ -404,6 +404,16 @@ def test_approved_late_orders_are_rescheduled_and_customers_told_once(late_po):
         writes = 2 if expected["notify_customer"] else 1
         assert len(posts) == writes, (scenario["id"], posts)  # applied once, never resent
         assert all(authorized for _, _, authorized in posts)
+        # E06: the trace says who allowed each write and that it happened, verified,
+        # including the write whose answer was lost and was settled by read-back.
+        trace = customer.call("GET", f"/executions/{execution_id}/trace")
+        assert trace["outcome"] == {"state": "verified", "exception": False}, trace["outcome"]
+        assert len(trace["actions"]) == writes
+        for action in trace["actions"]:
+            decision = action["review"]["decision"]
+            assert decision["decision"] == "allow" and decision["decided_by"]["user_id"]
+            assert action["verification"]["state"] == "verified", action
+        assert po not in str(trace)  # digests and identifiers only, never values
     assert ledger.fail_after_commit == 0
 
 

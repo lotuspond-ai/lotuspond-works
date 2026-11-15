@@ -2312,3 +2312,61 @@ button.decide:hover:not(:disabled) {
 .operate-unavailable p {
   margin: 0;
 }
+
+/* Verified outcomes (E06) ---------------------------------------------------------- */
+.outcome {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: var(--sunken);
+}
+.outcome p {
+  margin: 0 0 6px;
+}
+.outcome p:last-child {
+  margin-bottom: 0;
+}
+.outcome-success {
+  border-left-color: var(--success);
+}
+.outcome-warning {
+  border-left-color: var(--warning);
+}
+.outcome-danger {
+  border-left-color: var(--danger);
+}
+.outcome-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.operate-trace {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.operate-trace li {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.operate-trace p {
+  margin: 0 0 4px;
+}
+.operate-trace p:last-child {
+  margin-bottom: 0;
+}
+.outcome-summary ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}

@@ -13,9 +13,14 @@ import {
   allowedControls,
   fromMs,
   opaqueId,
+  allowedBy,
+  effectWords,
   operateMessage,
+  outcomeOf,
   scopedPath,
+  type OutcomeSummary,
   type Scope,
+  type Trace,
 } from '../lib/operate.js';
 
 type Deployment = {
@@ -40,14 +45,6 @@ type Event = {
   code: string;
   occurred_at_ms: number;
   application_state: string | null;
-};
-type Action = {
-  action_id: string;
-  step_id: string;
-  authorization: string;
-  effect: string;
-  outcome: string;
-  receipt_status: string | null;
 };
 
 function problem(reason: unknown) {
@@ -130,16 +127,31 @@ function Room({
   // Both lists fail the same way when the server has no execution services: say it once.
   const sameError = deployments.error && deployments.error === executions.error;
   const opened = executions.items?.find((item) => item.id === openId);
+  const [summary, setSummary] = useState<OutcomeSummary | null>(null);
+  const loadSummary = useCallback(async () => {
+    try {
+      const since = Date.now() - 7 * 86_400_000;
+      setSummary(
+        await api<OutcomeSummary>(scopedPath(scope, `outcomes?since_ms=${since}`), workspace),
+      );
+    } catch {
+      setSummary(null); // the lists say why the server cannot answer
+    }
+  }, [scope, workspace]);
+  useEffect(() => {
+    void loadSummary();
+  }, [loadSummary]);
   const retry = () => {
     void deployments.load();
     void executions.load();
+    void loadSummary();
   };
   return (
     <>
       <SectionHeader
         eyebrow="Operate"
         title="Control Room"
-        description="What is deployed in this environment and what is running, with the controls to pause, resume or cancel it."
+        description="What is deployed in this environment, what is running and what each run achieved, with the controls to pause, resume or cancel it."
         actions={
           <>
             {picker}
@@ -158,6 +170,33 @@ function Room({
         </div>
       ) : (
         <>
+          {summary && summary.total > 0 && (
+            <section className="panel outcome-summary" aria-labelledby="summary-heading">
+              <h2 id="summary-heading">Last 7 days</h2>
+              <p>
+                {summary.total.toLocaleString()} execution{summary.total === 1 ? '' : 's'}
+                {summary.truncated ? ' (the newest 10,000)' : ''},{' '}
+                <strong>
+                  {summary.exceptions.toLocaleString()} need
+                  {summary.exceptions === 1 ? 's' : ''} a person
+                </strong>
+                .
+              </p>
+              <ul>
+                {Object.entries(summary.outcomes)
+                  .filter(([, count]) => count > 0)
+                  .map(([state, count]) => (
+                    <li key={state}>
+                      <span className={`badge badge-${outcomeOf(state).tone}`}>
+                        <span aria-hidden="true" />
+                        {outcomeOf(state).label}
+                      </span>{' '}
+                      {count.toLocaleString()}
+                    </li>
+                  ))}
+              </ul>
+            </section>
+          )}
           <section className="panel" aria-labelledby="deployments-heading">
             <h2 id="deployments-heading">Deployments</h2>
             {!sameError && deployments.error && (
@@ -294,7 +333,7 @@ function Room({
                   />
                 ) : (
                   <div className="operate-detail operate-placeholder">
-                    <p>Choose an execution to see its waits, actions and events.</p>
+                    <p>Choose an execution to see its outcome, its writes and who allowed them.</p>
                   </div>
                 )}
               </div>
@@ -322,7 +361,7 @@ function ExecutionDetail({
   const [execution, setExecution] = useState(listed);
   const [waits, setWaits] = useState<Wait[] | null>(null);
   const [events, setEvents] = useState<Event[] | null>(null);
-  const [actions, setActions] = useState<Action[] | null | 'unavailable'>(null);
+  const [trace, setTrace] = useState<Trace | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -334,24 +373,38 @@ function ExecutionDetail({
     setError('');
     const get = <T,>(path: string) => api<T>(scopedPath(scope, path), workspace);
     try {
-      const [current, waitPage, eventPage] = await Promise.all([
+      const [current, waitPage, eventPage, traced] = await Promise.all([
         get<Execution>(base),
         get<Page<Wait>>(`${base}/waits`),
         get<{ items: Event[] }>(`${base}/events?limit=100`),
+        // The trace is read from committed rows; it needs no action services.
+        get<Trace>(`${base}/trace`),
       ]);
       setExecution(current);
       setWaits(waitPage.items);
       setEvents(eventPage.items);
+      setTrace(traced);
     } catch (reason) {
       setError(problem(reason));
     }
-    try {
-      setActions((await get<{ items: Action[] }>(`${base}/actions`)).items);
-    } catch {
-      // Action services are optional: without them the route answers 503 by design.
-      setActions('unavailable');
-    }
   }, [base, scope, workspace]);
+  async function download() {
+    setError('');
+    try {
+      const document = await api<Trace>(scopedPath(scope, `${base}/trace/export`), workspace);
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(document, null, 2)], { type: 'application/json' }),
+      );
+      const link = Object.assign(window.document.createElement('a'), {
+        href: url,
+        download: `lotuspond-trace-${execution.id}.json`,
+      });
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (reason) {
+      setError(problem(reason));
+    }
+  }
   useEffect(() => {
     heading.current?.focus();
     void load();
@@ -420,6 +473,35 @@ function ExecutionDetail({
           </div>
         )}
       </dl>
+
+      {trace && (
+        <div className={`outcome outcome-${outcomeOf(trace.outcome.state).tone}`}>
+          <p className="outcome-line">
+            <span className={`badge badge-${outcomeOf(trace.outcome.state).tone}`}>
+              <span aria-hidden="true" />
+              {outcomeOf(trace.outcome.state).label}
+            </span>
+            {trace.outcome.exception && <strong>Needs a person</strong>}
+          </p>
+          <p>{outcomeOf(trace.outcome.state).text}</p>
+          <p className="hint">
+            Version {trace.version.package} {trace.version.package_version} (revision{' '}
+            {trace.version.revision},{' '}
+            <span className="cell-mono">{trace.version.package_sha256.slice(0, 12)}</span>)
+            {trace.version.release_id ? (
+              <>
+                , admitted by a{' '}
+                <a className="inline-link" href="#releases">
+                  release
+                </a>
+              </>
+            ) : (
+              ', admitted without a release'
+            )}
+            .
+          </p>
+        </div>
+      )}
 
       {error && <Alert onRetry={() => void load()}>{error}</Alert>}
       {notice && (
@@ -495,24 +577,50 @@ function ExecutionDetail({
         </p>
       )}
 
-      <h3>Actions</h3>
-      {actions === null ? (
+      <h3>Writes</h3>
+      {trace === null ? (
         <p className="hint">Loading…</p>
-      ) : actions === 'unavailable' ? (
-        <p className="hint">Action records are not available on this server.</p>
-      ) : !actions.length ? (
-        <p className="hint">This execution has proposed no writes.</p>
+      ) : !trace.actions.length ? (
+        <p className="hint">This execution proposed no writes.</p>
       ) : (
-        <ul className="operate-facts">
-          {actions.map((action) => (
+        <ol className="operate-trace">
+          {trace.actions.map((action) => (
             <li key={action.action_id}>
-              <span className="cell-mono">{action.step_id}</span>
-              <span>Authorization: {humanize(action.authorization)}</span>
-              <span>Effect: {humanize(action.effect)}</span>
-              <StatusBadge value={action.outcome} />
+              <p className="operate-trace-title">
+                <strong>{action.operation}</strong> on {action.connector.name}{' '}
+                {action.connector.version} <span className="cell-mono">({action.step_id})</span>
+              </p>
+              <p>
+                {allowedBy(action)}
+                {action.review?.decision && (
+                  <>
+                    {' '}
+                    <RelativeTime value={fromMs(action.review.decision.issued_at_ms)} />
+                  </>
+                )}
+                . {effectWords(action.effect)}.
+              </p>
+              <p>
+                Outcome: <StatusBadge value={action.outcome} />
+                {action.verification && (
+                  <span className="hint">
+                    {' '}
+                    by rule <span className="cell-mono">{action.verification.rule_id}</span>
+                  </span>
+                )}
+              </p>
             </li>
           ))}
-        </ul>
+        </ol>
+      )}
+      {trace && (
+        <p className="hint">
+          Trace <span className="cell-mono">{trace.trace_sha256.slice(0, 12)}</span>: digests and
+          identifiers only, never the values sent.{' '}
+          <button className="text-button" onClick={() => void download()}>
+            Download trace
+          </button>
+        </p>
       )}
 
       <h3>Events</h3>

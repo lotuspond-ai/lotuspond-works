@@ -14,6 +14,7 @@ from .database import engine_for, sessions_for
 from .execution.action_routes import router as execution_action_router
 from .execution.action_runtime_routes import router as execution_action_runtime_router
 from .execution.boundary import ExecutionRequestBoundary, ExecutionServices
+from .execution.outcome_routes import router as execution_outcome_router
 from .execution.routes import router as execution_router
 from .execution.runtime_routes import router as execution_runtime_router
 from .execution.task_routes import router as execution_task_router
@@ -310,6 +311,13 @@ def create_app(
         return {
             "product": "Lotuspond",
             "items": [
+                {
+                    "version": "0.4.0",
+                    "id": "verified-outcomes",
+                    "date": "2026-11-15",
+                    "title": "Who allowed it, and did it happen",
+                    "description": "Every production execution now has a trace: the input, the exact package version and release it ran, and for each write the person who allowed it, what was sent, what the system answered and the verified outcome. One rule turns that into a business outcome (verified, completed, partial, no effect, not verified or unknown) and never counts an uncertain write as done. Control Room shows the outcome and the trace for each execution, with a download carrying its SHA-256, and the last seven days' outcomes for the environment.",
+                },
                 {
                     "version": "0.4.0",
                     "id": "production-action-wiring",
@@ -651,6 +659,7 @@ def create_app(
     app.include_router(execution_router)
     app.include_router(execution_task_router)
     app.include_router(execution_action_router)
+    app.include_router(execution_outcome_router)
     app.include_router(execution_runtime_router)
     app.include_router(execution_action_runtime_router)
     app.include_router(workflow_router)
