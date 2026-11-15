@@ -400,6 +400,41 @@ function execution(path: string, method: string, body: Record<string, unknown>) 
   if (path === 'human-tasks') return page(tasks.filter((task) => task.state === 'open'));
   if (path === 'deployments') return page(deployments);
   if (path === 'executions') return page(executions);
+  // Studio v2: the reviewed-action pattern's connector is published here; its policy is not.
+  if (path.startsWith('executable-packages') && method === 'GET' && !path.includes('/'))
+    return page([
+      {
+        id: '0193a900-0001-7000-8000-000000000001',
+        kind: 'connector',
+        name: 'connector-fixture',
+        version: '1.0.0',
+        package_sha256: '478fde8e7f65a29046477b92f4110126d77aff896e45e5686213e47f720ce76d',
+        plan_sha256: null,
+        validator_id: 'fixture',
+        compiler_id: null,
+      },
+    ]);
+  if (path === 'executable-packages/check' && method === 'POST') {
+    // The fixture stands in for the server's SDK check: a version must be x.y.z.
+    const pkg = body.package as Record<string, unknown>;
+    const problems = /^\d+\.\d+\.\d+$/.test(String(pkg?.version))
+      ? []
+      : [
+          {
+            path: '/version',
+            code: 'invalid_package',
+            message: 'The executable package is invalid.',
+          },
+        ];
+    const canonical = JSON.stringify(pkg);
+    return json({
+      valid: problems.length === 0,
+      package_sha256: digest('7e'),
+      plan_sha256: problems.length ? null : digest('8f'),
+      canonical,
+      problems,
+    });
+  }
   if (path === 'cases' && method === 'GET') return page(cases.map((item) => caseView(item, false)));
   if (path === 'cases' && method === 'POST') {
     const found = cases.find((item) => item.key === body.key);

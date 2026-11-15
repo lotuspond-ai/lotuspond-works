@@ -43,6 +43,22 @@ class Contract(BaseModel):
             raise ExecutionError("invalid_request") from None
 
 
+class PackageCheckRequest(Contract):
+    """A Studio check: the publication path without trust or storage."""
+
+    package: object
+    dependency_ids: Annotated[
+        tuple[CanonicalUUID, ...], BeforeValidator(array), Field(max_length=511)
+    ] = ()
+
+    @model_validator(mode="after")
+    def bounded(self):
+        canonical_value({"package": self.package, "dependency_ids": list(self.dependency_ids)})
+        if len(set(self.dependency_ids)) != len(self.dependency_ids):
+            raise ExecutionError("invalid_request")
+        return self
+
+
 class PublicationRequest(Contract):
     package: object
     dependency_ids: Annotated[
@@ -66,6 +82,10 @@ class PublicationRequest(Contract):
 
 class PublicationView(Contract):
     id: CanonicalUUID
+    # What it is, so an author can match a package's pinned references (Studio v2).
+    kind: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=128)
+    version: str = Field(min_length=1, max_length=100)
     package_sha256: Digest
     plan_sha256: Digest | None
     validator_id: str = Field(min_length=1, max_length=128)

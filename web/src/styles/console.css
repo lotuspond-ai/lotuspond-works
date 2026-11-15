@@ -2402,3 +2402,96 @@ button.decide:hover:not(:disabled) {
 .operate-resolve .hint {
   margin: 10px 0 0;
 }
+
+/* Studio v2 (executable-v2 authoring) ---------------------------------------------- */
+.studio-mode {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.studio-v2-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.studio-v2-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr) minmax(220px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.studio-v2-grid > * {
+  min-width: 0;
+}
+.studio-v2-outline ol,
+.studio-v2-patterns {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.studio-v2-outline > .operate-row {
+  margin-bottom: 12px;
+}
+.studio-v2-outline h3 {
+  margin: 8px 0;
+  font-size: 13.5px;
+}
+.studio-v2-editor,
+.studio-v2-check {
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.studio-v2-editor h2,
+.studio-v2-check h2 {
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+.studio-v2-check h3,
+.studio-v2-editor h3 {
+  margin: 18px 0 8px;
+  font-size: 13.5px;
+}
+.studio-v2-problems {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.studio-v2-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.studio-v2-command {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.studio-v2-file input {
+  margin-top: 6px;
+}
+.studio-v2-outline .danger {
+  color: var(--danger);
+}
+@media (max-width: 1100px) {
+  .studio-v2-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
