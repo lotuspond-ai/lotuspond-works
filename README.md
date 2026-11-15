@@ -66,14 +66,7 @@ and [explicit requirements](contracts/examples/synthetic-requirements.v1.json)
 illustrate declared compatibility; a match never establishes runtime support or
 grants execution authority.
 
-The current platform expansion starts with the [workflow-package v1 schema](contracts/workflow-package.v1.schema.json) and a synthetic reviewed-action example:
-
-```sh
-npm run package:validate -- contracts/examples/reviewed-action.v1.json
-npm run check:contracts
-```
-
-The validator checks the local declaration and emits a canonical content digest. It does not execute the workflow, contact a connector, grant approval, or verify a publisher signature. `npm run schema:contracts` regenerates the checked-in schema from the contract model; review the generated diff when changing the contract. A valid synthetic example is not a customer integration test.
+Workflows are executable-v2 packages: the Studio authors them, and `lotuspond-package v2` validates, compiles and signs them (see `sdk/python/README.md`). The five domain patterns live in `contracts/examples/executable-v2/patterns/` with their synthetic catalogs. Workflow-package v1 publishing is retired (ADR-0013); `lotuspond-package validate` still checks a v1 file, and `npm run check:contracts` keeps its schema snapshot current. A valid synthetic example is not a customer integration test.
 
 ## Product and delivery
 

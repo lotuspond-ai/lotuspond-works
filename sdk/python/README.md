@@ -19,9 +19,8 @@ detached trust and synthetic compatibility commands.
 
 ## CLI commands and local limits
 
-`lotuspond-package`, `python -m lotuspond_sdk` and the legacy
-`python -m lotuspond.package_cli` dispatch the same commands. The legacy module
-requires the backend installation; the standalone entry points need only the SDK.
+`lotuspond-package` and `python -m lotuspond_sdk` dispatch the same commands and
+need only the SDK.
 Use `--help` or `COMMAND --help` for usage. All paths are explicit and relative to
 the caller; options cannot be abbreviated.
 

@@ -15,7 +15,6 @@
     "test": "node --import tsx --test web/src/lib/*.test.ts scripts/*.test.mjs",
     "test:python": "node scripts/python.mjs test",
     "lint:python": "node scripts/python.mjs lint",
-    "package:validate": "node scripts/python.mjs package validate",
     "schema:executable": "uv run --frozen --project sdk/python python -m lotuspond_sdk.executable.schema",
     "check:executable-contracts": "uv run --frozen --project sdk/python python -m lotuspond_sdk.executable.schema --check",
     "schema:contracts": "node scripts/python.mjs package-schema",

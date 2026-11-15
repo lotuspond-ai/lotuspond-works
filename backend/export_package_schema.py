@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from lotuspond.package_contract import WorkflowPackage
+from lotuspond_sdk.contract import WorkflowPackage
 
 
 def render() -> str:

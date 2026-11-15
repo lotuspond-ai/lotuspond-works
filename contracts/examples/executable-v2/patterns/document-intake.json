@@ -1,0 +1,293 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "document-intake",
+  "version": "1.0.0",
+  "name": "Document intake",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "connector_read",
+        "id": "read",
+        "connector_ref": "document-source",
+        "operation": "read-document",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "agent",
+        "id": "extract",
+        "model_ref": "reasoner",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "instructions": "Extract the fields the intake form declares. Cite the page of each.",
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "knowledge_refs": [],
+        "limits": {
+          "max_steps": 5,
+          "timeout_seconds": 60,
+          "max_input_tokens": 4000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "agent",
+        "id": "check",
+        "model_ref": "reasoner",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "instructions": "Compare the extracted fields with the declared validation rules and list every field that fails one.",
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "knowledge_refs": [],
+        "limits": {
+          "max_steps": 5,
+          "timeout_seconds": 60,
+          "max_input_tokens": 4000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "action_intent",
+        "id": "create-intent",
+        "connector_ref": "records-system",
+        "operation": "create-record",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "policy_ref": "reviewers",
+        "approval": "human",
+        "independent_review": true,
+        "expiry_seconds": 3600
+      },
+      {
+        "kind": "human_task",
+        "id": "create-review",
+        "assignment_policy_ref": "reviewers",
+        "timeout_seconds": 86400,
+        "mode": "review",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "create-intent"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "action_dispatch",
+        "id": "create-send",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "create-intent"
+          },
+          "pointer": ""
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        },
+        "decision": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "create-review"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "outcome_verification",
+        "id": "create-verify",
+        "receipt": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "create-send"
+          },
+          "pointer": ""
+        },
+        "connector_ref": "records-system",
+        "read_operation": "read-record",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "rule_id": "create-applied",
+        "version": "1",
+        "rules": [
+          {
+            "op": "present",
+            "readback_pointer": ""
+          }
+        ]
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 200,
+    "active_seconds": 3600,
+    "elapsed_seconds": 604800,
+    "retained_waits": 20,
+    "max_input_tokens": 50000,
+    "max_output_tokens": 10000,
+    "max_cost_microusd": 2000000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [
+    {
+      "id": "reasoner",
+      "ref": {
+        "kind": "model",
+        "name": "synthetic-reasoner",
+        "version": "1.0.0",
+        "sha256": "a004792214219bbe4d610c042fec2b2b83563b47aef759e3cfe2817fcf37ce80"
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "id": "document-source",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-document-source",
+        "version": "1.0.0",
+        "sha256": "aa354114063615769b108af011514eeafa8c316e21287516c173287efdd14354"
+      }
+    },
+    {
+      "id": "records-system",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-records-system",
+        "version": "1.0.0",
+        "sha256": "4e34cd5967cb3484781ebd568da842cd69e7b3921ccfdfd45ec8c381bb276a87"
+      }
+    }
+  ],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [
+    {
+      "id": "reviewers",
+      "ref": {
+        "kind": "policy",
+        "name": "synthetic-reviewers",
+        "version": "1.0.0",
+        "sha256": "9284072453d45107016c0ffd9578603e499229d76c6f1ced1dc267d1ca689157"
+      }
+    }
+  ],
+  "knowledge": [],
+  "artifacts": []
+}

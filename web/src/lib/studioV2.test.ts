@@ -15,15 +15,31 @@ import {
   type Step,
 } from './studioV2.js';
 
-test('the patterns are the SDK examples, each a v2 package with a distinct id', () => {
-  assert.equal(V2_PATTERNS.length, 5);
+test('the five domain patterns come first, then the structures, each a v2 package', () => {
+  assert.deepEqual(
+    V2_PATTERNS.filter((pattern) => pattern.family === 'domain').map((pattern) => pattern.id),
+    [
+      'reviewed-action',
+      'document-intake',
+      'case-approval',
+      'knowledge-answer',
+      'record-reconciliation',
+    ],
+  );
   for (const pattern of V2_PATTERNS) assert.ok(isV2(pattern.package), pattern.id);
   const ids = V2_PATTERNS.map((pattern) => pattern.package.package_id);
   assert.equal(new Set(ids).size, ids.length);
-  const reviewed = V2_PATTERNS.find((pattern) => pattern.id === 'reviewed_action')!;
+  const reviewed = V2_PATTERNS.find((pattern) => pattern.id === 'reviewed-action')!;
   assert.deepEqual(
     reviewed.package.body.steps.map((step) => step.kind),
-    ['action_intent', 'human_task', 'action_dispatch', 'outcome_verification'],
+    [
+      'connector_read',
+      'agent',
+      'action_intent',
+      'human_task',
+      'action_dispatch',
+      'outcome_verification',
+    ],
   );
 });
 
@@ -82,11 +98,12 @@ test('problems attach to the step they point into; the rest stay with the packag
 });
 
 test('pins match publications exactly, and anything else is missing', () => {
-  const pkg = clone(V2_PATTERNS.find((p) => p.id === 'reviewed_action')!.package);
+  const pkg = clone(V2_PATTERNS.find((p) => p.id === 'reviewed-action')!.package);
   const refs = pinnedRefs(pkg);
   assert.deepEqual(refs.map((ref) => `${ref.kind}:${ref.name}`).sort(), [
-    'connector:connector-fixture',
-    'policy:policy-fixture',
+    'connector:synthetic-case-system',
+    'model:synthetic-reasoner',
+    'policy:synthetic-reviewers',
   ]);
   const connector = refs.find((ref) => ref.kind === 'connector')!;
   const exact = {
@@ -99,10 +116,7 @@ test('pins match publications exactly, and anything else is missing', () => {
   const otherDigest = { ...exact, id: 'pub-2', package_sha256: '0'.repeat(64) };
   const result = matchDependencies(refs, [otherDigest, exact]);
   assert.deepEqual(result.ids, ['pub-1']);
-  assert.deepEqual(
-    result.missing.map((ref) => ref.kind),
-    ['policy'],
-  );
+  assert.deepEqual(result.missing.map((ref) => ref.kind).sort(), ['model', 'policy']);
 });
 
 test('the signing command names the SDK and never a key value', () => {

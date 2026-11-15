@@ -34,6 +34,9 @@ UNKNOWN = "00000000-0000-4000-8000-000000000000"
         ("POST", "/api/v1/receipts", 405),
         ("POST", "/api/v1/integrations", 405),
         ("GET", "/api/v1/integrations", 404),
+        # ADR-0013 step 3: v1 publishing; stored versions stay readable (test_packages).
+        ("POST", f"/api/v1/projects/{UNKNOWN}/packages", 405),
+        ("GET", "/api/v1/package-contracts", 404),
     ],
 )
 def test_retired_routes_refuse_requests(client, account, method, path, status):
@@ -49,9 +52,7 @@ def test_new_api_keys_cannot_take_the_retired_ingest_scope(client, account):
 
 
 def test_approval_requests_apply_to_a_release_only(client, account):
-    missing = client.post(
-        "/api/v1/approvals", json={"action": "release", "reason": "Ship it"}
-    )
+    missing = client.post("/api/v1/approvals", json={"action": "release", "reason": "Ship it"})
     assert missing.status_code == 400
     assert missing.json()["error"] == "release_required"
     other = client.post(

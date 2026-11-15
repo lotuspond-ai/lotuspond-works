@@ -1,0 +1,288 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "knowledge-answer",
+  "version": "1.0.0",
+  "name": "Knowledge answer",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "connector_read",
+        "id": "read",
+        "connector_ref": "service-desk",
+        "operation": "read-request",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "connector_read",
+        "id": "search",
+        "connector_ref": "knowledge-base",
+        "operation": "search-articles",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "agent",
+        "id": "draft",
+        "model_ref": "reasoner",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "instructions": "Draft a reply using only the retrieved articles, and cite each one used. Say so when they do not answer the request.",
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "knowledge_refs": [],
+        "limits": {
+          "max_steps": 5,
+          "timeout_seconds": 60,
+          "max_input_tokens": 4000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "action_intent",
+        "id": "reply-intent",
+        "connector_ref": "service-desk",
+        "operation": "post-reply",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "policy_ref": "reviewers",
+        "approval": "human",
+        "independent_review": true,
+        "expiry_seconds": 3600
+      },
+      {
+        "kind": "human_task",
+        "id": "reply-review",
+        "assignment_policy_ref": "reviewers",
+        "timeout_seconds": 86400,
+        "mode": "review",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "reply-intent"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "action_dispatch",
+        "id": "reply-send",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "reply-intent"
+          },
+          "pointer": ""
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        },
+        "decision": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "reply-review"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "outcome_verification",
+        "id": "reply-verify",
+        "receipt": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "reply-send"
+          },
+          "pointer": ""
+        },
+        "connector_ref": "service-desk",
+        "read_operation": "read-request",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "rule_id": "reply-applied",
+        "version": "1",
+        "rules": [
+          {
+            "op": "present",
+            "readback_pointer": ""
+          }
+        ]
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 200,
+    "active_seconds": 3600,
+    "elapsed_seconds": 604800,
+    "retained_waits": 20,
+    "max_input_tokens": 50000,
+    "max_output_tokens": 10000,
+    "max_cost_microusd": 2000000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [
+    {
+      "id": "reasoner",
+      "ref": {
+        "kind": "model",
+        "name": "synthetic-reasoner",
+        "version": "1.0.0",
+        "sha256": "a004792214219bbe4d610c042fec2b2b83563b47aef759e3cfe2817fcf37ce80"
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "id": "service-desk",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-service-desk",
+        "version": "1.0.0",
+        "sha256": "228522af949bd103311e90b4951ff9a3bb8adf99fd5008008339565535049719"
+      }
+    },
+    {
+      "id": "knowledge-base",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-knowledge-base",
+        "version": "1.0.0",
+        "sha256": "5f0f9ed28b021cdceb1954188db0a4e7af84d3253258ce6bf4501b67d6ed80af"
+      }
+    }
+  ],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [
+    {
+      "id": "reviewers",
+      "ref": {
+        "kind": "policy",
+        "name": "synthetic-reviewers",
+        "version": "1.0.0",
+        "sha256": "9284072453d45107016c0ffd9578603e499229d76c6f1ced1dc267d1ca689157"
+      }
+    }
+  ],
+  "knowledge": [],
+  "artifacts": []
+}

@@ -1,0 +1,288 @@
+{
+  "schema_version": "lotuspond.workflow-package.v2",
+  "package_id": "record-reconciliation",
+  "version": "1.0.0",
+  "name": "Record reconciliation",
+  "input_schema": {
+    "kind": "null"
+  },
+  "output_schema": {
+    "kind": "null"
+  },
+  "schemas": [],
+  "body": {
+    "steps": [
+      {
+        "kind": "connector_read",
+        "id": "read-source",
+        "connector_ref": "source-ledger",
+        "operation": "read-entries",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "connector_read",
+        "id": "read-target",
+        "connector_ref": "target-system",
+        "operation": "read-records",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "agent",
+        "id": "reconcile",
+        "model_ref": "reasoner",
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "instructions": "Match the entries with the records. List each unmatched item and propose the adjustment that would resolve it.",
+        "output_schema": {
+          "kind": "null"
+        },
+        "read_tools": [],
+        "knowledge_refs": [],
+        "limits": {
+          "max_steps": 5,
+          "timeout_seconds": 60,
+          "max_input_tokens": 4000,
+          "max_output_tokens": 1000,
+          "max_cost_microusd": 100000
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        }
+      },
+      {
+        "kind": "action_intent",
+        "id": "adjust-intent",
+        "connector_ref": "target-system",
+        "operation": "post-adjustment",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "policy_ref": "reviewers",
+        "approval": "human",
+        "independent_review": true,
+        "expiry_seconds": 3600
+      },
+      {
+        "kind": "human_task",
+        "id": "adjust-review",
+        "assignment_policy_ref": "reviewers",
+        "timeout_seconds": 86400,
+        "mode": "review",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "adjust-intent"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "action_dispatch",
+        "id": "adjust-send",
+        "intent": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "adjust-intent"
+          },
+          "pointer": ""
+        },
+        "retry": {
+          "max_attempts": 1,
+          "timeout_seconds": 30,
+          "backoff_seconds": 0,
+          "retry_codes": []
+        },
+        "decision": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "adjust-review"
+          },
+          "pointer": ""
+        }
+      },
+      {
+        "kind": "outcome_verification",
+        "id": "adjust-verify",
+        "receipt": {
+          "kind": "ref",
+          "source": {
+            "kind": "step",
+            "id": "adjust-send"
+          },
+          "pointer": ""
+        },
+        "connector_ref": "target-system",
+        "read_operation": "read-records",
+        "target": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "input": {
+          "kind": "literal",
+          "schema": {
+            "kind": "null"
+          },
+          "value": null
+        },
+        "rule_id": "adjust-applied",
+        "version": "1",
+        "rules": [
+          {
+            "op": "present",
+            "readback_pointer": ""
+          }
+        ]
+      }
+    ],
+    "result": {
+      "kind": "literal",
+      "schema": {
+        "kind": "null"
+      },
+      "value": null
+    },
+    "result_schema": {
+      "kind": "data",
+      "schema": {
+        "kind": "null"
+      }
+    }
+  },
+  "secret_refs": [],
+  "environment": {
+    "runtime_contract": "lotuspond.runtime-contract.v1",
+    "platforms": [
+      {
+        "os": "linux",
+        "architecture": "amd64"
+      }
+    ],
+    "required_capabilities": [],
+    "destination_classes": [],
+    "operation_classes": []
+  },
+  "limits": {
+    "max_steps": 200,
+    "active_seconds": 3600,
+    "elapsed_seconds": 604800,
+    "retained_waits": 20,
+    "max_input_tokens": 50000,
+    "max_output_tokens": 10000,
+    "max_cost_microusd": 2000000
+  },
+  "assurance": {
+    "evaluation_refs": [],
+    "outcome_rule_refs": [],
+    "required_classification": "synthetic"
+  },
+  "models": [
+    {
+      "id": "reasoner",
+      "ref": {
+        "kind": "model",
+        "name": "synthetic-reasoner",
+        "version": "1.0.0",
+        "sha256": "a004792214219bbe4d610c042fec2b2b83563b47aef759e3cfe2817fcf37ce80"
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "id": "source-ledger",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-source-ledger",
+        "version": "1.0.0",
+        "sha256": "134115fe04dfc22815ce35db66be35d9c7c5ec0c145147a5f87c2a49589acbd2"
+      }
+    },
+    {
+      "id": "target-system",
+      "ref": {
+        "kind": "connector",
+        "name": "synthetic-target-system",
+        "version": "1.0.0",
+        "sha256": "2a56b58287e7c883a4e0be9274a16e95d9cf698239ce161d1a5c1c37770fed67"
+      }
+    }
+  ],
+  "agents": [],
+  "subworkflows": [],
+  "evaluations": [],
+  "policies": [
+    {
+      "id": "reviewers",
+      "ref": {
+        "kind": "policy",
+        "name": "synthetic-reviewers",
+        "version": "1.0.0",
+        "sha256": "9284072453d45107016c0ffd9578603e499229d76c6f1ced1dc267d1ca689157"
+      }
+    }
+  ],
+  "knowledge": [],
+  "artifacts": []
+}
