@@ -16,6 +16,7 @@ from lotuspond.models import (
     SchemaVersion,
     new_id,
 )
+from lotuspond.schema_version import SCHEMA_VERSION
 from tests.fleet.test_migration import rows, signature
 from tests.fleet.test_schema import load
 
@@ -114,7 +115,7 @@ def test_v15_upgrade_preserves_rows(execution_database, monkeypatch):
         )
         assert set(EXECUTION_CONTROL_CODES_V15) <= set(codes.scalars())
         assert connection.scalar(select(SchemaVersion.installed_at)) == installed_at
-        assert connection.scalar(select(SchemaVersion.version)) == 16
+        assert connection.scalar(select(SchemaVersion.version)) == SCHEMA_VERSION
 
 
 def test_fresh_upgrade_signature_equal(execution_database, monkeypatch):

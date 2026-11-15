@@ -2370,3 +2370,35 @@ button.decide:hover:not(:disabled) {
   padding: 0;
   list-style: none;
 }
+
+/* Cases (E06, second part) -------------------------------------------------------- */
+.outcome-neutral {
+  border-left-color: var(--line-strong);
+}
+.operate-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-top: 14px;
+}
+.operate-inline-form label {
+  flex: 1 1 220px;
+  margin: 0;
+}
+.operate-inline-form .hint {
+  flex-basis: 100%;
+  margin: 0;
+}
+.operate-resolve {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.operate-resolve label {
+  margin-bottom: 10px;
+}
+.operate-resolve .hint {
+  margin: 10px 0 0;
+}

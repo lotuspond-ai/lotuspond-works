@@ -1,9 +1,9 @@
-"""Additive exact-v13 → v14, exact-v14 → v15 and exact-v15 → v16 migrations.
+"""Additive exact-v13 → v14, v14 → v15, v15 → v16 and v16 → v17 migrations.
 
 The caller owns its transaction and advisory lock. Engine state is product schema
 (ADR-0011): v15 adds only the orchestration claim marker, the restore hold's epoch
 and sweep indexes; v16 (E05) adds the action, task and outcome records and widens
-two closed vocabularies. No authority backfill, reset or downgrade belongs here.
+two closed vocabularies; v17 (E06) adds the case and case-link tables. No authority backfill, reset or downgrade belongs here.
 """
 
 from copy import deepcopy
@@ -18,10 +18,12 @@ from ..models import (
     EXECUTION_REASONS_V15,
     EXECUTION_TABLES,
     V16_TABLES,
+    V17_TABLES,
     Base,
     SchemaVersion,
     sql_values,
 )
+from .frozen_v16 import V16_FROZEN_CHECKS, V16_FROZEN_PREDICATES
 
 LEGACY_ADDITIONS = frozenset(
     {
@@ -65,9 +67,17 @@ _V15_TEXT = {
 }
 
 
-def _v15_metadata():
-    """A private copy of the authoritative model without any v16 object."""
+def _v16_metadata():
+    """A private copy of the authoritative model without any v17 object."""
     metadata = deepcopy(Base.metadata)
+    for name in V17_TABLES:
+        metadata.remove(metadata.tables[name])
+    return metadata
+
+
+def _v15_metadata():
+    """A private copy of the authoritative model without any v16 or v17 object."""
+    metadata = _v16_metadata()
     for name in V16_TABLES:
         metadata.remove(metadata.tables[name])
     for table_name, check_name in V16_WIDENED.items():
@@ -880,4 +890,43 @@ def migrate_execution_v16(connection: Connection) -> None:
     if result.rowcount != 1 or list(
         connection.execute(select(SchemaVersion.version)).scalars()
     ) != [16]:
+        raise ValueError(ERROR)
+
+
+def _preflight_v17(connection: Connection) -> None:
+    tables = dict(_v16_metadata().tables)
+    if set(inspect(connection).get_table_names()) != set(tables):
+        raise ValueError(ERROR)
+    _lock(connection, tables)
+    _version(connection, 16)
+    _verify_catalog(connection)
+    _verify_tables(
+        connection,
+        tables,
+        V16_FROZEN_CHECKS,
+        excluded_columns={},
+        frozen_predicates=V16_FROZEN_PREDICATES,
+    )
+
+
+def migrate_execution_v17(connection: Connection) -> None:
+    """Validate exact v16, add the E06 case records, then the ledger.
+
+    Never commits. Creates `execution_cases` and `execution_case_links` with their
+    constraints and indexes. No existing column, constraint or row changes.
+    """
+    if connection.dialect.name != "postgresql" or not connection.in_transaction():
+        raise ValueError(ERROR)
+    _preflight_v17(connection)
+    for table in Base.metadata.sorted_tables:
+        if table.name in V17_TABLES:
+            connection.execute(CreateTable(table))
+            for index in sorted(table.indexes, key=lambda index: index.name):
+                connection.execute(CreateIndex(index))
+    result = connection.execute(
+        SchemaVersion.__table__.update().where(SchemaVersion.version == 16).values(version=17)
+    )
+    if result.rowcount != 1 or list(
+        connection.execute(select(SchemaVersion.version)).scalars()
+    ) != [17]:
         raise ValueError(ERROR)

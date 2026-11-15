@@ -290,7 +290,7 @@ Each of these must be qualified before production use. Every goal remains in the
 - The actual customer workflow.
 - Real read and model providers. This release ships synthetic test-mode providers only, and the runtime's activity worker refuses outside test mode.
 - Signed commercial issuance: entitlement, price and tenant-policy providers.
-- E06 cases and exception ownership (each execution's trace and business outcome are built; see the actions guide). E05's reviewed writes are qualified only against a synthetic target; see [the actions and human tasks guide](actions-human-tasks.md).
+- Schema v17 (E06 cases) is additive: `python -m lotuspond.initialize migrate` verifies exact v16 and adds two tables. E05's reviewed writes are qualified only against a synthetic target; see [the actions and human tasks guide](actions-human-tasks.md).
 - The agent-first E07 builder and operations experience. No UI or engine-console parity is implied.
 - Enterprise, topology, security, capacity and service-level evidence. Hosted CI has not run this work, and tier 3 measured an application-level serialization limit far below the planning target.
 - Production wiring of the API's single in-flight authority lookup (Task 12's recorded limitation).

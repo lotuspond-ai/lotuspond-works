@@ -135,6 +135,7 @@ export function ConsolePreview() {
                   'connections',
                   'control-room',
                   'human-tasks',
+                  'cases',
                   'members',
                   'invitations',
                   'api-keys',

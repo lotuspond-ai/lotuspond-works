@@ -345,10 +345,34 @@ def execution_rows(n=0):
     return values
 
 
+def with_cases(values):
+    """Schema v17 (E06): a case keyed by the fixture's artifact, and its execution. Kept
+    out of `execution_rows`, which older-schema migration tests also load."""
+    scope = {k: values["executions"][k] for k in ("workspace_id", "project_id", "environment_id")}
+    case_id = new_id()
+    values["execution_cases"] = dict(
+        scope,
+        id=case_id,
+        key_artifact_id=values["execution_artifacts"]["id"],
+        key_artifact_version=1,
+        key_sha256=values["execution_artifacts"]["sha256"],
+        created_by_user_id=values["users"]["id"],
+    )
+    values["execution_case_links"] = dict(
+        scope,
+        id=new_id(),
+        case_id=case_id,
+        execution_id=values["executions"]["id"],
+        linked_by_user_id=values["users"]["id"],
+        linked_at_ms=0,
+    )
+    return values
+
+
 @pytest.mark.parametrize("boundary", ["workspace", "project", "environment"])
 def test_full_scope_fk_matrix(engine, boundary):
     assert "executions" in Base.metadata.tables
-    left, right = execution_rows(), execution_rows(1)
+    left, right = with_cases(execution_rows()), with_cases(execution_rows(1))
     if boundary in {"project", "environment"}:
         for row in right.values():
             if "workspace_id" in row:

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   allowedBy,
   allowedControls,
+  caseOrder,
   effectWords,
   fromMs,
   inboxOrder,
@@ -164,4 +165,28 @@ test('who allowed an action is named, never assumed', () => {
 test('effect states read as words, and an unexpected one as unknown', () => {
   assert.equal(effectWords('observed'), 'Sent, and seen in the system');
   assert.equal(effectWords('something'), 'Unknown');
+});
+
+test('cases that need a person come first, unowned before owned', () => {
+  const item = (id: string, needs: boolean, owned: boolean) =>
+    ({
+      id,
+      key: id,
+      key_sha256: 'x',
+      created_at: '',
+      outcome: 'verified',
+      needs_person: needs,
+      owner: owned ? { user_id: 'u', name: 'A', since_ms: 1 } : null,
+      resolution: null,
+      execution_count: 1,
+    }) as const;
+  const ordered = caseOrder([
+    item('fine', false, false),
+    item('owned', true, true),
+    item('open', true, false),
+  ]);
+  assert.deepEqual(
+    ordered.map((c) => c.id),
+    ['open', 'owned', 'fine'],
+  );
 });

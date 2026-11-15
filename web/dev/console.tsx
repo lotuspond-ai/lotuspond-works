@@ -331,6 +331,64 @@ const events = (id: string) =>
     }),
   );
 
+const asha = { user_id: 'u2', name: 'Asha Rao' };
+const caseRuns = (ids: string[]) =>
+  ids
+    .map((id) => executions.find((item) => item.id === id)!)
+    .map((run) => ({
+      id: run.id,
+      state: run.state,
+      admitted_at_ms: run.admitted_at_ms as number,
+      outcome:
+        run.state === 'succeeded'
+          ? 'verified'
+          : run.state === 'failed'
+            ? 'no_effect'
+            : 'in_progress',
+      exception: run.state === 'failed',
+    }));
+const cases = [
+  {
+    id: '0193a800-0001-7000-8000-000000000001',
+    key: 'ORD-55120',
+    runs: ['0193a702-4b67-7f13-9d28-8a0e3c6f1b59', '0193a7e2-5f10-7c3a-9b1e-4d2f8a6c1e01'],
+    owner: null as null | Record<string, unknown>,
+    resolution: null as null | Record<string, unknown>,
+    needs: true,
+  },
+  {
+    id: '0193a800-0002-7000-8000-000000000002',
+    key: 'ORD-55098',
+    runs: ['0193a790-91d2-7b08-8e6a-2c5f7b1d9a14'],
+    owner: null,
+    resolution: null,
+    needs: false,
+  },
+  {
+    id: '0193a800-0003-7000-8000-000000000003',
+    key: 'ORD-54977',
+    runs: [],
+    owner: { ...asha, since_ms: at(-30) },
+    resolution: null,
+    needs: false,
+  },
+];
+const caseView = (item: (typeof cases)[number], full = true) => {
+  const runs = caseRuns(item.runs).sort((a, b) => b.admitted_at_ms - a.admitted_at_ms);
+  return {
+    id: item.id,
+    key: item.key,
+    key_sha256: digest('9a'),
+    created_at: new Date(at(-300)).toISOString(),
+    outcome: runs[0]?.outcome ?? 'empty',
+    needs_person: item.needs,
+    owner: item.owner,
+    resolution: item.resolution,
+    execution_count: runs.length,
+    ...(full ? { executions: runs } : {}),
+  };
+};
+
 function execution(path: string, method: string, body: Record<string, unknown>) {
   if (mode.has('unwired'))
     return json(
@@ -342,6 +400,42 @@ function execution(path: string, method: string, body: Record<string, unknown>) 
   if (path === 'human-tasks') return page(tasks.filter((task) => task.state === 'open'));
   if (path === 'deployments') return page(deployments);
   if (path === 'executions') return page(executions);
+  if (path === 'cases' && method === 'GET') return page(cases.map((item) => caseView(item, false)));
+  if (path === 'cases' && method === 'POST') {
+    const found = cases.find((item) => item.key === body.key);
+    if (found) return json(caseView(found));
+    const created = {
+      id: `0193a800-00${cases.length + 1}0-7000-8000-00000000000${cases.length + 1}`,
+      key: String(body.key),
+      runs: [],
+      owner: null,
+      resolution: null,
+      needs: false,
+    };
+    cases.push(created);
+    return json(caseView(created));
+  }
+  const kase = /^cases\/([^/]+)(?:\/(\w+))?$/.exec(path);
+  if (kase) {
+    const found = cases.find((item) => item.id === kase[1]);
+    if (!found) return json({ error: 'not_found', message: 'not_found' }, 404);
+    if (method === 'POST' && role === 'viewer')
+      return json({ error: 'forbidden', message: 'forbidden' }, 403);
+    if (kase[2] === 'owner')
+      found.owner =
+        body.action === 'take' ? { user_id: 'u1', name: 'You', since_ms: Date.now() } : null;
+    if (kase[2] === 'resolution') {
+      found.resolution = {
+        kind: body.kind,
+        resolved_by: { user_id: 'u1', name: 'You' },
+        resolved_at_ms: Date.now(),
+      };
+      found.needs = false;
+    }
+    if (kase[2] === 'executions' && !found.runs.includes(String(body.execution_id)))
+      found.runs.push(String(body.execution_id));
+    return json(caseView(found));
+  }
   if (path.startsWith('outcomes'))
     return json({
       since_ms: 0,
