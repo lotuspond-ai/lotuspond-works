@@ -2,6 +2,8 @@
 
 The authoritative model is `backend/lotuspond/models.py`, using SQLAlchemy 2 with PostgreSQL, UTC timestamps, generated UUID identifiers, explicit state constraints, and workspace-scoped composite foreign keys. Queries are parameterized. This is a separate database; the transitional TypeScript schema does not apply to it.
 
+Proposed on 2026-11-16, not built: one LotusPond account shared with LotusPond Health through a separate Accounts service ([ADR-0018](architecture/0018-one-lotuspond-account.md)), and a placement for each organisation, from a shared regional database to a self-hosted installation ([ADR-0019](architecture/0019-database-tenancy-and-placement.md)). The tables below describe the database as it is today.
+
 | Area        | Tables                                                                                       | Purpose                                                                                                                                                       |
 | ----------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Identity    | users, sessions, identity_challenges, invitations, mail_outbox, offline_identity_attestations, offline_enrollments, mfa_factors, mfa_enrollments, mfa_login_challenges, mfa_recovery_codes | Salted Argon2 password hashes, hashed expiring tokens, separate mailbox and offline identity state, encrypted mail, explicit operator flag |
