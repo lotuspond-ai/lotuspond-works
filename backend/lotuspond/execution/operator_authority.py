@@ -21,7 +21,13 @@ Files (all private: owner-only, no links):
 - `activity-trust.json` and `activity-signing.key` - the control plane's activity
   signing key and the trust set the runtimes pin;
 - `artifact-keys/<key_id>` - 32-byte artifact encryption keys, hex;
-- `access.json` - `{"knowledge_sources": "none" | "workspace_members"}`.
+- `access.json` - `{"knowledge_sources": "none" | "workspace_members"}`;
+- `command-signing.key` and `command-trust.json` - optional (E05): the key that signs
+  runtime write commands and `{"revision", "trust"}`, its verification trust. Present
+  when the API or worker starts, they switch on interpreter v2 and the action and task
+  services; absent, only interpreter v1 runs and those routes answer 503;
+- `catalog.json` - optional: the installed connectors and secret bindings
+  (`InstalledCatalog.installed`), read once at start. Absent, nothing is installed.
 
 A missing, unreadable or malformed file denies (each caller maps it to its fixed
 `*_unavailable` code). These providers are not test-only.
@@ -32,7 +38,13 @@ from __future__ import annotations
 import json
 import os
 import stat
+import time
+from hashlib import sha256
 from pathlib import Path
+
+# A command trust snapshot's life: inside E03's 60 s by the margin the runtime's own trust
+# uses, because the caller validates it against a `now` read just before asking.
+COMMAND_TRUST_MS = 50_000
 
 # Grants and snapshots carry the operator's stated expiry, never "now plus a window":
 # the engine compares two lookups of the same grant for equality, so an unchanged file
@@ -72,6 +84,13 @@ class OperatorDirectory:
         if len(data) > MAX_FILE:
             raise ValueError("authority file too large")
         return data
+
+    def exists(self, name: str) -> bool:
+        try:
+            os.stat(self.root / name, follow_symlinks=False)
+        except FileNotFoundError:
+            return False
+        return True
 
     def json(self, name: str):
         value = json.loads(self._read(name))
@@ -224,6 +243,68 @@ class OperatorSigner:
         return sign_activity(envelope, Ed25519PrivateKey.from_private_bytes(raw))
 
 
+class OperatorCommandKey:
+    """E05's command key provider: signs runtime write commands, answers their trust.
+
+    Both files are reread on every call, so replacing or removing them takes effect on
+    the next command. Any failure is `trust_unavailable`, never a partial answer.
+    """
+
+    test_only = False
+
+    def __init__(self, directory: OperatorDirectory):
+        self.directory = directory
+
+    def current(self, installation_id):
+        from lotuspond_runtime.errors import FleetError
+        from lotuspond_runtime.protocol import CommandTrustSnapshot
+        from lotuspond_sdk.trust import TrustSet
+
+        try:
+            self.directory.check_installation(installation_id)
+            state = self.directory.json("command-trust.json")
+            if set(state) != {"revision", "trust"} or type(state["revision"]) is not int:
+                raise ValueError("invalid command trust")
+            return CommandTrustSnapshot(
+                state["revision"],
+                TrustSet.model_validate(state["trust"]),
+                time.time_ns() // 1_000_000 + COMMAND_TRUST_MS,
+            )
+        except Exception:
+            raise FleetError("trust_unavailable") from None
+
+    def sign(self, command, snapshot):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from lotuspond_runtime.errors import FleetError
+        from lotuspond_runtime.trust import validate_snapshot
+        from lotuspond_sdk.executable.signing import sign_runtime_command, verify_runtime_command
+
+        try:
+            raw = bytes.fromhex(self.directory._read("command-signing.key").decode().strip())
+            key = Ed25519PrivateKey.from_private_bytes(raw)
+            snapshot = validate_snapshot(snapshot, now_ms=time.time_ns() // 1_000_000)
+            key_id = sha256(key.public_key().public_bytes_raw()).hexdigest()
+            if not any(
+                item.key_id == key_id and item.state == "allowed" for item in snapshot.trust.keys
+            ):
+                raise ValueError("the signing key is not allowed")
+            envelope = sign_runtime_command(command, key)
+            if not verify_runtime_command(command, envelope, snapshot.trust).valid:
+                raise ValueError("the signature does not verify")
+            return envelope
+        except Exception:
+            raise FleetError("trust_unavailable") from None
+
+
+def operator_catalog(directory: OperatorDirectory):
+    """The installed catalog, read once: `FleetDependencies` holds an immutable one."""
+    from lotuspond.fleet.catalog import InstalledCatalog
+
+    if not directory.exists("catalog.json"):
+        return InstalledCatalog()
+    return InstalledCatalog.installed(directory.json("catalog.json"))
+
+
 class OperatorAuthorities:
     """Every authority the execution services need, from one operator directory."""
 
@@ -240,6 +321,12 @@ class OperatorAuthorities:
         self.access = OperatorAccess(directory)
         self.activity_trust = OperatorActivityTrust(directory)
         self.signer = OperatorSigner(directory)
+        # Read at start: a malformed catalog refuses to start rather than run without it.
+        self.catalog = operator_catalog(directory)
+        # Actions are switched on by provisioning a command key, never by a flag.
+        self.commands = (
+            OperatorCommandKey(directory) if directory.exists("command-signing.key") else None
+        )
         self.artifact_key_id = "primary"
         self.retain_until_ms = UNTIL_CHANGED_MS  # until the operator's own retention runs
         self.test_mode = False

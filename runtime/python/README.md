@@ -308,14 +308,19 @@ write effect, the destination and the secret pins against its own provider.
   selected by the exact connector pin and a declared write operation. The idempotency
   key is the intent's `action_id`, sent only when the operation declares
   `target_key` idempotency.
-- **Test mode only.** The only write providers are the synthetic target's
-  (`synthetic-target-write`, with `synthetic-target-read` for read-backs), selected
-  by the fixture form's `actions` section (`{"trust_file", "providers"}`). A test-mode
-  runtime may report the connector they serve in its observation ceiling, and its
-  worker refuses to start reporting one they don't. Outside test mode no write
-  provider exists, a synthetic one answers `unavailable` without reaching anything,
-  and a runtime reporting any connector is refused. The `https-json` write side is not
-  built.
+- **Write providers.** An operator's provider configuration may add an `actions`
+  section: `https-json` write providers (POST routes with an `Idempotency-Key`, and a
+  read-back route for each write), and `trust_file`, the command trust the operator
+  installed from the control plane's `python -m lotuspond.authority command-trust`
+  (`{"revision", "trust"}`, private, reread on every command). The worker may then
+  report exactly the connectors those providers serve, and refuses to start reporting
+  any other. Test mode also accepts the synthetic target's providers
+  (`synthetic-target-write`, `synthetic-target-read`) with a bare trust set; outside
+  test mode a synthetic one is refused. The control plane admits a write only for a
+  connector and secret binding its operator installed (`authority install-connector`,
+  `authority secret-binding`), signed with its provisioned command key
+  (`authority command-key`); see the
+  [operator authority runbook](../../docs/operations/operator-authority.md).
 
 Operator bootstrap and qualification are documented in
 [`runtime-foundation.md`](../../docs-site/docs/runtime-foundation.md) and the

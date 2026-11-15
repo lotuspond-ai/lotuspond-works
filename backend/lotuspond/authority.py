@@ -6,13 +6,22 @@
     python -m lotuspond.authority execution DIR on|off
     python -m lotuspond.authority release-required DIR on|off
     python -m lotuspond.authority new-epoch DIR
+    python -m lotuspond.authority command-key DIR
+    python -m lotuspond.authority command-trust DIR
+    python -m lotuspond.authority install-connector DIR FILE
+    python -m lotuspond.authority secret-binding DIR BINDING_ID VERSION
     python -m lotuspond.authority show DIR
 
 `init` creates the directory (it must not exist or must be empty) with a new activity
 signing key and its trust set, a new artifact key, recovery epoch 1, no trusted
 publisher, no admitted catalog document, release decisions required, and execution
 switched off. An operator turns execution on deliberately. `new-epoch` is the step
-after a database restore. `show` prints a summary and never key material. Every file
+after a database restore. `command-key` provisions the key that signs runtime write
+commands (E05), which switches on reviewed actions when the API and workers next start;
+`command-trust` prints its public trust (revision and key set) for each runtime's
+`actions.trust_file`.
+`install-connector` and `secret-binding` add to the installed catalog (read at start).
+`show` prints a summary and never key material. Every file
 is written atomically, owner-only. The directory is read by
 `lotuspond.execution.operator_authority`; see that module for its format.
 """
@@ -130,6 +139,71 @@ def new_epoch(root: Path) -> None:
     _write(root / "recovery.json", state)
 
 
+def command_key(root: Path) -> None:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    if (root / "command-signing.key").exists() or (root / "command-trust.json").exists():
+        raise SystemExit("refused: a command key is already provisioned")
+    signing = Ed25519PrivateKey.generate()
+    entry = _trust_entry(signing.public_key().public_bytes_raw())
+    # The trust first: a key file without its trust would switch actions on unverifiable.
+    _write(
+        root / "command-trust.json",
+        {"revision": 1, "trust": {"format_version": 1, "keys": [entry]}},
+    )
+    _write(root / "command-signing.key", signing.private_bytes_raw().hex())
+
+
+def command_trust(root: Path) -> dict:
+    """`{"revision", "trust"}`: the public command trust each runtime pins. A runtime
+    refuses a command issued under a newer revision than its own, so it carries both."""
+    return _read(root, "command-trust.json")
+
+
+def _catalog(root: Path) -> dict:
+    path = root / "catalog.json"
+    return (
+        _read(root, "catalog.json")
+        if path.exists()
+        else {
+            "connectors": [],
+            "secret_bindings": [],
+        }
+    )
+
+
+def install_connector(root: Path, description: dict) -> None:
+    from lotuspond.fleet.catalog import InstalledCatalog, connector_descriptor
+
+    try:
+        pin = connector_descriptor(description).pin
+    except Exception:
+        raise SystemExit("refused: not a valid connector description") from None
+    state = _catalog(root)
+    for item in state["connectors"]:
+        if item["pin"] == pin.model_dump():
+            if item == description:
+                return
+            raise SystemExit("refused: this connector version is installed differently")
+    state["connectors"].append(description)
+    InstalledCatalog.installed(state)
+    _write(root / "catalog.json", state)
+
+
+def secret_binding(root: Path, binding_id: str, version: int) -> None:
+    from lotuspond.fleet.catalog import InstalledCatalog
+
+    state = _catalog(root)
+    row = {"binding_id": binding_id, "version": version}
+    if row not in state["secret_bindings"]:
+        state["secret_bindings"].append(row)
+    try:
+        InstalledCatalog.installed(state)
+    except Exception:
+        raise SystemExit("refused: not a valid secret binding") from None
+    _write(root / "catalog.json", state)
+
+
 def show(root: Path) -> dict:
     publishers = _read(root, "publishers.json")
     entitlement = _read(root, "entitlement.json")
@@ -140,6 +214,16 @@ def show(root: Path) -> dict:
         "release_required": publishers.get("release_required", True),
         "trusted_publishers": [key["key_id"] for key in publishers["trust"]["keys"]],
         "admitted_catalog_documents": len(publishers.get("catalog", [])),
+        "command_key": (
+            [key["key_id"] for key in command_trust(root)["trust"]["keys"]]
+            if (root / "command-signing.key").exists()
+            else None
+        ),
+        "installed_connectors": [
+            f"{item['pin']['name']}@{item['pin']['version']}"
+            for item in _catalog(root)["connectors"]
+        ],
+        "secret_bindings": len(_catalog(root)["secret_bindings"]),
     }
 
 
@@ -159,8 +243,15 @@ def main(argv=None) -> int:
         p = commands.add_parser(name)
         p.add_argument("dir")
         p.add_argument("state", choices=("on", "off"))
-    for name in ("new-epoch", "show"):
+    for name in ("new-epoch", "show", "command-key", "command-trust"):
         commands.add_parser(name).add_argument("dir")
+    p = commands.add_parser("install-connector")
+    p.add_argument("dir")
+    p.add_argument("file")
+    p = commands.add_parser("secret-binding")
+    p.add_argument("dir")
+    p.add_argument("binding_id")
+    p.add_argument("version", type=int)
     args = parser.parse_args(argv)
     root = Path(args.dir).absolute()
     if args.command == "init":
@@ -175,6 +266,15 @@ def main(argv=None) -> int:
         switch(root, "publishers.json", "release_required", args.state == "on")
     elif args.command == "new-epoch":
         new_epoch(root)
+    elif args.command == "command-key":
+        command_key(root)
+    elif args.command == "command-trust":
+        print(json.dumps(command_trust(root), indent=1, sort_keys=True))
+        return 0
+    elif args.command == "install-connector":
+        install_connector(root, json.loads(Path(args.file).read_text()))
+    elif args.command == "secret-binding":
+        secret_binding(root, args.binding_id, args.version)
     print(json.dumps(show(root), indent=1))
     return 0
 

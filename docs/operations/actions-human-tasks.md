@@ -4,7 +4,7 @@ E05 lets a workflow write to a business system only through a reviewed, durable 
 
 This guide extends [the durable execution guide](durable-execution.md): its topology, grants, capacity, restore and runbooks all still apply. Read that one first.
 
-> **Not production-qualified.** Every connector, provider and target that has run this is synthetic, in local Linux containers. Production has no command key provider yet, so the action and task routes answer 503 and only interpreter v1 runs (see [Still open](#still-open)).
+> **Not production-qualified.** Every connector, provider and target that has run this is synthetic, in local Linux containers. Production gains a command key and an installed catalog only when its operator provisions them ([operator authority](operator-authority.md#reviewed-actions)); until then the action and task routes answer 503 and only interpreter v1 runs. No real system of record has been written through yet (see [Still open](#still-open)).
 
 ## What turns it on
 
@@ -15,7 +15,7 @@ Action dispatch exists only when composition is given a **command key provider**
 - the installed catalog names no connector, so no deployment can allow a write;
 - `/api/v1/ready` reports the database and limiter only. It never reports dispatch as ready, so a missing key is never readiness success.
 
-The operator directory (`python -m lotuspond.authority`) does not yet hold a command key. A test command key or a catalog naming the synthetic target refuses composition outside test mode.
+In production the operator directory holds both: `authority command-key` provisions the key (`command-signing.key`, `command-trust.json`) and `authority install-connector` / `secret-binding` the catalog (`catalog.json`); see [operator authority](operator-authority.md#reviewed-actions). The key is reread on every signature; the catalog is read when the API and workers start. A test command key or a catalog naming the synthetic target refuses composition outside test mode.
 
 ## Command key custody and rotation
 
@@ -90,11 +90,11 @@ Restore follows the [durable execution procedure](durable-execution.md#backups-a
 
 Each must be qualified before production use:
 
-- real connectors and providers: the `https-json` write side, a production command key provider and its trust, and a real system of record;
+- a real system of record: the `https-json` write side and the operator command key and catalog are built and tested locally, against stand-ins, but nothing has written to a customer's system; command key rotation without a restart;
 - notification delivery for tasks and escalations;
 - compensation (plan decision 14): reversing an applied write stays refused;
 - E06 cases and business outcomes;
-- the E07 task inbox and operations UI (the console's Human tasks page stays planned);
+- the rest of E07's operations UI (the console's Human tasks inbox and Control Room exist since 2026-11-15; workers, queues and deployment changes do not);
 - E08 signed entitlements;
 - E09 operations: hosted CI, capacity at the planning target (tier 3 failed its throughput criteria on a 4-vCPU VM), HA and service levels;
 - the owner's decisions on ACT-12 (a reviewer without source access), RESTORE-2 (a restored, never-dispatched intent that reads back present), and whether a lapsed write should keep its slot until its stop is confirmed. See the [qualification record](../validation/2026-11-13-actions-human-tasks.md).

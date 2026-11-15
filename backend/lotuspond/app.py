@@ -312,6 +312,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "production-action-wiring",
+                    "date": "2026-11-15",
+                    "title": "Reviewed actions can be switched on in production",
+                    "description": "An operator can now switch on reviewed actions for an installation: provision a command key with python -m lotuspond.authority command-key, install the connectors and secret bindings workflows write through, and give each runtime the printed command trust. The API and workers then run the reviewed-action engine, the Human tasks inbox and its decisions work, and a runtime can send approved writes through its https-json write providers. Without a command key nothing changes: only the earlier engine runs and the action routes say they are unavailable.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "review-inbox-control-room",
                     "date": "2026-11-15",
                     "title": "Review inbox and Control Room",

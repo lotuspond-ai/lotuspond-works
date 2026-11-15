@@ -136,7 +136,10 @@ def test_action_configuration_is_closed_data(tmp_path):
             worker_config(bad)
 
 
-def test_the_cli_accepts_actions_only_in_test_mode(tmp_path, capsys):
+def test_the_cli_runs_synthetic_write_providers_only_in_test_mode(tmp_path, capsys):
+    """An unknown writer is refused in test mode; outside it, the synthetic target's write
+    provider is refused too (only an operator's `https-json` write side is accepted there,
+    see test_operator_actions)."""
     import json
 
     from test_cli import activity_config, cli_module, config_file
