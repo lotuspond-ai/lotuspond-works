@@ -1,6 +1,6 @@
 # ADR-0019: Databases, tenancy and placement
 
-Date: 2026-11-16. Status: **proposed. On 2026-11-16 the owner asked how the databases should be laid out, given that LotusPond Works will serve organisations and will later need on-premises or enterprise-only privacy.** This record decides where each product's data lives and how one Works organisation can move to stricter isolation later. [ADR-0018](0018-one-lotuspond-account.md) decides the shared account. Nothing here is built yet.
+Date: 2026-11-16. Status: **accepted. On 2026-11-16 the owner asked how the databases should be laid out, given that LotusPond Works will serve organisations and will later need on-premises or enterprise-only privacy, then accepted this design the same day and opened Health in India only at first ([ADR-0018](0018-one-lotuspond-account.md)).** This record decides where each product's data lives and how one Works organisation can move to stricter isolation later. [ADR-0018](0018-one-lotuspond-account.md) decides the shared account. Nothing here is built yet.
 
 ## Context
 
@@ -124,7 +124,11 @@ A **support-access approval** applies wherever LotusPond runs the service. A Lot
 - Row-level security needs care with connection pooling: the setting must be per transaction, never per session.
 - The organisation export and import tool becomes the main way to deliver isolation, and it needs its own tests and restore drills.
 
-## Open questions for the owner
+## Settled, and still open
+
+Settled 2026-11-16: **Health opens in India only at first.** Only the India cells of Accounts and Health are deployed for Health at launch; the other cells stay in the design and open by configuration.
+
+Still open:
 
 1. **Which regions hosted Works opens first.** India only, or India and Europe together?
 2. **Prices and thresholds** for the dedicated placements. This record decides only that they exist.

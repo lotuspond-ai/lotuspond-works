@@ -1,6 +1,6 @@
 # ADR-0018: One LotusPond account for Health and Works
 
-Date: 2026-11-16. Status: **proposed. On 2026-11-16 the owner asked for one sign-up page for LotusPond Health and LotusPond Works, with single sign-on between them.** This record decides how sign-up, sign-in and single sign-on work across both products, on LotusPond's cloud and on a customer's own servers. [ADR-0019](0019-database-tenancy-and-placement.md) decides where each product's data lives. Nothing here is built yet.
+Date: 2026-11-16. Status: **accepted. On 2026-11-16 the owner asked for one sign-up page for LotusPond Health and LotusPond Works, with single sign-on between them, then accepted this design the same day, confirmed the domain names, and opened Health in India only at first.** This record decides how sign-up, sign-in and single sign-on work across both products, on LotusPond's cloud and on a customer's own servers. [ADR-0019](0019-database-tenancy-and-placement.md) decides where each product's data lives. Nothing here is built yet.
 
 ## Context
 
@@ -148,12 +148,23 @@ Health holds health records, the most sensitive data LotusPond keeps. It must st
   - local mode stays for air-gapped installations;
   - multi-factor code moves into Accounts.
 
-## Open questions for the owner
+## Settled by the owner, 2026-11-16
 
-1. **Domain names.** `accounts.lotuspond.ai` for Accounts, and `works.lotuspond.ai` for hosted Works, are assumed here.
-2. **Legal review.** Moving Health's account identity (not records) out of Health into Accounts changes the Health privacy policy's list of who processes account data. It should be reviewed before launch, as Health's consent text was.
-3. **Order of work.** The suggested order:
-   1. Accounts with password and passkey sign-in;
+The owner's words:
+
+> Go ahead with this, at first only India is accepted for health. Use those sub domains u mentioned
+
+1. **Domain names.** Accounts is at `accounts.lotuspond.ai`, and hosted Works at `works.lotuspond.ai`. Health stays at `health.lotuspond.ai`.
+2. **Health opens in India only at first.**
+   - Health sign-up through Accounts accepts only people resident in India, and their accounts and records are kept in the India cell.
+   - The other cells stay in the design, so opening a region later is configuration, not a redesign.
+   - A person from another country can still create a LotusPond account for Works; only Health refuses them, and says so.
+
+## Still open
+
+1. **Legal review.** Moving Health's account identity (not records) out of Health into Accounts changes the Health privacy policy's list of who processes account data. It should be reviewed before launch, as Health's consent text was.
+2. **Order of work.** The suggested order:
+   1. Accounts with password and passkey sign-in, starting with the India cell;
    2. Works as the first relying party;
    3. Health, including its apps;
    4. enterprise connections when the first organisation asks.
