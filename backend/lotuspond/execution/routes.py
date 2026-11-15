@@ -350,6 +350,16 @@ def list_production_executions(project_id: str, environment_id: str, request: Re
     return _inventory(db, current.scope, Execution, request, lambda row: _json(execution_view(row)))
 
 
+@router.get("/execution-queue", tags=["production executions"])
+def get_execution_queue(project_id: str, environment_id: str, request: Request, db=DB):
+    """Capacity against its limits, executions by state, the oldest pending admission."""
+    no_query(request)
+    from .queue import queue_view
+
+    current = actor(db, request, project_id, environment_id, "read")
+    return queue_view(db, current)
+
+
 @router.get("/executions/{execution_id}", tags=["production executions"])
 def get_production_execution(
     project_id: str, environment_id: str, execution_id: str, request: Request, db=DB

@@ -292,6 +292,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "control-room-operations",
+                    "date": "2026-11-16",
+                    "title": "Control Room runs the environment",
+                    "description": "Control Room now has four tabs. Runs shows executions and what each achieved, as before. Deployments lets owners and administrators enable, disable or revoke a deployment and deploy a published workflow to a runtime pool, with its configuration prefilled from the package. Workers lists runtime pools, issues one-time enrollment tokens shown once with the enroll command, and lists enrolled runtimes with when each was last seen, so one can be revoked. Queue shows how many runs are active, waiting to start and waiting on people against the environment's limits, and how long the oldest has waited.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "retire-package-v1",
                     "date": "2026-11-16",
                     "title": "One workflow format",

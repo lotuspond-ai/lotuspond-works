@@ -469,3 +469,27 @@ def test_a_package_check_needs_publish_and_stores_nothing(api):
     assert (
         post(h, "/executable-packages/check", {"package": {}, "x": 1}, h.owner).status_code == 400
     )
+
+
+def test_the_execution_queue_counts_states_against_capacity(api):
+    """Control Room's queue: capacity and its limits, executions by state, read-only."""
+    h = api
+    empty = get(h, "/execution-queue", h.owner)
+    assert empty.status_code == 200, empty.text
+    assert sum(empty.json()["states"].values()) == 0
+    revision = h.deploy("waits", "waits.policy")
+    started = [
+        post(h, "/executions", start_body(revision), h.owner, f"q-{n}").json()["id"]
+        for n in range(2)
+    ]
+    viewer = login(h, member(h, "viewer"))
+    queue = get(h, "/execution-queue", viewer).json()
+    assert sum(queue["states"].values()) == len(started)
+    capacity = queue["capacity"]
+    assert capacity is not None
+    assert 0 <= capacity["active"] <= capacity["active_limit"]
+    assert 0 <= capacity["pending"] <= capacity["pending_limit"]
+    if queue["states"]["pending"]:
+        assert queue["oldest_pending_admitted_at_ms"] is not None
+    assert get(h, "/execution-queue?x=1", h.owner).status_code == 400
+    assert get(h, "/execution-queue", key(h, ["read"])).status_code == 200
