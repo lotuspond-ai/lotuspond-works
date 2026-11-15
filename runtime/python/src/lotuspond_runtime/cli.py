@@ -47,8 +47,8 @@ def _token(path):
 def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, failed):
     """One action worker on its own transport, beside the activity worker (E05).
 
-    Test mode only: `actions` is the configuration's synthetic write providers and
-    their command trust. It shares the activity worker's journal (one holder per
+    Test mode only: `actions` is the configuration's write providers (the synthetic
+    target's, or `https-json`'s) and their command trust. It shares the activity worker's journal (one holder per
     process) and server-anchored clock, and the supervisor's live session.
     """
     from .action_client import ActionClient
@@ -57,6 +57,13 @@ def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, fai
     from .action_worker import ActionDependencies, ActionWorker
 
     trust_file, descriptors = actions
+    # A real write provider's connection secrets resolve through the mounted resolver
+    # of the operator configuration; the synthetic target's configuration has none.
+    secrets = None
+    if getattr(setup, "resolver", None) is not None:
+        from .action_worker import MountedActionSecrets
+
+        secrets = MountedActionSecrets(setup.resolver)
 
     def live():
         shared = supervisor.activity_session()
@@ -84,6 +91,7 @@ def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, fai
                         providers=providers,
                         journal=journal,
                         clock=clock,
+                        secrets=secrets,
                     )
                     if worker is None:
                         worker = ActionWorker(deps)
@@ -228,7 +236,9 @@ def _serve_activities(config, client, store, setup, stop, actions=None) -> int:
 
 def _execute(argv, clients) -> int:
     try:
-        parser = _Parser(prog="lotuspond-runtime", description="Private LotusPond Works Linux runtime")
+        parser = _Parser(
+            prog="lotuspond-runtime", description="Private LotusPond Works Linux runtime"
+        )
         commands = parser.add_subparsers(dest="command", required=True)
         enroll = commands.add_parser("enroll")
         enroll.add_argument("--config", required=True)
@@ -255,6 +265,7 @@ def _execute(argv, clients) -> int:
                     from .provider_config import worker_config as operator_config
 
                     fixture = operator_config(raw, test_mode=True)
+                    actions = fixture.actions
                 elif config.mode == "test":
                     # Otherwise test mode runs the packaged synthetic providers (Task 13),
                     # and the synthetic target's write providers when it names them (E05).

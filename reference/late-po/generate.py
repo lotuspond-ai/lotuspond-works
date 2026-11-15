@@ -148,6 +148,11 @@ ROUTES = {
         "get_promised_date_change": {
             "method": "GET",
             "path": "/erp/purchase-orders/{po_number}/promised-date",
+            "input": "ignored",
+        },
+        "set_promised_date": {
+            "method": "POST",
+            "path": "/erp/purchase-orders/{po_number}/promised-date",
         },
     },
     "carrier": {
@@ -156,7 +161,12 @@ ROUTES = {
     },
     "inbox": {
         "list_supplier_messages": {"method": "GET", "path": "/inbox/purchase-orders/{po_number}"},
-        "get_customer_update": {"method": "GET", "path": "/inbox/sent/{sales_order_id}"},
+        "get_customer_update": {
+            "method": "GET",
+            "path": "/inbox/sent/{sales_order_id}",
+            "input": "ignored",
+        },
+        "send_customer_update": {"method": "POST", "path": "/inbox/sent/{sales_order_id}"},
     },
 }
 

@@ -6,6 +6,7 @@
  "format": "lotuspond.https-json.routes.v1",
  "operations": {
   "get_credit_note_request": {
+   "input": "ignored",
    "method": "GET",
    "path": "/invoices/{invoice_id}/credit-note-request"
   },
@@ -18,6 +19,7 @@
    "path": "/invoices/{invoice_id}"
   },
   "get_payment_hold": {
+   "input": "ignored",
    "method": "GET",
    "path": "/invoices/{invoice_id}/payment-hold"
   },
@@ -36,6 +38,14 @@
   "list_supplier_invoices": {
    "method": "GET",
    "path": "/suppliers/{supplier_id}/purchase-orders/{po_number}/invoices"
+  },
+  "request_credit_note": {
+   "method": "POST",
+   "path": "/invoices/{invoice_id}/credit-note-request"
+  },
+  "set_payment_hold": {
+   "method": "POST",
+   "path": "/invoices/{invoice_id}/payment-hold"
   }
  }
 }

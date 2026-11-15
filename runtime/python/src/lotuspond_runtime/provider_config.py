@@ -10,6 +10,11 @@ Strict, closed data, read from one private file. It names:
 - `providers`: each real provider by fixed identifier (`https-json` or
   `anthropic-messages`), pinned to its catalog dependency, with its settings.
 
+A test-mode runtime may add `actions`: `{"trust_file", "providers": [{"provider_id":
+"https-json", "connector", "operations": {write: idempotency}, "settings"}]}`, the
+`https-json` write side for its reviewed actions (E05). Its command trust is a test
+file; production command trust is not provided by this configuration.
+
 Each provider's settings are checked here against its pins before the worker starts,
 so a mismatched routes document or model configuration never reaches a delivery.
 Nothing in it is code, and no synthetic provider is accepted.
@@ -56,6 +61,10 @@ class ActivitySetup:
     descriptors: tuple
     secrets: object
     test_mode: bool
+    # Test mode only: (command trust file, write descriptors), and the mounted resolver
+    # an action's own secret bindings resolve through.
+    actions: tuple | None = None
+    resolver: object = None
 
 
 def _descriptor(item) -> ProviderDescriptor:
@@ -102,13 +111,18 @@ def worker_config(raw: bytes, *, test_mode: bool = False) -> ActivitySetup:
     from .resolver import MountedSecretResolver
 
     data = json.loads(raw)
-    if type(data) is not dict or set(data) != {
+    if type(data) is not dict or set(data) - {"actions"} != {
         "trust_file",
         "journal_directory",
         "secrets",
         "providers",
     }:
         raise ValueError("Invalid activity worker configuration")
+    actions = None
+    if "actions" in data:
+        if test_mode is not True:
+            raise ValueError("Write providers need command trust this configuration lacks")
+        actions = _actions(data["actions"])
     trust = _operator_path(data["trust_file"])
     journal = _operator_path(data["journal_directory"])
     secrets = data["secrets"]
@@ -132,4 +146,35 @@ def worker_config(raw: bytes, *, test_mode: bool = False) -> ActivitySetup:
         descriptors=tuple(_descriptor(item) for item in providers),
         secrets=MountedActivitySecrets(resolver, bindings),
         test_mode=test_mode is True,
+        actions=actions,
+        resolver=resolver,
     )
+
+
+def _actions(raw) -> tuple:
+    """`(trust_file, write descriptors)`: the `https-json` write side, strictly checked."""
+    from .action_invocation import WriteDescriptor
+    from .https_json import HttpsJsonWriteProvider
+
+    if type(raw) is not dict or set(raw) != {"trust_file", "providers"}:
+        raise ValueError("Invalid actions")
+    providers = raw["providers"]
+    if type(providers) is not list or not 1 <= len(providers) <= 8:
+        raise ValueError("Invalid write providers")
+    descriptors = []
+    for item in providers:
+        if (
+            type(item) is not dict
+            or set(item) != {"provider_id", "connector", "operations", "settings"}
+            or item["provider_id"] != "https-json"
+        ):
+            raise ValueError("Invalid write provider")
+        descriptor = WriteDescriptor(
+            "https-json",
+            ConnectorPin.model_validate(item["connector"]),
+            item["operations"],
+            settings=item["settings"],
+        )
+        HttpsJsonWriteProvider(descriptor, ())  # fail at start, not at the first command
+        descriptors.append(descriptor)
+    return _operator_path(raw["trust_file"]), tuple(descriptors)

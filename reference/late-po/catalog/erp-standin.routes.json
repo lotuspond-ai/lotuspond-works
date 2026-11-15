@@ -6,6 +6,7 @@
  "format": "lotuspond.https-json.routes.v1",
  "operations": {
   "get_promised_date_change": {
+   "input": "ignored",
    "method": "GET",
    "path": "/erp/purchase-orders/{po_number}/promised-date"
   },
@@ -16,6 +17,10 @@
   "get_stock_cover": {
    "method": "GET",
    "path": "/erp/stock/{sku}"
+  },
+  "set_promised_date": {
+   "method": "POST",
+   "path": "/erp/purchase-orders/{po_number}/promised-date"
   }
  }
 }

@@ -8,10 +8,11 @@ runtime's `https-json` connector reads the stand-in ERP, carrier and inbox
 secret, and its `anthropic-messages` provider calls the local Messages API double,
 scripted from each scenario. Nothing leaves the machine.
 
-Writes are not dispatched here: the `https-json` connector has no write side yet
-(milestone 3). A late order instead stops at the planner's review of the exact date
-change, which is checked and denied, so the execution fails `approval_denied` and the
-stand-in records no write.
+The first case denies each late order's review, so nothing is written. The second
+approves them (milestone 3): the runtime's `https-json` write provider posts the date
+change to the ERP and, after a second planner's independent approval, the customer
+update to the inbox; each is read back and verified, and a write that times out after
+committing is settled by read-back, never resent.
 """
 
 import importlib.util
@@ -62,7 +63,12 @@ def review_of(w, operator, customer, execution_id, seconds=180):
 @pytest.fixture
 def late_po(world, processes, linux):
     w = world
-    drivers.worlds.actions_mode(w, list(gen.CONNECTORS.values()))
+    drivers.worlds.actions_mode(
+        w,
+        list(gen.CONNECTORS.values()),
+        # Each connection's secret binding is installed, as an operator installs one.
+        secret_bindings=[(f"{system}_token", 1) for system in gen.CONNECTORS],
+    )
     processes.start_api()
     processes.start_worker("orchestrator", "orchestrator-a", wait=False)
     processes.start_worker("sweeper", "sweeper-a", wait=False)
@@ -104,10 +110,35 @@ def late_po(world, processes, linux):
         for system, document in gen.CONNECTORS.items()
     }
     model_pin = {"reference_id": str(uuid4()), "version": 1}
+    # Each token under its activity binding and under its connection's secret binding,
+    # which an action's command names.
     root, mapping = mounted_secrets(
         w.root,
-        {**{f"{system}-token": token for system, token in TOKENS.items()}, "model-key": MODEL_KEY},
+        {
+            **{f"{system}-token": token for system, token in TOKENS.items()},
+            **{f"{system}_token": token for system, token in TOKENS.items()},
+            "model-key": MODEL_KEY,
+        },
     )
+    command_trust = w.root / "command-trust.json"
+    drivers.worlds.write_private(
+        command_trust, drivers.worlds.trust_set(w.state("keys")["command"])
+    )
+
+    def pin_of(document):
+        return {
+            "name": document["name"],
+            "version": document["version"],
+            "artifact_sha256": document["definition"]["artifact_sha256"],
+        }
+
+    def settings_of(system):
+        return {
+            "routes": gen.routes_document(system),
+            "ca_file": str(cert),
+            "egress": {"allowed_private_cidrs": ["127.0.0.0/8", "::1/128"]},
+            "test_loopback": True,
+        }
 
     def activity(trust, journal):
         providers = [
@@ -124,12 +155,7 @@ def late_po(world, processes, linux):
                     "version": document["version"],
                     "artifact_sha256": document["definition"]["artifact_sha256"],
                 },
-                "settings": {
-                    "routes": gen.routes_document(system),
-                    "ca_file": str(cert),
-                    "egress": {"allowed_private_cidrs": ["127.0.0.0/8", "::1/128"]},
-                    "test_loopback": True,
-                },
+                "settings": settings_of(system),
             }
             for system, document in gen.CONNECTORS.items()
         ]
@@ -158,10 +184,27 @@ def late_po(world, processes, linux):
                 ],
             },
             "providers": providers,
+            # The https-json write side for the two systems the package writes to.
+            "actions": {
+                "trust_file": str(command_trust),
+                "providers": [
+                    {
+                        "provider_id": "https-json",
+                        "connector": pin_of(gen.CONNECTORS[system]),
+                        "operations": {operation: "target_key" for operation in WRITES[system]},
+                        "settings": settings_of(system),
+                    }
+                    for system in ("erp", "inbox")
+                ],
+            },
         }
 
     runtime = operator.runtime(
-        customer, "runtime-late-po", model_document=gen.model, activity=activity
+        customer,
+        "runtime-late-po",
+        model_document=gen.model,
+        activity=activity,
+        writes=[pin_of(gen.CONNECTORS[system]) for system in ("erp", "inbox")],
     )
     yield w, operator, customer, revision, ledger, double, runtime
     customer.close()
@@ -243,3 +286,118 @@ def test_every_scenario_reads_three_systems_and_waits_for_the_exact_date_change(
     # A denied review sends nothing: no write reached any system.
     assert not [r for r in ledger.requests if r[0] == "POST"], ledger.requests
     assert ledger.date_changes == {} and ledger.customer_updates == {}
+
+
+def logs(w, names=("api", "runtime-late-po")):
+    """The last lines of each process's own log, for a failure message."""
+    found = {}
+    for name in names:
+        for kind in ("stdout", "stderr"):
+            path = w.root / "logs" / f"{name}.{kind}"
+            if path.exists():
+                found[f"{name}.{kind}"] = path.read_text(errors="replace").splitlines()[-40:]
+    return found
+
+
+def facts(w, execution_id):
+    """Event codes, command and admission rows of one execution, for a failure message."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from lotuspond.models import ExecutionActionCommand, RuntimeCommandAdmission, RuntimeInstance
+
+    events = [
+        (row.code, payload.get("detail"), payload.get("occurrence_path"))
+        for row, payload in drivers.decoded_events(w, execution_id)
+    ]
+    with Session(w.engine) as db:
+        commands = [
+            (c.status, c.claimed_at_ms is not None, c.admission_id)
+            for c in db.scalars(
+                select(ExecutionActionCommand).where(
+                    ExecutionActionCommand.execution_id == execution_id
+                )
+            )
+        ]
+        admissions = [
+            (a.status, a.command_expires_at_ms)
+            for a in db.scalars(
+                select(RuntimeCommandAdmission).where(
+                    RuntimeCommandAdmission.id.in_([c[2] for c in commands])
+                )
+            )
+        ]
+        instances = [
+            (i.status, bytes(i.observation_ceiling)[:300])
+            for i in db.scalars(select(RuntimeInstance))
+        ]
+    tail = " | ".join(f"{code}:{detail}:{path}" for code, detail, path in events[-30:])
+    return {"events": tail, "commands": commands, "admissions": admissions, "runtimes": instances}
+
+
+def decide(person, task, decision="allow"):
+    proposal = person.call("GET", f"/human-tasks/{task['id']}/proposal")
+    person.call("POST", f"/human-tasks/{task['id']}/claim", {})
+    person.call(
+        "POST",
+        f"/human-tasks/{task['id']}/decision",
+        {
+            "decision_id": f"d-{uuid4().hex[:8]}",
+            "intent_sha256": proposal["intent_sha256"],
+            "decision": decision,
+        },
+    )
+    return proposal
+
+
+def test_approved_late_orders_are_rescheduled_and_customers_told_once(late_po):
+    """Milestone 3: both writes go out through https-json after their reviews, are read
+    back and verified; the customer update needs a second, independent planner. One
+    date change times out after committing: read back, never resent."""
+    w, operator, customer, revision, ledger, double, runtime = late_po
+    second = operator.member(customer, "admin")
+    late = [s for s in SCENARIOS if s["expected"]["status"] != "on_time"]
+    for scenario in late:
+        rounds = scenario["model_rounds"]
+        double.rounds = rounds
+        expected = scenario["expected"]
+        po = scenario["input"]["po_number"]
+        order = standin.Ledger().answer("get_purchase_order", {"po_number": po})
+        posts_before = len([r for r in ledger.requests if r[0] == "POST"])
+        if scenario["id"] == "carrier-only":
+            ledger.fail_after_commit = 1  # the ERP commits, then the answer is lost
+        execution_id = operator.start(customer, revision, scenario["input"])["id"]
+
+        reschedule = decide(customer, review_of(w, operator, customer, execution_id))
+        assert reschedule["operation"] == "set_promised_date"
+        if expected["notify_customer"]:
+            task = review_of(w, operator, customer, execution_id)
+            # The requester cannot approve a customer message: a second planner does.
+            notify = decide(second, task)
+            assert (notify["operation"], notify["independent_approval"]) == (
+                "send_customer_update",
+                True,
+            )
+            assert notify["target"] == {"sales_order_id": order["sales_order_id"]}
+
+        view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 240)
+        assert view["state"] == "succeeded", (
+            scenario["id"],
+            facts(w, execution_id),
+            logs(w),
+        )
+        result = result_of(w, execution_id)
+        for key, value in expected.items():
+            assert result[key] == value, (scenario["id"], key, result)
+
+        change = ledger.date_changes[po]
+        assert change["promised_day"] == expected["new_promised_day"]
+        update = ledger.customer_updates.get(order["sales_order_id"])
+        assert (update is not None) is expected["notify_customer"]
+        if update is not None:
+            assert update["promised_day"] == expected["new_promised_day"]
+        posts = [r for r in ledger.requests if r[0] == "POST"][posts_before:]
+        writes = 2 if expected["notify_customer"] else 1
+        assert len(posts) == writes, (scenario["id"], posts)  # applied once, never resent
+        assert all(authorized for _, _, authorized in posts)
+    assert ledger.fail_after_commit == 0

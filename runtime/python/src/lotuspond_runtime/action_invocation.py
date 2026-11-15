@@ -186,8 +186,14 @@ def _provider(descriptor: WriteDescriptor, secrets, test_mode):
 
         implementation = action_fixture.WRITE_PROVIDERS.get(descriptor.provider_id)
         return None if implementation is None else implementation(descriptor, secrets)
-    # No real write provider is installed by this change; one that is not
-    # installed is unavailable, never a fallback to anything else.
+    if descriptor.test_only:
+        return None
+    # Real write providers, by fixed identifier only; any other is unavailable, never
+    # a fallback to anything else.
+    if descriptor.provider_id == "https-json":
+        from .https_json import HttpsJsonWriteProvider
+
+        return HttpsJsonWriteProvider(descriptor, secrets, test_mode=test_mode is True)
     return None
 
 

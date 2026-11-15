@@ -140,8 +140,10 @@ def test_the_connectors_pin_their_routes_and_the_model_its_configuration():
     for system, document in gen.CONNECTORS.items():
         routes = gen.routes_document(system)
         assert document["definition"]["artifact_sha256"] == routes_digest(routes)
-        reads = {op["id"] for op in document["definition"]["operations"] if op["effect"] == "read"}
-        assert set(routes["operations"]) == reads
+        effects = {op["id"]: op["effect"] for op in document["definition"]["operations"]}
+        assert set(routes["operations"]) == set(effects)
+        for operation, route in routes["operations"].items():
+            assert route["method"] == ("POST" if effects[operation] == "write" else "GET")
     assert gen.model["definition"]["configuration_sha256"] == configuration_digest(
         gen.MODEL_CONFIGURATION
     )
@@ -329,7 +331,7 @@ def test_each_route_reaches_its_stand_in_operation():
         for operation, route in gen.ROUTES[system].items():
             path = route["path"].replace("{po_number}", "PO-1").replace("{sku}", "SKU-1")
             path = path.replace("{sales_order_id}", "SO-1")
-            assert standin.route("GET", path)[:2] == (system, operation)
+            assert standin.route(route["method"], path)[:2] == (system, operation)
 
 
 def test_the_https_json_connector_reads_each_system_with_its_own_secret(https):

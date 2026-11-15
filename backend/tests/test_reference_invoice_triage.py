@@ -261,10 +261,10 @@ def test_the_connector_pins_its_routes_and_the_model_pins_its_configuration():
 
     assert stored("catalog/ap-standin.routes.json") == gen.ROUTES
     assert gen.connector["definition"]["artifact_sha256"] == routes_digest(gen.ROUTES)
-    declared = {op["id"] for op in gen.connector["definition"]["operations"]}
-    assert set(gen.ROUTES["operations"]) == {
-        o for o in declared if not o.startswith(("set_", "request_"))
-    }
+    declared = {op["id"]: op["effect"] for op in gen.connector["definition"]["operations"]}
+    assert set(gen.ROUTES["operations"]) == set(declared)
+    for operation, route in gen.ROUTES["operations"].items():
+        assert route["method"] == ("POST" if declared[operation] == "write" else "GET")
     assert gen.model["definition"]["configuration_sha256"] == configuration_digest(
         gen.MODEL_CONFIGURATION
     )
@@ -275,7 +275,8 @@ def test_each_route_reaches_its_stand_in_operation():
     for operation, route in gen.ROUTES["operations"].items():
         path = route["path"].replace("{invoice_id}", "INV-1").replace("{po_number}", "PO-1")
         path = path.replace("{supplier_id}", "SUP-1")
-        assert standin.route("GET", path) == (operation, standin.route("GET", path)[1])
+        found = standin.route(route["method"], path)
+        assert found == (operation, found[1])
 
 
 def test_the_https_json_connector_reads_the_stand_in(tmp_path):
@@ -340,3 +341,21 @@ def test_the_https_json_connector_reads_the_stand_in(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_deployment_admits_both_writes_and_their_read_backs():
+    """Each read-back accepts its write's exact target and input (E05 owner decision
+    18), so the full package deploys through one connection allowing every operation."""
+    from lotuspond_runtime.protocol import ConnectorPin
+    from lotuspond_sdk.executable.catalog import catalog_document_digest
+
+    from lotuspond.execution.action_policies import check_write_bindings
+
+    pin = ConnectorPin(
+        name=gen.connector["name"],
+        version=gen.connector["version"],
+        artifact_sha256=gen.connector["definition"]["artifact_sha256"],
+    )
+    allowed = [op["id"] for op in gen.connector["definition"]["operations"]]
+    connections = {catalog_document_digest(gen.connector): (pin, allowed)}
+    check_write_bindings(closure_of(gen.full), connections)

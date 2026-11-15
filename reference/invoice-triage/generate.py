@@ -186,9 +186,20 @@ ROUTES = {
             "path": "/suppliers/{supplier_id}/purchase-orders/{po_number}/invoices",
         },
         "list_credit_notes": {"method": "GET", "path": "/suppliers/{supplier_id}/credit-notes"},
-        "get_payment_hold": {"method": "GET", "path": "/invoices/{invoice_id}/payment-hold"},
+        # Read-backs take the write's input (E05 owner decision 18) and read by target.
+        "get_payment_hold": {
+            "method": "GET",
+            "path": "/invoices/{invoice_id}/payment-hold",
+            "input": "ignored",
+        },
         "get_credit_note_request": {
             "method": "GET",
+            "path": "/invoices/{invoice_id}/credit-note-request",
+            "input": "ignored",
+        },
+        "set_payment_hold": {"method": "POST", "path": "/invoices/{invoice_id}/payment-hold"},
+        "request_credit_note": {
+            "method": "POST",
             "path": "/invoices/{invoice_id}/credit-note-request",
         },
     },
@@ -198,6 +209,8 @@ ROUTES = {
 BY_INVOICE = fields(invoice_id=ID)
 BY_PO = fields(po_number=ID)
 BY_SUPPLIER = fields(supplier_id=ID)
+HOLD_INPUT = fields(amount=MONEY, reason=string(400))
+CREDIT_INPUT = fields(supplier_id=ID, amount=MONEY, reason=string(400))
 connector = {
     "format_version": 1,
     "kind": "connector",
@@ -213,14 +226,16 @@ connector = {
             operation("get_supplier_contract", BY_SUPPLIER, CONTRACT),
             operation("list_supplier_invoices", fields(supplier_id=ID, po_number=ID), INVOICES),
             operation("list_credit_notes", BY_SUPPLIER, CREDIT_NOTES),
-            operation("get_payment_hold", BY_INVOICE, HOLD_READBACK),
-            operation("get_credit_note_request", BY_INVOICE, CREDIT_READBACK),
+            operation("get_payment_hold", BY_INVOICE, HOLD_READBACK, input_schema=HOLD_INPUT),
+            operation(
+                "get_credit_note_request", BY_INVOICE, CREDIT_READBACK, input_schema=CREDIT_INPUT
+            ),
             operation(
                 "set_payment_hold",
                 BY_INVOICE,
                 RECEIPT_OUT,
                 effect="write",
-                input_schema=fields(amount=MONEY, reason=string(400)),
+                input_schema=HOLD_INPUT,
                 readback="get_payment_hold",
             ),
             operation(
@@ -228,7 +243,7 @@ connector = {
                 BY_INVOICE,
                 RECEIPT_OUT,
                 effect="write",
-                input_schema=fields(supplier_id=ID, amount=MONEY, reason=string(400)),
+                input_schema=CREDIT_INPUT,
                 readback="get_credit_note_request",
             ),
         ],
@@ -491,7 +506,7 @@ def action_body(prefix, status, operation_id, read_operation, policy_ref, indepe
                 "connector_ref": "ap",
                 "read_operation": read_operation,
                 "target": target,
-                "input": lit(None, NULL),
+                "input": input_,
                 "rule_id": f"{prefix}-recorded",
                 "version": "1",
                 "rules": [

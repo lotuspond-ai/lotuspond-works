@@ -1,6 +1,6 @@
 {
  "definition": {
-  "artifact_sha256": "26e738df654688a2f3748db37e36c94b6299577c5b0b9bc8642f711dfc037860",
+  "artifact_sha256": "2e23e5ea93cd6b4a565d7581b852382a79d820c2836135279b884577e769a9c0",
   "operations": [
    {
     "effect": "read",
