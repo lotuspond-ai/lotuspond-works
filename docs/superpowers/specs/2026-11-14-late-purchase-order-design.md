@@ -75,6 +75,10 @@ Each is its own PR. Milestones 1 to 3 reuse what the first workflow built (the `
 - **Milestone 2:** the conformance case already runs on `https-json` and `anthropic-messages` with three connections and three secrets. The opt-in live model call is not made: there is no API key on the build machine.
 - **Milestone 3:** a second conformance case approves each late order. The date change goes to the ERP and, after a second, independent planner's approval, the customer update to the inbox, both through `https-json`; each is read back and verified, and the execution succeeds. One date change times out after committing: it is settled by read-back and never resent. The action world now installs each connection's secret binding, which E03's command admission checks; the synthetic target had no secret, so this had never been exercised.
 
+## Milestone 4 as built (15 November)
+
+Package evaluations and the release binding provider ([design](2026-11-15-package-proof-design.md)). A conformance case evaluates the package on all six scenarios through an evaluation deployment (on-time orders by their result, late orders by the exact date change they propose; nothing is written), releases the run under a policy with a second administrator's approval, and deploys the same package version to production with that release. It passed in the local Linux container.
+
 ## Out of scope
 
 A real ERP, carrier or mail system; the date trigger; free-text customer messages (the template is fixed); choosing another supplier or splitting an order (the agent may mention it as a reason, nothing acts on it); Studio authoring of this package; anything in GOAL.md's "Not part of the product".

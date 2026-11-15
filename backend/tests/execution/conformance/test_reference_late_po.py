@@ -104,11 +104,6 @@ def late_po(world, processes, linux):
         # Connectors first: the model's closure is exactly its three read-tool connectors.
         dependencies=[*gen.CONNECTORS.values(), gen.model, gen.planners, gen.customer_messages],
     )
-    by_connector = customer.connection["by_connector"]
-    pins = {
-        system: by_connector[document["name"]]["secrets"][0]
-        for system, document in gen.CONNECTORS.items()
-    }
     model_pin = {"reference_id": str(uuid4()), "version": 1}
     # Each token under its activity binding and under its connection's secret binding,
     # which an action's command names.
@@ -140,7 +135,16 @@ def late_po(world, processes, linux):
             "test_loopback": True,
         }
 
-    def activity(trust, journal):
+    def activity_for(target):
+        """The runtime configuration for one environment's three connections."""
+        by_connector = target.connection["by_connector"]
+        pins = {
+            system: by_connector[document["name"]]["secrets"][0]
+            for system, document in gen.CONNECTORS.items()
+        }
+        return lambda trust, journal: configuration(trust, journal, pins)
+
+    def configuration(trust, journal, pins):
         providers = [
             {
                 "provider_id": "https-json",
@@ -203,7 +207,7 @@ def late_po(world, processes, linux):
         customer,
         "runtime-late-po",
         model_document=gen.model,
-        activity=activity,
+        activity=activity_for(customer),
         writes=[pin_of(gen.CONNECTORS[system]) for system in ("erp", "inbox")],
     )
     yield w, operator, customer, revision, ledger, double, runtime
@@ -401,3 +405,114 @@ def test_approved_late_orders_are_rescheduled_and_customers_told_once(late_po):
         assert len(posts) == writes, (scenario["id"], posts)  # applied once, never resent
         assert all(authorized for _, _, authorized in posts)
     assert ledger.fail_after_commit == 0
+
+
+def workspace(person, method, path, body=None, expect=(200, 201)):
+    """A workspace route (scenarios, policies, releases, approvals): no environment prefix."""
+    headers = dict(person.headers)
+    if method != "GET":
+        headers["idempotency-key"] = uuid4().hex
+    response = person.client.request(method, "/api/v1" + path, json=body, headers=headers)
+    assert response.status_code in expect, (path, response.status_code, response.text[:400])
+    return response.json() if response.content else None
+
+
+def expectation(scenario):
+    """What a package evaluation observes: the result of an on-time order, or the exact
+    date change a late order proposes at its review."""
+    expected = scenario["expected"]
+    if expected["status"] == "on_time":
+        return {"state": "succeeded", "result": expected}
+    return {
+        "state": "review",
+        "proposal": {
+            "operation": "set_promised_date",
+            "target": {"po_number": scenario["input"]["po_number"]},
+            "input": {"promised_day": expected["new_promised_day"]},
+        },
+    }
+
+
+def test_a_proven_release_admits_the_package_to_production(late_po):
+    """Milestone 4: the package is evaluated through its own evaluation deployment in the
+    production environment (bound here to the same stand-ins; nothing is written: reviews
+    are recorded, then cancelled), released under a policy with a second administrator's
+    approval, and that release admits the same package version to production."""
+    w, operator, customer, revision, ledger, double, runtime = late_po
+    double.by_key = {
+        s["input"]["po_number"]: s["model_rounds"] for s in SCENARIOS if "model_rounds" in s
+    }
+    dependencies = [*gen.CONNECTORS.values(), gen.model, gen.planners, gen.customer_messages]
+    candidate = operator.deploy(
+        customer, "late-po-evaluation", package=gen.package, dependencies=dependencies
+    )
+    project = customer.scope["project_id"]
+    scenario_ids = [
+        workspace(
+            customer,
+            "POST",
+            "/scenarios",
+            {
+                "project_id": project,
+                "name": scenario["id"],
+                "input": scenario["input"],
+                "expected": expectation(scenario),
+                "critical": True,
+            },
+        )["id"]
+        for scenario in SCENARIOS
+    ]
+    run = customer.call(
+        "POST",
+        "/package-evaluations",
+        {
+            "deployment_revision_id": candidate,
+            "name": "Late PO candidate",
+            "scenario_ids": scenario_ids,
+        },
+    )
+    deadline = time.monotonic() + 300
+    while run["status"] != "completed" and time.monotonic() < deadline:
+        run = customer.call("POST", f"/package-evaluations/{run['id']}/advance", {})
+        if run["status"] != "completed":
+            time.sleep(0.5)
+    assert run["status"] == "completed", run
+    failed = [r for r in run["results"] if r["passed"] is not True]
+    assert failed == [], failed
+    # Proving the package wrote nothing to any system.
+    assert not [r for r in ledger.requests if r[0] == "POST"]
+
+    policy = workspace(customer, "POST", "/policies", {"name": "Late PO release"})
+    release = workspace(
+        customer,
+        "POST",
+        "/releases",
+        {
+            "project_id": project,
+            "name": "Late PO 0.1.0",
+            "revision": run["revision"],
+            "candidate_run_id": run["id"],
+            "policy_id": policy["id"],
+        },
+    )
+    approval = workspace(
+        customer,
+        "POST",
+        "/approvals",
+        {"release_id": release["id"], "action": "release", "reason": "Evaluated on stand-ins"},
+    )
+    second = operator.member(customer, "admin")
+    workspace(second, "POST", f"/approvals/{approval['id']}/decide", {"status": "approved"})
+    decision = workspace(customer, "POST", f"/releases/{release['id']}/evaluate", {})
+    assert decision["verdict"] == "pass", decision
+
+    # Production: the release admits exactly this package version (admission re-verifies
+    # the release; the provider ties its candidate run to the publication).
+    production = operator.deploy(
+        customer,
+        "late-po-released",
+        package=gen.package,
+        dependencies=dependencies,
+        release_id=release["id"],
+    )
+    assert production  # the revision admitted with the release

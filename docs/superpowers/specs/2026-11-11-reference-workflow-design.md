@@ -118,6 +118,10 @@ Each is its own PR, in this order. The workflow is done after milestone 6.
 
 E06 (cases and business outcome reporting) builds on the verified outcomes this produces and is not part of this workflow.
 
+## Milestone 5 status (15 November)
+
+Package evaluations and the release binding provider are built ([design](2026-11-15-package-proof-design.md)) and proven end to end on late purchase order recovery. This workflow's full package now deploys (its read-backs take their writes' input), but its own evaluation on real processes is not yet run: its conformance case still runs only the prefix.
+
 ## Out of scope
 
 A real ERP, more than one workflow, person-chosen alternative actions after a denial (a denied execution ends as `failed`; a new execution is started if needed), Studio authoring of this package (it is authored with the SDK), notification delivery, hosted installation and anything in GOAL.md's "Not part of the product".

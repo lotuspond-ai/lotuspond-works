@@ -104,7 +104,14 @@ def compose(authorities, *, engine, installation_id: str, limiter, test_mode: bo
     from lotuspond.fleet.catalog import InstalledCatalog
 
     a = authorities
-    dependencies = ExecutionDependencies(authority=a.publishers, test_mode=test_mode)
+    from lotuspond.execution.package_evaluation import PackageEvaluations, ReleaseEvidence
+
+    # The release binding provider: a release proves a package version when its candidate
+    # run is a completed package evaluation of it with a passing decision (admission then
+    # re-verifies the whole release).
+    dependencies = ExecutionDependencies(
+        authority=a.publishers, assurance=ReleaseEvidence(engine), test_mode=test_mode
+    )
     budgets = BudgetService(
         entitlement=a.entitlement,
         tenant_policy=a.tenant,
@@ -187,14 +194,15 @@ def compose(authorities, *, engine, installation_id: str, limiter, test_mode: bo
     )
     reconciliation = ReconciliationService(activities)
     context = ContextSource(store)
+    admission = AdmissionService(
+        budgets=budgets, artifacts=store, artifact_policy=policy, interpreter_id=INTERPRETER
+    )
     services = ExecutionServices(
         artifacts=store,
         artifact_policy=policy,
         budgets=budgets,
         dependencies=dependencies,
-        admission=AdmissionService(
-            budgets=budgets, artifacts=store, artifact_policy=policy, interpreter_id=INTERPRETER
-        ),
+        admission=admission,
         inbox=inbox,
         controls=controls,
         activities=activities,
@@ -202,6 +210,7 @@ def compose(authorities, *, engine, installation_id: str, limiter, test_mode: bo
         reconciliation=reconciliation,
         context=context,
         actions=actions,
+        evaluations=PackageEvaluations(admission=admission, controls=controls, artifacts=store),
     )
     interpreter_ids = [INTERPRETER, INTERPRETER_V2] if with_actions else [INTERPRETER]
     return SimpleNamespace(

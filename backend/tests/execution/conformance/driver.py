@@ -581,8 +581,10 @@ class Operator:
         label=None,
         deployment_id=None,
         knowledge=None,
+        release_id=None,
     ):
         """Publish a control-flow fixture with its dependencies; deploy and enable it.
+        `release_id` names the release that proves this package version.
 
         `dependencies` are catalog documents or fixture names; a connector document
         is bound to the pool's connection, and each `knowledge` entry's reference to
@@ -639,7 +641,7 @@ class Operator:
                 "deployment_id": deployment_id,
                 "publication_id": publication["id"],
                 "pool_id": customer.pool_id,
-                "release_id": None,
+                "release_id": release_id,
                 "configuration": {"bindings": bindings, "limits": limits},
             },
         )
