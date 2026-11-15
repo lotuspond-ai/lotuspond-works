@@ -635,6 +635,13 @@ body:has(main.is-registered) .art-background {
   height: 30px;
   fill: var(--ink);
 }
+.agents-list .agents-wide {
+  grid-column: span 2;
+}
+/* xAI asks for its marks unaltered: black, not the ink colour. */
+.agents-list svg.mark-exact {
+  fill: #000;
+}
 .agents-fine {
   margin: 14px 0 0;
   font-size: 11px;
