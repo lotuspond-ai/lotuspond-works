@@ -15,12 +15,20 @@ from pydantic import SecretStr
 from .client import RuntimeClient
 from .control_transport import ControlTransport
 from .errors import FleetError
+from .pacing import PollPacer, run_paced
 from .protocol import CredentialState, RuntimeConfig, validate_token
 from .state import CredentialStore, read_private_file
 from .supervisor import RuntimeSupervisor
 
-# An idle activity worker polls again after IDLE_MIN_S, doubling to IDLE_MAX_S.
-IDLE_MIN_S, IDLE_MAX_S = 0.2, 1.0
+
+def _pass(worker_run):
+    """One worker pass's status; a refusal for rate is told apart from other failures."""
+    try:
+        return worker_run()
+    except FleetError as error:
+        if error.code == "unsafe_storage":
+            raise
+        return "rate_limited" if error.code == "rate_limited" else "unavailable"
 
 
 class _Parser(argparse.ArgumentParser):
@@ -81,14 +89,13 @@ def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, fai
                 if setup.test_mode
                 else OperatorCommandTrust(trust_file, clock)
             )
-            worker = current = None
-            idle = IDLE_MIN_S
-            while not stop.is_set():
+            state = {"worker": None, "current": None}
+
+            def once():
                 shared = supervisor.activity_session()
                 if shared is None:
-                    stop.wait(0.2)
-                    continue
-                if shared is not current:
+                    return None
+                if shared is not state["current"]:
                     token, secret, identity = shared
                     deps = ActionDependencies(
                         identity=identity,
@@ -99,24 +106,15 @@ def _serve_actions(config, setup, actions, journal, clock, supervisor, stop, fai
                         clock=clock,
                         secrets=secrets,
                     )
-                    if worker is None:
-                        worker = ActionWorker(deps)
+                    if state["worker"] is None:
+                        state["worker"] = ActionWorker(deps)
                     else:
-                        worker.deps = deps
-                    current = shared
-                try:
-                    status = worker.run_once()
-                except FleetError as error:
-                    if error.code == "unsafe_storage":
-                        raise
-                    status = "unavailable"
-                if status == "idle":
-                    stop.wait(idle)
-                    idle = min(idle * 2, IDLE_MAX_S)
-                    continue
-                idle = IDLE_MIN_S
-                if status in ("fenced", "unavailable", "refused"):
-                    stop.wait(1.0)
+                        state["worker"].deps = deps
+                    state["current"] = shared
+                return _pass(state["worker"].run_once)
+
+            # Paced under the control plane's `action-poll:<instance>` allowance.
+            run_paced(stop, PollPacer(), once)
         except Exception as error:  # noqa: BLE001 - reported as a fixed exit code only
             failed.append(error)
             stop.set()
@@ -168,14 +166,13 @@ def _serve_activities(config, client, store, setup, stop, actions=None) -> int:
         try:
             transport = ControlTransport(config.origin, Path(config.ca_file), mode=config.mode)
             providers = ProviderSet(descriptors, test_mode=setup.test_mode)
-            worker = current = None
-            idle = IDLE_MIN_S
-            while not stop.is_set():
+            state = {"worker": None, "current": None}
+
+            def once():
                 shared = supervisor.activity_session()
                 if shared is None:
-                    stop.wait(0.2)
-                    continue
-                if shared is not current:
+                    return None
+                if shared is not state["current"]:
                     token, secret, identity = shared
                     activity_client = ActivityClient(transport, token, secret, live=live)
                     sources = ControlPlaneSources(activity_client)
@@ -191,26 +188,17 @@ def _serve_activities(config, client, store, setup, stop, actions=None) -> int:
                         context=sources,
                         secrets=setup.secrets,
                     )
-                    if worker is None:
-                        worker = ActivityWorker(deps)
+                    if state["worker"] is None:
+                        state["worker"] = ActivityWorker(deps)
                     else:
-                        worker.deps = deps
-                    current = shared
-                try:
-                    status = worker.run_once()
-                except FleetError as error:
-                    if error.code == "unsafe_storage":
-                        raise
-                    status = "unavailable"
-                if status == "idle":
-                    # Nothing for it now: poll again soon, backing off while idle up
-                    # to the E03 command loop's one-second ceiling.
-                    stop.wait(idle)
-                    idle = min(idle * 2, IDLE_MAX_S)
-                    continue
-                idle = IDLE_MIN_S
-                if status in ("fenced", "unavailable", "refused"):
-                    stop.wait(1.0)
+                        state["worker"].deps = deps
+                    state["current"] = shared
+                return _pass(state["worker"].run_once)
+
+            # Paced under the control plane's `activity-poll:<instance>` allowance:
+            # nothing for it now polls again soon, backing off while idle, never faster
+            # than the allowance, and a refusal for rate backs off further.
+            run_paced(stop, PollPacer(), once)
         except Exception as error:  # noqa: BLE001 - reported as a fixed exit code only
             failed.append(error)
             stop.set()
