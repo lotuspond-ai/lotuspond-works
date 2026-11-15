@@ -2131,3 +2131,184 @@ label:has(textarea:not(.code-input)) textarea {
     gap: 2px;
   }
 }
+
+/* Operate pages: Human tasks and Control Room ------------------------------------- */
+.operate .page-heading .heading-actions {
+  align-items: flex-end;
+}
+.operate-environment {
+  margin: 0;
+  min-width: 220px;
+}
+.operate-split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 16px;
+  align-items: start;
+}
+.operate-list ul {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+/* A task row is a button, drawn as a quiet card; the selected one carries the accent edge. */
+.operate-row,
+.operate-row:hover:not(:disabled) {
+  display: grid;
+  justify-content: stretch;
+  justify-items: start;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
+  text-align: left;
+}
+.operate-row:hover:not(:disabled) {
+  border-color: var(--field-line);
+}
+.operate-row.selected,
+.operate-row.selected:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    var(--shadow-sm);
+}
+.operate-row-title {
+  font-weight: 600;
+}
+.operate-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.operate-detail {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.operate-detail h2 {
+  margin-bottom: 14px;
+  font-size: 16px;
+}
+.operate-detail h2:focus {
+  outline: none;
+}
+.operate-detail h3 {
+  margin: 20px 0 8px;
+  font-size: 13.5px;
+}
+.operate-placeholder {
+  border-style: dashed;
+  background: var(--sunken);
+  color: var(--muted);
+}
+.proposal {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--sunken);
+}
+.proposal h3 {
+  margin-top: 0;
+}
+.proposal-line {
+  margin: 0 0 12px;
+}
+.operate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin-top: 18px;
+}
+/* Tomato marks the one place in the view where a person decides (DESIGN.md). */
+button.decide {
+  border-color: var(--decide);
+  background: var(--decide);
+}
+button.decide:hover:not(:disabled) {
+  border-color: #b52f19;
+  background: #b52f19;
+}
+.secondary.danger {
+  color: var(--danger);
+}
+.operate-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 13px;
+}
+.operate-facts,
+.operate-events {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.operate-facts li,
+.operate-events li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.operate-events {
+  max-height: 280px;
+  overflow: auto;
+}
+.operate-events li > .cell-mono {
+  min-width: 2.5em;
+  color: var(--muted);
+}
+.operate tr.selected td {
+  background: var(--accent-soft);
+}
+.operate-split-even {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+@media (max-width: 900px) {
+  .operate-split,
+  .operate-split-even {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.operate-detail .cell-mono {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.operate-detail,
+.operate-split > * {
+  min-width: 0;
+}
+.proposal .hint {
+  margin: 12px 0 0;
+}
+.operate-unavailable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.operate-unavailable p {
+  margin: 0;
+}

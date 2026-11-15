@@ -18,46 +18,6 @@ export type PlannedArea = {
 
 export const plannedAreas: readonly PlannedArea[] = [
   {
-    id: 'control-room',
-    section: 'Operate',
-    title: 'Control Room',
-    summary:
-      'Deploy published workflow versions and run them in production environments you control, with the queues, schedules and workers that keep work moving.',
-    will: [
-      'Admit a published version only when its signature matches publisher trust you configure.',
-      'Deploy a version to an environment, with work already in progress pinned to the version it started on.',
-      'Enroll, revoke and watch customer-side workers that run each step inside your boundary.',
-      'Queues, schedules and triggers that admit a delivered trigger once, even when it arrives twice.',
-      'Pause, cancel and recover executions after a worker, provider or network failure, reconciling any uncertain external effect before a retry.',
-    ],
-    dependsOn: [
-      'Package contract and SDK (E02)',
-      'Identity, connections and fleet (E03)',
-      'Durable execution (E04)',
-    ],
-    acceptance:
-      'Restart, timers, duplicate admission, cancellation and pinned-version behavior demonstrated before production runs are offered.',
-    foundation:
-      'A separately installed Linux runtime can enroll as a machine with its own expiring sessions and credential rotation through an opt-in API. It receives no business work yet.',
-    today: [
-      {
-        href: '#studio',
-        label: 'Studio',
-        note: 'Compose, check and publish the immutable package version a deployment will run.',
-      },
-      {
-        href: '#runs',
-        label: 'Evaluation runs',
-        note: 'Evaluate an agent against frozen scenarios. An evaluation run is not a production execution.',
-      },
-      {
-        href: '#releases',
-        label: 'Releases',
-        note: 'Record the release decision a deployment must have before its version is admitted.',
-      },
-    ],
-  },
-  {
     id: 'connections',
     section: 'Build',
     title: 'Connections',
@@ -80,33 +40,6 @@ export const plannedAreas: readonly PlannedArea[] = [
         href: '#studio',
         label: 'Studio',
         note: 'Declare connector references, versions, operations and secret reference names in a package.',
-      },
-    ],
-  },
-  {
-    id: 'human-tasks',
-    section: 'Operate',
-    title: 'Human tasks',
-    summary:
-      'One inbox for the reviews, approvals and exceptions a running workflow waits on, with each decision tied to the exact action it allows.',
-    will: [
-      'Show each waiting case with the exact action and inputs a person is asked to approve.',
-      'Invalidate an approval when its parameters change or it expires, so a stale decision cannot authorize a different action.',
-      'Route exceptions and escalations to the right people with deadlines.',
-      'Link every decision to the deployed version, the action taken and the downstream outcome.',
-    ],
-    dependsOn: [
-      'Durable execution (E04)',
-      'Actions and human tasks (E05)',
-      'Cases and verified outcomes (E06)',
-    ],
-    acceptance:
-      'Changed parameters or expiry invalidate an approval, a denied action cannot execute, and uncertain effects reconcile before anything is retried.',
-    today: [
-      {
-        href: '#approvals',
-        label: 'Approvals',
-        note: 'Independent approval of a release decision by a different administrator.',
       },
     ],
   },
@@ -145,14 +78,14 @@ export const studioStages: readonly StudioStage[] = [
   },
   {
     name: 'Deploy and run',
-    state: 'planned',
-    text: 'Admit a signed version to an environment and run it on workers you control.',
+    state: 'available',
+    text: 'Watch what is deployed and running in an environment, and pause, resume or cancel an execution.',
     link: { href: '#control-room', label: 'Control Room' },
   },
   {
     name: 'Operate',
-    state: 'planned',
-    text: 'Work the reviews and exceptions a running workflow waits on, each tied to the version that produced it.',
+    state: 'available',
+    text: 'Work the reviews and forms a running workflow waits on, each holding the exact action you allow.',
     link: { href: '#human-tasks', label: 'Human tasks' },
   },
 ];
