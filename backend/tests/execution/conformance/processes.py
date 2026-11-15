@@ -248,6 +248,7 @@ class Processes:
         operations=("read",),
         activity=None,
         actions=None,
+        observed=None,
     ):
         """Enroll and start one installed runtime with synthetic providers.
 
@@ -266,7 +267,10 @@ class Processes:
         counter = worlds.private_directory(home / "read") / "provider-calls"
         model_counter = worlds.private_directory(home / "model") / "provider-calls"
         config = home / "config.json"
-        observed = [actions["pin"]] if actions is not None else []
+        # The connectors its write providers serve: the synthetic target's, or those an
+        # operator-format `activity` configuration names (`observed`).
+        if observed is None:
+            observed = [actions["pin"]] if actions is not None else []
         worlds.write_private(
             config,
             {

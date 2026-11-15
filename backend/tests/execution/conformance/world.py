@@ -270,17 +270,20 @@ def file_catalog(world: World):
         connectors[pin] = ConnectorDescriptor(pin, operations)
     catalog = InstalledCatalog()
     object.__setattr__(catalog, "_connectors", MappingProxyType(connectors))
+    bindings = world.state("actions").get("secret_bindings", ())
+    object.__setattr__(catalog, "_bindings", frozenset(tuple(pair) for pair in bindings))
     object.__setattr__(catalog, "test_only", True)
     return catalog
 
 
-def actions_mode(world: World, connector: dict | list) -> dict:
+def actions_mode(world: World, connector: dict | list, secret_bindings=()) -> dict:
     """Give a world E05's action authorities before any process starts.
 
     A command signing key and its trust, and the connector (or each of several)
     installed in the catalog. Composition then wires interpreter v2 and the action
-    services; a world without this keeps E04's exact v1 graph. Returns the (first)
-    connector pin.
+    services; a world without this keeps E04's exact v1 graph. `secret_bindings`
+    (`(binding_id, version)` pairs) are installed too, for connections that carry a
+    secret. Returns the (first) connector pin.
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -296,7 +299,14 @@ def actions_mode(world: World, connector: dict | list) -> dict:
         }
         operations = {op["id"]: op["effect"] for op in document["definition"]["operations"]}
         installed.append({"pin": pin, "operations": operations})
-    world.write("actions", {"command_key_available": True, "connectors": installed})
+    world.write(
+        "actions",
+        {
+            "command_key_available": True,
+            "connectors": installed,
+            "secret_bindings": [list(pair) for pair in secret_bindings],
+        },
+    )
     return installed[0]["pin"]
 
 

@@ -1,6 +1,6 @@
 {
  "definition": {
-  "artifact_sha256": "15aa05a84c27bbcf20f74254a5b0e445909ade34dc9a720b5c710414a52ac1a7",
+  "artifact_sha256": "1eabbf937f622dbccba8e3ec29ff96b251e014878f08e9c5c2e00bc062264616",
   "operations": [
    {
     "effect": "read",
@@ -641,7 +641,26 @@
     "id": "get_payment_hold",
     "idempotency": "none",
     "input_schema": {
-     "kind": "null"
+     "fields": [
+      {
+       "name": "amount",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
     },
     "output_schema": {
      "fields": [
@@ -694,7 +713,34 @@
     "id": "get_credit_note_request",
     "idempotency": "none",
     "input_schema": {
-     "kind": "null"
+     "fields": [
+      {
+       "name": "supplier_id",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 32
+       }
+      },
+      {
+       "name": "amount",
+       "required": true,
+       "schema": {
+        "kind": "decimal",
+        "precision": 18,
+        "scale": 2
+       }
+      },
+      {
+       "name": "reason",
+       "required": true,
+       "schema": {
+        "kind": "string",
+        "max_length": 400
+       }
+      }
+     ],
+     "kind": "object"
     },
     "output_schema": {
      "fields": [

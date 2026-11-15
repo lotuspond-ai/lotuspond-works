@@ -6,12 +6,17 @@
  "format": "lotuspond.https-json.routes.v1",
  "operations": {
   "get_customer_update": {
+   "input": "ignored",
    "method": "GET",
    "path": "/inbox/sent/{sales_order_id}"
   },
   "list_supplier_messages": {
    "method": "GET",
    "path": "/inbox/purchase-orders/{po_number}"
+  },
+  "send_customer_update": {
+   "method": "POST",
+   "path": "/inbox/sent/{sales_order_id}"
   }
  }
 }

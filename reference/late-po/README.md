@@ -26,6 +26,7 @@ Tests: `backend/tests/test_reference_late_po.py` (documents, rules, deployment a
 stand-in and the `https-json` connector reading each system with its own secret; runs anywhere) and
 `backend/tests/execution/conformance/test_reference_late_po.py` (the package on real API, worker
 and runtime processes, three connections with three secrets, the runtime's `https-json` and
-`anthropic-messages` providers against the stand-in and the model double; Linux only). A late order
-stops at the planner's review of the exact date change, which the test denies: the `https-json`
-connector has no write side yet, so no write is dispatched (milestone 3).
+`anthropic-messages` providers against the stand-in and the model double; Linux only). The first case denies
+each late order's review, so nothing is written; the second approves them: both writes go out
+through the runtime's `https-json` write provider, are read back and verified, and a write that
+times out after committing is settled by read-back, never resent.

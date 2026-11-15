@@ -407,22 +407,33 @@ class Operator:
             return pool_id, {"by_connector": views, **next(iter(views.values()))}
         return pool_id, next(iter(views.values()))
 
-    def enrollment(self, customer) -> str:
+    def enrollment(self, customer, connectors=None) -> str:
+        if connectors is None:
+            connectors = [] if self.actions is None else [self.actions["pin"]]
         issued = customer.call(
             "POST",
             f"/runtime-pools/{customer.pool_id}/enrollments",
-            {
-                "platform": "linux",
-                "connectors": [] if self.actions is None else [self.actions["pin"]],
-            },
+            {"platform": "linux", "connectors": list(connectors)},
         )
         return issued["token"]
 
-    def runtime(self, customer, name, *, model_document=None, start=True, activity=None, **scripts):
+    def runtime(
+        self,
+        customer,
+        name,
+        *,
+        model_document=None,
+        start=True,
+        activity=None,
+        writes=None,
+        **scripts,
+    ):
+        """`writes`: the connector pins an operator-format `activity` configuration's write
+        providers serve; the enrollment admits them and the runtime reports them."""
         connector, model = self.connector, model_document or self.model_document()
         return self.processes.start_runtime(
             name,
-            self.enrollment(customer),
+            self.enrollment(customer, writes),
             operations=list(self.read_operations),
             activity=activity,
             dependencies={
@@ -436,6 +447,7 @@ class Operator:
             },
             start=start,
             actions=None if self.actions is None else self._runtime_actions(),
+            observed=None if writes is None else list(writes),
             **scripts,
         )
 

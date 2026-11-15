@@ -1,12 +1,16 @@
-"""The generic `https-json` connector's read side: fixed GET routes over pinned TLS.
+"""The generic `https-json` connector: fixed routes over pinned TLS.
 
 The installed connector artifact is a routes document. It maps each catalog operation
-to one HTTPS GET path, whose `{name}` placeholders are filled from the read's target.
+to one HTTPS path, whose `{name}` placeholders are filled from the target: a read is a
+GET, a write a POST of the write's exact input as canonical JSON with the action's
+idempotency key. A read-back route may declare `"input": "ignored"`: it accepts the
+write's input, as every read-back must (E05 owner decision 18), and reads by target
+alone; any other read refuses an input rather than drop it silently.
 Its canonical (RFC 8785) SHA-256 is the connector's pinned `artifact_sha256`, so a
 changed route is a different connector, never a silent edit. Reads go only to the
 connection's single destination, through `DestinationTransport` (one resolution, the
 egress policy on every resolved address, the operator's CA, no proxy, no redirect),
-with the connection's one secret as a bearer token. Nothing is written.
+with the connection's one secret as a bearer token.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ ROUTES_FORMAT = "lotuspond.https-json.routes.v1"
 _PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]{0,63})\}")
 _SEGMENT_VALUE = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _TOKEN = re.compile(r"[\x21-\x7e]{1,4096}")
+_ZERO = dict(input_tokens=0, output_tokens=0, cost_microusd=0, completed_at_ms=0)
 
 
 def routes_digest(routes) -> str:
@@ -49,8 +54,9 @@ def validate_routes(routes, connector) -> dict:
     for operation, route in routes["operations"].items():
         if (
             type(route) is not dict
-            or set(route) != {"method", "path"}
-            or route["method"] != "GET"
+            or not {"method", "path"} <= set(route) <= {"method", "path", "input"}
+            or route["method"] not in ("GET", "POST")
+            or ("input" in route and (route["method"] != "GET" or route["input"] != "ignored"))
             or type(route["path"]) is not str
             or not route["path"].startswith("/")
             or len(route["path"]) > 512
@@ -107,7 +113,11 @@ class HttpsJsonReadProvider:
             or len(self._secrets) < 1
         ):
             raise ActivityFailure("unavailable", reached=False)
-        if type(arguments) is not dict or arguments.get("input") is not None:
+        if (
+            type(arguments) is not dict
+            or route.get("method") != "GET"
+            or (arguments.get("input") is not None and route.get("input") != "ignored")
+        ):
             raise ActivityFailure("provider_failed", reached=False)
         rule = connection.destinations[0]
         path = rule.path_prefix.rstrip("/") + route_path(route["path"], arguments.get("target"))
@@ -150,3 +160,91 @@ class HttpsJsonReadProvider:
             input_tokens=0, output_tokens=0, cost_microusd=0, completed_at_ms=0
         )
         return ProviderResult(value, usage)
+
+
+class HttpsJsonWriteProvider:
+    """`WriteProvider` for one installed `https-json` connector's POST routes.
+
+    The write's exact input is the body; the action's idempotency key travels as the
+    `Idempotency-Key` header, so a resent command is applied once. A request that was
+    sent but brought no usable 2xx answer may have been applied: it is `unknown`, and
+    E05 reads it back before anything else happens. Nothing sent is `unavailable`.
+    """
+
+    def __init__(self, descriptor, secrets, *, test_mode=False):
+        settings = descriptor.settings_data() or {}
+        self.descriptor = descriptor
+        self._secrets = secrets
+        self._routes = validate_routes(settings.get("routes"), descriptor.connector)
+        egress = settings.get("egress") or {}
+        self._policy = EgressPolicy(
+            tuple(egress.get("allowed_private_cidrs", ())),
+            tuple(egress.get("denied_cidrs", ())),
+            tuple(egress.get("denied_hosts", ())),
+        )
+        self._ca = Path(settings["ca_file"])
+        if not self._ca.is_absolute():
+            raise ValueError("The CA file must be an absolute operator path")
+        for operation, _ in descriptor.operations:
+            if self._routes["operations"].get(operation, {}).get("method") != "POST":
+                raise ValueError(f"No POST route for the write {operation}")
+        self._loopback = test_mode is True and settings.get("test_loopback") is True
+
+    def invoke(self, records, idempotency_key, deadline_ms):
+        from .action_protocol import WriteResult
+
+        operation = records.intent.binding.operation
+        route = self._routes["operations"].get(operation)
+        idempotency = self.descriptor.idempotency(operation)
+        connection = records.configuration
+        if (
+            route is None
+            or route["method"] != "POST"
+            or idempotency is None
+            or (idempotency == "target_key" and not idempotency_key)
+            or connection is None
+            or len(connection.destinations) != 1
+            or len(connection.secrets) != 1
+            or len(self._secrets) < 1
+        ):
+            raise ActivityFailure("unavailable", reached=False)
+        try:
+            target = json.loads(records.actual_target)
+            body = rfc8785.dumps(json.loads(records.actual_input))
+            token = self._secrets[0].decode("ascii").strip()
+        except (ValueError, TypeError, UnicodeError):
+            raise ActivityFailure("unavailable", reached=False) from None
+        if not _TOKEN.fullmatch(token):
+            raise ActivityFailure("unavailable", reached=False)
+        rule = connection.destinations[0]
+        path = rule.path_prefix.rstrip("/") + route_path(route["path"], target)
+        headers = {"Authorization": f"Bearer {token}"}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        limits = connection.data_handling
+        if len(body) > limits.max_request_bytes:
+            raise ActivityFailure("provider_failed", reached=False)
+        deadline = time.monotonic_ns() + limits.timeout_ms * 1_000_000
+        transport = (
+            DestinationTransport._for_test(self._policy, self._ca)
+            if self._loopback
+            else DestinationTransport(self._policy, self._ca)
+        )
+        transport._worker_process = True  # the DNS helper stays in the child's group
+        # A write to a system has no metered model cost: zero is known, not assumed.
+        usage = UsageObservation(**_ZERO)
+        sent = False
+        try:
+            with transport.connect(rule, path, deadline) as connected:
+                try:
+                    answer = connected.send("POST", body, headers, limits.max_response_bytes)
+                finally:
+                    sent = connected.sent
+        except FleetError:
+            if not sent:
+                raise ActivityFailure("unavailable", reached=False) from None
+            return WriteResult("unknown", None, usage)
+        try:
+            return WriteResult("accepted", json.loads(answer), usage)
+        except ValueError:
+            return WriteResult("unknown", None, usage)

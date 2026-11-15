@@ -1387,11 +1387,56 @@
              "connector_ref": "ap",
              "id": "credit_verify",
              "input": {
-              "kind": "literal",
-              "schema": {
-               "kind": "null"
-              },
-              "value": null
+              "fields": [
+               {
+                "name": "supplier_id",
+                "value": {
+                 "kind": "ref",
+                 "pointer": "/supplier_id",
+                 "source": {
+                  "id": "invoice",
+                  "kind": "step"
+                 }
+                }
+               },
+               {
+                "name": "amount",
+                "value": {
+                 "kind": "ref",
+                 "pointer": "/amount",
+                 "source": {
+                  "id": "investigate",
+                  "kind": "step"
+                 }
+                }
+               },
+               {
+                "name": "reason",
+                "value": {
+                 "args": [
+                  {
+                   "kind": "ref",
+                   "pointer": "/reasons/0/text",
+                   "source": {
+                    "id": "investigate",
+                    "kind": "step"
+                   }
+                  },
+                  {
+                   "kind": "literal",
+                   "schema": {
+                    "kind": "string",
+                    "max_length": 400
+                   },
+                   "value": "No reason was given."
+                  }
+                 ],
+                 "fn": "coalesce",
+                 "kind": "call"
+                }
+               }
+              ],
+              "kind": "object"
              },
              "kind": "outcome_verification",
              "read_operation": "get_credit_note_request",
@@ -1744,11 +1789,45 @@
           "connector_ref": "ap",
           "id": "hold_verify",
           "input": {
-           "kind": "literal",
-           "schema": {
-            "kind": "null"
-           },
-           "value": null
+           "fields": [
+            {
+             "name": "amount",
+             "value": {
+              "kind": "ref",
+              "pointer": "/amount",
+              "source": {
+               "id": "investigate",
+               "kind": "step"
+              }
+             }
+            },
+            {
+             "name": "reason",
+             "value": {
+              "args": [
+               {
+                "kind": "ref",
+                "pointer": "/reasons/0/text",
+                "source": {
+                 "id": "investigate",
+                 "kind": "step"
+                }
+               },
+               {
+                "kind": "literal",
+                "schema": {
+                 "kind": "string",
+                 "max_length": 400
+                },
+                "value": "No reason was given."
+               }
+              ],
+              "fn": "coalesce",
+              "kind": "call"
+             }
+            }
+           ],
+           "kind": "object"
           },
           "kind": "outcome_verification",
           "read_operation": "get_payment_hold",
@@ -2029,7 +2108,7 @@
    "ref": {
     "kind": "connector",
     "name": "ap-standin",
-    "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
+    "sha256": "81c11ca4fdf99f1e96d562e9b68b585e673e62355e808c40249e9e43b9fb692b",
     "version": "0.1.0"
    }
   }
@@ -2076,7 +2155,7 @@
    "ref": {
     "kind": "model",
     "name": "ap-investigator-model",
-    "sha256": "b029f8cfa7772ba84e32b15906488f40c2e4913409c65b5446d355a208aedfbb",
+    "sha256": "05af0f0a31c3c3152db1f2b74488c97a831dc165738468dcb5dbdda935614f39",
     "version": "0.1.0"
    }
   }

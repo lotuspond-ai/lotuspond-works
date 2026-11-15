@@ -263,17 +263,21 @@ class ConnectedDestination:
                 raise FleetError("invalid_request")
             self._used = True
             fields = []
-            # Only fixed connector credential headers are supported: the fixture's, or a
-            # bearer token for the https-json connector. No origin/framing override.
+            # Only fixed connector headers are supported: the fixture's secret, or the
+            # https-json connector's bearer token and write idempotency key. No
+            # origin/framing override.
+            patterns = {
+                "X-Lotuspond-Fixture-Secret": r"[\x21-\x7e]*",
+                "Authorization": r"Bearer [\x21-\x7e]+",
+                # An https-json write's action idempotency key (E05).
+                "Idempotency-Key": r"[A-Za-z0-9._:-]{1,128}",
+            }
             for key, value in headers.items():
                 if (
-                    key not in ("X-Lotuspond-Fixture-Secret", "Authorization")
+                    key not in patterns
                     or type(value) is not str
                     or len(value) > 65536
-                    or not re.fullmatch(
-                        r"Bearer [\x21-\x7e]+" if key == "Authorization" else r"[\x21-\x7e]*",
-                        value,
-                    )
+                    or not re.fullmatch(patterns[key], value)
                 ):
                     raise FleetError("invalid_request")
                 fields.append(f"{key}: {value}")

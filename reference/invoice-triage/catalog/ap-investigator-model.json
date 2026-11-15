@@ -381,7 +381,7 @@
     "connector_ref": {
      "kind": "connector",
      "name": "ap-standin",
-     "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
+     "sha256": "81c11ca4fdf99f1e96d562e9b68b585e673e62355e808c40249e9e43b9fb692b",
      "version": "0.1.0"
     },
     "operation": "get_supplier_contract",
@@ -398,7 +398,7 @@
     "connector_ref": {
      "kind": "connector",
      "name": "ap-standin",
-     "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
+     "sha256": "81c11ca4fdf99f1e96d562e9b68b585e673e62355e808c40249e9e43b9fb692b",
      "version": "0.1.0"
     },
     "operation": "list_supplier_invoices",
@@ -415,7 +415,7 @@
     "connector_ref": {
      "kind": "connector",
      "name": "ap-standin",
-     "sha256": "a3318bc7c04ec04141601785ec687fc141460552486ce5d82b255aada4b4f8aa",
+     "sha256": "81c11ca4fdf99f1e96d562e9b68b585e673e62355e808c40249e9e43b9fb692b",
      "version": "0.1.0"
     },
     "operation": "list_credit_notes",
