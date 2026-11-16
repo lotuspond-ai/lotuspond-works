@@ -4,7 +4,9 @@ Status: the product's direction, set on 2026-11-11 by [ADR-0014](architecture/00
 
 ## Who it is for
 
-LotusPond Works automates the operational work of a business. Its first market is supply chain operations: the day-to-day work of buying, storing, moving and delivering goods. Supply chain is the first market, not the only one. Healthcare administration, such as referral intake and appointment operations, is also work LotusPond Works automates.
+LotusPond Works automates the operational work of a business. Its first market is supply chain operations: the day-to-day work of buying, storing, moving and delivering goods. Supply chain is the first market, not the only one. Healthcare administration, such as referral intake and appointment operations, is also work LotusPond Works automates: a hospital or clinic can use Works to automate its own administrative processes.
+
+LotusPond Works is automation, not an API product. It runs a customer's processes inside the product; it does not sell organisations an API that gives them access to outside systems or to these workflows.
 
 It is built to each customer's requirement, in two ways. LotusPond configures a customer once and builds the systems that customer needs. The customer's own builders can also build the systems they need themselves. Both happen inside the product, through the same Build step: the customer's systems are connected, agents are built, and the processes that customer chooses are automated. The systems are whatever the customer's operations already run on. These documents name them by kind and never by vendor: for example an ERP (the system that holds a company's orders, stock and accounts), a warehouse system, or a carrier portal (a transport company's site for booking and tracking shipments).
 
@@ -12,7 +14,7 @@ It is not for a single process or a single function, such as invoices or account
 
 This says who the core loop below is for. It does not change the loop, and it adds no capability: what is built is still what [CAPABILITIES.md](CAPABILITIES.md) records. [ADR-0017](architecture/0017-position-works-for-supply-chain-operations.md) keeps the owner's own words, how they settle earlier decisions, and the two points still open.
 
-LotusPond, the company, has two products. LotusPond Works is the one in this repository. LotusPond Health is the other and is not built here. It is a standard product, the same for every customer, and is not built to a customer's requirement. Its direction is one API and MCP server for health records, so that a company or an AI agent does not have to connect to each records system itself. (MCP, the Model Context Protocol, is a standard way for an AI agent to reach outside data and tools.)
+LotusPond, the company, has two products. LotusPond Works is the one in this repository. LotusPond Health is the other and is not built here. It is a standard product, the same for every customer, and is not built to a customer's requirement. It serves two audiences, both inside LotusPond Health: people, who keep their own and their family's health records there and choose which AI agents may read them; and organisations such as healthcare startups, which use one API and MCP server to reach any electronic health record (EHR) system instead of integrating with each one. Its API, including its MCP server for AI agents, lives only in its own repository, `lotuspond-ai/lotuspond-health`; LotusPond Works never hosts, proxies or calls it ([ADR-0018](architecture/0018-one-lotuspond-account.md)). (MCP, the Model Context Protocol, is a standard way for an AI agent to reach outside data and tools.)
 
 ## The problem
 

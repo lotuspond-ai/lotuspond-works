@@ -1,4 +1,4 @@
-LotusPond builds AI agents that work inside the systems a business depends on. LotusPond Works automates supply chain and operations. LotusPond Health is one API and MCP server for health records. Every page, product screen and deck for either product starts from these rules.
+LotusPond builds AI agents that work inside the systems a business depends on. LotusPond Works automates supply chain and operations. LotusPond Health keeps people's own health records, ready for any AI agent, and gives healthcare organisations one API and MCP server for every health record system. Every page, product screen and deck for either product starts from these rules.
 
 ## The idea: below the surface, above the surface
 
