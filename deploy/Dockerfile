@@ -7,6 +7,8 @@ COPY web ./web
 # outside web/. The production bundle inlines them; contract tests keep reading the same files
 # in the repository.
 COPY contracts/examples/*.v1.json ./contracts/examples/
+# Studio v2 (web/src/lib/studioV2.ts) also inlines the executable v2 examples and patterns.
+COPY contracts/examples/executable-v2 ./contracts/examples/executable-v2
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     npm ci && npx vite build

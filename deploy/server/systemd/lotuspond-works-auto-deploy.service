@@ -1,0 +1,15 @@
+# Deploys the newest commit on origin/main if it is not running yet. Started by lotuspond-works-auto-deploy.timer.
+# Installed by deploy/server/install-auto-deploy.sh; see deploy/server/README.md.
+[Unit]
+Description=LotusPond Works: deploy new commits on main
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+ExecStart=/opt/lotuspond-works/deploy/server/auto-deploy.sh
+# A rebuild (web bundle and Python environment) takes several minutes on the 4 GB plan.
+TimeoutStartSec=45min
+Nice=10

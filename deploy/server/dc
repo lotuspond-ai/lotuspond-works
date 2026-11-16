@@ -1,0 +1,6 @@
+#!/bin/sh
+# docker compose for the server: deploy/compose.yaml plus compose.server.yaml, with settings from deploy/server/.env.
+#   deploy/server/dc ps        deploy/server/dc logs -f api        deploy/server/dc up -d --build
+here=$(cd "$(dirname "$0")" && pwd)
+exec docker compose --project-directory "$here/.." -f "$here/../compose.yaml" -f "$here/compose.server.yaml" \
+  --env-file "$here/.env" "$@"
