@@ -12,7 +12,7 @@ It is not for a single process or a single function, such as invoices or account
 
 This says who the core loop below is for. It does not change the loop, and it adds no capability: what is built is still what [CAPABILITIES.md](CAPABILITIES.md) records. [ADR-0017](architecture/0017-position-works-for-supply-chain-operations.md) keeps the owner's own words, how they settle earlier decisions, and the two points still open.
 
-LotusPond, the company, has two products. LotusPond Works is the one in this repository. LotusPond Health is the other and is not built here. It is a standard product, the same for every customer, and is not built to a customer's requirement. Its direction is one API and MCP server for health records, so that a company or an AI agent does not have to connect to each records system itself. (MCP, the Model Context Protocol, is a standard way for an AI agent to reach outside data and tools.)
+LotusPond, the company, has two products. LotusPond Works is the one in this repository. LotusPond Health is the other and is not built here. It is a standard product, the same for every customer, and is not built to a customer's requirement. Its API, including its MCP server for AI agents, lives only in its own repository, `lotuspond-ai/lotuspond-health`; LotusPond Works never hosts, proxies or calls it ([ADR-0018](architecture/0018-one-lotuspond-account.md)). (MCP, the Model Context Protocol, is a standard way for an AI agent to reach outside data and tools.)
 
 ## The problem
 
