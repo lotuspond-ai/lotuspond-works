@@ -119,6 +119,8 @@ Health holds health records, the most sensitive data LotusPond keeps. It must st
     - Health's whole API is built, deployed, versioned and documented only in `lotuspond-ai/lotuspond-health`, and served only from `health.lotuspond.ai`. That covers its endpoints, its MCP server at `/mcp`, and its OAuth 2.1 authorization for AI agents.
     - Works never hosts, proxies or calls Health's API, and holds no copy of its code or its reference documentation.
     - Accounts only signs people in. It serves no health data and no Health endpoint.
+    - Health's API has two sides, and both stay in Health: a person's own records, which the person shares with the AI agents they choose; and the organisation API, one API and MCP server through which healthcare startups and other organisations reach any electronic health record (EHR) system.
+    - Works is automation only. It runs an organisation's administrative processes inside the product, and is not an API that gives an organisation access to outside systems or to its workflows. A hospital may use Works to automate its administration; if it wants API access to health record systems, that is LotusPond Health.
     - Works' healthcare administration workflows ([ADR-0017](0017-position-works-for-supply-chain-operations.md)) connect to a customer's own systems, never to LotusPond Health.
     - An AI agent's access is a grant to health data, chosen per profile and per kind of record, so Health keeps its own authorization server. Only its sign-in step changes: the consent page uses the Accounts session instead of Health's own password form.
 
@@ -159,7 +161,11 @@ The owner's words:
 
 > Health api should be in the health only and not in the works.
 
-The second statement is decision 11.
+> We have a unified API to connect to any portal, which is for enterprises or organizations. LotusPond Health is also for users to have all their data. Both of these should be within the enterprise LotusPond Health only.
+
+> LotusPond Works is going to be automation only […] even hospitals can use this automation to automate their flows.
+
+The second, third and fourth statements are decision 11.
 
 1. **Domain names.** Accounts is at `accounts.lotuspond.ai`, and hosted Works at `works.lotuspond.ai`. Health stays at `health.lotuspond.ai`.
 2. **Health opens in India only at first.**
