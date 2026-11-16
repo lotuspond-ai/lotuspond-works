@@ -1,0 +1,10 @@
+# HTTPS for LotusPond Works. Caddy gets and renews the certificate for the domain by itself.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:8000
+	header -Server
+}

@@ -1,0 +1,30 @@
+# Additions to deploy/compose.yaml for the single LotusPond Works server at https://works.lotuspond.ai: Caddy in front
+# of the API for HTTPS (Let's Encrypt certificates, renewed automatically). Use it through ./dc, which also reads
+# deploy/server/.env. See deploy/server/README.md.
+services:
+  api:
+    environment:
+      # Uvicorn takes the client address from Caddy's X-Forwarded-For, so sign-in rate limits apply per visitor
+      # rather than to Caddy. The API port is published on loopback only, so only Caddy and this host reach it.
+      FORWARDED_ALLOW_IPS: "*"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-works.lotuspond.ai}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in deploy/server/.env (Let's Encrypt sends certificate notices there)}
+    volumes:
+      - ./server/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -13,6 +13,10 @@ The API image does not initialize or migrate a database. Before first startup, a
 
 These artifacts have no cloud side effects. They do not provision DNS, certificates, hosts, databases, registries, backups, or monitoring.
 
+## The hosted server
+
+[`server/`](server/README.md) runs this stack at `works.lotuspond.ai` on one Amazon Lightsail server in Mumbai, set up like the Health server: Caddy for HTTPS, a first-boot script, and a timer that deploys each new commit on `main`. Its scripts create AWS resources only when you run `server/aws-lightsail-cfn.sh` yourself. On that server, `server/init-database.sh` loads `backend/schema.sql` only into the newly created empty database, and `server/remote-deploy.sh` refuses any release whose schema version differs from the database's.
+
 ## Identity mail
 
 The API and optional `mail-worker` share the mail settings in `example.env`. Keep mail disabled until an authorized SMTP service and an encryption key are configured; a hosted installation needs it, because a mailbox is the only way to verify an identity. Start with `--profile mail` to run the delivery worker. The API can enqueue messages without a worker, so watch queue age and worker liveness yourself. See [the identity-mail runbook](../docs-site/docs/identity-mail.md) for configuration, delivery checks, and key handling.

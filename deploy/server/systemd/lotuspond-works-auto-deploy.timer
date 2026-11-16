@@ -1,0 +1,11 @@
+# Checks origin/main five minutes after boot, then five minutes after each check ends (a deploy never overlaps the next).
+[Unit]
+Description=LotusPond Works: check main for new commits every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target
