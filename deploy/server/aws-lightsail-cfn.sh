@@ -3,12 +3,11 @@
 # any shell with the AWS CLI, ssh-keygen and python3). The stack (aws-lightsail.cfn.yaml) holds the instance
 # (Ubuntu 24.04, 4 GB / 2 vCPU, $24/month), daily automatic snapshots, a static IP and the firewall rules.
 #
-# The script makes a new read-only deploy key, fills it into aws-lightsail-firstboot.sh and passes that to the stack as
-# a hidden parameter, then prints the public key to add on GitHub and the addresses for DNS. Once the key is added, the
-# server clones the repository, creates deploy/server/.env with fresh secrets, loads the schema into its new empty
-# database, starts the app and turns on automatic deploys by itself.
+# The script fills the ACME email and domain into aws-lightsail-firstboot.sh, passes that to the stack and prints the
+# addresses for DNS. The server then clones the public repository over HTTPS, creates deploy/server/.env with fresh
+# secrets, loads the schema into its new empty database, starts the app and turns on automatic deploys by itself.
 #   ACME_EMAIL=ops@lotuspond.ai bash deploy/server/aws-lightsail-cfn.sh
-# See deploy/server/README.md. The private key exists only on the server and in the stack's hidden parameter.
+# See deploy/server/README.md.
 set -euo pipefail
 
 REGION=${REGION:-ap-south-1}
@@ -24,12 +23,10 @@ else
   WORK=$(mktemp -d)
   trap 'rm -rf "$WORK"' EXIT
   chmod 700 "$WORK"
-  ssh-keygen -q -t ed25519 -N "" -C lotuspond-works-server -f "$WORK/deploy_key"
-  python3 - "$HERE/aws-lightsail-firstboot.sh" "$WORK/deploy_key" "$ACME_EMAIL" "$DOMAIN" "$WORK/params.json" <<'PY'
+  python3 - "$HERE/aws-lightsail-firstboot.sh" "$ACME_EMAIL" "$DOMAIN" "$WORK/params.json" <<'PY'
 import json, os, sys
-script, key, email, domain, out = sys.argv[1:]
-body = (open(script).read().replace("__DEPLOY_KEY__", open(key).read().strip())
-        .replace("__ACME_EMAIL__", email).replace("__DOMAIN__", domain))
+script, email, domain, out = sys.argv[1:]
+body = open(script).read().replace("__ACME_EMAIL__", email).replace("__DOMAIN__", domain)
 os.umask(0o077)
 json.dump([{"ParameterKey": "UserData", "ParameterValue": body}], open(out, "w"))
 PY
@@ -37,9 +34,6 @@ PY
     --parameters "file://$WORK/params.json" --tags Key=project,Value=lotuspond-works >/dev/null
   echo "Creating stack $STACK…"
   aws cloudformation wait stack-create-complete --stack-name "$STACK"
-  echo
-  echo "Add this as a read-only deploy key on lotuspond-ai/lotuspond-works (Settings → Deploy keys, write access off):"
-  cat "$WORK/deploy_key.pub"
 fi
 
 echo
