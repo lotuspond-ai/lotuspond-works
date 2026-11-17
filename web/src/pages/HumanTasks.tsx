@@ -10,6 +10,7 @@ import {
   StatusBadge,
 } from '../components/ui.js';
 import {
+  decisionMessage,
   fromMs,
   inboxOrder,
   opaqueId,
@@ -241,7 +242,12 @@ function TaskDetail({
     if (pending.current?.key !== key) pending.current = { key, id: opaqueId(prefix) };
     return pending.current.id;
   }
-  async function act(path: string, body: unknown, done?: string) {
+  async function act(
+    path: string,
+    body: unknown,
+    done?: string,
+    explain: (reason: unknown) => string = problem,
+  ) {
     setBusy(true);
     setError('');
     setNotice('');
@@ -255,7 +261,7 @@ function TaskDetail({
       if (done) setNotice(done);
       onChanged(updated, done ?? '');
     } catch (reason) {
-      setError(problem(reason));
+      setError(explain(reason));
       if (reason instanceof ApiError && reason.code === 'conflict') {
         pending.current = null;
         void loadProposal();
@@ -275,6 +281,10 @@ function TaskDetail({
         decision,
       },
       decision === 'allow' ? 'Allowed. The action can now be sent.' : 'Denied. Nothing is sent.',
+      (reason) =>
+        reason instanceof ApiError
+          ? decisionMessage(reason.code, decision, proposal.independent_approval, reason.message)
+          : problem(reason),
     );
   }
   function submit() {

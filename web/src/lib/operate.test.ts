@@ -13,6 +13,7 @@ import {
   fromMs,
   inboxOrder,
   opaqueId,
+  decisionMessage,
   operateMessage,
   outcomeOf,
   scopedPath,
@@ -226,4 +227,12 @@ test('every pin gets a binding; connectors and knowledge name what they bind to'
     ],
   );
   assert.equal(enrollCommand().startsWith('lotuspond-runtime enroll --config'), true);
+});
+
+test('a refused Allow on an independent review names the reason, not the session', () => {
+  assert.match(decisionMessage('forbidden', 'allow', true, 'x'), /independent approval/);
+  // Any other refusal keeps the operate message.
+  assert.equal(decisionMessage('forbidden', 'allow', false, 'x'), operateMessage('forbidden', 'x'));
+  assert.equal(decisionMessage('forbidden', 'deny', true, 'x'), operateMessage('forbidden', 'x'));
+  assert.equal(decisionMessage('conflict', 'allow', true, 'x'), operateMessage('conflict', 'x'));
 });

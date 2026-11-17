@@ -29,6 +29,7 @@ from ..models import (
     Execution,
     ExecutionActionDecision,
     ExecutionActionIntent,
+    ExecutionDeploymentRevision,
     ExecutionHumanTask,
     ExecutionInbox,
     ExecutionWait,
@@ -48,7 +49,7 @@ from .artifacts import ArtifactPolicy
 from .authorization import mark_replay, reauthorize, record, scoped
 from .contracts import SignalRequest
 from .control import retained_clause
-from .deployments import execution_gates
+from .deployments import evaluation_only, execution_gates
 from .errors import ExecutionError
 from .orchestrator import TERMINAL, mark_runnable
 from .progression import record_event
@@ -346,6 +347,12 @@ class HumanTaskService:
         if intent.independent_approval and actor.user_id == intent.requester_user_id:
             raise ExecutionError("forbidden")  # SDK `independence_required`
         self._values(db, actor, intent)
+        # An evaluation deployment proves its package and never writes: its reviews are
+        # recorded and cancelled by the package evaluation, and none may be allowed.
+        if request.decision == "allow" and evaluation_only(
+            record(db, ExecutionDeploymentRevision, actor.scope, execution.deployment_revision_id)
+        ):
+            raise ExecutionError("forbidden")
         # 4. the intent awaits review, unexpired, and the quoted digest is the stored one.
         if intent.authorization_state != "awaiting_review" or intent.expires_at_ms <= now:
             raise ExecutionError("conflict")

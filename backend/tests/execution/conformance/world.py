@@ -319,13 +319,13 @@ def _wall_ms():
 # ------------------------------------------------------------------ creation
 
 
-def operator_mode(world: World) -> Path:
+def operator_mode(world: World, *, release_required: bool = False) -> Path:
     """Switch a world to an operator authority directory before any process starts.
 
     The directory is created by `python -m lotuspond.authority` exactly as an operator
-    would: the world's package key becomes a trusted publisher, execution is switched
-    on, and release decisions are not required (milestone 5 adds the release binding).
-    Runtimes pin the directory's activity trust.
+    would: the world's package key becomes a trusted publisher and execution is switched
+    on. Release decisions are not required unless `release_required` keeps the
+    operator's default. Runtimes pin the directory's activity trust.
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -336,10 +336,57 @@ def operator_mode(world: World) -> Path:
     package = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(world.state("keys")["package"]))
     trust_publisher(directory, package.public_key().public_bytes_raw().hex())
     switch(directory, "entitlement.json", "execute", True)
-    switch(directory, "publishers.json", "release_required", False)
+    if not release_required:
+        switch(directory, "publishers.json", "release_required", False)
     world.write("activity-trust", json.loads((directory / "activity-trust.json").read_text()))
     world.write("operator", {"dir": str(directory)})
     return directory
+
+
+def operator_actions(world: World, connectors: list, secret_bindings=()) -> dict:
+    """Reviewed actions on an operator directory, provisioned as the runbook says
+    (docs/operations/operator-authority.md, "Reviewed actions"): each connector
+    installed with `install-connector`, each secret binding with `secret-binding`, then
+    `command-key`. Every operation of these connectors needs its connection's
+    destination and secret. Returns the public command trust (`command-trust`)."""
+    from lotuspond.authority import command_key, command_trust, install_connector
+    from lotuspond.authority import secret_binding as install_binding
+
+    directory = Path(world.state("operator")["dir"])
+    for document in connectors:
+        install_connector(
+            directory,
+            {
+                "pin": {
+                    "name": document["name"],
+                    "version": document["version"],
+                    "artifact_sha256": document["definition"]["artifact_sha256"],
+                },
+                "operations": {
+                    op["id"]: {
+                        "effect": op["effect"],
+                        "requires_destination": True,
+                        "requires_secret": True,
+                    }
+                    for op in document["definition"]["operations"]
+                },
+            },
+        )
+    for binding_id, version in secret_bindings:
+        install_binding(directory, binding_id, version)
+    command_key(directory)
+    return command_trust(directory)
+
+
+def operator_demand(world: World, active_ms: int) -> None:
+    """Each attempt's reserved active time in the operator's `entitlement.json`, which
+    the runbook has the operator edit; the directory is reread on every lookup."""
+    from lotuspond.authority import _read, _write
+
+    directory = Path(world.state("operator")["dir"])
+    entitlement = _read(directory, "entitlement.json")
+    entitlement["demand"] = {**entitlement["demand"], "active_ms": active_ms}
+    _write(directory / "entitlement.json", entitlement)
 
 
 def trust_set(private_hex: str) -> dict:

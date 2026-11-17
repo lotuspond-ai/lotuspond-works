@@ -159,6 +159,7 @@ class PackageEvaluations:
                         input=item["input"],
                     ),
                     _key(run.id, item["id"]),
+                    evaluation=True,
                 )
                 return self._view(db, run)
         # 2. One review: recorded, then cancelled unsent (never approved).

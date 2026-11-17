@@ -17,6 +17,9 @@ committing is settled by read-back, never resent.
 
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -24,6 +27,7 @@ from uuid import uuid4
 
 import driver as drivers
 import pytest
+from console import DIST, Console
 from driver import catalog_ref, diagnose
 from test_reference_triage import certificate, doubles, mounted_secrets, result_of
 
@@ -44,6 +48,8 @@ def _load(name, path):
 gen = _load("late_po_generate", REFERENCE / "generate.py")
 standin = _load("late_po_standin", REFERENCE / "standin" / "server.py")
 SCENARIOS = json.loads((REFERENCE / "scenarios.json").read_text())["scenarios"]
+# Connectors first: the model's closure is exactly its three read-tool connectors.
+DEPENDENCIES = [*gen.CONNECTORS.values(), gen.model, gen.planners, gen.customer_messages]
 
 
 def review_of(w, operator, customer, execution_id, seconds=180):
@@ -62,13 +68,39 @@ def review_of(w, operator, customer, execution_id, seconds=180):
 
 @pytest.fixture
 def late_po(world, processes, linux):
-    w = world
-    drivers.worlds.actions_mode(
-        w,
-        list(gen.CONNECTORS.values()),
-        # Each connection's secret binding is installed, as an operator installs one.
-        secret_bindings=[(f"{system}_token", 1) for system in gen.CONNECTORS],
-    )
+    yield from stand_up(world, processes, operator_directory=False)
+
+
+@pytest.fixture
+def late_po_operator(world, processes, linux):
+    yield from stand_up(world, processes, operator_directory=True)
+
+
+def stand_up(w, processes, *, operator_directory):
+    """The stand-ins, the model double, the API, workers and one runtime.
+
+    Without `operator_directory`, an E05 action world (test authorities, test mode) and
+    a deployment admitted without a release. With it, the server's authorities are an
+    operator directory provisioned with `python -m lotuspond.authority` only, as
+    production's are: release decisions required, the three connectors and their
+    secret bindings installed, and a command key. Nothing is deployed then: a
+    deployment needs a release. The runtime stays in test mode either way, because the
+    stand-ins are on loopback, which a production runtime's egress policy refuses.
+    """
+    secret_bindings = [(f"{system}_token", 1) for system in gen.CONNECTORS]
+    if operator_directory:
+        drivers.worlds.operator_mode(w, release_required=True)
+        command_trust_set = drivers.worlds.operator_actions(
+            w, list(gen.CONNECTORS.values()), secret_bindings
+        )["trust"]
+    else:
+        drivers.worlds.actions_mode(
+            w,
+            list(gen.CONNECTORS.values()),
+            # Each connection's secret binding is installed, as an operator installs one.
+            secret_bindings=secret_bindings,
+        )
+        command_trust_set = drivers.worlds.trust_set(w.state("keys")["command"])
     processes.start_api()
     processes.start_worker("orchestrator", "orchestrator-a", wait=False)
     processes.start_worker("sweeper", "sweeper-a", wait=False)
@@ -95,14 +127,20 @@ def late_po(world, processes, linux):
     # Each attempt's reserved active time. The 20 s default let a model round's lease
     # lapse on a loaded host (the attempt went uncertain); 40 s keeps the most attempts
     # any scenario makes (2 reads, 3 rounds, 2 tool calls) inside the agent's 600 s.
-    operator.demand(40000)
+    if operator_directory:
+        drivers.worlds.operator_demand(w, 40000)
+    else:
+        operator.demand(40000)
     customer = operator.tenant(w.engine, label="Late PO")
-    revision = operator.deploy(
-        customer,
-        "late-po",
-        package=gen.package,
-        # Connectors first: the model's closure is exactly its three read-tool connectors.
-        dependencies=[*gen.CONNECTORS.values(), gen.model, gen.planners, gen.customer_messages],
+    revision = (
+        None
+        if operator_directory
+        else operator.deploy(
+            customer,
+            "late-po",
+            package=gen.package,
+            dependencies=DEPENDENCIES,
+        )
     )
     model_pin = {"reference_id": str(uuid4()), "version": 1}
     # Each token under its activity binding and under its connection's secret binding,
@@ -116,9 +154,7 @@ def late_po(world, processes, linux):
         },
     )
     command_trust = w.root / "command-trust.json"
-    drivers.worlds.write_private(
-        command_trust, drivers.worlds.trust_set(w.state("keys")["command"])
-    )
+    drivers.worlds.write_private(command_trust, command_trust_set)
 
     def pin_of(document):
         return {
@@ -359,6 +395,13 @@ def test_approved_late_orders_are_rescheduled_and_customers_told_once(late_po):
     back and verified; the customer update needs a second, independent planner. One
     date change times out after committing: read back, never resent."""
     w, operator, customer, revision, ledger, double, runtime = late_po
+    reschedule_and_notify(w, operator, customer, revision, ledger, double)
+
+
+def reschedule_and_notify(w, operator, customer, revision, ledger, double):
+    """Each late order runs on `revision`: one planner allows the date change and, when
+    the customer must be told, a second planner allows the update. Both writes are read
+    back and verified, each applied once, and the trace says who allowed each."""
     second = operator.member(customer, "admin")
     late = [s for s in SCENARIOS if s["expected"]["status"] != "on_time"]
     for scenario in late:
@@ -449,12 +492,32 @@ def test_a_proven_release_admits_the_package_to_production(late_po):
     are recorded, then cancelled), released under a policy with a second administrator's
     approval, and that release admits the same package version to production."""
     w, operator, customer, revision, ledger, double, runtime = late_po
+    release_id, _ = prove_and_release(operator, customer, ledger, double)
+    # Production: the release admits exactly this package version (admission re-verifies
+    # the release; the provider ties its candidate run to the publication).
+    production = operator.deploy(
+        customer,
+        "late-po-released",
+        package=gen.package,
+        dependencies=DEPENDENCIES,
+        release_id=release_id,
+    )
+    assert production  # the revision admitted with the release
+
+
+def prove_and_release(operator, customer, ledger, double):
+    """Evaluate the package on all six scenarios through an evaluation deployment
+    (nothing is written), then release that run under a policy with a second
+    administrator's approval. Returns the release's and the evaluation deployment's IDs."""
     double.by_key = {
         s["input"]["po_number"]: s["model_rounds"] for s in SCENARIOS if "model_rounds" in s
     }
-    dependencies = [*gen.CONNECTORS.values(), gen.model, gen.planners, gen.customer_messages]
     candidate = operator.deploy(
-        customer, "late-po-evaluation", package=gen.package, dependencies=dependencies
+        customer,
+        "late-po-evaluation",
+        package=gen.package,
+        dependencies=DEPENDENCIES,
+        purpose="evaluation",
     )
     project = customer.scope["project_id"]
     scenario_ids = [
@@ -515,14 +578,128 @@ def test_a_proven_release_admits_the_package_to_production(late_po):
     workspace(second, "POST", f"/approvals/{approval['id']}/decide", {"status": "approved"})
     decision = workspace(customer, "POST", f"/releases/{release['id']}/evaluate", {})
     assert decision["verdict"] == "pass", decision
+    double.by_key = {}
+    return release["id"], candidate
 
-    # Production: the release admits exactly this package version (admission re-verifies
-    # the release; the provider ties its candidate run to the publication).
-    production = operator.deploy(
+
+def test_the_whole_loop_on_an_operator_directory(late_po_operator):
+    """Milestone 5: the loop on production's authorities. The server's operator
+    directory was provisioned with `python -m lotuspond.authority` only, and keeps its
+    default: release decisions required. The package is proven and released, the release
+    admits it, and each late order is rescheduled and its customer told after two
+    planners' reviews, each write read back and verified."""
+    w, operator, customer, _, ledger, double, runtime = late_po_operator
+    # No release, no deployment: the operator's default refuses one.
+    with pytest.raises(drivers.Refused) as refused:
+        operator.deploy(
+            customer, "late-po-unreleased", package=gen.package, dependencies=DEPENDENCIES
+        )
+    assert (refused.value.status, refused.value.code) == (503, "assurance_unavailable")
+    release_id, candidate = prove_and_release(operator, customer, ledger, double)
+    # The evaluation deployment proves; it never runs anyone's order.
+    with pytest.raises(drivers.Refused) as refused:
+        operator.start(customer, candidate, SCENARIOS[1]["input"])
+    assert refused.value.code == "deployment_unavailable", refused.value
+    revision = operator.deploy(
         customer,
-        "late-po-released",
+        "late-po",
         package=gen.package,
-        dependencies=dependencies,
-        release_id=release["id"],
+        dependencies=DEPENDENCIES,
+        release_id=release_id,
     )
-    assert production  # the revision admitted with the release
+    reschedule_and_notify(w, operator, customer, revision, ledger, double)
+
+
+JOURNEY = Path(__file__).with_name("console_journey.mjs")
+CONSOLE_JOURNEY = os.environ.get("LOTUSPOND_CONSOLE_JOURNEY") == "1"
+
+
+@pytest.mark.skipif(
+    not CONSOLE_JOURNEY,
+    reason="opt-in browser journey: LOTUSPOND_CONSOLE_JOURNEY=1, `npm run build`, Playwright",
+)
+def test_two_planners_decide_in_the_console(late_po_operator):
+    """Milestone 5, seen: a late order whose customer must be told, decided in the built
+    console by two people with their own sessions (console_journey.mjs). The requester
+    allows the date change in Human tasks; the customer update needs independent
+    approval, so the requester's Allow is refused and a second planner allows it.
+    Control Room shows both writes verified, and the server agrees."""
+    w, operator, customer, _, ledger, double, runtime = late_po_operator
+    if shutil.which("node") is None or not (DIST / "index.html").exists():
+        pytest.fail("the console journey needs node and a built console (npm run build)")
+    release_id, _ = prove_and_release(operator, customer, ledger, double)
+    revision = operator.deploy(
+        customer, "late-po", package=gen.package, dependencies=DEPENDENCIES, release_id=release_id
+    )
+    scenario = next(s for s in SCENARIOS if s["id"] == "past-customer-day")
+    double.rounds = scenario["model_rounds"]
+    po = scenario["input"]["po_number"]
+    order = standin.Ledger().answer("get_purchase_order", {"po_number": po})
+    execution_id = operator.start(customer, revision, scenario["input"])["id"]
+    review_of(w, operator, customer, execution_id)  # the date change waits for a person
+    second = operator.member(customer, "admin")
+    console = Console(w.processes.api_port, w.processes.ca, w.config["origin"]).start()
+    shots = Path(os.environ.get("LOTUSPOND_CONSOLE_JOURNEY_SHOTS") or w.root / "shots")
+    plan = w.root / "journey.json"
+    drivers.worlds.write_private(
+        plan,
+        {
+            "url": console.url,
+            "workspace": "Late PO",  # the organization workspace and its one project
+            "project": "Late PO",
+            "execution_id": execution_id,
+            "people": {
+                "requester": customer.headers["cookie"].split("=", 1)[1],
+                "second": second.headers["cookie"].split("=", 1)[1],
+            },
+            "shots": str(shots),
+            "result": str(w.root / "journey-result.json"),
+        },
+    )
+    try:
+        ran = subprocess.run(
+            ["node", str(JOURNEY), str(plan)], capture_output=True, timeout=900, check=False
+        )
+    finally:
+        console.stop()
+    written = w.root / "journey-result.json"
+    assert written.exists(), ran.stderr.decode()[-2000:]
+    seen = json.loads(written.read_text())
+    assert ran.returncode == 0 and seen["ok"], (
+        seen,
+        ran.stderr.decode()[-2000:],
+        facts(w, execution_id),
+    )
+    steps = {step["name"]: step for step in seen["steps"]}
+    assert steps["requester opened the review"]["operation"] == "set_promised_date"
+    assert steps["requester opened the second review"] == {
+        "name": "requester opened the second review",
+        "operation": "send_customer_update",
+        "independent": True,
+    }
+    assert "page error" not in steps, seen
+    assert "independent approval" in steps["requester was refused"]["message"], steps
+    assert steps["second planner opened the review"]["operation"] == "send_customer_update"
+    outcomes = steps["control room writes"]["outcomes"]
+    if len(outcomes) != 2 or not all("outcome: verified" in t.lower() for t in outcomes):
+        found = shots / "facts.json"
+        found.write_text(
+            json.dumps({"facts": facts(w, execution_id), "logs": logs(w)}, default=str, indent=1)
+        )
+        raise AssertionError((outcomes, f"facts in {found}"))
+    for width in ("tablet", "phone"):
+        assert steps[f"control room at {width}"]["horizontal_overflow_px"] <= 0, seen
+    assert seen["focus"][0]["label"] == "Claim", seen["focus"]
+
+    # The server agrees: both writes applied once, each allowed by the person who did.
+    view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 240)
+    assert view["state"] == "succeeded", (facts(w, execution_id), logs(w))
+    result = result_of(w, execution_id)
+    assert result["status"] == "rescheduled_and_notified", result
+    assert ledger.date_changes[po]["promised_day"] == scenario["expected"]["new_promised_day"]
+    assert order["sales_order_id"] in ledger.customer_updates
+    assert len([r for r in ledger.requests if r[0] == "POST"]) == 2
+    trace = customer.call("GET", f"/executions/{execution_id}/trace")
+    assert trace["outcome"] == {"state": "verified", "exception": False}, trace["outcome"]
+    deciders = [a["review"]["decision"]["decided_by"]["user_id"] for a in trace["actions"]]
+    assert deciders[1] == second.user_id != deciders[0]

@@ -36,6 +36,19 @@ export function operateMessage(code: string | undefined, fallback: string) {
   return (code && messages[code]) || fallback;
 }
 
+// A refused Allow on a review that needs independent approval: the person who requested the
+// action is signed in but may not allow it, so say that rather than blame their session.
+export function decisionMessage(
+  code: string | undefined,
+  decision: 'allow' | 'deny',
+  independent: boolean,
+  fallback: string,
+) {
+  if (code === 'forbidden' && decision === 'allow' && independent)
+    return 'This action needs independent approval, and you requested it. Release the task so another person can allow it.';
+  return operateMessage(code, fallback);
+}
+
 export type ExecutionState =
   'pending' | 'running' | 'waiting' | 'paused' | 'cancelled' | 'succeeded' | 'failed' | string;
 

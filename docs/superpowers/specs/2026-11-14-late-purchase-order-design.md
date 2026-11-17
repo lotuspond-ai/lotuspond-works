@@ -1,6 +1,6 @@
 # Second reference workflow: late purchase order recovery
 
-Date: 14 November 2026 (Asia/Kolkata). Status: **specification, decided under the owner's delegation; not implemented.** On 2026-11-14 the owner asked for a second supply chain example to be built before a customer brings a process ([ADR-0017](../../architecture/0017-position-works-for-supply-chain-operations.md)). Claude chose the process and wrote this specification. Nothing here is a production-readiness or live-provider claim.
+Date: 14 November 2026 (Asia/Kolkata). Status: **specification, decided under the owner's delegation; milestones 1 to 5 built (14 to 17 November), against synthetic stand-ins only.** On 2026-11-14 the owner asked for a second supply chain example to be built before a customer brings a process ([ADR-0017](../../architecture/0017-position-works-for-supply-chain-operations.md)). Claude chose the process and wrote this specification. Nothing here is a production-readiness or live-provider claim.
 
 ## Why this workflow
 
@@ -78,6 +78,15 @@ Each is its own PR. Milestones 1 to 3 reuse what the first workflow built (the `
 ## Milestone 4 as built (15 November)
 
 Package evaluations and the release binding provider ([design](2026-11-15-package-proof-design.md)). A conformance case evaluates the package on all six scenarios through an evaluation deployment (on-time orders by their result, late orders by the exact date change they propose; nothing is written), releases the run under a policy with a second administrator's approval, and deploys the same package version to production with that release. It passed in the local Linux container.
+
+## Milestone 5 as built (17 November)
+
+The workflow on production's authorities, seen in the console.
+
+- **On an operator directory.** A conformance case provisions the server's authorities with `python -m lotuspond.authority` only, as the [runbook](../../operations/operator-authority.md) says: publisher trust, admitted catalog documents, the three connectors and their secret bindings (`install-connector`, `secret-binding`), a command key, and release decisions left required. An unreleased deployment is refused (`503 assurance_unavailable`). The package is proven on an evaluation deployment and released, the release admits that version, and every late order runs on it: both reviewed writes are dispatched, read back and verified. The runtime stays in test mode, because its stand-ins are on loopback and a production runtime's egress policy refuses loopback and documentation-range addresses; the server side is production's.
+- **Finding: release decisions blocked their own proof.** With `release_required` on, the evaluation deployment itself was refused, so no package could be proven and released without switching the gate off. Milestone 4's case had passed only because test worlds switch it off. The owner chose evaluation-only deployments ([design](2026-11-17-evaluation-deployments-design.md)): admitted without a release, started only by a package evaluation, never approving or dispatching a write.
+- **In the console.** An opt-in case (`LOTUSPOND_CONSOLE_JOURNEY=1`, after `npm run build`) serves the built console in front of that API and drives it in Chromium as two people (`backend/tests/execution/conformance/console_journey.mjs`). The requester opens Human tasks, reviews the exact date change and allows it. The customer update needs independent approval: the requester's Allow is refused and released, and a second planner allows it on a 375 px screen. Control Room then shows both writes verified, with who allowed each, at 1440, 768 and 375 px without horizontal scroll, and the server agrees.
+- **Finding: the console blamed the session.** A refused Allow on an independent review said "Reviews need a person signed in, not a key" to a person who was signed in. It now says the action needs independent approval and asks the requester to release the task (`decisionMessage`, `web/src/lib/operate.ts`).
 
 ## Out of scope
 

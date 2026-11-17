@@ -125,6 +125,16 @@ class DeploymentConfig(Contract):
         tuple[DependencyBinding, ...], BeforeValidator(array), Field(max_length=511)
     ]
     limits: ExecutionLimits
+    # "evaluation": a deployment that exists to prove its package before release
+    # (docs/superpowers/specs/2026-11-17-evaluation-deployments-design.md). It is
+    # admitted without a release, only a package evaluation run starts executions on
+    # it, and none of its writes is ever approved or dispatched. Absent for every other
+    # deployment, so their canonical bytes and digests are unchanged.
+    purpose: Literal["evaluation"] | None = None
+
+    @property
+    def evaluation(self) -> bool:
+        return self.purpose == "evaluation"
 
     @model_validator(mode="after")
     def unique(self):
@@ -217,4 +227,7 @@ def canonical_value(raw):
 
 
 def canonical_configuration(raw):
-    return canonical_value(DeploymentConfig.model_validate(raw).model_dump(mode="json"))
+    value = DeploymentConfig.model_validate(raw).model_dump(mode="json")
+    if value["purpose"] is None:
+        del value["purpose"]  # a deployment without a purpose keeps its stored bytes
+    return canonical_value(value)

@@ -358,7 +358,9 @@ class BudgetService:
         reauthorize(db, actor, "execute")
         current_snapshot(db, snapshot)
         self._expiry(db, grant, tenant)
-        check_assurance_current(db, assurance, package, snapshot, sources)
+        check_assurance_current(
+            db, assurance, package, snapshot, sources, evaluation=config.evaluation
+        )
         if execution and (
             execution.deadline_ms <= database_now_ms(db)
             or not may_run(execution, path)
