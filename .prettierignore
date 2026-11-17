@@ -11,4 +11,4 @@
 /reference/late-po/catalog/
 
 # Copy of the LotusPond design system published to Claude Design; keep byte-identical (ADR-0016).
-/design-system/project/
+/web/src/styles/lotuspond-tokens.json

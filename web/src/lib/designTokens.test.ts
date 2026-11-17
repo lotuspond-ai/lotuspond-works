@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 // The console names its tokens for what they do in the application (console.css). Each one is
-// a token of the LotusPond design system (design-system/project/tokens.json). This test fails
+// a token of the LotusPond design system (a copy of design-system/project/tokens.json from
+// lotuspond-ai/lotuspond, kept in ../styles/lotuspond-tokens.json). This test fails
 // when a value is changed in one place and not the other.
 const css = readFileSync(new URL('../styles/console.css', import.meta.url), 'utf8');
 const system = JSON.parse(
-  readFileSync(new URL('../../../design-system/project/tokens.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../styles/lotuspond-tokens.json', import.meta.url), 'utf8'),
 ) as { color: { tokens: { name: string; value: Record<string, string> }[] } };
 
 const light = new Map(system.color.tokens.map((token) => [token.name, token.value.light]));
