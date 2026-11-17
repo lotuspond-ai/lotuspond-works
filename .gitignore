@@ -20,3 +20,6 @@ coverage/
 output/
 # Local handoff notes may include machine-specific operational context.
 /HANDOFF.md
+
+# Local Cloudflare Worker state (Miniflare databases); never commit.
+.wrangler/
