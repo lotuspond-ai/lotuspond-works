@@ -36,7 +36,7 @@ Unchanged, on purpose:
 
 - Identifiers: the `lotuspond`, `lotuspond_sdk` and `lotuspond_runtime` packages, the `lotuspond-*` commands, `LOTUSPOND_*` environment variables, `X-Lotuspond-*` headers, database and schema names, the repository, and the `"product": "Lotuspond"` value in API responses and evidence exports. Renaming them would break installed runtimes, keys, scripts and stored evidence for no customer benefit.
 - Dated records: plans, earlier ADRs, validation and research records keep the name they were written with.
-- The early-access page in `deploy/interest/`, which speaks for the company and names no product.
+- The early-access page, then in `deploy/interest/` and now in [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond), which speaks for the company and names no product.
 
 Not yet renamed: text the server and command-line clients produce, such as mail subjects and bodies, the authenticator account label, error messages, the OpenAPI title and the CI workflow names. The console and the documentation quote the authenticator label ("Lotuspond") exactly until it changes. Changing that label affects new enrollments only; existing authenticators keep their label and their codes still verify.
 
