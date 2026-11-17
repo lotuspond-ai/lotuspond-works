@@ -772,7 +772,7 @@ CI. All product/runtime/customer qualification boundaries above remain open.
 
 ## Draft publication and hosted completion
 
-[Draft PR #6](https://github.com/lotuspond-ai/lotuspond/pull/6) targets the reviewed
+[Draft PR #6](https://github.com/lotuspond-ai/lotuspond-works/pull/6) targets the reviewed
 `codex/executable-v2-design` base `468550703a45c702995391c5d93ac201283d4a50`.
 The normally pushed publication head is `5b43e64acbd9e818e979d1cd034479ef9a48d66d`;
 its only changes after corrected product source `2b4b3ee` are plan/evidence
@@ -780,7 +780,7 @@ Markdown. The fetched GitHub pull-request head matches exactly. The complete
 106-file diff is retained and checked from Git; the GitHub API omits some large
 patches, so its preview was not treated as the complete review surface.
 
-All twelve jobs in [validation run 38573333807](https://github.com/lotuspond-ai/lotuspond/actions/runs/38573333807)
+All twelve jobs in [validation run 38573333807](https://github.com/lotuspond-ai/lotuspond-works/actions/runs/38573333807)
 passed for that head: validate, SDK 3.13, SDK 3.14, collector, evidence, protocols,
 voice, docs, execution image, offline installation, restore and monitoring rules.
 These are ordinary hosted checks, distinct from the recorded cloud-workspace

@@ -72,7 +72,7 @@ Workflows are executable-v2 packages: the Studio authors them, and `lotuspond-pa
 
 Read [capabilities](docs/CAPABILITIES.md), [API](docs/API.md), [database](docs/DATABASE.md), [design system](docs/design-system.md), and [what LotusPond Works is for](docs/GOAL.md). The Git-backed documentation site is in `docs-site/`; packaging and operator instructions are in `deploy/`.
 
-The canonical private repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Repository publication and hosted deployment are separate milestones. Production readiness requires the remaining identity, provider, deployment, and operational evidence listed in the capability register, and the runtime capabilities still to build. The separate local recovery archive is outside this project.
+The canonical private repository is [lotuspond-ai/lotuspond-works](https://github.com/lotuspond-ai/lotuspond-works). Repository publication and hosted deployment are separate milestones. Production readiness requires the remaining identity, provider, deployment, and operational evidence listed in the capability register, and the runtime capabilities still to build. The separate local recovery archive is outside this project.
 
 [Evaluation runners](docs-site/docs/runners.md) execute reviewed adapters in supervised processes. Use the HTTP adapter for an operator-configured text agent; frozen scenarios, complete evidence and a current lease remain required.
 

@@ -363,11 +363,11 @@ hosted CI results are recorded separately below.
 
 ## Draft publication and exact-head hosted verification
 
-[Draft PR #4](https://github.com/lotuspond-ai/lotuspond/pull/4) targets the preserved
+[Draft PR #4](https://github.com/lotuspond-ai/lotuspond-works/pull/4) targets the preserved
 readiness branch `codex/production-readiness-20261014` at
 `c2d3e3685db79f37758095403b3bab4a94212e32`. Its initial published head
 `219e54b72fbb0a556a8c3e5051f91b4e4b6026d6` passed **all twelve GitHub jobs** in
-[run 38523799089](https://github.com/lotuspond-ai/lotuspond/actions/runs/38523799089):
+[run 38523799089](https://github.com/lotuspond-ai/lotuspond-works/actions/runs/38523799089):
 validation/application/database/supervised runner, SDK3.13, SDK3.14, collector,
 monitoring rules, voice, evidence, protocols, execution, restore, offline install
 and docs. The ordinary Dockerfile and actual hosted offline recovery passed,
@@ -387,7 +387,7 @@ scratch is eligible for cleanup; source worktrees, branches, original data and
 recovery material remain intact.
 
 The next executable-v2 specification is separately proposed in
-[draft PR #5](https://github.com/lotuspond-ai/lotuspond/pull/5). Written-spec review
+[draft PR #5](https://github.com/lotuspond-ai/lotuspond-works/pull/5). Written-spec review
 is pending under the selected Superpowers workflow; no v2 implementation or
 product dependency installation is part of this SDK change. All broader product
 and production-qualification requirements remain open until their evidence exists.

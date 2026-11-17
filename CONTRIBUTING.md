@@ -1,6 +1,6 @@
 # Contributing to LotusPond Works
 
-The canonical private product repository is [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond). Begin with [README.md](README.md), [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and the [capability register](docs/CAPABILITIES.md). The [platform plan](docs/plans/2026-10-13-platform-master-plan.md) describes the approved direction; planned features are not shipped functionality.
+The canonical private product repository is [lotuspond-ai/lotuspond-works](https://github.com/lotuspond-ai/lotuspond-works). Begin with [README.md](README.md), [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and the [capability register](docs/CAPABILITIES.md). The [platform plan](docs/plans/2026-10-13-platform-master-plan.md) describes the approved direction; planned features are not shipped functionality.
 
 Use short-lived branches (`codex/` for agent-created branches) and pull requests. Inspect the branch, index, working tree, and remote before editing. Preserve unrelated work and stage intended paths explicitly. Never reset someone else's changes or force-push shared history. Keep baseline failures separate from regressions introduced by your change.
 

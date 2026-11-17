@@ -8,7 +8,7 @@ The original checkout had no commits or remote, 329 staged files, 107 further wo
 
 Initial commit `3f91bf0` contains the current bytes of 332 curated source files, each verified against that snapshot. The remaining `HANDOFF.md` is unchanged and stays local. The former index is recoverable from the private snapshot rather than silently discarded.
 
-The canonical private repository [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond) is created, its baseline `main` is published and verified, and this increment uses `codex/platform-foundation`. Repository-local HTTPS authentication uses the already signed-in GitHub CLI account. The nine older repositories and their consumers remain unchanged.
+The canonical private repository [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond-works) is created, its baseline `main` is published and verified, and this increment uses `codex/platform-foundation`. Repository-local HTTPS authentication uses the already signed-in GitHub CLI account. The nine older repositories and their consumers remain unchanged.
 
 CODEOWNERS, contribution guidance, issue/PR templates and the intended main-branch policy are included. GitHub rejected protection with HTTP 403 because the current plan does not support it for this private repository. The policy is **not enforced**; see [repository governance](../repository-governance.md). No visibility, billing, hosting, deployment secrets, or documentation-publishing settings were changed.
 
@@ -48,12 +48,12 @@ Logs are retained privately under `.local/foundation-test-*/`, `/tmp/lotuspond-f
 
 ## First hosted CI findings
 
-The initial baseline [validation run](https://github.com/lotuspond-ai/lotuspond/actions/runs/38394753383) passed eight jobs and failed two. Both failures were in existing harnesses and were investigated rather than excluded:
+The initial baseline [validation run](https://github.com/lotuspond-ai/lotuspond-works/actions/runs/38394753383) passed eight jobs and failed two. Both failures were in existing harnesses and were investigated rather than excluded:
 
 1. The restore fixture omitted the required `workspaces.require_mfa` column. Explicit personal/organization values repair the fixture and exercise policy preservation; the real isolated restore drill now passes locally.
 2. The runner smoke requires a verified loopback server address. A bridged CI PostgreSQL service has a container address, so the smoke guard rejects it before executing the runner. CI now gives this drill its own disposable host-network PostgreSQL instance listening only on loopback, with explicit identity and cleanup. The guard remains unchanged.
 
-The foundation [PR validation run](https://github.com/lotuspond-ai/lotuspond/actions/runs/38396169650) passed all ten jobs for `f79f1e5`: PostgreSQL 18 ran 263 tests plus 89 subtests with no skips; sandbox checks passed 22 tests plus 14 subtests; deployment checks passed 31 tests plus 13 subtests. The corrected runner smoke, restore and offline installation drills all passed. The runner confirmed cancellation/revocation, timeout/crash handling, persisted results, control-key isolation and cleanup.
+The foundation [PR validation run](https://github.com/lotuspond-ai/lotuspond-works/actions/runs/38396169650) passed all ten jobs for `f79f1e5`: PostgreSQL 18 ran 263 tests plus 89 subtests with no skips; sandbox checks passed 22 tests plus 14 subtests; deployment checks passed 31 tests plus 13 subtests. The corrected runner smoke, restore and offline installation drills all passed. The runner confirmed cancellation/revocation, timeout/crash handling, persisted results, control-key isolation and cleanup.
 
 The duplicate push-triggered run was cancelled in favor of the PR run, but its cancelled checks still made GitHub label the PR unstable. The follow-up CI configuration runs feature validation through pull requests, with pushes to `main` and explicit manual dispatch still supported. This avoids duplicate runs and gives the final PR source one authoritative check set. CI is not deployment. Documentation publication remains disabled by its existing opt-in gate.
 
