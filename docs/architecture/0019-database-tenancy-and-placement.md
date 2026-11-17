@@ -1,5 +1,7 @@
 # ADR-0019: Databases, tenancy and placement
 
+On 2026-11-17 sections 1 and 2, which set the Accounts databases and keep the three products' databases apart, moved to the company repository as [ADR-0002](https://github.com/lotuspond-ai/lotuspond/blob/main/docs/architecture/0002-account-and-product-databases.md). This record keeps where Works data lives.
+
 Date: 2026-11-16. Status: **accepted. On 2026-11-16 the owner asked how the databases should be laid out, given that LotusPond Works will serve organisations and will later need on-premises or enterprise-only privacy, then accepted this design the same day and opened Health in India only at first ([ADR-0018](0018-one-lotuspond-account.md)).** This record decides where each product's data lives and how one Works organisation can move to stricter isolation later. [ADR-0018](0018-one-lotuspond-account.md) decides the shared account. Nothing here is built yet.
 
 ## Context
@@ -30,29 +32,11 @@ The layout must allow each of these later without rewriting the product.
 
 ### 1. Separate databases, never shared across products
 
-There are three kinds of database. No database is shared between them, and no product reads another's tables.
-
-| Database     | Holds                                                                                      | Layout                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| **Accounts** | Identity only: emails, credentials, multi-factor secrets, sessions, enterprise connections | A global directory (non-personal), plus one cell per region            |
-| **Health**   | Health records, profiles, consents, agent grants, files                                    | Unchanged: one cell per region, plus the non-personal default database |
-| **Works**    | Organisations, workspaces, projects, packages, deployments, runs, audit                    | Per placement (section 3)                                              |
-
-**Accounts:**
-
-- The **directory** holds only:
-  - an HMAC of each email, mapped to its region;
-  - OpenID Connect client registrations;
-  - each enterprise connection's verified domains, its identity-provider metadata, and the Works organisation that owns it.
-- Each **account cell** holds that region's accounts, credentials and sign-in sessions, and its audit of sign-ins.
-- Health's own email directory moves into Accounts. Health then finds the cell from the token's `region` claim instead.
+Moved to company [ADR-0002](https://github.com/lotuspond-ai/lotuspond/blob/main/docs/architecture/0002-account-and-product-databases.md). Accounts, Health and Works each have their own databases; no product reads another's tables. Works holds organisations, workspaces, projects, packages, deployments, runs and audit, laid out per placement (section 3).
 
 ### 2. Health stays as it is
 
-- Health's `users` table becomes its account row, keyed by the Accounts subject.
-- The password column goes once every account has moved (ADR-0018).
-- Records never leave the cell, and no Works database ever holds Health data.
-- Healthcare administration workflows in Works ([ADR-0017](0017-position-works-for-supply-chain-operations.md)) handle an organisation's own data in Works. They are not a path into LotusPond Health.
+Moved to company [ADR-0002](https://github.com/lotuspond-ai/lotuspond/blob/main/docs/architecture/0002-account-and-product-databases.md). No Works database ever holds Health data.
 
 ### 3. Every Works organisation has a placement
 
@@ -126,7 +110,7 @@ A **support-access approval** applies wherever LotusPond runs the service. A Lot
 
 ## Settled, and still open
 
-Settled 2026-11-16: **Health opens in India only at first.** Only the India cells of Accounts and Health are deployed for Health at launch; the other cells stay in the design and open by configuration.
+Settled 2026-11-16: **Health opens in India only at first.** That decision is recorded with the Accounts and Health cells in company [ADR-0002](https://github.com/lotuspond-ai/lotuspond/blob/main/docs/architecture/0002-account-and-product-databases.md).
 
 Still open:
 
