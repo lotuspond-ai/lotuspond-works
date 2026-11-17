@@ -292,6 +292,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "evaluation-deployments",
+                    "date": "2026-11-17",
+                    "title": "Prove a workflow while releases stay required",
+                    "description": "A deployment can now exist only to prove its workflow: with \"purpose\": \"evaluation\" in its configuration it is admitted without a release, only a package evaluation starts it, none of its reviews can be allowed and nothing it proposes is sent. Before this, an installation that requires a release for every deployment refused the evaluation's own deployment, so no workflow could be proven and released. When a person who requested an action tries to allow it and the action needs independent approval, Human tasks now says so instead of blaming their session.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "control-room-operations",
                     "date": "2026-11-16",
                     "title": "Control Room runs the environment",
