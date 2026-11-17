@@ -62,5 +62,5 @@ A new public page follows the system's layout: a sage field with off-white sheet
 ## Open work
 
 - **Account screens.** The small labels above the sign-in and registration titles are still uppercase monospace, which the system does not allow.
-- **The company site** at lotuspond.ai (`deploy/interest/`) still shows the early-access page. Replacing it is a hosted change with its own scope.
+- **The company site** at lotuspond.ai (now in [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond), `site/`) still shows the early-access page. Replacing it is a hosted change with its own scope.
 - **Icons and a logo file.** The system has neither yet. The wordmark is the logo, and a word or a dot plus a word comes before an icon.

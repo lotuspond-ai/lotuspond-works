@@ -44,7 +44,7 @@ Unchanged, on purpose:
 
 - Layout, navigation, components, keyboard behaviour and copy.
 - The signed-out introduction (`web/src/pages/Landing.tsx`) keeps the field record for now. `landing.css` pins its action green, its 8px buttons and its earlier system typefaces so the page does not shift, and the console preview inside it shows the new console.
-- The early-access page in `deploy/interest/`.
+- The early-access page, then in `deploy/interest/` and now in [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond).
 
 Not done yet, in this order:
 
