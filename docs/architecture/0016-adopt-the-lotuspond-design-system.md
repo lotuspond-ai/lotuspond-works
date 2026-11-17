@@ -2,6 +2,8 @@
 
 Date: 2026-11-13. Status: **accepted. On 2026-11-13 the owner supplied three brand colours, asked for a unique, uncluttered design and a design system kept in Claude Design, accepted the resulting company sample page, asked for Works and Health pages in the same design, and asked for the design to be brought into this repository.** It changes how the product looks. It changes no scope, behaviour, API or stored data.
 
+On 2026-11-17 the source moved from `design-system/` in this repository to [lotuspond-ai/lotuspond](https://github.com/lotuspond-ai/lotuspond/tree/main/design-system), because the system belongs to the company. Works keeps a copy of `tokens.json` at `web/src/styles/lotuspond-tokens.json` for its token test. Paths below are as they were when this record was accepted.
+
 ## Context
 
 The console and the signed-out introduction used a theme called the field record: warm archival paper, a reading serif, a dusk pond scene, ink glyphs, stamps and one warm orange note ([DESIGN.md](../../DESIGN.md) before this change).
@@ -53,6 +55,6 @@ Not done yet, in this order:
 
 ## Consequences
 
-New interface work uses the system's tokens and rules. The field record is not extended. A change to a colour or a scale is made in `design-system/project/tokens.json` first, then in `console.css`, and republished to Claude Design.
+New interface work uses the system's tokens and rules. The field record is not extended. A change to a colour or a scale is made in `design-system/project/tokens.json` in lotuspond-ai/lotuspond first, then copied to `web/src/styles/lotuspond-tokens.json` and made in `console.css`, and republished to Claude Design.
 
 The sample pages the owner approved describe LotusPond Works as automation for supply-chain operations. That positioning is not in `docs/GOAL.md` or `docs/CAPABILITIES.md`, and this record does not adopt it. Public copy in this repository keeps to implemented behaviour until the owner decides the positioning in its own record.
