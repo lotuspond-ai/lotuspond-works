@@ -587,6 +587,11 @@ def test_real_child_and_dns_descendant_cleanup(tmp_path, monkeypatch, failure):
                 # The helper can disappear before open (ENOENT) or during read (ESRCH).
                 break
             assert int(fields[19]) == helper_start, "helper PID was reused"
+            if int(fields[2]) <= 0:
+                # Mid-exit the task can already be detached from its process group, and
+                # /proc then reports no group (CI read -1): no group, never another one,
+                # so termination is observable.
+                break
             assert int(fields[2]) == helper_group
             if fields[0] in ("Z", "X"):
                 # Termination is observable; this does not claim the orphan was reaped.
