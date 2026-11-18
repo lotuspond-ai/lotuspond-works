@@ -43,14 +43,35 @@ def _docker(*args, input=None, timeout=120, check=True):
     )
 
 
+def _ephemeral_range():
+    """The kernel's range for the local end of outgoing connections (Linux default)."""
+    try:
+        low, high = Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split()
+        return int(low), int(high)
+    except (OSError, ValueError):
+        return 32768, 60999
+
+
 def _free_port():
+    """A port nothing holds, outside the kernel's range for outgoing connections.
+
+    A port in that range can be the local end of one of the suite's own client
+    connections. A connect probe still reports it free, and `docker run --publish`
+    then fails with "address already in use" (exit 125). So ports come from below
+    the range, and the probe binds the port, which fails whenever anything holds it.
+    """
+    low, high = _ephemeral_range()
+    candidates = [port for port in range(20000, 60001) if not low <= port <= high]
     for _ in range(100):
-        port = random.randint(20000, 60000)
+        port = random.choice(candidates)
         if port in REFUSED_PORTS:
             continue
         with socket.socket() as probe:
-            if probe.connect_ex(("127.0.0.1", port)) != 0:
-                return port
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return port
     raise AssertionError("no private port")
 
 
@@ -62,27 +83,42 @@ class Cluster:
         self.port = _free_port()
         self.url = f"postgresql+psycopg://lotuspond@127.0.0.1:{self.port}/lotuspond_platform_test"
 
-    def start(self):
-        _docker(
-            "run",
-            "--detach",
-            "--name",
-            self.name,
-            "--label",
-            LABEL,
-            "--publish",
-            f"127.0.0.1:{self.port}:5432",
-            "--env",
-            "POSTGRES_USER=lotuspond",
-            "--env",
-            "POSTGRES_DB=lotuspond_platform_test",
-            "--env",
-            "POSTGRES_HOST_AUTH_METHOD=trust",
-            "--env",
-            f"PGDATA={DATA}",
-            IMAGE,
-        )
-        self.ready()
+    def start(self, attempts=3):
+        """Start the cluster; a port taken between the probe and Docker gets a new port."""
+        for attempt in range(1, attempts + 1):
+            started = _docker(
+                "run",
+                "--detach",
+                "--name",
+                self.name,
+                "--label",
+                LABEL,
+                "--publish",
+                f"127.0.0.1:{self.port}:5432",
+                "--env",
+                "POSTGRES_USER=lotuspond",
+                "--env",
+                "POSTGRES_DB=lotuspond_platform_test",
+                "--env",
+                "POSTGRES_HOST_AUTH_METHOD=trust",
+                "--env",
+                f"PGDATA={DATA}",
+                IMAGE,
+                check=False,
+            )
+            if started.returncode == 0:
+                self.ready()
+                return
+            error = started.stderr.decode(errors="replace").strip()
+            # A failed publish leaves a created container behind under this name.
+            _docker("rm", "--force", "--volumes", self.name, check=False)
+            port_taken = "already in use" in error or "already allocated" in error
+            if attempt == attempts or not port_taken:
+                raise AssertionError(f"docker run failed ({started.returncode}): {error}")
+            self.port = _free_port()
+            self.url = (
+                f"postgresql+psycopg://lotuspond@127.0.0.1:{self.port}/lotuspond_platform_test"
+            )
 
     def ready(self, seconds=90):
         deadline = time.monotonic() + seconds
