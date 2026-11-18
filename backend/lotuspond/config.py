@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     redis_url: SecretStr | None = None
     origin: str = "http://127.0.0.1:8000"
     registration_enabled: bool = False
+    # Shown as a badge on every console page, such as "Staging", so a non-production server
+    # is never mistaken for production. Unset (the default) shows nothing.
+    environment_label: str | None = Field(
+        default=None, min_length=1, max_length=24, pattern=r"^[A-Za-z0-9][A-Za-z0-9 -]*$"
+    )
     fleet_enabled: bool = False
     fleet_installation_id: str | None = None
     # The operator authority directory (`python -m lotuspond.authority`). With it and
@@ -47,6 +52,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "redis_url",
+        "environment_label",
         "mail_encryption_key",
         "mfa_encryption_key",
         "smtp_host",

@@ -90,7 +90,7 @@ A staging server runs the same stack from `main` on its own Lightsail instance, 
 
 An unlisted address is not access control: anyone who has the link can open the site. Keep registration closed, use synthetic data only, and put Cloudflare Access in front of it if it ever needs to be private.
 
-To create one, issue an ECDSA Origin CA certificate for the hostname in Cloudflare (SSL/TLS → Origin Server), put `cert.pem` and `key.pem` in a private folder's `origin/`, and `CADDYFILE=Caddyfile.origin` in its `env.extra`, then:
+To create one, issue an ECDSA Origin CA certificate for the hostname in Cloudflare (SSL/TLS → Origin Server), put `cert.pem` and `key.pem` in a private folder's `origin/`, and `CADDYFILE=Caddyfile.origin` and `LOTUSPOND_ENVIRONMENT_LABEL=Staging` (a badge on every console page) in its `env.extra`, then:
 
 ```bash
 STACK=lotuspond-works-<label> NAME=lotuspond-works-<label> DOMAIN=<label>.lotuspond.ai ACME_EMAIL=ops@lotuspond.ai \
