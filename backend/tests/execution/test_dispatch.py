@@ -715,7 +715,7 @@ def test_child_admission_is_rechecked_after_provider_waits(activity):
     assert remaining > 1000, "setup outlived the session window"
     if remaining > 4000:
         until(h, expires - 4000)
-    original, entered = h.activities.demand, []
+    original, entered, returned = h.activities.demand, [], []
 
     class Slow:
         test_only = True
@@ -724,7 +724,10 @@ def test_child_admission_is_rechecked_after_provider_waits(activity):
             with Session(h.engine) as db:
                 entered.append(database_now_ms(db) < expires)  # live when entered
             until(h, expires)  # the session expires during this provider call
-            return original.demand(attempt_id)
+            try:
+                return original.demand(attempt_id)
+            finally:
+                returned.append(monotonic())
 
     h.activities.demand = Slow()
     started = monotonic()
@@ -733,7 +736,13 @@ def test_child_admission_is_rechecked_after_provider_waits(activity):
             h, parent, "late", "connector_read", tool_name("connector-fixture", "read"), arguments
         )
     assert entered == [True]  # the recheck after the provider call refused it
-    assert monotonic() - started < 6  # bounded by the 5 s provider slot
+    # Bounded by the 5 s provider slot. The provider call itself ends at the session
+    # expiry, under 4 s after the start: had it overrun its slot, the refusal would be
+    # price_unavailable, not the recheck's. The work after it (the shared reservation
+    # and the recheck) then waits on nothing longer than one slot. Measuring the two
+    # separately keeps a slow runner's reservation from counting against the wait.
+    assert len(returned) == 1 and returned[0] - started < 5
+    assert monotonic() - returned[0] < 5
     with Session(h.engine) as db:
         children = db.scalar(
             select(func.count())
