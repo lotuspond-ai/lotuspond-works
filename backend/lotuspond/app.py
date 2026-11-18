@@ -292,6 +292,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "forms-say-what-they-ask",
+                    "date": "2026-11-18",
+                    "title": "Forms say what they ask",
+                    "description": "A form in Human tasks now shows what it asks before anyone claims it: each field the workflow declares, whether it is required, and its limits, such as how many characters or decimal places it takes. Once you claim it, you answer in labelled fields instead of typing JSON, and a missing or out-of-range answer is named before anything is sent. A form with a nested shape still takes JSON.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "decimal-verification",
                     "date": "2026-11-18",
                     "title": "Amounts verify after a write",

@@ -148,7 +148,7 @@ An opt-in case (`LOTUSPOND_CONSOLE_JOURNEY=1`, after `npm run build`) runs three
 
 Control Room shows each execution succeeded and each write verified by its rule, with no horizontal scroll at 768 and 375 px. The Claim control takes keyboard focus. The server agrees: each write was applied once and allowed by the person who did.
 
-**Finding, not fixed here:** the console never says what a form asks. Before claiming, a form shows only its due date and claim; after claiming, a raw JSON box with no fields or description. A clerk cannot know to answer `decision` and `comment` without reading the package. Rendering a form from its declared schema is console work for later.
+**Finding, fixed the same day:** the console never said what a form asks. Before claiming, a form showed only its due date and claim; after claiming, a raw JSON box. `GET …/human-tasks/{id}/form` now returns the form's declared schema, and Human tasks lists each field with its limits before the task is claimed and renders labelled inputs once it is. A form with a nested shape keeps the JSON editor. The schema cannot say which values a field allows, so the clerk sees `decision` as text up to 32 characters, not as a choice between `accept_variance` and `manual_follow_up`; that needs a package-format change.
 
 ## Out of scope
 

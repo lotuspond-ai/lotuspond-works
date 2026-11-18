@@ -162,6 +162,11 @@ async function doTask(run, task, index) {
   await openTask(page, run.execution_id, task.kind);
   if (task.kind === 'review') seen.operation = await proposed(page);
   if (task.focus) await focusClaim(page, name);
+  if (task.kind === 'form') {
+    // What the form asks, as it is shown before anyone claims it.
+    await page.getByRole('heading', { name: 'What this form asks' }).waitFor();
+    seen.asks = (await page.locator('.form-asks-list').innerText()).replace(/\s+/g, ' ').trim();
+  }
   await shot(page, `${name}-${task.kind}-${task.width ?? 'desktop'}`);
   await claim(page);
   if (task.kind === 'review') {
@@ -171,7 +176,12 @@ async function doTask(run, task, index) {
     await page.getByText('Allowed. The action can now be sent.').waitFor({ timeout: 30000 });
     seen.allowed = true;
   } else {
-    await page.locator('.operate-detail textarea.code-input').fill(JSON.stringify(task.payload));
+    // Each field by its label (the field name, as the console labels it).
+    for (const [field, value] of Object.entries(task.payload)) {
+      const label = field.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
+      await page.getByLabel(label, { exact: true }).fill(String(value));
+    }
+    await shot(page, `${name}-${task.kind}-filled-${task.width ?? 'desktop'}`);
     await page.getByRole('button', { name: 'Submit', exact: true }).click();
     await page.getByText('Submitted.').waitFor({ timeout: 30000 });
     seen.submitted = true;

@@ -75,6 +75,16 @@ def get_human_task_proposal(
     return JSONResponse(_json(proposal), headers={"Cache-Control": "no-store"})
 
 
+@router.get("/human-tasks/{task_id}/form", tags=TAGS)
+def get_human_task_form(
+    project_id: str, environment_id: str, task_id: str, request: Request, db=DB
+):
+    """What a form task asks: its declared schema, so a person can answer it."""
+    no_query(request)
+    current = actor(db, request, project_id, environment_id, "read")
+    return _json(action_services(request).tasks.form(db, current, _id(task_id)))
+
+
 def _mutation(request, db, project_id, environment_id, task_id):
     current = _person(db, request, project_id, environment_id, "review")
     return current, _id(task_id), action_services(request).tasks

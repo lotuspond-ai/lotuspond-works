@@ -431,6 +431,10 @@ def test_admins_decide_invoice_exceptions_in_the_console(triage):
     assert "independent approval" in independent["refusal"], independent
     [clerk] = seen["runs"]["clerk"]["tasks"]
     assert (clerk["kind"], clerk["submitted"]) == ("form", True)
+    # The form says what it asks before anyone claims it (its declared schema).
+    assert clerk["asks"] == (
+        "Decision Text, up to 32 characters Comment Text, up to 1,000 characters"
+    ), clerk
     for name, writes in (("hold", 1), ("credit", 1), ("clerk", 0)):
         shown = seen["runs"][name]["control_room"]
         assert "succeeded" in shown["state"].lower(), (name, shown)

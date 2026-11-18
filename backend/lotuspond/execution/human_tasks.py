@@ -32,12 +32,14 @@ from ..models import (
     ExecutionDeploymentRevision,
     ExecutionHumanTask,
     ExecutionInbox,
+    ExecutionStepInstance,
     ExecutionWait,
     new_id,
 )
 from .action_contracts import (
     TASK_CLAIM_MS,
     DecisionRequest,
+    FormView,
     HumanTaskView,
     ProposalView,
     SubmissionRequest,
@@ -259,6 +261,35 @@ class HumanTaskService:
             expires_at_ms=b.expires_at_ms,
             target=target,
             input=value,
+        )
+
+    def form(self, db, actor, task_id) -> FormView:
+        """The declared schema of a form task, to anyone who may read the execution. The
+        schema is the pinned package's, so a person sees exactly what a submission must
+        be; it carries no execution value. A read: no row locks, as `get`."""
+        from .program import ProgramError, load_program, resolve_occurrence
+
+        actor = reauthorize(db, actor, "read")
+        task = record(db, ExecutionHumanTask, actor.scope, task_id)
+        if not _retained(db, task) or task.kind != "form":
+            raise ExecutionError("not_found")
+        execution = record(db, Execution, actor.scope, task.execution_id)
+        step = record(db, ExecutionStepInstance, actor.scope, task.step_instance_id)
+        try:
+            ref = resolve_occurrence(load_program(db, actor.scope, execution), step.occurrence_path)
+        except ProgramError:
+            raise ExecutionError("dependency_unavailable") from None
+        node = ref.step
+        if (
+            ref.selector is not None
+            or ref.step_id != step.node_id
+            or node.kind != "human_task"
+            or node.mode != "form"
+        ):
+            raise ExecutionError("dependency_unavailable")
+        return FormView(
+            form_schema=node.form_schema.model_dump(mode="json"),
+            definitions=[item.model_dump(mode="json") for item in ref.package.schemas],
         )
 
     @staticmethod

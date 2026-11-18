@@ -1602,3 +1602,17 @@ Local evidence only, as above. The browser was the preinstalled Chromium driven 
 - **Before the triage run:** PostgreSQL had stopped with the container's restart and was started again. That attempt failed to connect and ran nothing.
 - **Finding, not fixed:** a form task shows nothing of what it asks, only a raw JSON box after claiming.
 - **Not covered:** a runtime outside test mode, a live model call, Safari, Firefox and real assistive technology.
+
+## Forms say what they ask — 2026-11-18
+
+Local evidence only.
+
+- **Server:** `GET …/human-tasks/{id}/form` returns a form task's declared schema and the package's named schemas, under the task's own scope and read access. A review answers `404`. Tests: `test_a_form_task_says_what_it_asks` (form, viewer read, review refused) and `test_a_review_has_no_form`; the route count in `test_openapi_names` went from 7 to 8. With the rest of `test_forms_v2.py` and `test_task_routes.py`, 9 passed.
+- **Console:** `formFields` and `formPayload` (`web/src/lib/operate.ts`) lay out a schema as labelled fields and build the exact payload: trimmed text within its length, whole numbers within their bounds, decimals padded to their scale and limited to their precision, yes/no. An unanswered optional field is left out. Two new tests use invoice triage's own clerk form. `operate.test.ts`: 19 passed. `npm test`: 100 passed, 1 failed (the runner-cleanup test that also fails on unmodified `main` here). `npm run lint` and `npm run build` pass.
+- **Browser, dev fixture** (address form, 1440, 768 and 375 px):
+  - Fields were listed before the task was claimed and became labelled inputs after it.
+  - Each hint is linked by `aria-describedby`, and the focus ring is 2 px.
+  - An empty required field gave "Postcode is required.", which cleared once a field was edited.
+  - There was no horizontal overflow and no page error.
+  - Two layout flaws were fixed after the first look: "(optional)" wrapped under its label, and the comment box was monospace.
+- **Browser, invoice triage journey:** **passed** (3 min 38 s). Before claiming, the clerk's form listed "Decision Text, up to 32 characters Comment Text, up to 1,000 characters". The second admin filled both fields by label at 375 px and submitted, and the execution succeeded as `clerk_decided`.

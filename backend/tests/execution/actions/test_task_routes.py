@@ -193,8 +193,16 @@ def test_openapi_names(action_api):
         if path.startswith(prefix + "/executions/{execution_id}/actions")
         for operation in methods.values()
     ]
-    assert len(tasks_ops) == 7 and all("human_task" in name for name in tasks_ops)
+    assert len(tasks_ops) == 8 and all("human_task" in name for name in tasks_ops)
     assert len(action_ops) == 3
     assert all("production_execution_action" in name for name in action_ops)
     # Nothing names an evaluation run.
     assert not any("run" in name.split("_") for name in tasks_ops + action_ops)
+
+
+def test_a_review_has_no_form(action_api):
+    """`GET …/form` answers only a form task; a review's is not found."""
+    h = action_api
+    _, task = under_review(h, "no-form")
+    response = get(h, f"/human-tasks/{task}/form", h.owner)
+    assert response.status_code == 404, response.text

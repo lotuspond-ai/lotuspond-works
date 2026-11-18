@@ -144,6 +144,7 @@ Every route is under `/api/v1/projects/{project_id}/environments/{environment_id
 | `GET /human-tasks` | `read` | Open tasks: `id`, `execution_id`, `kind` (`review`, `form`), `state`, `deadline_ms`, `escalated`, `escalate_at_ms`, `claim` (`none`, `caller`, `other`), `claim_expires_at_ms`, `intent_sha256` |
 | `GET /human-tasks/{id}` | `read` | One task, same shape |
 | `GET /human-tasks/{id}/proposal` | a person with `read` | The exact connector, operation, policy, target and input under review. `Cache-Control: no-store`; audited without its values. API keys are refused |
+| `GET /human-tasks/{id}/form` | `read` | What a form task asks: `form_schema`, its declared data schema, and `definitions`, the package's named schemas its `ref`s resolve against. Package content only, never an execution's values; `404` for a review |
 | `POST /human-tasks/{id}/claim`, `/release` | a person, `review` | Empty body; idempotent by state. A claim lasts 15 minutes, never past the task's deadline; an owner or admin may release another person's claim |
 | `POST /human-tasks/{id}/decision` | a person, `review` | `{decision_id, intent_sha256, decision: "allow" \| "deny"}`. A digest other than the intent's is 409 `conflict`; with independent approval the requester is refused |
 | `POST /human-tasks/{id}/submission` | a person, `review` | `{submission_id, payload}` for a `form` task |

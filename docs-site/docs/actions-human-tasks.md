@@ -20,6 +20,7 @@ Tasks are listed per environment at `GET /api/v1/projects/{project}/environments
 
 - **Only people review.** API keys, runtimes, viewers and platform administrators cannot claim or decide. With independent approval, the person who started the execution cannot approve it.
 - **Read the proposal** (`GET .../human-tasks/{id}/proposal`): the exact values you are asked to approve. Proposal responses are never cached, and reading one is audited without its values.
+- **Read what a form asks** (`GET .../human-tasks/{id}/form`): the form's declared schema, which the console shows as labelled fields with their limits, before and after you claim it.
 - **Claim** a task to hold it for 15 minutes (never past its deadline). The holder, or an owner or admin, can release it.
 - **Decide** with `POST .../human-tasks/{id}/decision`: a `decision_id` you choose, the `intent_sha256` you reviewed, and `allow` or `deny`.
 - **Escalation.** At half the task's timeout the escalation group may also act, and any claim ends. Nobody is notified: check the list.

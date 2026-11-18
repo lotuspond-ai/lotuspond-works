@@ -2581,3 +2581,21 @@ button.decide:hover:not(:disabled) {
   border-top: 1px solid var(--line);
   border-radius: 0;
 }
+/* A form task's fields: the label sits on its input, the hint just below. */
+.form-asks .form-field {
+  margin-bottom: 14px;
+}
+.form-asks .form-field label:not(.checkbox-label) {
+  display: block; /* not the base grid, so "(optional)" stays beside its label */
+  margin-bottom: 6px;
+}
+.form-asks .form-field .hint {
+  margin: 4px 0 0;
+}
+.form-asks .form-field .checkbox-label {
+  margin: 0;
+}
+/* Prose, like a textarea inside a label; the JSON editor keeps its monospace. */
+.form-asks .form-field textarea {
+  font-family: inherit;
+}
