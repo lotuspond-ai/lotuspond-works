@@ -2,36 +2,53 @@ AWSTemplateFormatVersion: "2010-09-09"
 # Created by aws-lightsail-cfn.sh. Same plan and region as the Health server: Mumbai bundle IDs end in _3_1.
 Description: LotusPond Works server in Mumbai (Lightsail instance, static IP, firewall, daily snapshots). See deploy/server/README.md.
 Parameters:
+  InstanceName:
+    Type: String
+    Default: lotuspond-works-in
+    Description: Lightsail instance name; the static IP is named after it with -ip
+  WebIpv4Cidrs:
+    Type: CommaDelimitedList
+    Default: 0.0.0.0/0
+    Description: IPv4 ranges allowed on ports 80 and 443 (Cloudflare's ranges for a server behind the Cloudflare proxy)
+  WebIpv6Cidrs:
+    Type: CommaDelimitedList
+    Default: "::/0"
+    Description: IPv6 ranges allowed on ports 80 and 443
   UserData:
     Type: String
     NoEcho: true
     Description: First-boot script from aws-lightsail-firstboot.sh, rendered by aws-lightsail-cfn.sh
+  UserDataMore:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: The rest of the first-boot script, when it is longer than one parameter (4096 bytes) holds
 Resources:
   Server:
     Type: AWS::Lightsail::Instance
     Properties:
-      InstanceName: lotuspond-works-in
+      InstanceName: !Ref InstanceName
       AvailabilityZone: ap-south-1a
       BlueprintId: ubuntu_24_04
       BundleId: medium_3_1
-      UserData: !Ref UserData
+      UserData: !Join ["", [!Ref UserData, !Ref UserDataMore]]
       AddOns:
         - AddOnType: AutoSnapshot
           Status: Enabled
           AutoSnapshotAddOnRequest:
-            SnapshotTimeOfDay: "21:30"
+            SnapshotTimeOfDay: "22:00" # Lightsail accepts only whole hours
       Networking:
         Ports:
           - {FromPort: 22, ToPort: 22, Protocol: tcp, Cidrs: ["0.0.0.0/0"], Ipv6Cidrs: ["::/0"]}
-          - {FromPort: 80, ToPort: 80, Protocol: tcp, Cidrs: ["0.0.0.0/0"], Ipv6Cidrs: ["::/0"]}
-          - {FromPort: 443, ToPort: 443, Protocol: tcp, Cidrs: ["0.0.0.0/0"], Ipv6Cidrs: ["::/0"]}
-          - {FromPort: 443, ToPort: 443, Protocol: udp, Cidrs: ["0.0.0.0/0"], Ipv6Cidrs: ["::/0"]}
+          - {FromPort: 80, ToPort: 80, Protocol: tcp, Cidrs: !Ref WebIpv4Cidrs, Ipv6Cidrs: !Ref WebIpv6Cidrs}
+          - {FromPort: 443, ToPort: 443, Protocol: tcp, Cidrs: !Ref WebIpv4Cidrs, Ipv6Cidrs: !Ref WebIpv6Cidrs}
+          - {FromPort: 443, ToPort: 443, Protocol: udp, Cidrs: !Ref WebIpv4Cidrs, Ipv6Cidrs: !Ref WebIpv6Cidrs}
       Tags:
         - {Key: project, Value: lotuspond-works}
   StaticIp:
     Type: AWS::Lightsail::StaticIp
     Properties:
-      StaticIpName: lotuspond-works-in-ip
+      StaticIpName: !Sub "${InstanceName}-ip"
       AttachedTo: !Ref Server
 Outputs:
   StaticIpAddress:

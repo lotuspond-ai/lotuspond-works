@@ -23,3 +23,6 @@ output/
 
 # Local Cloudflare Worker state (Miniflare databases); never commit.
 .wrangler/
+
+# Cloudflare origin certificate and key on a server (deploy/server/Caddyfile.origin)
+deploy/server/origin/
