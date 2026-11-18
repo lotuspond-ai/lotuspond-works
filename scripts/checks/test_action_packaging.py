@@ -292,7 +292,9 @@ def capability_row(name):
     return None
 
 
-def test_capabilities_do_not_claim_ui_or_live_providers():
+def test_capabilities_do_not_overclaim_reviewed_actions():
+    # Real connectors and the console's human tasks inbox are shipped (f4a03b0, 2cd0151),
+    # so the row may name them; it must not claim what is still open.
     row = capability_row("Reviewed actions and human tasks (E05)")
     assert row is not None, "CAPABILITIES.md has no E05 row"
     _, boundary, remaining = (cell.lower() for cell in row)
@@ -302,29 +304,15 @@ def test_capabilities_do_not_claim_ui_or_live_providers():
         "production-ready",
         "production ready",
         "live",
-        "real connector",
         "real system",
         "notif",
-        "console",
-        "inbox page",
         "compensat",
     ):
         assert claim not in boundary, claim
     # What remains says so plainly.
     for gap in (
-        r"\bui\b",
-        r"\breal connectors\b",
         "notification",
         "compensation",
         "hosted ci",
     ):
         assert re.search(gap, remaining), gap
-    # The console keeps human tasks as a planned page: E05 adds no UI.
-    roadmap = (ROOT / "web/src/lib/roadmap.ts").read_text()
-    entry = roadmap[roadmap.index("id: 'human-tasks'") :]
-    entry = entry[: entry.index("\n  },\n")]
-    assert re.search(r"href: '#human-tasks'", entry) is None
-    # ...and its stage stays planned.
-    stage = roadmap[roadmap.index("name: 'Operate'") :]
-    stage = stage[: stage.index("},")]
-    assert "state: 'planned'" in stage and "#human-tasks" in stage
