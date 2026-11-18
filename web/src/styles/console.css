@@ -1165,7 +1165,7 @@ tbody tr:hover td {
 }
 
 /* Home and first-run setup ---------------------------------------------------------- */
-.home .page-heading button kbd {
+.workspace-home .page-heading button kbd {
   margin-left: 6px;
 }
 .setup {
@@ -1297,7 +1297,7 @@ tbody tr:hover td {
   color: var(--muted);
   font-size: 12.5px;
 }
-.home-code {
+.workspace-home-code {
   width: 100%;
   margin: 4px 0 14px;
   padding: 10px 12px;
