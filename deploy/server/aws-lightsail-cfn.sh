@@ -42,9 +42,8 @@ else
     "$NAME" "$WEB_IPV4" "$WEB_IPV6" "$WORK/params.json" <<'PY'
 import base64, gzip, json, os, sys
 script, key, email, domain, extra, name, ipv4, ipv6, out = sys.argv[1:]
-lines = open(script).read().splitlines()  # comment lines (all but the first) are left out, to save space
-body = "\n".join(lines[:1] + [l for l in lines[1:] if not l.lstrip().startswith("#")]) + "\n"
-body = (body.replace("__DEPLOY_KEY__", open(key).read().strip()).replace("__ACME_EMAIL__", email)
+# The script goes as written: it holds other scripts (heredocs) whose own #! lines must survive.
+body = (open(script).read().replace("__DEPLOY_KEY__", open(key).read().strip()).replace("__ACME_EMAIL__", email)
         .replace("__DOMAIN__", domain).replace("__EXTRA_B64__", base64.b64encode(open(extra, "rb").read()).decode()))
 # A CloudFormation parameter holds at most 4096 bytes: the script travels gzipped, unpacked on the server, and split
 # across UserData and UserDataMore, which the template joins.
