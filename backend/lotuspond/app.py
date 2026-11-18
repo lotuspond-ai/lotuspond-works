@@ -270,7 +270,12 @@ def create_app(
 
     @app.get("/api/v1/health")
     def health():
-        return {"status": "ok", "product": "Lotuspond", "version": "0.4.0"}
+        return {
+            "status": "ok",
+            "product": "Lotuspond",
+            "version": "0.4.0",
+            "environment_label": settings.environment_label,
+        }
 
     @app.get("/api/v1/ready")
     def ready():

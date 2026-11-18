@@ -3,6 +3,7 @@ from datetime import timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from lotuspond.app import create_app
 from lotuspond.models import ApiKey, now
 from lotuspond.schema_version import SCHEMA_VERSION
 
@@ -53,3 +54,23 @@ def test_key_expiry_revocation_and_workspace_header_ignored(client, account, db_
     assert client.post(f"/api/v1/api-keys/{identifier}/revoke", json={}).status_code == 200
     with TestClient(app, headers={"authorization": f"Bearer {created['key']}"}) as service:
         assert service.get("/api/v1/projects").status_code == 401
+
+
+def test_health_reports_the_environment_label_only_when_set(client, settings, engine):
+    assert client.get("/api/v1/health").json()["environment_label"] is None
+    labelled = settings.model_copy(update={"environment_label": "Staging"})
+    with TestClient(create_app(labelled, engine=engine)) as staging:
+        assert staging.get("/api/v1/health").json()["environment_label"] == "Staging"
+
+
+def test_environment_label_rejects_markup_and_long_values():
+    import pytest
+    from pydantic import ValidationError
+
+    from lotuspond.config import Settings
+
+    base = {"env": "test", "database_url": "sqlite://", "origin": "http://testserver"}
+    assert Settings(**base, environment_label="  ").environment_label is None
+    for bad in ("<b>Staging</b>", "x" * 25, "-Staging"):
+        with pytest.raises(ValidationError):
+            Settings(**base, environment_label=bad)

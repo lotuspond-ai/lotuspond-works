@@ -26,6 +26,11 @@ KEY
 umask 022
 chown ubuntu:ubuntu /home/ubuntu/.ssh/lotuspond_deploy
 install -d -o ubuntu -g ubuntu /opt/lotuspond-works
+# Optional server-specific files from aws-lightsail-cfn.sh (EXTRA_DIR), such as a staging server's Cloudflare origin
+# certificate (origin/cert.pem, origin/key.pem) and env.extra, lines added to deploy/server/.env. Empty otherwise.
+umask 077
+echo '__EXTRA_B64__' | base64 -d > /root/lotuspond-extra.tar
+umask 022
 
 cat > /usr/local/sbin/lotuspond-bootstrap <<'BOOT'
 #!/bin/bash
@@ -39,7 +44,15 @@ for i in $(seq 1 720); do
 done
 [ -d $REPO/.git ] || { echo "gave up cloning"; exit 1; }
 sudo -u ubuntu git -C $REPO config core.sshCommand "ssh -i /home/ubuntu/.ssh/lotuspond_deploy"
-[ -f $REPO/deploy/server/.env ] || sudo -u ubuntu env DOMAIN=__DOMAIN__ ACME_EMAIL=__ACME_EMAIL__ $REPO/deploy/server/make-secrets.sh
+if [ -s /root/lotuspond-extra.tar ]; then
+  tar -xf /root/lotuspond-extra.tar -C $REPO/deploy/server --no-same-owner
+  chown -R ubuntu:ubuntu $REPO/deploy/server/origin 2>/dev/null || true
+fi
+if [ ! -f $REPO/deploy/server/.env ]; then
+  sudo -u ubuntu env DOMAIN=__DOMAIN__ ACME_EMAIL=__ACME_EMAIL__ $REPO/deploy/server/make-secrets.sh
+  [ -f $REPO/deploy/server/env.extra ] && cat $REPO/deploy/server/env.extra >> $REPO/deploy/server/.env && rm $REPO/deploy/server/env.extra
+fi
+rm -f /root/lotuspond-extra.tar
 # The first deploy goes through auto-deploy.sh so it is recorded; the timer then deploys each new commit on main.
 sudo -u ubuntu -H $REPO/deploy/server/auto-deploy.sh || echo "$(date -u +%FT%TZ) first deploy failed; see the log above"
 $REPO/deploy/server/install-auto-deploy.sh

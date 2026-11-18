@@ -20,3 +20,9 @@ coverage/
 output/
 # Local handoff notes may include machine-specific operational context.
 /HANDOFF.md
+
+# Local Cloudflare Worker state (Miniflare databases); never commit.
+.wrangler/
+
+# Cloudflare origin certificate and key on a server (deploy/server/Caddyfile.origin)
+deploy/server/origin/

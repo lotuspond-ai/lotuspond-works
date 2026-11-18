@@ -19,7 +19,9 @@ services:
       DOMAIN: ${DOMAIN:-works.lotuspond.ai}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in deploy/server/.env (Let's Encrypt sends certificate notices there)}
     volumes:
-      - ./server/Caddyfile:/etc/caddy/Caddyfile:ro
+      # CADDYFILE=Caddyfile.origin serves a Cloudflare origin certificate from deploy/server/origin/ instead.
+      - ./server/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      - ./server/origin:/etc/caddy/origin:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
