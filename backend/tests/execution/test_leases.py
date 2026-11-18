@@ -80,7 +80,7 @@ def test_lease_renewal_cannot_extend_attempt_deadline(activity):
 @pytest.mark.parametrize("change", ["cancelled", "revoked"])
 def test_revoked_identity_and_cancellation_cannot_renew(activity, change):
     h = activity
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     assert renew(h, lease).attempt_id == attempt_id  # positive control
     with Session(h.engine) as db, db.begin():
@@ -282,8 +282,8 @@ def test_only_a_stopped_never_claimed_attempt_is_released(activity):
     from lotuspond.models import ExecutionReconciliationObservation
 
     h = activity
-    _, reserved = h.ready("activity_read", capacity=3)
-    _, claimed = h.ready("activity_read", capacity=3)
+    _, reserved = h.ready("activity_unhurried", capacity=3)
+    _, claimed = h.ready("activity_unhurried", capacity=3)
     lease = h.claim(h.dispatch(claimed))
     h.result(claimed, lease, code="unavailable")
 

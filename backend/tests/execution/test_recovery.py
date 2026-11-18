@@ -52,11 +52,11 @@ class Restored:
 def test_restore_cannot_restore_epoch_or_grant(controlled):
     h = controlled
     # Work in flight when the backup was taken: one claimed, one only delivered.
-    _, claimed = h.ready("activity_read", capacity=3)
+    _, claimed = h.ready("activity_unhurried", capacity=3)
     lease = h.claim(h.dispatch(claimed))
-    _, delivered = h.ready("activity_read", capacity=3)
+    _, delivered = h.ready("activity_unhurried", capacity=3)
     delivery = h.dispatch(delivered)
-    _, reserved = h.ready("activity_read", capacity=3)
+    _, reserved = h.ready("activity_unhurried", capacity=3)
     # During the restore the authority answers nothing: no orchestration, sweeping
     # or dispatch, whatever the restored rows say.
     h.fleet_recovery.available = False

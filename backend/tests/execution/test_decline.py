@@ -114,7 +114,7 @@ def test_a_declined_delivery_stops_heading_its_sessions_polls(activity):
 
 def test_only_its_session_and_exact_digest_may_decline(activity):
     h = activity
-    _, attempt_id = h.ready("activity_read")
+    _, attempt_id = h.ready("activity_unhurried")
     delivery = h.dispatch(attempt_id)
     other = runtime(h)  # another runtime instance in the same pool
     with pytest.raises(FleetError, match="unauthenticated"):
@@ -208,7 +208,7 @@ def test_decline_and_expiry_end_an_attempt_once_in_either_order(activity):
 
 def test_a_decline_racing_a_claim_has_one_winner(activity):
     h = activity
-    _, attempt_id = h.ready("activity_read")
+    _, attempt_id = h.ready("activity_unhurried")
     delivery = h.dispatch(attempt_id)
     claimed, declined = race(lambda: h.claim(delivery), lambda: decline(h, delivery))
     with Session(h.engine) as db:

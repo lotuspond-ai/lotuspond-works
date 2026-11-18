@@ -1565,3 +1565,14 @@ Hosted runs started again on 2026-11-17, once the repository was public. The req
 - Run `44245983868` (lotuspond-ai/lotuspond-works#58 at `af05d34`): the bound stopped the step at 60 min 0 s, at 91% (`tests/test_migrations.py::test_monitoring_v6_migration_preserves_existing_incidents`). It had no failed, errored or stalled test: the median gap between results was under 0.01 s, and the longest, 311 s, is the designed fleet acceptance migration case (307 s on 2026-10-22). Run `44151260449` reached the same test after 53 min 27 s, so this runner was 1.12× slower, projecting about 63 minutes for the step.
 
 As on 2026-10-22, the bound is at least 1.5× the slowest projection: 100 minutes, still a hang bound far below the job's six-hour default. Nothing is skipped, sharded or reordered. Revisit it again from hosted `--durations` output as the suite grows.
+
+## A claim that raced the 2-second fixture timeout — 2026-11-18
+
+Hosted run `44278236338` (lotuspond-ai/lotuspond-works#58 at `f7da1a7`, attempt 1) failed one test of 1420: `tests/execution/test_recovery.py::test_restore_cannot_restore_epoch_or_grant`, `ExecutionError: conflict` at `dispatch.py:924` on its first claim. Attempt 2 passed every job.
+
+The `activity_read` fixture gives its step a 2 s timeout, on purpose, so that expiry happens in real database time. Dispatch sets the attempt deadline to dispatch time + 2 s, and the delivery cannot outlive it. A claim more than 2 s after its dispatch is refused with exactly this error. Locally, against PostgreSQL 18.6:
+
+- With a 2.1 s pause between dispatch and claim, the test fails the same way, at the same line.
+- Dispatch to claim normally takes 0.16–0.41 s, or 0.59–0.77 s with every core busy. So a slow hosted runner stalled for over 2 s between the two.
+
+`activity_unhurried` is `activity_read` with a 10 s step timeout and its own package id, built by `generate.py`. No other fixture file changes. The 17 tests that dispatch and claim but never mention expiry, deadlines, timeouts or waiting now use it. So does the failing test, which checks a restore, not the 2 s timing. Every other use of `activity_read`, 49 in all, keeps the 2 s timeout. With the 2.1 s pause, the failing test now passes. The seven changed test files report `101 passed`, and `ruff check` and `ruff format --check` are clean.
