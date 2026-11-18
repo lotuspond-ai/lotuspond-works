@@ -26,4 +26,7 @@ Tests: `backend/tests/test_reference_invoice_triage.py` (documents, pins, rules,
 `https-json` connector reading it; runs anywhere) and
 `backend/tests/execution/conformance/test_reference_triage.py` (the prefix on real API, worker and
 runtime processes, with the runtime's `https-json` and `anthropic-messages` providers against the
-stand-in and the model double; Linux only).
+stand-in and the model double; Linux only). `test_reference_triage_full.py` runs the full package
+the same way on an operator directory with release decisions required: proven on an evaluation
+deployment, released, then every scenario on the released version, each hold and credit-note
+request allowed, read back and verified (a lost answer settled by read-back, never resent).

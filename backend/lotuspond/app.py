@@ -292,6 +292,13 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "decimal-verification",
+                    "date": "2026-11-18",
+                    "title": "Amounts verify after a write",
+                    "description": "A workflow that checks an amount it wrote, such as a payment hold or a credit-note request, now verifies it. Before this, any verification rule comparing a decimal read back from a system failed as unknown, so the run failed even though the write had been applied. A package evaluation also records a scenario that stops at a person's form, then cancels it without submitting anything, so a workflow with a clerk's form can be proven.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "evaluation-deployments",
                     "date": "2026-11-17",
                     "title": "Prove a workflow while releases stay required",

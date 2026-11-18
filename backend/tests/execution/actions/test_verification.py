@@ -513,3 +513,49 @@ def test_success_is_gated_at_the_terminal_transition(actions, monkeypatch):
     row = execution(h, execution_id)
     assert (row.state, row.reason) == ("failed", "outcome_unknown")
     assert row.result_artifact_id is None
+
+
+MONEY = {"kind": "decimal", "precision": 18, "scale": 2}
+
+
+def test_a_decimal_read_back_verifies(actions):
+    """A rule comparing a decimal read-back (an amount) with a decimal value verifies.
+
+    The read-back stays typed against its declared schema, as the step values it is
+    compared with are: untagging it made every decimal comparison a type mismatch, so
+    an applied write could never verify (found running invoice triage's full package)."""
+    from lotuspond_sdk.executable.catalog import catalog_document_digest
+
+    h = actions
+    rules = [
+        *EQ_TRUE,
+        {
+            "op": "eq",
+            "readback_pointer": "/amount",
+            "expected": {"kind": "literal", "schema": MONEY, "value": "60.00"},
+        },
+    ]
+    package, documents = verification_package(rules=rules)
+    connector = deepcopy(documents[0])
+    lookup = next(o for o in connector["definition"]["operations"] if o["id"] == "lookup")
+    lookup["output_schema"]["fields"].append({"name": "amount", "required": True, "schema": MONEY})
+    documents[0] = connector
+    package["connectors"][0]["ref"]["sha256"] = catalog_document_digest(connector)
+    target = Target()
+    execution_id = h.reviewed("decimal", package, documents, active_ms=20000)
+    send(h, target, "applied")
+    h.run2()
+    read(h, pending_read(h, execution_id).id, {"present": True, "amount": "60.00"})
+    h.run2()
+    [row] = outcomes(h, execution_id)
+    assert row.state == "verified", record_of(row)
+    assert execution(h, execution_id).state == "succeeded"
+    # The pure rule over typed values: equal amounts verify, others do not.
+    from lotuspond.execution.expressions import typed_schema
+
+    schema = lookup["output_schema"]
+    expected = ValueEnvironment(input=None)
+    readback = typed_schema({"present": True, "amount": "60.00"}, schema)
+    assert outcome_state(rules, readback, expected) == "verified"
+    other = typed_schema({"present": True, "amount": "61.00"}, schema)
+    assert outcome_state(rules, other, expected) == "not_verified"

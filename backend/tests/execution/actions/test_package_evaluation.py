@@ -131,3 +131,32 @@ def test_one_step_per_advance_until_every_scenario_has_a_result(actions):
     view = drive(h, service, run["id"])
     assert view["status"] == "completed"
     assert len(view["results"]) == 3 and all(r["passed"] for r in view["results"])
+
+
+def test_a_package_evaluation_records_a_form_and_submits_nothing(actions):
+    """A package that stops at a person's form is observed as asking one, then cancelled;
+    the evaluation never submits it (late purchase order and invoice triage both end
+    some scenarios at a clerk's form)."""
+    from .test_forms_v2 import form_package, form_task
+
+    h = actions
+    package, documents = form_package("owners")
+    first = h.start2(package, "form-subject", documents)
+    with Session(h.engine) as db:
+        revision_id = db.get(Execution, first).deployment_revision_id
+    asks = scenario(h, "asks a clerk", {"state": "form"})
+    finishes = scenario(h, "expects a result", {"state": "succeeded"}, False)
+    service = evaluations(h)
+    run = start(h, service, revision_id, [asks, finishes])
+    view = drive(h, service, run["id"])
+    assert view["status"] == "completed", view
+    results = {row["scenario_id"]: row for row in view["results"]}
+    assert (results[asks]["passed"], results[finishes]["passed"]) == (True, False)
+    assert results[asks]["output"]["state"] == "form"
+    h.run2()
+    with Session(h.engine) as db:
+        for row in view["results"]:
+            execution = db.get(Execution, row["output"]["execution_id"])
+            assert execution.requested_state == "cancelled"
+            task = form_task(h, execution.id)
+            assert task.kind == "form" and task.state != "submitted"

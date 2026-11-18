@@ -4,9 +4,10 @@ A package evaluation run is an ordinary evaluation run whose subject is one pack
 version (`revision = "package:<publication sha256>@<deployment revision>"`). It runs the
 real package once per named scenario, through an evaluation deployment of that publication
 bound to evaluation connections, and records each
-scenario's observed outcome: the execution's terminal state and result, or, when it stops
-at a person's review, the exact proposed action, after which the execution is cancelled.
-An evaluation never approves an action, so it writes nothing to any system.
+scenario's observed outcome: the execution's terminal state and result; when it stops
+at a person's review, the exact proposed action; or, when it stops at a person's form,
+that it does (`"state": "form"`). The execution is then cancelled. An evaluation never
+approves an action or submits a form, so it writes nothing to any system.
 
 `ReleaseEvidence` is the release binding provider deployment admission asks: it returns
 the evidence tying a release to a package version when the release's candidate run is a
@@ -136,7 +137,8 @@ class PackageEvaluations:
         """One step, safe to repeat; call it until the run is `completed`.
 
         In order: admit one scenario not yet started; else cancel one execution waiting
-        at a review, recording its exact proposal; else record every finished execution
+        at a review, recording its exact proposal, or at a form, recording that it asks
+        for one; else record every finished execution
         and complete the run when all have results. The first two take the fair gates,
         so each is the only gated step of its transaction (as admission and control
         require); the last takes none.
@@ -162,7 +164,7 @@ class PackageEvaluations:
                     evaluation=True,
                 )
                 return self._view(db, run)
-        # 2. One review: recorded, then cancelled unsent (never approved).
+        # 2. One review or form: recorded, then cancelled (never approved or submitted).
         for item in pending:
             execution = record(db, Execution, scope, self._execution_id(db, scope, run, item))
             if execution.state in TERMINAL or execution.requested_state != "running":
@@ -172,13 +174,26 @@ class PackageEvaluations:
                 .where(
                     ExecutionHumanTask.execution_id == execution.id,
                     ExecutionHumanTask.state == "open",
-                    ExecutionHumanTask.kind == "review",
+                    ExecutionHumanTask.kind.in_(("review", "form")),
                 )
                 .order_by(ExecutionHumanTask.id)
                 .limit(1)
             )
-            if task is None or task.intent_id is None:
+            if task is None or (task.kind == "review" and task.intent_id is None):
                 continue
+            if task.kind == "form":
+                # A person's form ends what the package decides on its own: the
+                # observation is that it asks one. Nothing is submitted.
+                self.controls.request_control(
+                    db,
+                    actor,
+                    execution.id,
+                    ControlRequest(request_id=f"evaluation-{execution.id}", action="cancel"),
+                )
+                self._record(
+                    db, run, item, execution, {"execution_id": execution.id, "state": "form"}
+                )
+                return self._view(db, run)
             self.controls.request_control(
                 db,
                 actor,

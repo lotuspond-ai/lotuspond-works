@@ -1423,7 +1423,9 @@ class _RegionV2(_Region):
             except ExpressionError:
                 readback = MISSING
             if readback is not MISSING:
-                state = outcome_state(step.rules, plain(readback), self.env(), self.package.schemas)
+                # Typed, as the step values the rules compare it with are: untagging it
+                # made every decimal comparison a type mismatch (an unknown outcome).
+                state = outcome_state(step.rules, readback, self.env(), self.package.schemas)
         return "pending", Derivation(
             actions=(RecordOutcome(outcome_path, step.id, last.id, receipt["id"], state),)
         )

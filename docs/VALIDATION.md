@@ -1569,3 +1569,20 @@ Local evidence only, in a Linux cloud container (PostgreSQL 16.15, Python 3.13, 
 - **Console journey** (`LOTUSPOND_CONSOLE_JOURNEY=1` after `npm run build`): passed (3 min 10 s). In the built console, two people with their own sessions decided order PO-7004's reviews in Human tasks. The requester's Allow on the customer update was refused for independent approval and released, and a second planner allowed it at 375 px. Control Room showed both writes verified at 1440, 768 and 375 px with no horizontal scroll, the Claim control took keyboard focus with a 2 px outline, and the server's trace agreed. Three earlier runs failed on the journey script itself (the organization workspace and project had to be chosen, the narrow-screen menu closed, and a hash-only navigation reloaded), not on the product.
 - **Console finding, fixed:** a refused Allow on an independent review told a signed-in person "Reviews need a person signed in, not a key". It now names independent approval (`decisionMessage`, 1 new test; `web/src/lib/operate.test.ts` 17 passed). `npm test`: 98 passed, 1 failed. The failure is `scripts/runner-execution.test.mjs` "successful leader cleanup terminates its lingering descendant", which fails identically on the unmodified code in this container.
 - **Not covered:** a production-mode runtime. Its egress policy refuses the loopback and documentation-range addresses available here, so the runtime ran in test mode while the server's authorities were production's. Also not covered: hosted CI, a live model call, and invoice exception triage's full package on real processes.
+
+## Invoice exception triage, full package on real processes — 2026-11-18
+
+Local evidence only, in the same Linux cloud container (PostgreSQL 16.15). The AP system and the model are local synthetic stand-ins; no live model call, customer system or hosted installation is involved. See the [invoice triage design](superpowers/specs/2026-11-11-reference-workflow-design.md#milestones-4-and-5-as-built-18-november).
+
+- **Full package** (`backend/tests/execution/conformance/test_reference_triage_full.py`): **passed** (4 min 14 s), on an operator directory with release decisions required. Steps covered:
+  - an unreleased deployment refused;
+  - all six scenarios proven on an evaluation deployment, with nothing written;
+  - released, and an ordinary start on the evaluation deployment refused;
+  - every scenario on the released version: three holds each allowed by one admin, the first with its answer lost after committing and settled by read-back; the credit-note request allowed by a second, independent admin; the clerk's form submitted by a second admin; and every write applied once, read back and verified.
+- **Two failed runs before that**, each a real finding:
+  - The clerk's form was refused on E04's signal route. Under interpreter v2 it is a human task, so the case now submits it through the task API.
+  - The credit-note request was applied but failed verification (`outcome_unknown`). Progression untagged the typed read-back before applying decimal rules. This is fixed, and `test_a_decimal_read_back_verifies` failed before the fix (`unknown`) and passes after.
+- **Package evaluations observe a form:** `test_a_package_evaluation_records_a_form_and_submits_nothing`, 1 passed. With the evaluation deployment and package evaluation tests, 9 passed.
+- **Reference workflows, final code:** 53 passed, 1 skipped (15 min 16 s). This covers both workflows' unit tests, the four late purchase order conformance cases, the triage prefix case and the full-package case. The skip is the opt-in console journey.
+- **Execution suite** (`tests/execution` without conformance): 833 passed (40 min 1 s), with the installed-acceptance journey deselected because it also fails on unmodified `main` in this container.
+- **Not covered:** a runtime outside test mode (the stand-in is on loopback), a live model call, and seeing this workflow in the console (the pages were seen on late purchase order recovery).
