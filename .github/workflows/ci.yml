@@ -72,8 +72,9 @@ jobs:
       - name: Required PostgreSQL suite, installed fleet acceptance and supervised runner
         # A hang bound, not a speed target: with tests/execution the 998-test suite took
         # 29m22s on a fast hosted runner and projects to 34-38 min on slower ones
-        # (docs/VALIDATION.md, 2026-10-22).
-        timeout-minutes: 60
+        # (docs/VALIDATION.md, 2026-10-22). Raised to 90 on 2026-11-18: the grown suite
+        # ran past 60 minutes on a hosted runner with no failure (PR #57).
+        timeout-minutes: 90
         shell: bash
         run: |
           set -euo pipefail
