@@ -292,7 +292,15 @@ def capability_row(name):
     return None
 
 
-def test_capabilities_do_not_claim_ui_or_live_providers():
+def test_capabilities_do_not_claim_live_writes_or_unbuilt_work():
+    """The E05 row claims what is built and no more.
+
+    Since 2026-11-15 the row rightly names the console's Human tasks inbox and the
+    production wiring (an operator installs real connectors; a runtime outside test mode
+    runs write providers). What it must not claim is a write to a real customer system,
+    readiness, live providers, notifications or compensation: its evidence stays local
+    and synthetic, and what remains says so.
+    """
     row = capability_row("Reviewed actions and human tasks (E05)")
     assert row is not None, "CAPABILITIES.md has no E05 row"
     _, boundary, remaining = (cell.lower() for cell in row)
@@ -302,29 +310,23 @@ def test_capabilities_do_not_claim_ui_or_live_providers():
         "production-ready",
         "production ready",
         "live",
-        "real connector",
         "real system",
+        "real customer system",
         "notif",
-        "console",
-        "inbox page",
         "compensat",
     ):
         assert claim not in boundary, claim
     # What remains says so plainly.
     for gap in (
-        r"\bui\b",
-        r"\breal connectors\b",
+        r"\breal customer system\b",
         "notification",
         "compensation",
         "hosted ci",
     ):
         assert re.search(gap, remaining), gap
-    # The console keeps human tasks as a planned page: E05 adds no UI.
+    # Human tasks is a console page now, no longer a planned placeholder.
     roadmap = (ROOT / "web/src/lib/roadmap.ts").read_text()
-    entry = roadmap[roadmap.index("id: 'human-tasks'") :]
-    entry = entry[: entry.index("\n  },\n")]
-    assert re.search(r"href: '#human-tasks'", entry) is None
-    # ...and its stage stays planned.
-    stage = roadmap[roadmap.index("name: 'Operate'") :]
-    stage = stage[: stage.index("},")]
-    assert "state: 'planned'" in stage and "#human-tasks" in stage
+    assert "id: 'human-tasks'" not in roadmap
+    navigation = (ROOT / "web/src/components/console/navigation.tsx").read_text()
+    assert "id: 'human-tasks'" in navigation
+    assert (ROOT / "web/src/pages/HumanTasks.tsx").is_file()
