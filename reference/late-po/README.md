@@ -30,3 +30,12 @@ and runtime processes, three connections with three secrets, the runtime's `http
 each late order's review, so nothing is written; the second approves them: both writes go out
 through the runtime's `https-json` write provider, are read back and verified, and a write that
 times out after committing is settled by read-back, never resent.
+
+Milestone 5 adds two cases on an operator directory provisioned only with
+`python -m lotuspond.authority`, with release decisions required as an operator's are by
+default. The first proves the package on an evaluation deployment, releases it and runs
+the late orders on the released version. The second, opt-in
+(`LOTUSPOND_CONSOLE_JOURNEY=1` after `npm run build`), has two people decide one late
+order's reviews in the built console (`console_journey.mjs`), then checks Control Room
+and the server agree. The runtime stays in test mode in both, because the stand-ins
+are on loopback, which a production runtime's egress policy refuses.

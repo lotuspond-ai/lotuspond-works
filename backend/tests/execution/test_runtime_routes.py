@@ -62,6 +62,14 @@ class HttpTransport:
         pass
 
 
+# A test that holds an attempt across several runtime round trips uses `activity_slow`:
+# `activity_read`'s read times out after 2 s, and the lease never outlives the attempt,
+# so a slow runner saw it lapse mid-test (`conflict` instead of the asserted refusal).
+# As in test_activity_races.py, the reservation covers one lease's maximum.
+def held_read(h):
+    return h.ready("activity_slow", active_ms=60000)
+
+
 def runtime_client(h):
     token = h.runtime["authorization"].removeprefix("Bearer ")
     session = h.runtime["x-lotuspond-runtime-session"]
@@ -89,7 +97,7 @@ def code_of(call):
 
 def test_a_runtime_runs_a_read_through_the_routes(api):
     h = api
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = held_read(h)
     client = runtime_client(h)
     delivery = client.poll()
     envelope = envelope_of(delivery)
@@ -122,7 +130,7 @@ def test_a_runtime_runs_a_read_through_the_routes(api):
 
 def test_refusals_tell_a_bad_delivery_from_an_outage(api):
     h = api
-    _, attempt_id = h.ready("activity_read")
+    _, attempt_id = held_read(h)
     client = runtime_client(h)
     delivery = client.poll()
     envelope = envelope_of(delivery)

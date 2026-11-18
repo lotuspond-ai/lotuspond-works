@@ -49,7 +49,10 @@ def test_the_execution_deadline_stops_activities_and_waits(system, linux):
         customer, activity, {"reconciliation_required", "failed", "succeeded"}, 90
     )
     if view["state"] == "reconciliation_required":
-        wait_for(lambda: Processes.calls(runtime["counter"]) > 0, 30)
+        # Only a claimed lease that lapsed leaves an attempt uncertain, and the runtime
+        # journals its claim before sending it, so the journal holds the entry whether or
+        # not the provider was reached: on a slow runner the lease lapsed between claim
+        # and call, and nothing was called (CI, 2026-11-18).
         processes.stop("runtime-a")
         reconcile_from_journal(w, customer, runtime, activity)
         view = operator.settled(customer, activity, {"failed", "succeeded"}, 60)

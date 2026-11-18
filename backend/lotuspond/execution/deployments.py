@@ -402,6 +402,7 @@ def create_deployment(
     )
     content = canonical_configuration(request.configuration)
     configuration_sha256 = sha256(content).hexdigest()
+    evaluation = request.configuration.evaluation
     release = release_binding(
         db,
         actor,
@@ -412,6 +413,7 @@ def create_deployment(
         snapshot,
         dependencies,
         sources,
+        evaluation=evaluation,
     )
     deployment = (
         record(db, ExecutionDeployment, actor.scope, request.deployment_id, locked=True)
@@ -422,6 +424,10 @@ def create_deployment(
         raise ExecutionError("deployment_unavailable")
     current_snapshot(db, snapshot)
     unreviewed = unreviewed_operations(closure_of(json.loads(publication.canonical_package), rows, sources))
+    if evaluation and unreviewed:
+        # A package evaluation cancels each execution at its review; a write without
+        # one would reach the evaluation connection's system.
+        raise ExecutionError("invalid_request")
     digest, replay = mutation_replay(
         db,
         actor,
@@ -499,6 +505,17 @@ def create_deployment(
     )
 
 
+def evaluation_only(revision) -> bool:
+    """Whether a deployment revision exists only to prove its package (`purpose`).
+
+    Read from the revision's immutable canonical configuration; every authorizing path
+    also checks those bytes against their digest (`_stored_configuration`)."""
+    try:
+        return DeploymentConfig.model_validate_json(revision.canonical_configuration).evaluation
+    except Exception:
+        raise ExecutionError("deployment_unavailable") from None
+
+
 @execution_service
 def load_deployment(
     db,
@@ -564,6 +581,7 @@ def load_deployment(
         snapshot,
         dependencies,
         sources,
+        evaluation=config.evaluation,
     )
     result = (evidence.release_id, evidence.candidate_run_id) if evidence else None
     if binding and result != (binding.release_id, binding.candidate_run_id):

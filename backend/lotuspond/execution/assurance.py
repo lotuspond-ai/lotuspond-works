@@ -64,7 +64,11 @@ def _run(db, scope, identifier):
     }
 
 
-def _release_required(package, snapshot, sources=None):
+def _release_required(package, snapshot, sources=None, *, evaluation=False):
+    if evaluation:
+        # An evaluation deployment produces the evidence a release needs; it can never
+        # approve or dispatch a write, and only a package evaluation run starts it.
+        return False
     assurances = [
         package.assurance.model_dump(),
         *[
@@ -79,7 +83,13 @@ def _release_required(package, snapshot, sources=None):
 
 
 def check_assurance_current(
-    db, validated_evidence: AssuranceEvidence | None, package, snapshot, sources=None
+    db,
+    validated_evidence: AssuranceEvidence | None,
+    package,
+    snapshot,
+    sources=None,
+    *,
+    evaluation=False,
 ) -> None:
     """Internal final guard on already validated evidence, never a verifier/grant.
 
@@ -88,7 +98,7 @@ def check_assurance_current(
     retained the exact scope/publication/configuration/release identity binding.
     """
     if validated_evidence is None:
-        if _release_required(package, snapshot, sources):
+        if _release_required(package, snapshot, sources, evaluation=evaluation):
             raise ExecutionError("assurance_unavailable")
         return
     if validated_evidence.expires_at_ms <= database_now_ms(db):
@@ -105,9 +115,13 @@ def validated_release_binding(
     snapshot,
     dependencies,
     sources=None,
+    *,
+    evaluation=False,
 ) -> AssuranceEvidence | None:
     """Validate the existing full release pipeline and retain its expiring evidence."""
-    required = _release_required(package, snapshot, sources)
+    if evaluation and release_id is not None:
+        raise ExecutionError("assurance_unavailable")  # nothing releases an evaluation
+    required = _release_required(package, snapshot, sources, evaluation=evaluation)
     if release_id is None and not required:
         return None
     if release_id is None or configuration_sha256 is None:
@@ -212,6 +226,8 @@ def release_binding(
     snapshot,
     dependencies,
     sources=None,
+    *,
+    evaluation=False,
 ):
     """Preserve the established ID-only return contract for existing consumers."""
     evidence = validated_release_binding(
@@ -224,6 +240,7 @@ def release_binding(
         snapshot,
         dependencies,
         sources,
+        evaluation=evaluation,
     )
     return (evidence.release_id, evidence.candidate_run_id) if evidence else None
 

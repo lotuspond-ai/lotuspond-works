@@ -1556,3 +1556,63 @@ Local evidence only: the same Linux containers as Task 12 (`lotuspond-ci-runner:
   - `validate`, rerun after all three fixes: the job passed. The repository check passed (SQLite 1,265 passed with 237 skipped; 1,514 passed; runtime 802 passed), as did the schema export check and `deploy/checks` (16 passed). The required PostgreSQL suite with installed fleet acceptance passed 1,407 (45 min 52 s). The API image built (`sha256:9ba53c7d41ea093baf5c1ba635ba5434c4f979880527d49bb7d9237d3193085b`), its metadata check passed, durable execution packaging against that image passed 8, and the strict operator docs build passed.
 - **Mac:** `git diff --check` and the strict mkdocs build passed.
 - **Not covered:** real connectors, a production command key provider, notification, compensation, the task inbox UI, hosted CI and the planning-target load (see Task 12).
+
+## Late purchase order recovery, milestone 5: on an operator directory and in the console — 2026-11-17
+
+Local evidence only, in a Linux cloud container (PostgreSQL 16.15, Python 3.13, Node 22, Chromium through the preinstalled Playwright). Every system is a synthetic stand-in; no live model call, customer system or hosted installation is involved. See the [late purchase order design](superpowers/specs/2026-11-14-late-purchase-order-design.md#milestone-5-as-built-17-november) and [evaluation deployments](superpowers/specs/2026-11-17-evaluation-deployments-design.md).
+
+- **Baseline before any change:** `tests/test_reference_late_po.py` (24) and the three late purchase order conformance cases passed (6 min 34 s).
+- **Finding:** on an operator directory provisioned with `python -m lotuspond.authority` only, with release decisions required (its default), the package's evaluation deployment was refused (`503 assurance_unavailable`), so nothing could be proven and released. The owner chose evaluation-only deployments, built in this change.
+- **Evaluation deployments:** `backend/tests/execution/actions/test_evaluation_deployments.py`, 5 passed. They cover unchanged canonical bytes without a purpose, admission without a release only for evaluation, refusal of an unreviewed write, starts only by a package evaluation, and a refused Allow.
+- **Execution suite** (`tests/execution` without conformance): 831 passed (47 min 31 s), with `test_installed_acceptance.py::test_installed_durable_execution_journey` deselected. That test also fails on the unmodified code in this container (7 min 18 s run), so it is recorded and not attributed to this change.
+- **Late purchase order, final code:** 28 passed, 1 skipped (11 min 42 s): the 24 unit tests and four conformance cases, including the new loop on an operator directory (an unreleased deployment refused, the package proven on an evaluation deployment, an ordinary start on it refused, released, and every late order rescheduled and its customer told after two reviews, each write verified). The skip is the opt-in console journey.
+- **Console journey** (`LOTUSPOND_CONSOLE_JOURNEY=1` after `npm run build`): passed (3 min 10 s). In the built console, two people with their own sessions decided order PO-7004's reviews in Human tasks. The requester's Allow on the customer update was refused for independent approval and released, and a second planner allowed it at 375 px. Control Room showed both writes verified at 1440, 768 and 375 px with no horizontal scroll, the Claim control took keyboard focus with a 2 px outline, and the server's trace agreed. Three earlier runs failed on the journey script itself (the organization workspace and project had to be chosen, the narrow-screen menu closed, and a hash-only navigation reloaded), not on the product.
+- **Console finding, fixed:** a refused Allow on an independent review told a signed-in person "Reviews need a person signed in, not a key". It now names independent approval (`decisionMessage`, 1 new test; `web/src/lib/operate.test.ts` 17 passed). `npm test`: 98 passed, 1 failed. The failure is `scripts/runner-execution.test.mjs` "successful leader cleanup terminates its lingering descendant", which fails identically on the unmodified code in this container.
+- **Not covered:** a production-mode runtime. Its egress policy refuses the loopback and documentation-range addresses available here, so the runtime ran in test mode while the server's authorities were production's. Also not covered: hosted CI, a live model call, and invoice exception triage's full package on real processes.
+
+## Invoice exception triage, full package on real processes — 2026-11-18
+
+Local evidence only, in the same Linux cloud container (PostgreSQL 16.15). The AP system and the model are local synthetic stand-ins; no live model call, customer system or hosted installation is involved. See the [invoice triage design](superpowers/specs/2026-11-11-reference-workflow-design.md#milestones-4-and-5-as-built-18-november).
+
+- **Full package** (`backend/tests/execution/conformance/test_reference_triage_full.py`): **passed** (4 min 14 s), on an operator directory with release decisions required. Steps covered:
+  - an unreleased deployment refused;
+  - all six scenarios proven on an evaluation deployment, with nothing written;
+  - released, and an ordinary start on the evaluation deployment refused;
+  - every scenario on the released version: three holds each allowed by one admin, the first with its answer lost after committing and settled by read-back; the credit-note request allowed by a second, independent admin; the clerk's form submitted by a second admin; and every write applied once, read back and verified.
+- **Two failed runs before that**, each a real finding:
+  - The clerk's form was refused on E04's signal route. Under interpreter v2 it is a human task, so the case now submits it through the task API.
+  - The credit-note request was applied but failed verification (`outcome_unknown`). Progression untagged the typed read-back before applying decimal rules. This is fixed, and `test_a_decimal_read_back_verifies` failed before the fix (`unknown`) and passes after.
+- **Package evaluations observe a form:** `test_a_package_evaluation_records_a_form_and_submits_nothing`, 1 passed. With the evaluation deployment and package evaluation tests, 9 passed.
+- **Reference workflows, final code:** 53 passed, 1 skipped (15 min 16 s). This covers both workflows' unit tests, the four late purchase order conformance cases, the triage prefix case and the full-package case. The skip is the opt-in console journey.
+- **Execution suite** (`tests/execution` without conformance): 833 passed (40 min 1 s), with the installed-acceptance journey deselected because it also fails on unmodified `main` in this container.
+- **Not covered:** a runtime outside test mode (the stand-in is on loopback), a live model call, and seeing this workflow in the console (the pages were seen on late purchase order recovery).
+
+## Invoice exception triage in the console — 2026-11-18
+
+Local evidence only, as above. The browser was the preinstalled Chromium driven by Playwright.
+
+- **Shared journey:** `console_journey.mjs` now reads its people, executions and tasks from a plan. Both reference workflows use it through `console.journey`.
+- **Invoice triage journey** (`test_admins_decide_invoice_exceptions_in_the_console`): **passed** on its first run (3 min 36 s).
+  - The requester allowed a short receipt's payment hold.
+  - The requester's Allow on an overcharge's credit-note request was refused with the independent-approval message and released, and a second admin allowed it at 768 px.
+  - The second admin submitted the clerk's form for a justified variance at 375 px.
+  - Control Room showed all three executions succeeded and both writes verified, with no horizontal scroll at 768 or 375 px. The Claim control took keyboard focus with a visible outline.
+  - The server's traces named a different decider for the hold and the credit note.
+- **Late purchase order journey** on the shared script: **passed** (2 min 36 s).
+- **Before the triage run:** PostgreSQL had stopped with the container's restart and was started again. That attempt failed to connect and ran nothing.
+- **Finding, not fixed:** a form task shows nothing of what it asks, only a raw JSON box after claiming.
+- **Not covered:** a runtime outside test mode, a live model call, Safari, Firefox and real assistive technology.
+
+## Forms say what they ask — 2026-11-18
+
+Local evidence only.
+
+- **Server:** `GET …/human-tasks/{id}/form` returns a form task's declared schema and the package's named schemas, under the task's own scope and read access. A review answers `404`. Tests: `test_a_form_task_says_what_it_asks` (form, viewer read, review refused) and `test_a_review_has_no_form`; the route count in `test_openapi_names` went from 7 to 8. With the rest of `test_forms_v2.py` and `test_task_routes.py`, 9 passed.
+- **Console:** `formFields` and `formPayload` (`web/src/lib/operate.ts`) lay out a schema as labelled fields and build the exact payload: trimmed text within its length, whole numbers within their bounds, decimals padded to their scale and limited to their precision, yes/no. An unanswered optional field is left out. Two new tests use invoice triage's own clerk form. `operate.test.ts`: 19 passed. `npm test`: 100 passed, 1 failed (the runner-cleanup test that also fails on unmodified `main` here). `npm run lint` and `npm run build` pass.
+- **Browser, dev fixture** (address form, 1440, 768 and 375 px):
+  - Fields were listed before the task was claimed and became labelled inputs after it.
+  - Each hint is linked by `aria-describedby`, and the focus ring is 2 px.
+  - An empty required field gave "Postcode is required.", which cleared once a field was edited.
+  - There was no horizontal overflow and no page error.
+  - Two layout flaws were fixed after the first look: "(optional)" wrapped under its label, and the comment box was monospace.
+- **Browser, invoice triage journey:** **passed** (3 min 38 s). Before claiming, the clerk's form listed "Decision Text, up to 32 characters Comment Text, up to 1,000 characters". The second admin filled both fields by label at 375 px and submitted, and the execution succeeded as `clerk_decided`.

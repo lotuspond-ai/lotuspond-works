@@ -1,6 +1,6 @@
 # First reference workflow: invoice exception triage
 
-Date: 11 November 2026 (Asia/Kolkata). Status: **specification, revision 2, decided under the owner's delegation ("you only take the decisions"); not implemented.** It serves the Build row of [GOAL.md](../../GOAL.md) ("a first reference workflow built end to end") and the E10a row of the [completion design](2026-10-14-product-completion-design.md). The owner chose to start it before E05 ([actions and human tasks](2026-10-26-actions-human-tasks-design.md)) so that the workflow shapes E05. Nothing here is a production-readiness or live-provider claim.
+Date: 11 November 2026 (Asia/Kolkata). Status: **specification, revision 2, decided under the owner's delegation ("you only take the decisions"); milestones 1 to 6 built, the full package run end to end and decided in the console on 18 November against synthetic stand-ins; the runtime still in test mode (see below).** It serves the Build row of [GOAL.md](../../GOAL.md) ("a first reference workflow built end to end") and the E10a row of the [completion design](2026-10-14-product-completion-design.md). The owner chose to start it before E05 ([actions and human tasks](2026-10-26-actions-human-tasks-design.md)) so that the workflow shapes E05. Nothing here is a production-readiness or live-provider claim.
 
 **Revision 2 (owner review, 11 November).** Revision 1 gave the agent no tools and left the action to a later epic, so milestones 1–5 would have shown only what any workflow engine has. On review the owner asked that the workflow carry the product's core promise: the agent does real, bounded investigation; the consequential action it proposes waits for a person's approval of exactly that action; and the outcome is verified. E05's action chain is therefore part of this workflow's definition of done, and the console pages come after it.
 
@@ -121,6 +121,34 @@ E06 (cases and business outcome reporting) builds on the verified outcomes this 
 ## Milestone 5 status (15 November)
 
 Package evaluations and the release binding provider are built ([design](2026-11-15-package-proof-design.md)) and proven end to end on late purchase order recovery. This workflow's full package now deploys (its read-backs take their writes' input), but its own evaluation on real processes is not yet run: its conformance case still runs only the prefix.
+
+## Milestones 4 and 5 as built (18 November)
+
+The full package, not the prefix, on real processes (`backend/tests/execution/conformance/test_reference_triage_full.py`).
+
+- **On production's authorities.** The server's operator directory is provisioned with `python -m lotuspond.authority` only: the `ap-standin` connector and its `ap_token` secret binding installed, a command key, and release decisions left required. An unreleased deployment is refused (`503 assurance_unavailable`).
+- **Proven, then released.** The package is evaluated on all six scenarios on an [evaluation deployment](2026-11-17-evaluation-deployments-design.md): the clean match by its result, the justified variance by the clerk's form it asks for, and each exception by the exact write it proposes. Nothing is written. The run is released under a policy with a second administrator's approval, and the release admits the same package version.
+- **Every scenario on the released version.**
+  - The clean match needs no model and no person.
+  - The justified variance goes to the clerk's form, which a second admin claims and submits through the task API (under interpreter v2 the form is a human task, not E04's signal route).
+  - Each hold is allowed by one admin, and the first one's answer is lost after it commits: it is settled by read-back, never resent.
+  - The credit-note request is allowed by a second, independent admin.
+  - Every write is applied once, read back and verified, and the trace says who allowed it.
+- **Finding: a decimal read-back could never verify.** Progression untagged the typed read-back before applying the verification rules, while the step values the rules compare it with stay typed. Every decimal comparison, such as an amount, was a type mismatch, recorded as `outcome_unknown`, so an applied hold or credit note failed its execution. Late purchase order compares integers and never met it. Fixed in `progression.py`, with a regression test (`test_a_decimal_read_back_verifies`).
+- **Finding: package evaluations could not observe a form.** A scenario that ends at the clerk's form never completed its evaluation run. A package evaluation now records an execution waiting at a form as `{"state": "form"}` and cancels it, never submitting it, as it does at a review.
+- **Not yet:** the runtime ran in test mode, because the stand-in is on loopback and a production runtime's egress policy refuses loopback addresses (decision 1's "outside test mode" holds for the server, not the runtime). No live model call has been made.
+
+## Milestone 6 as built (18 November)
+
+An opt-in case (`LOTUSPOND_CONSOLE_JOURNEY=1`, after `npm run build`) runs three invoices of the released package and has two admins decide them in the built console, each with their own session (`console_journey.mjs`, now driven by a plan shared with late purchase order recovery):
+
+- **Short receipt:** the requester allows the payment hold in Human tasks.
+- **Overcharge:** the credit-note request needs independent approval. The requester's Allow is refused with the independent-approval message and released, and a second admin allows it on a 768 px screen.
+- **Justified price variance:** the second admin completes the clerk's form on a 375 px screen.
+
+Control Room shows each execution succeeded and each write verified by its rule, with no horizontal scroll at 768 and 375 px. The Claim control takes keyboard focus. The server agrees: each write was applied once and allowed by the person who did.
+
+**Finding, fixed the same day:** the console never said what a form asks. Before claiming, a form showed only its due date and claim; after claiming, a raw JSON box. `GET …/human-tasks/{id}/form` now returns the form's declared schema, and Human tasks lists each field with its limits before the task is claimed and renders labelled inputs once it is. A form with a nested shape keeps the JSON editor. The schema cannot say which values a field allows, so the clerk sees `decision` as text up to 32 characters, not as a choice between `accept_variance` and `manual_follow_up`; that needs a package-format change.
 
 ## Out of scope
 

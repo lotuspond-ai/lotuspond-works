@@ -225,6 +225,21 @@ const tasks = [
     intent_sha256: null,
   },
 ] as (Record<string, unknown> & { id: string })[];
+// What the address form asks: its declared schema, as GET …/human-tasks/{id}/form answers.
+const forms: Record<string, Record<string, unknown>> = {
+  't-address': {
+    form_schema: {
+      kind: 'object',
+      fields: [
+        { name: 'street', schema: { kind: 'string', max_length: 120 }, required: true },
+        { name: 'postcode', schema: { kind: 'string', max_length: 16 }, required: true },
+        { name: 'confirmed_with_customer', schema: { kind: 'boolean' }, required: true },
+        { name: 'note', schema: { kind: 'string', max_length: 1000 }, required: false },
+      ],
+    },
+    definitions: [],
+  },
+};
 const proposals: Record<string, Record<string, unknown>> = {
   't-refund': {
     intent_sha256: digest('a1'),
@@ -616,7 +631,14 @@ function execution(path: string, method: string, body: Record<string, unknown>) 
   if (task) {
     const found = tasks.find((item) => item.id === task[1]);
     if (!found) return json({ detail: { error: 'not_found', message: 'not_found' } }, 404);
-    if (method === 'GET') return task[2] === 'proposal' ? json(proposals[found.id]) : json(found);
+    if (method === 'GET') {
+      if (task[2] === 'proposal') return json(proposals[found.id]);
+      if (task[2] === 'form')
+        return found.kind === 'form'
+          ? json(forms[found.id])
+          : json({ detail: { error: 'not_found', message: 'not_found' } }, 404);
+      return json(found);
+    }
     if (role === 'viewer')
       return json({ detail: { error: 'forbidden', message: 'forbidden' } }, 403);
     if (task[2] === 'claim') Object.assign(found, { claim: 'caller', claim_expires_at_ms: at(15) });

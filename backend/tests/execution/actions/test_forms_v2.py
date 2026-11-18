@@ -114,3 +114,23 @@ def test_v1_form_signals_unchanged(tasks):
     assert receipt.status == "pending"
     h.run2()
     assert state_of(h, execution_id)[0] == "succeeded"
+
+
+def test_a_form_task_says_what_it_asks(tasks):
+    """The console renders a form from its declared schema: the pinned package's, read
+    by anyone who may read the execution, and refused for a review."""
+    h = tasks
+    package, documents = form_package("owners")
+    execution_id = h.start2(package, "form-schema", documents)
+    task = form_task(h, execution_id)
+    view = h.call("form", h.actor, task.id)
+    assert view.form_schema == FORM_SCHEMA
+    assert view.definitions == []
+    viewer = h.reviewer("viewer")
+    assert h.call("form", viewer, task.id).form_schema == FORM_SCHEMA
+    from .dispatch_fixtures import task_id
+    from .test_tasks import review_package
+
+    review, review_documents = review_package()
+    reviewed = h.start2(review, "form-of-review", review_documents)
+    assert code_of(h.call, "form", h.actor, task_id(h, reviewed)) == "not_found"

@@ -13,6 +13,9 @@ import {
   fromMs,
   inboxOrder,
   opaqueId,
+  decisionMessage,
+  formFields,
+  formPayload,
   operateMessage,
   outcomeOf,
   scopedPath,
@@ -226,4 +229,100 @@ test('every pin gets a binding; connectors and knowledge name what they bind to'
     ],
   );
   assert.equal(enrollCommand().startsWith('lotuspond-runtime enroll --config'), true);
+});
+
+test('a refused Allow on an independent review names the reason, not the session', () => {
+  assert.match(decisionMessage('forbidden', 'allow', true, 'x'), /independent approval/);
+  // Any other refusal keeps the operate message.
+  assert.equal(decisionMessage('forbidden', 'allow', false, 'x'), operateMessage('forbidden', 'x'));
+  assert.equal(decisionMessage('forbidden', 'deny', true, 'x'), operateMessage('forbidden', 'x'));
+  assert.equal(decisionMessage('conflict', 'allow', true, 'x'), operateMessage('conflict', 'x'));
+});
+
+// Invoice exception triage's clerk form, as its package declares it.
+const CLERK_FORM = {
+  form_schema: {
+    kind: 'object',
+    fields: [
+      { name: 'decision', schema: { kind: 'string', max_length: 32 }, required: true },
+      { name: 'comment', schema: { kind: 'string', max_length: 1000 }, required: true },
+    ],
+  },
+  definitions: [],
+};
+
+test('a form says what it asks, from its declared schema', () => {
+  const fields = formFields(CLERK_FORM);
+  assert.deepEqual(
+    fields?.map((f) => [f.name, f.label, f.kind, f.required, f.hint]),
+    [
+      ['decision', 'Decision', 'text', true, 'Text, up to 32 characters'],
+      ['comment', 'Comment', 'long_text', true, 'Text, up to 1,000 characters'],
+    ],
+  );
+  // A one-value form is the answer itself; refs resolve against the package's schemas.
+  const one = formFields({ form_schema: { kind: 'string', max_length: 64 }, definitions: [] });
+  assert.deepEqual(
+    one?.map((f) => [f.name, f.label]),
+    [[null, 'Answer']],
+  );
+  const viaRef = formFields({
+    form_schema: {
+      kind: 'object',
+      fields: [{ name: 'amount', schema: { kind: 'ref', name: 'money' }, required: false }],
+    },
+    definitions: [{ name: 'money', schema: { kind: 'decimal', precision: 18, scale: 2 } }],
+  });
+  assert.deepEqual(
+    viaRef?.map((f) => [f.kind, f.hint]),
+    [['decimal', 'A decimal with 2 decimal places']],
+  );
+  // Lists, nested objects and unknown refs keep the JSON editor.
+  const nested = {
+    kind: 'object',
+    fields: [{ name: 'x', schema: { kind: 'array' }, required: true }],
+  };
+  assert.equal(formFields({ form_schema: nested, definitions: [] }), null);
+  assert.equal(formFields({ form_schema: { kind: 'ref', name: 'gone' }, definitions: [] }), null);
+});
+
+test('a form answer is built exactly as its schema accepts it', () => {
+  const fields = formFields(CLERK_FORM)!;
+  assert.deepEqual(
+    formPayload(fields, { decision: ' accept_variance ', comment: 'Agreed rise.' }),
+    {
+      payload: { decision: 'accept_variance', comment: 'Agreed rise.' },
+    },
+  );
+  assert.deepEqual(formPayload(fields, { decision: 'x' }), { error: 'Comment is required.' });
+  assert.deepEqual(formPayload(fields, { decision: 'x'.repeat(33), comment: 'c' }), {
+    error: 'Decision is longer than 32 characters.',
+  });
+  const money = formFields({
+    form_schema: {
+      kind: 'object',
+      fields: [
+        { name: 'amount', schema: { kind: 'decimal', precision: 6, scale: 2 }, required: false },
+        { name: 'units', schema: { kind: 'integer', min: 0, max: 10 }, required: true },
+        { name: 'urgent', schema: { kind: 'boolean' }, required: true },
+      ],
+    },
+    definitions: [],
+  })!;
+  assert.deepEqual(formPayload(money, { amount: '60.5', units: '3', urgent: true }), {
+    payload: { amount: '60.50', units: 3, urgent: true },
+  });
+  assert.deepEqual(formPayload(money, { units: '3' }), { payload: { units: 3, urgent: false } });
+  assert.match(
+    (formPayload(money, { amount: '1.234', units: '1' }) as { error: string }).error,
+    /2 decimal places/,
+  );
+  assert.match(
+    (formPayload(money, { amount: '12345', units: '1' }) as { error: string }).error,
+    /too many digits/,
+  );
+  assert.match((formPayload(money, { units: '11' }) as { error: string }).error, /out of range/);
+  assert.match((formPayload(money, { units: '1.5' }) as { error: string }).error, /whole number/);
+  const one = formFields({ form_schema: { kind: 'string', max_length: 64 }, definitions: [] })!;
+  assert.deepEqual(formPayload(one, { '': 'approved' }), { payload: 'approved' });
 });

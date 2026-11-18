@@ -87,7 +87,7 @@ from .activity_records import initiator, reserved_until
 from .artifacts import ArtifactPolicy
 from .authorization import record, scoped
 from .contracts import canonical_value
-from .deployments import load_deployment
+from .deployments import evaluation_only, load_deployment
 from .errors import ExecutionError
 from .human_tasks import eligible
 from .orchestrator import TERMINAL, mark_runnable
@@ -214,6 +214,8 @@ class ExecutionPinnedRecordSource:
             revision = record(
                 db, ExecutionDeploymentRevision, scope, execution.deployment_revision_id
             )
+            if evaluation_only(revision):
+                raise FleetError("forbidden")  # an evaluation deployment never writes
             grant, tenant, recovery = self.budgets._grants(db, scope)
             self.budgets._final(
                 db, actor, revision, grant, tenant, recovery, None if finishing else execution

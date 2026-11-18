@@ -297,6 +297,27 @@ def create_app(
             "items": [
                 {
                     "version": "0.4.0",
+                    "id": "forms-say-what-they-ask",
+                    "date": "2026-11-18",
+                    "title": "Forms say what they ask",
+                    "description": "A form in Human tasks now shows what it asks before anyone claims it: each field the workflow declares, whether it is required, and its limits, such as how many characters or decimal places it takes. Once you claim it, you answer in labelled fields instead of typing JSON, and a missing or out-of-range answer is named before anything is sent. A form with a nested shape still takes JSON.",
+                },
+                {
+                    "version": "0.4.0",
+                    "id": "decimal-verification",
+                    "date": "2026-11-18",
+                    "title": "Amounts verify after a write",
+                    "description": "A workflow that checks an amount it wrote, such as a payment hold or a credit-note request, now verifies it. Before this, any verification rule comparing a decimal read back from a system failed as unknown, so the run failed even though the write had been applied. A package evaluation also records a scenario that stops at a person's form, then cancels it without submitting anything, so a workflow with a clerk's form can be proven.",
+                },
+                {
+                    "version": "0.4.0",
+                    "id": "evaluation-deployments",
+                    "date": "2026-11-17",
+                    "title": "Prove a workflow while releases stay required",
+                    "description": "A deployment can now exist only to prove its workflow: with \"purpose\": \"evaluation\" in its configuration it is admitted without a release, only a package evaluation starts it, none of its reviews can be allowed and nothing it proposes is sent. Before this, an installation that requires a release for every deployment refused the evaluation's own deployment, so no workflow could be proven and released. When a person who requested an action tries to allow it and the action needs independent approval, Human tasks now says so instead of blaming their session.",
+                },
+                {
+                    "version": "0.4.0",
                     "id": "control-room-operations",
                     "date": "2026-11-16",
                     "title": "Control Room runs the environment",

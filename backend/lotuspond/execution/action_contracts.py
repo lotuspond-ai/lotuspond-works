@@ -147,6 +147,14 @@ class ProposalView(Contract):
     input: JsonValue
 
 
+class FormView(Contract):
+    """What a form task asks: its declared data schema and the package's named schemas
+    its `ref`s resolve against. Package content only, never an execution's values."""
+
+    form_schema: JsonValue
+    definitions: list[JsonValue]
+
+
 class DecisionRequest(Contract):
     decision_id: OpaqueId
     intent_sha256: Digest

@@ -36,6 +36,19 @@ export function operateMessage(code: string | undefined, fallback: string) {
   return (code && messages[code]) || fallback;
 }
 
+// A refused Allow on a review that needs independent approval: the person who requested the
+// action is signed in but may not allow it, so say that rather than blame their session.
+export function decisionMessage(
+  code: string | undefined,
+  decision: 'allow' | 'deny',
+  independent: boolean,
+  fallback: string,
+) {
+  if (code === 'forbidden' && decision === 'allow' && independent)
+    return 'This action needs independent approval, and you requested it. Release the task so another person can allow it.';
+  return operateMessage(code, fallback);
+}
+
 export type ExecutionState =
   'pending' | 'running' | 'waiting' | 'paused' | 'cancelled' | 'succeeded' | 'failed' | string;
 
@@ -301,4 +314,164 @@ export function bindingTemplate(refs: readonly DependencyRef[]) {
         ? { dependency: ref, source_id: '<source id>', source_version: 1 }
         : { dependency: ref },
   );
+}
+
+// ---- Forms: what a form task asks, from its declared schema (GET …/human-tasks/{id}/form).
+
+export type DataSchema = { kind: string } & Record<string, unknown>;
+export type TaskForm = {
+  form_schema: DataSchema;
+  definitions: { name: string; schema: DataSchema }[];
+};
+export type FormField = {
+  // `null`: the field is the whole answer (a form whose schema is one scalar).
+  name: string | null;
+  label: string;
+  kind: 'text' | 'long_text' | 'integer' | 'number' | 'decimal' | 'boolean';
+  required: boolean;
+  hint: string;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+  scale?: number;
+  precision?: number;
+};
+
+const LONG_TEXT = 200; // a string allowed more than this many characters gets a text area
+
+function labelOf(name: string) {
+  const words = name.replaceAll('_', ' ').replaceAll('-', ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function resolved(schema: DataSchema, definitions: TaskForm['definitions'], depth = 0): DataSchema {
+  if (schema.kind !== 'ref') return schema;
+  const found = definitions.find((item) => item.name === schema.name);
+  if (!found || depth > 16) return { kind: 'unresolved' };
+  return resolved(found.schema, definitions, depth + 1);
+}
+
+function scalar(name: string | null, schema: DataSchema, required: boolean): FormField | null {
+  const label = name === null ? 'Answer' : labelOf(name);
+  const base = { name, label, required };
+  const num = (value: unknown) => (typeof value === 'number' ? value : undefined);
+  switch (schema.kind) {
+    case 'string': {
+      const maxLength = num(schema.max_length) ?? 1;
+      return {
+        ...base,
+        kind: maxLength > LONG_TEXT ? 'long_text' : 'text',
+        maxLength,
+        hint: `Text, up to ${maxLength.toLocaleString('en')} characters`,
+      };
+    }
+    case 'integer': {
+      const [min, max] = [num(schema.min), num(schema.max)];
+      const bounds =
+        min !== undefined && max !== undefined
+          ? ` from ${min} to ${max}`
+          : min !== undefined
+            ? ` of at least ${min}`
+            : max !== undefined
+              ? ` of at most ${max}`
+              : '';
+      return { ...base, kind: 'integer', min, max, hint: `A whole number${bounds}` };
+    }
+    case 'number': {
+      const [min, max] = [num(schema.min), num(schema.max)];
+      return { ...base, kind: 'number', min, max, hint: 'A number' };
+    }
+    case 'decimal': {
+      const scale = num(schema.scale) ?? 0;
+      const precision = num(schema.precision) ?? 38;
+      const places = scale === 0 ? 'no decimal places' : `${scale} decimal places`;
+      return { ...base, kind: 'decimal', scale, precision, hint: `A decimal with ${places}` };
+    }
+    case 'boolean':
+      return { ...base, kind: 'boolean', hint: 'Yes or no' };
+    default:
+      return null;
+  }
+}
+
+// The fields a person fills in, or null when the schema needs the JSON editor (nested
+// objects, lists, or anything unresolved). Field order is the schema's.
+export function formFields(form: TaskForm): FormField[] | null {
+  const root = resolved(form.form_schema, form.definitions);
+  if (root.kind !== 'object') {
+    const field = scalar(null, root, true);
+    return field ? [field] : null;
+  }
+  const declared = Array.isArray(root.fields) ? root.fields : [];
+  const fields: FormField[] = [];
+  for (const item of declared as { name: string; schema: DataSchema; required: boolean }[]) {
+    const field = scalar(item.name, resolved(item.schema, form.definitions), item.required);
+    if (!field) return null;
+    fields.push(field);
+  }
+  return fields;
+}
+
+export type FormValues = Record<string, string | boolean>;
+const key = (field: FormField) => field.name ?? '';
+
+// The exact payload the schema accepts, or the first problem in the person's words. An
+// empty optional field is left out; nothing is coerced beyond what the schema declares.
+export function formPayload(
+  fields: FormField[],
+  values: FormValues,
+): { payload: unknown } | { error: string } {
+  const answer: Record<string, unknown> = {};
+  for (const field of fields) {
+    const raw = values[key(field)];
+    let value: unknown;
+    if (field.kind === 'boolean') {
+      value = raw === true;
+    } else {
+      const text = typeof raw === 'string' ? raw.trim() : '';
+      if (text === '') {
+        if (field.required) return { error: `${field.label} is required.` };
+        continue;
+      }
+      if (field.kind === 'text' || field.kind === 'long_text') {
+        if (text.length > (field.maxLength ?? Infinity))
+          return { error: `${field.label} is longer than ${field.maxLength} characters.` };
+        value = text;
+      } else if (field.kind === 'integer') {
+        if (!/^-?\d+$/.test(text)) return { error: `${field.label} must be a whole number.` };
+        const parsed = Number(text);
+        if (
+          !Number.isSafeInteger(parsed) ||
+          (field.min !== undefined && parsed < field.min) ||
+          (field.max !== undefined && parsed > field.max)
+        )
+          return { error: `${field.label} is out of range.` };
+        value = parsed;
+      } else if (field.kind === 'number') {
+        const parsed = Number(text);
+        if (!Number.isFinite(parsed)) return { error: `${field.label} must be a number.` };
+        if (
+          (field.min !== undefined && parsed < field.min) ||
+          (field.max !== undefined && parsed > field.max)
+        )
+          return { error: `${field.label} is out of range.` };
+        value = parsed;
+      } else {
+        const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text);
+        const scale = field.scale ?? 0;
+        if (!match || (match[3]?.length ?? 0) > scale)
+          return {
+            error: `${field.label} must be a decimal with at most ${scale} decimal places.`,
+          };
+        const fraction = (match[3] ?? '').padEnd(scale, '0');
+        const digits = match[2].replace(/^0+(?=\d)/, '');
+        if (digits.length + scale > (field.precision ?? 38))
+          return { error: `${field.label} has too many digits.` };
+        value = `${match[1]}${digits}${scale ? `.${fraction}` : ''}`;
+      }
+    }
+    if (field.name === null) return { payload: value };
+    answer[field.name] = value;
+  }
+  return { payload: answer };
 }

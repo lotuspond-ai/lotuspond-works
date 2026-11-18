@@ -50,7 +50,7 @@ python -m lotuspond.authority execution /etc/lotuspond/authority on
 Each command prints a summary and never prints key material. The API and workers reread the files on every lookup, so a change takes effect on the next request with no restart:
 
 - removing a publisher or switching execution off stops new work at once;
-- `release-required off` lets a deployment be admitted without a release decision. Leave it on: a release of a package evaluation run binds exactly that package version (`docs/superpowers/specs/2026-11-15-package-proof-design.md`). Turning it off is a deliberate operator decision.
+- `release-required off` lets a deployment be admitted without a release decision. Leave it on: a release of a package evaluation run binds exactly that package version (`docs/superpowers/specs/2026-11-15-package-proof-design.md`). Turning it off is a deliberate operator decision. To prove a package with it on, evaluate it on an evaluation deployment (`"purpose": "evaluation"` in the deployment's configuration): it is admitted without a release, only a package evaluation starts it, and it never writes (`docs/superpowers/specs/2026-11-17-evaluation-deployments-design.md`).
 
 ## Reviewed actions
 

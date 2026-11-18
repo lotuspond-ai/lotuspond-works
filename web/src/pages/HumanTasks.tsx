@@ -10,14 +10,20 @@ import {
   StatusBadge,
 } from '../components/ui.js';
 import {
+  decisionMessage,
+  formFields,
+  formPayload,
   fromMs,
   inboxOrder,
   opaqueId,
   operateMessage,
   scopedPath,
   taskActions,
+  type FormField,
+  type FormValues,
   type HumanTask,
   type Proposal,
+  type TaskForm,
   type Scope,
 } from '../lib/operate.js';
 
@@ -218,6 +224,10 @@ function TaskDetail({
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [payload, setPayload] = useState('{}');
+  // A form's declared schema (what it asks), and the values a person has entered.
+  const [form, setForm] = useState<TaskForm | null>(null);
+  const [formError, setFormError] = useState('');
+  const [values, setValues] = useState<FormValues>({});
   // One identity per intended decision or submission, so a repeated click is the same request.
   const pending = useRef<{ key: string; id: string } | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -233,15 +243,31 @@ function TaskDetail({
       setProposalError(problem(reason));
     }
   }, [scope, task.id, task.intent_sha256, task.kind, workspace]);
+  const loadForm = useCallback(async () => {
+    if (task.kind !== 'form') return;
+    setFormError('');
+    try {
+      setForm(await api<TaskForm>(scopedPath(scope, `human-tasks/${task.id}/form`), workspace));
+    } catch (reason) {
+      setFormError(problem(reason));
+    }
+  }, [scope, task.id, task.kind, workspace]);
+  const fields = form ? formFields(form) : null;
   useEffect(() => {
     heading.current?.focus();
     void loadProposal();
-  }, [loadProposal]);
+    void loadForm();
+  }, [loadProposal, loadForm]);
   function identity(key: string, prefix: string) {
     if (pending.current?.key !== key) pending.current = { key, id: opaqueId(prefix) };
     return pending.current.id;
   }
-  async function act(path: string, body: unknown, done?: string) {
+  async function act(
+    path: string,
+    body: unknown,
+    done?: string,
+    explain: (reason: unknown) => string = problem,
+  ) {
     setBusy(true);
     setError('');
     setNotice('');
@@ -255,7 +281,7 @@ function TaskDetail({
       if (done) setNotice(done);
       onChanged(updated, done ?? '');
     } catch (reason) {
-      setError(problem(reason));
+      setError(explain(reason));
       if (reason instanceof ApiError && reason.code === 'conflict') {
         pending.current = null;
         void loadProposal();
@@ -275,19 +301,33 @@ function TaskDetail({
         decision,
       },
       decision === 'allow' ? 'Allowed. The action can now be sent.' : 'Denied. Nothing is sent.',
+      (reason) =>
+        reason instanceof ApiError
+          ? decisionMessage(reason.code, decision, proposal.independent_approval, reason.message)
+          : problem(reason),
     );
   }
   function submit() {
     let value: unknown;
-    try {
-      value = JSON.parse(payload);
-    } catch {
-      setError('The form answer must be valid JSON.');
-      return;
+    if (fields) {
+      const built = formPayload(fields, values);
+      if ('error' in built) {
+        setError(built.error);
+        return;
+      }
+      value = built.payload;
+    } else {
+      try {
+        value = JSON.parse(payload);
+      } catch {
+        setError('The form answer must be valid JSON.');
+        return;
+      }
     }
+    const answer = JSON.stringify(value);
     void act(
       'submission',
-      { submission_id: identity(`submit:${payload}`, 'submission'), payload: value },
+      { submission_id: identity(`submit:${answer}`, 'submission'), payload: value },
       'Submitted.',
     );
   }
@@ -395,16 +435,22 @@ function TaskDetail({
           </div>
         ))}
 
-      {task.kind === 'form' && actions.decide && (
-        <label>
-          Your answer (JSON)
-          <textarea
-            className="code-input"
-            rows={6}
-            value={payload}
-            onChange={(event) => setPayload(event.target.value)}
-          />
-        </label>
+      {task.kind === 'form' && (
+        <FormAsks
+          taskId={task.id}
+          fields={fields}
+          loaded={form !== null}
+          error={formError}
+          onRetry={() => void loadForm()}
+          editing={actions.decide}
+          values={values}
+          onValue={(name, value) => {
+            setValues((current) => ({ ...current, [name]: value }));
+            setError(''); // a corrected answer clears the last refusal
+          }}
+          payload={payload}
+          onPayload={setPayload}
+        />
       )}
 
       {error && <Alert>{error}</Alert>}
@@ -463,5 +509,163 @@ function TaskDetail({
         </p>
       )}
     </section>
+  );
+}
+
+// What a form task asks, from its declared schema: each field with its limits before the
+// task is claimed, and inputs for them once it is the caller's. A schema the console
+// cannot lay out as fields (lists, nested objects) keeps the JSON editor.
+function FormAsks({
+  taskId,
+  fields,
+  loaded,
+  error,
+  onRetry,
+  editing,
+  values,
+  onValue,
+  payload,
+  onPayload,
+}: {
+  taskId: string;
+  fields: FormField[] | null;
+  loaded: boolean;
+  error: string;
+  onRetry: () => void;
+  editing: boolean;
+  values: FormValues;
+  onValue: (name: string, value: string | boolean) => void;
+  payload: string;
+  onPayload: (value: string) => void;
+}) {
+  const json = (
+    <label>
+      Your answer (JSON)
+      <textarea
+        className="code-input"
+        rows={6}
+        value={payload}
+        onChange={(event) => onPayload(event.target.value)}
+      />
+    </label>
+  );
+  if (error)
+    return (
+      <>
+        <Alert onRetry={onRetry}>{error}</Alert>
+        {editing && json}
+      </>
+    );
+  if (!loaded)
+    return (
+      <p className="loading-state" role="status">
+        Loading what this form asks…
+      </p>
+    );
+  return (
+    <div className="proposal form-asks">
+      <h3>What this form asks</h3>
+      {!fields ? (
+        <>
+          <p className="hint">This answer has a nested shape; enter it as JSON.</p>
+          {editing && json}
+        </>
+      ) : editing ? (
+        fields.map((field) => (
+          <FieldInput
+            key={field.name ?? ''}
+            id={`${taskId}-${field.name ?? 'answer'}`}
+            field={field}
+            value={values[field.name ?? '']}
+            onChange={(value) => onValue(field.name ?? '', value)}
+          />
+        ))
+      ) : (
+        <dl className="record-facts form-asks-list">
+          {fields.map((field) => (
+            <div key={field.name ?? ''}>
+              <dt>
+                {field.label}
+                {!field.required && <span className="optional"> (optional)</span>}
+              </dt>
+              <dd>{field.hint}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {!editing && <p className="hint">Claim the task to answer.</p>}
+    </div>
+  );
+}
+
+function FieldInput({
+  id,
+  field,
+  value,
+  onChange,
+}: {
+  id: string;
+  field: FormField;
+  value: string | boolean | undefined;
+  onChange: (value: string | boolean) => void;
+}) {
+  const hint = `${id}-hint`;
+  const label = (
+    <>
+      {field.label}
+      {!field.required && <span className="optional"> (optional)</span>}
+    </>
+  );
+  if (field.kind === 'boolean')
+    return (
+      <div className="form-field">
+        <label className="checkbox-label" htmlFor={id}>
+          <input
+            id={id}
+            type="checkbox"
+            checked={value === true}
+            aria-describedby={hint}
+            onChange={(event) => onChange(event.target.checked)}
+          />
+          {label}
+        </label>
+        <p className="hint" id={hint}>
+          {field.hint}
+        </p>
+      </div>
+    );
+  const text = typeof value === 'string' ? value : '';
+  const common = {
+    id,
+    value: text,
+    required: field.required,
+    'aria-describedby': hint,
+  };
+  return (
+    <div className="form-field">
+      <label htmlFor={id}>{label}</label>
+      {field.kind === 'long_text' ? (
+        <textarea
+          {...common}
+          rows={4}
+          maxLength={field.maxLength}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <input
+          {...common}
+          type="text"
+          maxLength={field.kind === 'text' ? field.maxLength : undefined}
+          inputMode={
+            field.kind === 'integer' ? 'numeric' : field.kind === 'text' ? undefined : 'decimal'
+          }
+          autoComplete="off"
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+      <p className="hint" id={hint}>
+        {field.hint}
+      </p>
+    </div>
   );
 }

@@ -33,7 +33,14 @@ from .artifacts import ArtifactPolicy
 from .assurance import check_assurance_current
 from .authorization import ExecutionActor, lock, mark_replay, reauthorize, record, scoped
 from .contracts import AdmissionRequest, ExecutionView, canonical_value
-from .deployments import _configuration, _pool, _stored_configuration, gates, load_deployment
+from .deployments import (
+    _configuration,
+    _pool,
+    _stored_configuration,
+    evaluation_only,
+    gates,
+    load_deployment,
+)
 from .engine_contracts import INTERPRETER_V1
 from .errors import ExecutionError, execution_service
 from .interpreters import require_interpreter
@@ -102,7 +109,9 @@ def _current_deployment(db, actor, revision_id, *, dependencies, operation):
     _configuration(db, actor.scope, configuration, package, links, rows, sources, pool, snapshot)
     reauthorize(db, actor, operation)
     current_snapshot(db, snapshot)
-    check_assurance_current(db, evidence, package, snapshot, sources)
+    check_assurance_current(
+        db, evidence, package, snapshot, sources, evaluation=configuration.evaluation
+    )
     return package, sources
 
 
@@ -158,8 +167,10 @@ class AdmissionService:
 
     @execution_service
     def admit_execution(
-        self, db, actor, request: AdmissionRequest, request_key: str
+        self, db, actor, request: AdmissionRequest, request_key: str, *, evaluation=False
     ) -> ExecutionView:
+        """`evaluation`: a package evaluation run admits this execution. Only such a
+        run may start one on an evaluation deployment."""
         # Frozen DTOs may still contain caller-owned mutable JSON containers.
         # Copy before provider calls without normalizing numbers: only the declared
         # schema may select a numeric domain. Identity and storage share this copy. An
@@ -184,6 +195,8 @@ class AdmissionService:
         _, capacity, revision, _ = self.budgets._parents(
             db, actor, request.deployment_revision_id, snapshot=snapshot
         )
+        if evaluation_only(revision) and evaluation is not True:
+            raise ExecutionError("deployment_unavailable")
         existing = lock(
             db, scoped(ExecutionRequest, actor.scope).where(ExecutionRequest.request_key == key)
         )
