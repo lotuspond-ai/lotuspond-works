@@ -1576,3 +1576,20 @@ The `activity_read` fixture gives its step a 2 s timeout, on purpose, so that ex
 - Dispatch to claim normally takes 0.16–0.41 s, or 0.59–0.77 s with every core busy. So a slow hosted runner stalled for over 2 s between the two.
 
 `activity_unhurried` is `activity_read` with a 10 s step timeout and its own package id, built by `generate.py`. No other fixture file changes. The 17 tests that dispatch and claim but never mention expiry, deadlines, timeouts or waiting now use it. So does the failing test, which checks a restore, not the 2 s timing. Every other use of `activity_read`, 49 in all, keeps the 2 s timeout. With the 2.1 s pause, the failing test now passes. The seven changed test files report `101 passed`, and `ruff check` and `ruff format --check` are clean.
+
+## The child admission recheck's time bound — 2026-11-18
+
+`tests/execution/test_dispatch.py::test_child_admission_is_rechecked_after_provider_waits` once failed in hosted CI on #58's earlier head, at 6.05 s against `assert monotonic() - started < 6`.
+
+The test's slow `demand` provider waits until the runtime session expires, an absolute time under 4 s after the start. So the provider call ends about 4 s in on any runner. The bound therefore left under 2 s for the work after it: the shared reservation and the recheck that refuses the expired session. A slow hosted runner used that up.
+
+The bound is now measured in two parts:
+
+- The provider call must return within the 5 s slot. If it overran, the refusal would be `price_unavailable`, not the recheck's `unauthenticated`.
+- The work after the provider must finish within one more slot, 5 s. That is a hang bound, not a speed target.
+
+Local evidence against PostgreSQL 18.6:
+
+- The test passed 3 of 3 times, in about 9.3 s each.
+- With a 2.1 s stall added to the reservation after the provider returns, the old assertion failed at 6.2 s and the new ones pass.
+- `tests/execution/test_dispatch.py` reports `43 passed`. `ruff check` and `ruff format --check` are clean.
