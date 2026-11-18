@@ -388,7 +388,9 @@ def test_a_sweep_pass_reserves_the_next_attempts_through_the_scheduler(controlle
     from .activity_fixtures import Demand, attempt_at, deploy
 
     h = controlled
-    revision = deploy(h, "activity_read")
+    # `activity_slow`, not `activity_read`: the latter's 2 s read timeout caps the
+    # delivery window at 2 s, and a slow runner spent it signing (CI read `forbidden`).
+    revision = deploy(h, "activity_slow")
     with Session(h.engine) as db, db.begin():
         execution_id = h.service.admit_execution(
             db, h.actor, AdmissionRequest(deployment_revision_id=revision, input=None), "sched"
