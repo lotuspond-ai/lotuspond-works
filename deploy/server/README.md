@@ -88,6 +88,8 @@ A staging server runs the same stack from `main` on its own Lightsail instance, 
 - **Only Cloudflare reaches ports 80 and 443.** The firewall allows Cloudflare's published ranges ([cloudflare.com/ips](https://www.cloudflare.com/ips/)); port 22 stays open for Lightsail's browser SSH.
 - **SSL/TLS Full (strict) for that hostname only,** as a Cloudflare configuration rule, leaving the zone's own setting alone.
 
+The production server at `works.lotuspond.ai` is set up the same way, behind the proxy with its own origin certificate, but with `CADDYFILE=Caddyfile.public`, which leaves out the noindex header and `robots.txt` so search engines may list it.
+
 An unlisted address is not access control: anyone who has the link can open the site. Keep registration closed, use synthetic data only, and put Cloudflare Access in front of it if it ever needs to be private.
 
 To create one, issue an ECDSA Origin CA certificate for the hostname in Cloudflare (SSL/TLS → Origin Server), put `cert.pem` and `key.pem` in a private folder's `origin/`, and `CADDYFILE=Caddyfile.origin` and `LOTUSPOND_ENVIRONMENT_LABEL=Staging` (a badge on every console page) in its `env.extra`, then:
