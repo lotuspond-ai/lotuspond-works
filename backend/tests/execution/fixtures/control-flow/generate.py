@@ -856,6 +856,18 @@ compile_package(activity_slow, dependencies=[], catalog={"documents": [connector
 (OUT / "activity_slow.json").write_text(json.dumps(activity_slow, indent=1, sort_keys=True) + "\n")
 print("slow activity fixture compiled")
 
+# The same read with a 10 s attempt timeout, for cases that dispatch and then claim
+# and are not about expiry. Their claim then never races the 2 s timeout on a slow
+# host: a CI runner stalled over 2 s between dispatch and claim on 2026-11-18.
+activity_unhurried = copy.deepcopy(activity_read)
+activity_unhurried["package_id"] = "fixture-activity-unhurried"
+activity_unhurried["body"]["steps"][0]["retry"] = {**FAST, "timeout_seconds": 10}
+compile_package(activity_unhurried, dependencies=[], catalog={"documents": [connector]})
+(OUT / "activity_unhurried.json").write_text(
+    json.dumps(activity_unhurried, indent=1, sort_keys=True) + "\n"
+)
+print("unhurried activity fixture compiled")
+
 # Task 11: the waits package with a 2 s timer and a 3 s external-wait expiry, and
 # one whose 5 s execution deadline passes while its 60 s timer waits. The sweeper's
 # due waits and deadlines then come in real database time, never by column edits.

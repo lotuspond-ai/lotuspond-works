@@ -206,7 +206,7 @@ def test_another_event_at_a_taken_sequence_fences_with_a_fixed_reason(controlled
 
 def test_only_a_runtime_holding_live_work_reports(controlled):
     h = controlled
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     source = h.principal_runtime.identity.instance_id
 

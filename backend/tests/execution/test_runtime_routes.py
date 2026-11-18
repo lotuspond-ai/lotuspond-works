@@ -89,7 +89,7 @@ def code_of(call):
 
 def test_a_runtime_runs_a_read_through_the_routes(api):
     h = api
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     client = runtime_client(h)
     delivery = client.poll()
     envelope = envelope_of(delivery)

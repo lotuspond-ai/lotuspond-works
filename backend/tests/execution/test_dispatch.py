@@ -334,7 +334,7 @@ def test_result_marks_execution_runnable_atomically(activity, monkeypatch):
     import lotuspond.execution.dispatch as dispatch
 
     h = activity
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     with Session(h.engine) as db:
         assert db.get(Execution, execution_id).runnable_at_ms is None
@@ -375,13 +375,13 @@ def test_result_marks_execution_runnable_atomically(activity, monkeypatch):
 
 def test_output_schema_and_unknown_usage_cannot_complete_a_step(activity):
     h = activity
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     # The operation's output schema is null; a forged value fails the attempt.
     h.result(attempt_id, lease, value={"forged": True})
     with Session(h.engine) as db:
         assert db.get(ExecutionAttempt, attempt_id).state == "failed"
-    second_execution, second = h.ready("activity_read")
+    second_execution, second = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(second))
     with Session(h.engine) as db:
         now = database_now_ms(db)
@@ -416,7 +416,7 @@ def test_plaintext_credentials_never_enter_the_envelope_or_admission(activity):
         db.get(RuntimeSession, h.principal_runtime.session_id).token_digest = token_digest(
             session_token, "lps_"
         )
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     delivery = h.dispatch(attempt_id)
     lease = h.claim(delivery)
     h.result(attempt_id, lease, value=None)
@@ -866,7 +866,7 @@ def test_a_runtime_in_another_pool_is_refused_before_any_provider_call(activity)
 
 def test_lost_result_response_is_repeatable_only_by_its_session(activity):
     h = activity
-    _, attempt_id = h.ready("activity_read")
+    _, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     usage = dict(input_tokens=1, output_tokens=1, cost_microusd=1, completed_at_ms=1)
     h.result(attempt_id, lease, code="unavailable", usage=usage)
@@ -889,7 +889,7 @@ def test_stored_values_are_bounded_per_execution(activity, monkeypatch):
     import lotuspond.execution.dispatch as dispatch
 
     h = activity
-    _, attempt_id = h.ready("activity_read")
+    _, attempt_id = h.ready("activity_unhurried")
     h.claim(h.dispatch(attempt_id))
     monkeypatch.setattr(dispatch, "MAX_VALUES", 2)
     h.store_value(attempt_id, 1)

@@ -161,7 +161,7 @@ def test_a_cancellation_waiting_on_the_execution_lock_still_precedes_dispatch(co
 
 def test_requested_state_is_not_observed_terminal(controlled):
     h = controlled
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))  # a runtime is working on it
     view = h.control(execution_id, "cancel")
     assert (view.state, view.requested_state) == ("running", "cancelled")
@@ -405,7 +405,7 @@ def test_pause_releases_unstarted_work_and_resume_spends_no_attempt(controlled):
 
 def test_pause_stops_claimed_work_and_resume_runs_it_anew(controlled):
     h = controlled
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     h.control(execution_id, "pause")
     h.run()
@@ -428,7 +428,7 @@ def test_pause_stops_claimed_work_and_resume_runs_it_anew(controlled):
 
 def test_a_pause_stopped_attempt_with_unknown_usage_reconciles_then_resumes(controlled):
     h = controlled
-    execution_id, attempt_id = h.ready("activity_read")
+    execution_id, attempt_id = h.ready("activity_unhurried")
     lease = h.claim(h.dispatch(attempt_id))
     h.control(execution_id, "pause")
     h.run()
@@ -645,7 +645,7 @@ def test_only_a_pause_makes_a_stop_an_interruption(controlled):
     h = controlled
     # Paused and resumed before the orchestrator saw either: the stop still came
     # from the pause, so it is an interruption.
-    quick, quick_attempt = h.ready("activity_read", capacity=2)
+    quick, quick_attempt = h.ready("activity_unhurried", capacity=2)
     quick_lease = h.claim(h.dispatch(quick_attempt))
     h.control(quick, "pause")
     with pytest.raises(ExecutionError, match="forbidden"):
@@ -655,7 +655,7 @@ def test_only_a_pause_makes_a_stop_an_interruption(controlled):
     assert interrupted(h, quick_attempt)
     # A renewal refused because the initiator lost `execute` is no pause: the
     # runtime's `cancelled` report is a failure its step counts, never a free restart.
-    revoked, revoked_attempt = h.ready("activity_read", capacity=2)
+    revoked, revoked_attempt = h.ready("activity_unhurried", capacity=2)
     revoked_lease = h.claim(h.dispatch(revoked_attempt))
     with Session(h.engine) as db, db.begin():
         db.scalar(
@@ -678,7 +678,7 @@ def test_only_a_pause_makes_a_stop_an_interruption(controlled):
 def test_repeated_pauses_never_spend_the_budget(controlled):
     h = controlled
     # Ten 10 s reservations would spend the 100 s active budget, were they charged.
-    execution_id, first = h.ready("activity_read")
+    execution_id, first = h.ready("activity_unhurried")
     for cycle in range(9):
         h.control(execution_id, "pause", request_id=f"pause-{cycle}")
         h.run()
