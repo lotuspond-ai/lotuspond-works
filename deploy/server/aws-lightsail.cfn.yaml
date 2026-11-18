@@ -17,7 +17,7 @@ Parameters:
   UserData:
     Type: String
     NoEcho: true
-    Description: First-boot script from aws-lightsail-firstboot.sh, rendered by aws-lightsail-cfn.sh (holds the read-only GitHub deploy key)
+    Description: First-boot script from aws-lightsail-firstboot.sh, rendered by aws-lightsail-cfn.sh
   UserDataMore:
     Type: String
     NoEcho: true

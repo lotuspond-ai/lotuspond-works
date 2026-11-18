@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pull-based deploys, as on the Health server: a systemd timer runs this every 5 minutes as ubuntu. It fetches
-# origin/main with the server's read-only deploy key and, when main has a commit not deployed yet, hands it to
+# origin/main (the public repository, over HTTPS) and, when main has a commit not deployed yet, hands it to
 # remote-deploy.sh. No GitHub Actions, secrets or inbound SSH key are involved.
 # It remembers the last commit deployed (~/.lotuspond-works-deployed). A commit that fails is tried once; the timer
 # then waits for the next commit on main. Deploy now: deploy/server/auto-deploy.sh. Log: journalctl -u lotuspond-works-auto-deploy

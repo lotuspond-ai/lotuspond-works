@@ -1556,3 +1556,12 @@ Local evidence only: the same Linux containers as Task 12 (`lotuspond-ci-runner:
   - `validate`, rerun after all three fixes: the job passed. The repository check passed (SQLite 1,265 passed with 237 skipped; 1,514 passed; runtime 802 passed), as did the schema export check and `deploy/checks` (16 passed). The required PostgreSQL suite with installed fleet acceptance passed 1,407 (45 min 52 s). The API image built (`sha256:9ba53c7d41ea093baf5c1ba635ba5434c4f979880527d49bb7d9237d3193085b`), its metadata check passed, durable execution packaging against that image passed 8, and the strict operator docs build passed.
 - **Mac:** `git diff --check` and the strict mkdocs build passed.
 - **Not covered:** real connectors, a production command key provider, notification, compensation, the task inbox UI, hosted CI and the planning-target load (see Task 12).
+
+## Required PostgreSQL CI allowance, revisited — 2026-11-18
+
+Hosted runs started again on 2026-11-17, once the repository was public. The required PostgreSQL step now runs 1418 tests, not the 998 for which its 60-minute bound was set on 2026-10-22.
+
+- Run `44151260449` on `main` at `13d030b`: the step's pytest reported `1418 passed, 1 warning in 3312.55s (0:55:12)`, and the whole step took 56 min 19 s, inside the bound by under four minutes.
+- Run `44245983868` (lotuspond-ai/lotuspond-works#58 at `af05d34`): the bound stopped the step at 60 min 0 s, at 91% (`tests/test_migrations.py::test_monitoring_v6_migration_preserves_existing_incidents`). It had no failed, errored or stalled test: the median gap between results was under 0.01 s, and the longest, 311 s, is the designed fleet acceptance migration case (307 s on 2026-10-22). Run `44151260449` reached the same test after 53 min 27 s, so this runner was 1.12× slower, projecting about 63 minutes for the step.
+
+As on 2026-10-22, the bound is at least 1.5× the slowest projection: 100 minutes, still a hang bound far below the job's six-hour default. Nothing is skipped, sharded or reordered. Revisit it again from hosted `--durations` output as the suite grows.
