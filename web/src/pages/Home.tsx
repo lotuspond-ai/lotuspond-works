@@ -60,7 +60,7 @@ export function Home({
   const isAdmin = ['owner', 'admin'].includes(role);
 
   return (
-    <div className="home">
+    <div className="workspace-home">
       <div className="page-heading">
         <div>
           <h1>Welcome, {first}</h1>
@@ -223,7 +223,12 @@ export function Home({
             exits with status 2.
           </p>
           {/* Scrolls sideways on a narrow screen, so it is a named stop for keyboard scrolling. */}
-          <pre className="home-code" role="region" aria-label="Release gate command" tabIndex={0}>
+          <pre
+            className="workspace-home-code"
+            role="region"
+            aria-label="Release gate command"
+            tabIndex={0}
+          >
             <code>npm run cli -- gate "$RELEASE_ID"</code>
           </pre>
           <a className="text-button" href="#api-keys">
