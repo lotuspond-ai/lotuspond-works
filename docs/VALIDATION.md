@@ -1586,3 +1586,19 @@ Local evidence only, in the same Linux cloud container (PostgreSQL 16.15). The A
 - **Reference workflows, final code:** 53 passed, 1 skipped (15 min 16 s). This covers both workflows' unit tests, the four late purchase order conformance cases, the triage prefix case and the full-package case. The skip is the opt-in console journey.
 - **Execution suite** (`tests/execution` without conformance): 833 passed (40 min 1 s), with the installed-acceptance journey deselected because it also fails on unmodified `main` in this container.
 - **Not covered:** a runtime outside test mode (the stand-in is on loopback), a live model call, and seeing this workflow in the console (the pages were seen on late purchase order recovery).
+
+## Invoice exception triage in the console — 2026-11-18
+
+Local evidence only, as above. The browser was the preinstalled Chromium driven by Playwright.
+
+- **Shared journey:** `console_journey.mjs` now reads its people, executions and tasks from a plan. Both reference workflows use it through `console.journey`.
+- **Invoice triage journey** (`test_admins_decide_invoice_exceptions_in_the_console`): **passed** on its first run (3 min 36 s).
+  - The requester allowed a short receipt's payment hold.
+  - The requester's Allow on an overcharge's credit-note request was refused with the independent-approval message and released, and a second admin allowed it at 768 px.
+  - The second admin submitted the clerk's form for a justified variance at 375 px.
+  - Control Room showed all three executions succeeded and both writes verified, with no horizontal scroll at 768 or 375 px. The Claim control took keyboard focus with a visible outline.
+  - The server's traces named a different decider for the hold and the credit note.
+- **Late purchase order journey** on the shared script: **passed** (2 min 36 s).
+- **Before the triage run:** PostgreSQL had stopped with the container's restart and was started again. That attempt failed to connect and ran nothing.
+- **Finding, not fixed:** a form task shows nothing of what it asks, only a raw JSON box after claiming.
+- **Not covered:** a runtime outside test mode, a live model call, Safari, Firefox and real assistive technology.

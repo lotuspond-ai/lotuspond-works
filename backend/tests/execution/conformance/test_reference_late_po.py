@@ -17,9 +17,6 @@ committing is settled by read-back, never resent.
 
 import importlib.util
 import json
-import os
-import shutil
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -27,7 +24,7 @@ from uuid import uuid4
 
 import driver as drivers
 import pytest
-from console import DIST, Console
+from console import CONSOLE_JOURNEY, SKIP_REASON, journey
 from driver import catalog_ref, diagnose
 from test_reference_triage import certificate, doubles, mounted_secrets, result_of
 
@@ -610,23 +607,14 @@ def test_the_whole_loop_on_an_operator_directory(late_po_operator):
     reschedule_and_notify(w, operator, customer, revision, ledger, double)
 
 
-JOURNEY = Path(__file__).with_name("console_journey.mjs")
-CONSOLE_JOURNEY = os.environ.get("LOTUSPOND_CONSOLE_JOURNEY") == "1"
-
-
-@pytest.mark.skipif(
-    not CONSOLE_JOURNEY,
-    reason="opt-in browser journey: LOTUSPOND_CONSOLE_JOURNEY=1, `npm run build`, Playwright",
-)
+@pytest.mark.skipif(not CONSOLE_JOURNEY, reason=SKIP_REASON)
 def test_two_planners_decide_in_the_console(late_po_operator):
     """Milestone 5, seen: a late order whose customer must be told, decided in the built
     console by two people with their own sessions (console_journey.mjs). The requester
     allows the date change in Human tasks; the customer update needs independent
-    approval, so the requester's Allow is refused and a second planner allows it.
-    Control Room shows both writes verified, and the server agrees."""
+    approval, so the requester's Allow is refused and a second planner allows it on a
+    phone. Control Room shows both writes verified, and the server agrees."""
     w, operator, customer, _, ledger, double, runtime = late_po_operator
-    if shutil.which("node") is None or not (DIST / "index.html").exists():
-        pytest.fail("the console journey needs node and a built console (npm run build)")
     release_id, _ = prove_and_release(operator, customer, ledger, double)
     revision = operator.deploy(
         customer, "late-po", package=gen.package, dependencies=DEPENDENCIES, release_id=release_id
@@ -636,59 +624,45 @@ def test_two_planners_decide_in_the_console(late_po_operator):
     po = scenario["input"]["po_number"]
     order = standin.Ledger().answer("get_purchase_order", {"po_number": po})
     execution_id = operator.start(customer, revision, scenario["input"])["id"]
-    review_of(w, operator, customer, execution_id)  # the date change waits for a person
     second = operator.member(customer, "admin")
-    console = Console(w.processes.api_port, w.processes.ca, w.config["origin"]).start()
-    shots = Path(os.environ.get("LOTUSPOND_CONSOLE_JOURNEY_SHOTS") or w.root / "shots")
-    plan = w.root / "journey.json"
-    drivers.worlds.write_private(
-        plan,
-        {
-            "url": console.url,
-            "workspace": "Late PO",  # the organization workspace and its one project
-            "project": "Late PO",
-            "execution_id": execution_id,
-            "people": {
-                "requester": customer.headers["cookie"].split("=", 1)[1],
-                "second": second.headers["cookie"].split("=", 1)[1],
-            },
-            "shots": str(shots),
-            "result": str(w.root / "journey-result.json"),
-        },
-    )
     try:
-        ran = subprocess.run(
-            ["node", str(JOURNEY), str(plan)], capture_output=True, timeout=900, check=False
+        seen = journey(
+            w,
+            workspace="Late PO",  # the organization workspace and its one project
+            project="Late PO",
+            people={"requester": customer, "second": second},
+            runs=[
+                {
+                    "name": "late-po",
+                    "execution_id": execution_id,
+                    "writes": 2,
+                    "tasks": [
+                        {"who": "requester", "kind": "review", "focus": True},
+                        {
+                            "who": "second",
+                            "width": "phone",
+                            "kind": "review",
+                            "refused_first": "requester",
+                        },
+                    ],
+                }
+            ],
         )
-    finally:
-        console.stop()
-    written = w.root / "journey-result.json"
-    assert written.exists(), ran.stderr.decode()[-2000:]
-    seen = json.loads(written.read_text())
-    assert ran.returncode == 0 and seen["ok"], (
-        seen,
-        ran.stderr.decode()[-2000:],
+    except AssertionError as failed:
+        raise AssertionError((failed, facts(w, execution_id), logs(w))) from None
+    run = seen["runs"]["late-po"]
+    reschedule, notify = run["tasks"]
+    assert reschedule["operation"] == "set_promised_date" and reschedule["allowed"]
+    assert notify["refused_operation"] == notify["operation"] == "send_customer_update"
+    assert notify["independent"] is True and notify["allowed"]
+    assert "independent approval" in notify["refusal"], notify
+    assert seen["errors"] == [], seen["errors"]
+    writes = run["control_room"]["writes"]
+    assert len(writes) == 2 and all("outcome: verified" in t.lower() for t in writes), (
+        writes,
         facts(w, execution_id),
     )
-    steps = {step["name"]: step for step in seen["steps"]}
-    assert steps["requester opened the review"]["operation"] == "set_promised_date"
-    assert steps["requester opened the second review"] == {
-        "name": "requester opened the second review",
-        "operation": "send_customer_update",
-        "independent": True,
-    }
-    assert "page error" not in steps, seen
-    assert "independent approval" in steps["requester was refused"]["message"], steps
-    assert steps["second planner opened the review"]["operation"] == "send_customer_update"
-    outcomes = steps["control room writes"]["outcomes"]
-    if len(outcomes) != 2 or not all("outcome: verified" in t.lower() for t in outcomes):
-        found = shots / "facts.json"
-        found.write_text(
-            json.dumps({"facts": facts(w, execution_id), "logs": logs(w)}, default=str, indent=1)
-        )
-        raise AssertionError((outcomes, f"facts in {found}"))
-    for width in ("tablet", "phone"):
-        assert steps[f"control room at {width}"]["horizontal_overflow_px"] <= 0, seen
+    assert run["overflow_tablet"] <= 0 and run["overflow_phone"] <= 0, run
     assert seen["focus"][0]["label"] == "Claim", seen["focus"]
 
     # The server agrees: both writes applied once, each allowed by the person who did.

@@ -25,6 +25,7 @@ from uuid import uuid4
 
 import driver as drivers
 import pytest
+from console import CONSOLE_JOURNEY, SKIP_REASON, journey
 from driver import catalog_ref
 from test_reference_triage import (
     AP_TOKEN,
@@ -351,3 +352,109 @@ def test_the_full_package_is_proven_released_and_writes_after_review(triage):
     assert set(ledger.credit_requests) == {
         s["input"]["invoice_id"] for s in SCENARIOS if s["expected"]["status"] == "credit_requested"
     }
+
+
+@pytest.mark.skipif(not CONSOLE_JOURNEY, reason=SKIP_REASON)
+def test_admins_decide_invoice_exceptions_in_the_console(triage):
+    """Milestone 6, seen: three invoices of the released package decided in the built
+    console by two admins with their own sessions (console_journey.mjs).
+
+    - A short receipt's payment hold: the requester allows it.
+    - An overcharge's credit-note request needs independent approval: the requester's
+      Allow is refused and released, and a second admin allows it on a tablet.
+    - A justified price variance: the second admin completes the clerk's form on a phone.
+
+    Control Room shows each execution and its verified write, and the server agrees."""
+    w, operator, customer, ledger, double, runtime = triage
+    release_id, _ = prove_and_release(operator, customer, ledger, double)
+    revision = operator.deploy(
+        customer,
+        "invoice-triage",
+        package=gen.full,
+        dependencies=DEPENDENCIES,
+        release_id=release_id,
+    )
+    chosen = {s["id"]: s for s in SCENARIOS}
+    hold, credit, form = (chosen[n] for n in ("short-receipt", "overcharge", "justified-price"))
+    double.by_key = {s["input"]["invoice_id"]: s["model_rounds"] for s in (hold, credit, form)}
+    started = {
+        s["id"]: operator.start(customer, revision, s["input"])["id"] for s in (hold, credit, form)
+    }
+    second = operator.member(customer, "admin")
+    runs = [
+        {
+            "name": "hold",
+            "execution_id": started["short-receipt"],
+            "writes": 1,
+            "tasks": [{"who": "requester", "kind": "review", "focus": True}],
+        },
+        {
+            "name": "credit",
+            "execution_id": started["overcharge"],
+            "writes": 1,
+            "tasks": [
+                {
+                    "who": "second",
+                    "width": "tablet",
+                    "kind": "review",
+                    "refused_first": "requester",
+                }
+            ],
+        },
+        {
+            "name": "clerk",
+            "execution_id": started["justified-price"],
+            "writes": 0,
+            "tasks": [
+                {"who": "second", "width": "phone", "kind": "form", "payload": form["clerk_form"]}
+            ],
+        },
+    ]
+    try:
+        seen = journey(
+            w,
+            workspace="Invoice triage",  # the organization workspace and its one project
+            project="Invoice triage",
+            people={"requester": customer, "second": second},
+            runs=runs,
+        )
+    except AssertionError as failed:
+        raise AssertionError(
+            (failed, {name: facts(w, e) for name, e in started.items()}, logs(w, ("api", RUNTIME)))
+        ) from None
+    assert seen["errors"] == [], seen["errors"]
+    [allowed] = seen["runs"]["hold"]["tasks"]
+    assert (allowed["operation"], allowed["allowed"]) == ("set_payment_hold", True)
+    [independent] = seen["runs"]["credit"]["tasks"]
+    assert independent["refused_operation"] == independent["operation"] == "request_credit_note"
+    assert independent["independent"] is True and independent["allowed"]
+    assert "independent approval" in independent["refusal"], independent
+    [clerk] = seen["runs"]["clerk"]["tasks"]
+    assert (clerk["kind"], clerk["submitted"]) == ("form", True)
+    for name, writes in (("hold", 1), ("credit", 1), ("clerk", 0)):
+        shown = seen["runs"][name]["control_room"]
+        assert "succeeded" in shown["state"].lower(), (name, shown)
+        assert len(shown["writes"]) == writes, (name, shown)
+        assert all("outcome: verified" in t.lower() for t in shown["writes"]), (name, shown)
+    clerk_run = seen["runs"]["clerk"]
+    assert clerk_run["overflow_tablet"] <= 0 and clerk_run["overflow_phone"] <= 0, clerk_run
+    assert seen["focus"][0]["label"] == "Claim", seen["focus"]
+
+    # The server agrees: each write applied once and allowed by the person who did.
+    for scenario in (hold, credit, form):
+        execution_id = started[scenario["id"]]
+        view = operator.settled(customer, execution_id, {"succeeded", "failed"}, 240)
+        assert view["state"] == "succeeded", (scenario["id"], facts(w, execution_id))
+        result = result_of(w, execution_id)
+        for key, value in scenario["expected"].items():
+            assert result[key] == value, (scenario["id"], key, result)
+    assert ledger.holds[hold["input"]["invoice_id"]]["amount"] == hold["expected"]["amount"]
+    assert set(ledger.credit_requests) == {credit["input"]["invoice_id"]}
+    assert len([r for r in ledger.requests if r[0] == "POST"]) == 2
+    held = customer.call("GET", f"/executions/{started['short-receipt']}/trace")
+    credited = customer.call("GET", f"/executions/{started['overcharge']}/trace")
+    deciders = [
+        trace["actions"][0]["review"]["decision"]["decided_by"]["user_id"]
+        for trace in (held, credited)
+    ]
+    assert deciders[1] == second.user_id != deciders[0]

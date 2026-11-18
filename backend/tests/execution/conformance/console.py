@@ -8,8 +8,12 @@ carries the world's origin, which the API requires. Nothing here is a product se
 from __future__ import annotations
 
 import http.client
+import json
 import mimetypes
+import os
+import shutil
 import ssl
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -83,9 +87,7 @@ class Console:
     def forward(self, handler):
         length = int(handler.headers.get("content-length") or 0)
         body = handler.rfile.read(length) if length else None
-        headers = {
-            name: handler.headers[name] for name in FORWARDED if handler.headers.get(name)
-        }
+        headers = {name: handler.headers[name] for name in FORWARDED if handler.headers.get(name)}
         if handler.headers.get("origin"):
             headers["origin"] = self.origin
         connection = http.client.HTTPSConnection(
@@ -104,3 +106,54 @@ class Console:
             handler.wfile.write(content)
         finally:
             connection.close()
+
+
+JOURNEY = Path(__file__).with_name("console_journey.mjs")
+CONSOLE_JOURNEY = os.environ.get("LOTUSPOND_CONSOLE_JOURNEY") == "1"
+SKIP_REASON = "opt-in browser journey: LOTUSPOND_CONSOLE_JOURNEY=1, `npm run build`, Playwright"
+
+
+def journey(world, *, workspace, project, people, runs):
+    """Run `console_journey.mjs` against the world's API and return what it saw.
+
+    `people` maps a name to a signed-in person (their session cookie is all the browser
+    gets); `runs` are the plan's executions and tasks. Screenshots go to
+    `LOTUSPOND_CONSOLE_JOURNEY_SHOTS` (default: the world's `shots` directory). Raises
+    with the script's own report when it fails.
+    """
+    if shutil.which("node") is None or not (DIST / "index.html").exists():
+        raise AssertionError("the console journey needs node and a built console (npm run build)")
+    import world as worlds
+
+    console = Console(world.processes.api_port, world.processes.ca, world.config["origin"])
+    console.start()
+    shots = Path(os.environ.get("LOTUSPOND_CONSOLE_JOURNEY_SHOTS") or world.root / "shots")
+    plan, written = world.root / "journey.json", world.root / "journey-result.json"
+    written.unlink(missing_ok=True)
+    worlds.write_private(
+        plan,
+        {
+            "url": console.url,
+            "workspace": workspace,
+            "project": project,
+            "people": {
+                name: person.headers["cookie"].split("=", 1)[1] for name, person in people.items()
+            },
+            "runs": runs,
+            "shots": str(shots),
+            "result": str(written),
+        },
+    )
+    try:
+        ran = subprocess.run(
+            ["node", str(JOURNEY), str(plan)], capture_output=True, timeout=1500, check=False
+        )
+    finally:
+        console.stop()
+    if not written.exists():
+        raise AssertionError(ran.stderr.decode()[-2000:])
+    seen = json.loads(written.read_text())
+    seen["shots"] = str(shots)
+    if ran.returncode != 0 or not seen["ok"]:
+        raise AssertionError((seen, ran.stderr.decode()[-2000:]))
+    return seen
