@@ -77,6 +77,27 @@ Invite everyone else from inside the product.
 
 **Organizations need identity mail.** In production, an account must verify its mailbox before it can create an organization, and verification is sent by email. Mail stays off until an SMTP service is configured. Add the SMTP settings from [`deploy/example.env`](../example.env) to `.env`, set `LOTUSPOND_MAIL_ENABLED=true`, and start the mail worker with `deploy/server/dc --profile mail up -d`. See the [identity-mail runbook](../../docs-site/docs/identity-mail.md).
 
+## A staging server
+
+A staging server runs the same stack from `main` on its own Lightsail instance, with its own empty database, at a hostname that says nothing about what it is (a random label under `lotuspond.ai`). Anyone with the link can open it; nothing else points to it:
+
+- **Behind the Cloudflare proxy.** Visitors get Cloudflare's wildcard edge certificate, so no certificate for the hostname is issued by a public CA or listed in Certificate Transparency logs, where unlisted hostnames are usually found. The server's address stays hidden.
+- **A Cloudflare Origin CA certificate on the server.** [`Caddyfile.origin`](Caddyfile.origin), selected with `CADDYFILE=Caddyfile.origin` in `.env`, serves it from `deploy/server/origin/` (never committed), takes the visitor's address from `CF-Connecting-IP`, and sends `X-Robots-Tag: noindex` and a `robots.txt` that disallows everything.
+- **Only Cloudflare reaches ports 80 and 443.** The firewall allows Cloudflare's published ranges ([cloudflare.com/ips](https://www.cloudflare.com/ips/)); port 22 stays open for Lightsail's browser SSH.
+- **SSL/TLS Full (strict) for that hostname only,** as a Cloudflare configuration rule, leaving the zone's own setting alone.
+
+An unlisted address is not access control: anyone who has the link can open the site. Keep registration closed, use synthetic data only, and put Cloudflare Access in front of it if it ever needs to be private.
+
+To create one, issue an ECDSA Origin CA certificate for the hostname in Cloudflare (SSL/TLS → Origin Server), put `cert.pem` and `key.pem` in a private folder's `origin/`, and `CADDYFILE=Caddyfile.origin` in its `env.extra`, then:
+
+```bash
+STACK=lotuspond-works-<label> NAME=lotuspond-works-<label> DOMAIN=<label>.lotuspond.ai ACME_EMAIL=ops@lotuspond.ai \
+  EXTRA_DIR=<private folder> WEB_IPV4=<Cloudflare IPv4 ranges, comma-separated> WEB_IPV6=<Cloudflare IPv6 ranges> \
+  bash deploy/server/aws-lightsail-cfn.sh
+```
+
+The files travel to the server inside the hidden first-boot parameter. Add the printed deploy key on GitHub (step 2), add the configuration rule, and only then create the DNS records, **proxied** (orange cloud). The firewall and the origin certificate need the proxy, so never switch a staging record to DNS only.
+
 ## Day to day
 
 Run these on the server, in `/opt/lotuspond-works`:
