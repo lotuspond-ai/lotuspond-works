@@ -8,12 +8,19 @@
 # server clones the repository, creates deploy/server/.env with fresh secrets, loads the schema into its new empty
 # database, starts the app and turns on automatic deploys by itself.
 #   ACME_EMAIL=ops@lotuspond.ai bash deploy/server/aws-lightsail-cfn.sh
+# A second server, such as staging (README.md, "A staging server"), sets STACK, NAME and DOMAIN, and may set
+# DEPLOY_KEY (an existing private key file), WEB_IPV4/WEB_IPV6 (comma-separated ranges for ports 80/443) and
+# EXTRA_DIR (files unpacked into deploy/server on the server, such as origin/ and env.extra; they travel in the hidden
+# parameter, so keep them small: an ECDSA origin certificate fits, an RSA one may not).
 # See deploy/server/README.md. The private key exists only on the server and in the stack's hidden parameter.
 set -euo pipefail
 
 REGION=${REGION:-ap-south-1}
 STACK=${STACK:-lotuspond-works-in}
 DOMAIN=${DOMAIN:-works.lotuspond.ai}
+NAME=${NAME:-lotuspond-works-in}
+WEB_IPV4=${WEB_IPV4:-0.0.0.0/0}
+WEB_IPV6=${WEB_IPV6:-::/0}
 ACME_EMAIL=${ACME_EMAIL:?Set ACME_EMAIL (Let\'s Encrypt certificate notices)}
 HERE=$(cd "$(dirname "$0")" && pwd)
 export AWS_DEFAULT_REGION=$REGION
@@ -24,14 +31,32 @@ else
   WORK=$(mktemp -d)
   trap 'rm -rf "$WORK"' EXIT
   chmod 700 "$WORK"
-  ssh-keygen -q -t ed25519 -N "" -C lotuspond-works-server -f "$WORK/deploy_key"
-  python3 - "$HERE/aws-lightsail-firstboot.sh" "$WORK/deploy_key" "$ACME_EMAIL" "$DOMAIN" "$WORK/params.json" <<'PY'
-import json, os, sys
-script, key, email, domain, out = sys.argv[1:]
-body = (open(script).read().replace("__DEPLOY_KEY__", open(key).read().strip())
-        .replace("__ACME_EMAIL__", email).replace("__DOMAIN__", domain))
+  if [ -n "${DEPLOY_KEY:-}" ]; then
+    cp "$DEPLOY_KEY" "$WORK/deploy_key" && ssh-keygen -y -f "$WORK/deploy_key" > "$WORK/deploy_key.pub"
+  else
+    ssh-keygen -q -t ed25519 -N "" -C "$NAME" -f "$WORK/deploy_key"
+  fi
+  : > "$WORK/extra.tar"
+  [ -z "${EXTRA_DIR:-}" ] || tar -cf "$WORK/extra.tar" -C "$EXTRA_DIR" .
+  python3 - "$HERE/aws-lightsail-firstboot.sh" "$WORK/deploy_key" "$ACME_EMAIL" "$DOMAIN" "$WORK/extra.tar" \
+    "$NAME" "$WEB_IPV4" "$WEB_IPV6" "$WORK/params.json" <<'PY'
+import base64, gzip, json, os, sys
+script, key, email, domain, extra, name, ipv4, ipv6, out = sys.argv[1:]
+lines = open(script).read().splitlines()  # comment lines (all but the first) are left out, to save space
+body = "\n".join(lines[:1] + [l for l in lines[1:] if not l.lstrip().startswith("#")]) + "\n"
+body = (body.replace("__DEPLOY_KEY__", open(key).read().strip()).replace("__ACME_EMAIL__", email)
+        .replace("__DOMAIN__", domain).replace("__EXTRA_B64__", base64.b64encode(open(extra, "rb").read()).decode()))
+# A CloudFormation parameter holds at most 4096 bytes: the script travels gzipped, unpacked on the server, and split
+# across UserData and UserDataMore, which the template joins.
+packed = base64.b64encode(gzip.compress(body.encode(), 9, mtime=0)).decode()
+body = f"#!/bin/sh\necho {packed} | base64 -d | gunzip > /root/lotuspond-firstboot.sh\nexec bash /root/lotuspond-firstboot.sh\n"
+if len(body) > 8192:
+    sys.exit(f"The packed first-boot script is {len(body)} bytes; the two parameters hold 8192.")
 os.umask(0o077)
-json.dump([{"ParameterKey": "UserData", "ParameterValue": body}], open(out, "w"))
+json.dump([{"ParameterKey": "UserData", "ParameterValue": body[:4096]},
+           {"ParameterKey": "UserDataMore", "ParameterValue": body[4096:]}, {"ParameterKey": "InstanceName", "ParameterValue": name},
+           {"ParameterKey": "WebIpv4Cidrs", "ParameterValue": ipv4}, {"ParameterKey": "WebIpv6Cidrs", "ParameterValue": ipv6}],
+          open(out, "w"))
 PY
   aws cloudformation create-stack --stack-name "$STACK" --template-body "file://$HERE/aws-lightsail.cfn.yaml" \
     --parameters "file://$WORK/params.json" --tags Key=project,Value=lotuspond-works >/dev/null
